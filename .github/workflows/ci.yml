@@ -28,6 +28,7 @@ jobs:
           key: whisper-${{ hashFiles('macos/scripts/fetch-whisper.sh') }}
 
       - name: Test
+        timeout-minutes: 5
         run: make test
 
       - name: Build package (Universal, ad-hoc signed)

@@ -26,7 +26,8 @@ install: app
 
 test:
 	scripts/fetch-whisper.sh
-	swift test $(TEST_FLAGS)
+	# Die Integrationstests starten Systemprozesse und prüfen Code-Signaturen synchron.
+	swift test --no-parallel $(TEST_FLAGS)
 
 zip: app
 	cd build && rm -f WhisperFree-macOS.zip && ditto -c -k --keepParent WhisperFree.app WhisperFree-macOS.zip

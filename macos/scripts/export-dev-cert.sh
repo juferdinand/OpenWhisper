@@ -17,11 +17,11 @@ printf '\n'
 [[ -n "$PASSWORD" ]] || { echo "Ein verschlüsselter Export mit Passwort ist erforderlich" >&2; exit 1; }
 trap 'unset PASSWORD' EXIT
 
-LEGACY=()
-if openssl pkcs12 -help 2>&1 | /usr/bin/grep -- '-legacy' >/dev/null; then LEGACY=(-legacy); fi
+LEGACY=""
+if openssl pkcs12 -help 2>&1 | /usr/bin/grep -- '-legacy' >/dev/null; then LEGACY=1; fi
 # Der entschlüsselte Schlüssel fließt nur durch eine Pipe, nie in eine Datei oder ins Terminal.
 # Das Passwort wird über einen Dateideskriptor statt als Prozessargument übergeben.
-openssl pkcs12 "${LEGACY[@]}" -in "$P12" -passin fd:3 -nocerts -nodes 3<<< "$PASSWORD" |
+openssl pkcs12 ${LEGACY:+-legacy} -in "$P12" -passin fd:3 -nocerts -nodes 3<<< "$PASSWORD" |
   awk '/-----BEGIN .*PRIVATE KEY-----/ { count++ } END { exit count != 1 }'
 
 base64 < "$P12" | gh secret set SIGNING_CERT_P12 --repo "$REPO"

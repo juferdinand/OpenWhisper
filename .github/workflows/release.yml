@@ -46,6 +46,7 @@ jobs:
 
       # Release-Abhängigkeiten frisch laden und per SHA-256 prüfen; kein Build-Cache.
       - name: Tests
+        timeout-minutes: 5
         working-directory: macos
         run: make test
 
