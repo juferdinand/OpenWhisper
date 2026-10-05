@@ -1,0 +1,95 @@
+name: Release
+
+# Manuell starten: Actions → Release → Run workflow → Version eingeben (z. B. 0.2.0).
+# Schreibt VERSION, committet, taggt v<Version>, baut eine signierte Universal-App und
+# veröffentlicht sie als GitHub-Release. Installierte Apps finden das Update automatisch.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Neue Version (z. B. 0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # Weitere Plattformen (desktop/: Linux, Windows) kommen als eigene Jobs dazu und laden
+  # ihre Artefakte in dasselbe Release hoch – siehe docs/PLATFORMS.md.
+  macos:
+    runs-on: macos-15
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Version prüfen
+        run: |
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version muss die Form X.Y.Z haben (bekommen: $VERSION)"; exit 1
+          fi
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "::error::Tag v$VERSION existiert bereits"; exit 1
+          fi
+
+      - name: Signier-Zertifikat importieren
+        env:
+          CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: |
+          if [[ -z "$CERT_P12" ]]; then
+            echo "::error::Secret SIGNING_CERT_P12 fehlt – siehe scripts/export-dev-cert.sh"; exit 1
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          security find-identity -p codesigning "$KEYCHAIN"
+
+      - name: Tests
+        working-directory: macos
+        run: make test
+
+      - name: Version setzen, committen, taggen
+        run: |
+          echo "$VERSION" > VERSION
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Release v$VERSION"
+          git tag "v$VERSION"
+
+      - name: Universal-App bauen und signieren
+        working-directory: macos
+        run: make release UNIVERSAL=1 UPDATE_REPO="${{ github.repository }}"
+
+      - name: Signatur prüfen
+        working-directory: macos
+        run: |
+          codesign --verify --deep --strict --verbose=2 build/WhisperFree.app
+          codesign -dr - build/WhisperFree.app
+
+      - name: Pushen und Release veröffentlichen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git push origin HEAD "v$VERSION"
+          gh release create "v$VERSION" macos/build/WhisperFree-macOS.zip \
+            --title "WhisperFree $VERSION" \
+            --generate-notes
+
+      - name: Keychain aufräumen
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true

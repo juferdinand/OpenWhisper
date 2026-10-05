@@ -1,0 +1,23 @@
+.DS_Store
+.build/
+build/
+.swiftpm/
+xcuserdata/
+*.xcodeproj
+Package.resolved
+/macos/Vendor/
+# künftige Desktop-App (Tauri)
+/desktop/target/
+/desktop/node_modules/
+
+# Lokale Konfiguration und Signiermaterial
+/.agents/
+/.aws/
+/.codex/
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.pem
+*.key

@@ -1,0 +1,96 @@
+{
+  "$comment": "Gemeinsamer Modellkatalog für alle WhisperFree-Plattformen. Dateien werden von https://huggingface.co/<repository>/resolve/main/<file> geladen.",
+  "models": [
+    {
+      "id": "parakeet-v3-q8",
+      "title": "Parakeet TDT v3",
+      "family": "parakeet",
+      "file": "ggml-parakeet-tdt-0.6b-v3-q8_0.bin",
+      "repository": "ggml-org/parakeet-GGUF",
+      "size": "669 MB",
+      "note": "Spitzenqualität für Deutsch und 24 weitere europäische Sprachen, extrem schnell, setzt Satzzeichen selbst"
+    },
+    {
+      "id": "parakeet-v3-q4",
+      "title": "Parakeet TDT v3 (kompakt)",
+      "family": "parakeet",
+      "file": "ggml-parakeet-tdt-0.6b-v3-q4_0.bin",
+      "repository": "ggml-org/parakeet-GGUF",
+      "size": "356 MB",
+      "note": "Fast so gut, halb so groß – für Rechner mit wenig Speicher"
+    },
+    {
+      "id": "parakeet-v3-f16",
+      "title": "Parakeet TDT v3 (volle Präzision)",
+      "family": "parakeet",
+      "file": "ggml-parakeet-tdt-0.6b-v3-f16.bin",
+      "repository": "ggml-org/parakeet-GGUF",
+      "size": "1,3 GB",
+      "note": "Minimal genauer als q8, doppelt so groß"
+    },
+    {
+      "id": "large-v3-turbo-q5_0",
+      "title": "Whisper Large v3 Turbo (komprimiert)",
+      "family": "whisper",
+      "file": "ggml-large-v3-turbo-q5_0.bin",
+      "repository": "ggerganov/whisper.cpp",
+      "size": "547 MB",
+      "note": "~99 Sprachen, Sprachwahl und eigenes Vokabular, sehr genau"
+    },
+    {
+      "id": "large-v3-turbo",
+      "title": "Whisper Large v3 Turbo",
+      "family": "whisper",
+      "file": "ggml-large-v3-turbo.bin",
+      "repository": "ggerganov/whisper.cpp",
+      "size": "1,6 GB",
+      "note": "Wie oben, unkomprimiert"
+    },
+    {
+      "id": "medium",
+      "title": "Whisper Medium",
+      "family": "whisper",
+      "file": "ggml-medium.bin",
+      "repository": "ggerganov/whisper.cpp",
+      "size": "1,5 GB",
+      "note": "Genau, aber langsamer als Turbo"
+    },
+    {
+      "id": "small",
+      "title": "Whisper Small",
+      "family": "whisper",
+      "file": "ggml-small.bin",
+      "repository": "ggerganov/whisper.cpp",
+      "size": "466 MB",
+      "note": "Guter Kompromiss für ältere Rechner"
+    },
+    {
+      "id": "base",
+      "title": "Whisper Base",
+      "family": "whisper",
+      "file": "ggml-base.bin",
+      "repository": "ggerganov/whisper.cpp",
+      "size": "142 MB",
+      "note": "Schnell, für kurze Notizen"
+    },
+    {
+      "id": "tiny",
+      "title": "Whisper Tiny",
+      "family": "whisper",
+      "file": "ggml-tiny.bin",
+      "repository": "ggerganov/whisper.cpp",
+      "size": "75 MB",
+      "note": "Am schnellsten, ungenau"
+    }
+  ],
+  "recommendations": {
+    "$comment": "strong = Apple Silicon bzw. GPU mit >= 8 GB RAM, weak = schwächere Rechner, cpuOnly = ohne brauchbare GPU (z. B. Intel-Mac)",
+    "strong": { "parakeet": "parakeet-v3-q8", "whisper": "large-v3-turbo-q5_0" },
+    "weak": { "parakeet": "parakeet-v3-q4", "whisper": "small" },
+    "cpuOnly": { "parakeet": "parakeet-v3-q4", "whisper": "base" }
+  },
+  "parakeetLanguages": [
+    "bg", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "de", "el", "hu", "it",
+    "lv", "lt", "mt", "pl", "pt", "ro", "sk", "sl", "es", "sv", "ru", "uk"
+  ]
+}

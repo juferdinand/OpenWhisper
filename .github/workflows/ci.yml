@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  macos:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: macos
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache whisper.cpp
+        uses: actions/cache@v4
+        with:
+          path: macos/Vendor
+          key: whisper-${{ hashFiles('macos/scripts/fetch-whisper.sh') }}
+
+      - name: Test
+        run: make test
+
+      - name: Build app (Universal, ad-hoc signed)
+        run: make app UNIVERSAL=1
