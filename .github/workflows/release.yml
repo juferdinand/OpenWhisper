@@ -1,4 +1,5 @@
 name: Release
+run-name: Release ${{ inputs.version }}
 
 # Manuell starten: Actions → Release → Run workflow → Version eingeben (z. B. 0.2.0).
 # Schreibt VERSION, committet, taggt v<Version>, baut eine signierte Universal-App und
@@ -23,6 +24,7 @@ jobs:
   # ihre Artefakte in dasselbe Release hoch – siehe docs/PLATFORMS.md.
   macos:
     runs-on: macos-15
+    timeout-minutes: 30
     env:
       VERSION: ${{ inputs.version }}
     steps:
@@ -32,6 +34,9 @@ jobs:
 
       - name: Version prüfen
         run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Releases müssen vom main-Branch gestartet werden"; exit 1
+          fi
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Version muss die Form X.Y.Z haben (bekommen: $VERSION)"; exit 1
           fi
@@ -39,16 +44,24 @@ jobs:
             echo "::error::Tag v$VERSION existiert bereits"; exit 1
           fi
 
+      - name: Cache whisper.cpp
+        uses: actions/cache@v4
+        with:
+          path: macos/Vendor
+          key: whisper-${{ hashFiles('macos/scripts/fetch-whisper.sh') }}
+
       - name: Signier-Zertifikat importieren
         env:
           CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
           CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
         run: |
-          if [[ -z "$CERT_P12" ]]; then
-            echo "::error::Secret SIGNING_CERT_P12 fehlt – siehe scripts/export-dev-cert.sh"; exit 1
+          if [[ -z "$CERT_P12" || -z "$CERT_PASSWORD" ]]; then
+            echo "::error::SIGNING_CERT_P12 oder SIGNING_CERT_PASSWORD fehlt – siehe macos/scripts/export-dev-cert.sh"; exit 1
           fi
+          umask 077
           KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
           KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
           echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
@@ -57,7 +70,11 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           rm "$RUNNER_TEMP/cert.p12"
-          security find-identity -p codesigning "$KEYCHAIN"
+          SIGN_IDENTITY="$(security find-identity -p codesigning "$KEYCHAIN" | awk '/^[[:space:]]*[0-9]+\)/ { print $2; exit }')"
+          if [[ -z "$SIGN_IDENTITY" ]]; then
+            echo "::error::Keine Code-Signing-Identität im Release-Schlüsselbund gefunden"; exit 1
+          fi
+          echo "SIGN_IDENTITY=$SIGN_IDENTITY" >> "$GITHUB_ENV"
 
       - name: Tests
         working-directory: macos
@@ -68,7 +85,10 @@ jobs:
           echo "$VERSION" > VERSION
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "Release v$VERSION"
+          if ! git diff --quiet -- VERSION; then
+            git add VERSION
+            git commit -m "Release v$VERSION"
+          fi
           git tag "v$VERSION"
 
       - name: Universal-App bauen und signieren
@@ -80,14 +100,29 @@ jobs:
         run: |
           codesign --verify --deep --strict --verbose=2 build/WhisperFree.app
           codesign -dr - build/WhisperFree.app
+          lipo -verify_arch arm64 x86_64 build/WhisperFree.app/Contents/MacOS/WhisperFree
+          cd build
+          shasum -a 256 WhisperFree-macOS.zip > SHA256SUMS
+
+      - name: Paket als Workflow-Artefakt sichern
+        uses: actions/upload-artifact@v4
+        with:
+          name: WhisperFree-macOS-v${{ inputs.version }}
+          path: |
+            macos/build/WhisperFree-macOS.zip
+            macos/build/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Pushen und Release veröffentlichen
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git push origin HEAD "v$VERSION"
-          gh release create "v$VERSION" macos/build/WhisperFree-macOS.zip \
+          git push --atomic origin HEAD:refs/heads/main "refs/tags/v$VERSION"
+          gh release create "v$VERSION" macos/build/WhisperFree-macOS.zip macos/build/SHA256SUMS \
             --title "WhisperFree $VERSION" \
+            --verify-tag \
+            --notes-file .github/release-notes.md \
             --generate-notes
 
       - name: Keychain aufräumen

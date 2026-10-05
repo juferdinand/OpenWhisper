@@ -4,10 +4,15 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   macos:
     runs-on: macos-15
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: macos
@@ -23,5 +28,13 @@ jobs:
       - name: Test
         run: make test
 
-      - name: Build app (Universal, ad-hoc signed)
-        run: make app UNIVERSAL=1
+      - name: Build package (Universal, ad-hoc signed)
+        run: make zip UNIVERSAL=1
+
+      - name: Upload macOS package
+        uses: actions/upload-artifact@v4
+        with:
+          name: WhisperFree-macOS-${{ github.sha }}
+          path: macos/build/WhisperFree-macOS.zip
+          if-no-files-found: error
+          retention-days: 14
