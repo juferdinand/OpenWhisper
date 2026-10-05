@@ -21,6 +21,9 @@ distribution choice, not a claim that self-signing is equivalent to Apple's veri
   free of bugs or malicious behavior. The included `SHA256SUMS` also permits download integrity checks.
 - CI development packages use ad-hoc signing and have no configured in-app updater.
   Public release packages use the persistent project certificate.
+- The primary download is a DMG with the signed app and an Applications shortcut. The release
+  workflow also signs the DMG and verifies its contents after mounting it read-only. This improves
+  installation convenience; it does not establish Apple trust or remove first-launch warnings.
 
 ## Risks and limits
 

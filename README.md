@@ -48,9 +48,11 @@ WhisperFree is in early development. Download the packaged macOS app from
 
 ### Download the app
 
-1. Download [**WhisperFree-macOS.zip**](https://github.com/juferdinand/WhisperFree/releases/latest/download/WhisperFree-macOS.zip).
-2. Extract the ZIP and move **WhisperFree.app** to `/Applications`.
-3. Open the app and follow [Your first dictation](#your-first-dictation).
+1. Download and open [**WhisperFree-macOS.dmg**](https://github.com/juferdinand/WhisperFree/releases/latest/download/WhisperFree-macOS.dmg).
+2. Drag **WhisperFree.app** onto the **Applications** folder in the window.
+3. Eject the WhisperFree volume, open the app from **Applications**, and follow [Your first dictation](#your-first-dictation).
+
+A [ZIP download](https://github.com/juferdinand/WhisperFree/releases/latest/download/WhisperFree-macOS.zip) is also available.
 
 Releases use a persistent, self-signed certificate and are **not notarized by Apple**.
 For these early open-source releases, this avoids the annual Apple Developer Program fee.
@@ -59,10 +61,10 @@ If macOS blocks the first launch, review the app's origin and, if you choose to 
 use **System Settings → Privacy & Security → Open Anyway**.
 See [Apple's instructions](https://support.apple.com/102445).
 
-Each release includes `SHA256SUMS`. To verify the download, place that file beside the ZIP and run:
+Each release includes `SHA256SUMS`. To verify the DMG download, place that file beside the DMG and run:
 
 ```bash
-shasum -a 256 -c SHA256SUMS
+grep '  WhisperFree-macOS[.]dmg$' SHA256SUMS | shasum -a 256 -c -
 ```
 
 ### Build from source
@@ -202,8 +204,11 @@ replacing it with a newly generated local certificate would break update signatu
 
 Then start the workflow under **Actions → Release → Run workflow**, supplying a new version
 in `X.Y.Z` format. It updates `VERSION`, creates a commit and tag, builds the universal bundle,
-and publishes the ZIP with `SHA256SUMS`. It also retains the package as an Actions artifact.
+and publishes the DMG and ZIP with `SHA256SUMS`. It also retains the packages as Actions artifacts.
+The DMG contains the signed app and an Applications shortcut. CI mounts it read-only and checks
+its integrity, the contained app's signature, and agreement with the original build.
 The update repository is embedded in the bundle during the build.
+The in-app updater uses the ZIP asset.
 The updater checks downloaded apps against the running app's signature requirement,
 so the signing identity must be preserved across releases.
 

@@ -11,7 +11,7 @@ endif
 # UNIVERSAL=1 baut für Apple Silicon + Intel (braucht Xcode), UPDATE_REPO=owner/repo aktiviert den Updater.
 BUILD_ENV := UNIVERSAL="$(UNIVERSAL)" UPDATE_REPO="$(UPDATE_REPO)"
 
-.PHONY: app run install test zip release clean
+.PHONY: app run install test zip dmg release clean
 
 app:
 	$(BUILD_ENV) scripts/build-app.sh
@@ -33,8 +33,11 @@ zip: app
 	cd build && rm -f WhisperFree-macOS.zip && ditto -c -k --keepParent WhisperFree.app WhisperFree-macOS.zip
 	@echo "✓ build/WhisperFree-macOS.zip"
 
+dmg: app
+	bash scripts/build-dmg.sh
+
 # Lokal: make release UPDATE_REPO=user/WhisperFree – normalerweise erledigt das .github/workflows/release.yml
-release: zip
+release: zip dmg
 
 clean:
 	rm -rf .build build

@@ -48,9 +48,11 @@ WhisperFree ist in früher Entwicklung. Lade die fertige macOS-App unter
 
 ### App herunterladen
 
-1. Lade [**WhisperFree-macOS.zip**](https://github.com/juferdinand/WhisperFree/releases/latest/download/WhisperFree-macOS.zip) herunter.
-2. Entpacke das ZIP und ziehe **WhisperFree.app** nach `/Applications`.
-3. Öffne die App und folge den Schritten unter [Erstes Diktat](#erstes-diktat).
+1. Lade [**WhisperFree-macOS.dmg**](https://github.com/juferdinand/WhisperFree/releases/latest/download/WhisperFree-macOS.dmg) herunter und öffne die Datei.
+2. Ziehe **WhisperFree.app** auf den **Programme-Ordner (Applications)** im Fenster.
+3. Wirf das WhisperFree-Laufwerk aus, öffne die App aus **Programme** und folge den Schritten unter [Erstes Diktat](#erstes-diktat).
+
+Alternativ ist ein [ZIP-Download](https://github.com/juferdinand/WhisperFree/releases/latest/download/WhisperFree-macOS.zip) verfügbar.
 
 Releases verwenden ein dauerhaftes, selbstsigniertes Zertifikat und sind **nicht von Apple notarisiert**.
 So kommen die ersten Open-Source-Releases vorerst ohne die jährliche Gebühr des Apple Developer Program aus.
@@ -59,10 +61,10 @@ Falls macOS den ersten Start blockiert, prüfe die Herkunft der App. Wenn du sie
 verwende **Systemeinstellungen → Datenschutz & Sicherheit → Dennoch öffnen**.
 Siehe [Apples Anleitung](https://support.apple.com/de-de/102445).
 
-Jedes Release enthält `SHA256SUMS`. Lege diese Datei neben das ZIP und prüfe den Download mit:
+Jedes Release enthält `SHA256SUMS`. Lege diese Datei neben die DMG und prüfe den DMG-Download mit:
 
 ```bash
-shasum -a 256 -c SHA256SUMS
+grep '  WhisperFree-macOS[.]dmg$' SHA256SUMS | shasum -a 256 -c -
 ```
 
 ### Aus dem Quellcode
@@ -200,8 +202,11 @@ ein neu erzeugtes lokales Zertifikat würde die Signaturkompatibilität für Upd
 
 Anschließend wird der Workflow unter **Actions → Release → Run workflow** mit einer neuen
 Version im Format `X.Y.Z` gestartet. Er setzt `VERSION`, erzeugt Commit und Tag, baut das
-Universal-Bundle und veröffentlicht das ZIP mit `SHA256SUMS`. Das Paket wird zusätzlich als Actions-Artefakt gespeichert.
+Universal-Bundle und veröffentlicht DMG und ZIP mit `SHA256SUMS`. Die Pakete werden zusätzlich als Actions-Artefakte gespeichert.
+Die DMG enthält die signierte App und eine Verknüpfung zum Programme-Ordner. CI bindet sie schreibgeschützt
+ein und prüft ihre Integrität, die App-Signatur und die Übereinstimmung mit dem ursprünglichen Build.
 Dabei wird das Update-Repository im Bundle hinterlegt.
+Der In-App-Updater verwendet das ZIP-Paket.
 Der Updater prüft heruntergeladene Apps gegen die Signaturanforderung der laufenden App;
 die Signieridentität muss deshalb über Releases hinweg erhalten bleiben.
 

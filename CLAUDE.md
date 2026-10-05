@@ -40,6 +40,7 @@ make mac                          # Build macos/build/WhisperFree.app
 make mac-install                  # Replace the app in /Applications and launch it
 make -C macos app UNIVERSAL=1      # Build arm64 and x86_64, then combine with lipo
 make -C macos zip UNIVERSAL=1      # Build and package WhisperFree-macOS.zip
+make -C macos dmg UNIVERSAL=1      # Build a drag-to-Applications installation image
 ```
 
 For live logs, use the absolute path because `log` may be a shell function in zsh:
@@ -83,12 +84,14 @@ the annual Apple Developer Program fee during early development. Clearly documen
 is not Apple-notarized and may need a first-launch exception. Follow [docs/SIGNING.md](docs/SIGNING.md)
 for key continuity and a future Developer ID migration; changing identities requires an updater transition.
 
-- CI runs tests, builds a universal app, and uploads the packaged ZIP as an Actions artifact.
+- CI runs tests, builds a universal app, verifies its DMG, and uploads the DMG and ZIP as Actions artifacts.
   CI builds use ad-hoc signing and do not enable the in-app updater.
 - The manual Release workflow runs from `main`, checks the requested `X.Y.Z` version,
-  tests, imports the persistent signing identity, builds, verifies, and publishes the ZIP
+  tests, imports the persistent signing identity, builds, verifies, and publishes the DMG, ZIP,
   and `SHA256SUMS` on GitHub Releases.
 - `WFUpdateRepository` is set through `UPDATE_REPO` during release builds.
+- The DMG is the primary installation download. The in-app updater still consumes the ZIP asset.
+  Verify the mounted DMG and its contained app with `macos/scripts/verify-dmg.sh` before publication.
 - Signing requires the repository secrets `SIGNING_CERT_P12` and `SIGNING_CERT_PASSWORD`.
   `macos/scripts/export-dev-cert.sh owner/repo /path/to/identity.p12` uploads one encrypted identity
   previously exported using Keychain Access. Never export all keychain identities or rotate the release key.

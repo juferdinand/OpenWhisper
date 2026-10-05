@@ -102,14 +102,16 @@ jobs:
           mkdir "$RUNNER_TEMP/release-verification"
           /usr/bin/tar -xf build/WhisperFree-macOS.zip -C "$RUNNER_TEMP/release-verification" --no-same-owner
           codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/release-verification/WhisperFree.app"
+          bash scripts/verify-dmg.sh build/WhisperFree-macOS.dmg build/WhisperFree.app
           cd build
-          shasum -a 256 WhisperFree-macOS.zip > SHA256SUMS
+          shasum -a 256 WhisperFree-macOS.dmg WhisperFree-macOS.zip > SHA256SUMS
 
       - name: Paket als Workflow-Artefakt sichern
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: WhisperFree-macOS-v${{ inputs.version }}
           path: |
+            macos/build/WhisperFree-macOS.dmg
             macos/build/WhisperFree-macOS.zip
             macos/build/SHA256SUMS
           if-no-files-found: error
@@ -120,7 +122,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           git push --atomic origin HEAD:refs/heads/main "refs/tags/v$VERSION"
-          gh release create "v$VERSION" macos/build/WhisperFree-macOS.zip macos/build/SHA256SUMS \
+          gh release create "v$VERSION" macos/build/WhisperFree-macOS.dmg macos/build/WhisperFree-macOS.zip macos/build/SHA256SUMS \
             --title "WhisperFree $VERSION" \
             --verify-tag \
             --notes-file .github/release-notes.md \
