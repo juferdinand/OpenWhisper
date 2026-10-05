@@ -1,61 +1,60 @@
 # WhisperFree
 
-**Drücken. Sprechen. Weiterschreiben. Lokales Diktieren für macOS.**
+**English** | [Deutsch](README.de.md)
+
+**Press. Speak. Keep writing. Local dictation for macOS.**
 
 [![CI](https://github.com/juferdinand/WhisperFree/actions/workflows/ci.yml/badge.svg)](https://github.com/juferdinand/WhisperFree/actions/workflows/ci.yml)
-[![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-blue.svg)](LICENSE)
-[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black.svg)](#voraussetzungen)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black.svg)](#requirements)
 
-WhisperFree ist eine native Menüleisten-App, die Sprache lokal auf deinem Mac in Text umwandelt.
-Drücke <kbd>⌥</kbd> + <kbd>Space</kbd>, sprich und drücke das Kürzel erneut:
-Der Text wird in das aktive Textfeld eingefügt. Kein Konto, kein API-Schlüssel, kein Abo.
+WhisperFree is a native menu bar app that turns speech into text locally on your Mac.
+Press <kbd>⌥</kbd> + <kbd>Space</kbd>, speak, then press the shortcut again:
+your text is pasted into the active text field. No account, API key, or subscription.
 
-> **English:** WhisperFree is a free, open-source macOS dictation app. Transcribe speech locally
-> with Whisper or Parakeet, then paste it into the active app. Requires macOS 14 or later;
-> the interface and documentation are currently in German. See [installation](#installation)
-> for building from source. Issues and pull requests in English are welcome.
+> **App language:** The interface is currently in German. This README is available in English and German.
 
-[Installation](#installation) · [Funktionen](#funktionen) · [Datenschutz](#datenschutz) ·
-[Mitmachen](#mitmachen) · [Probleme melden](https://github.com/juferdinand/WhisperFree/issues)
+[Installation](#installation) · [Features](#features) · [Privacy](#privacy) ·
+[Contributing](#contributing) · [Report an issue](https://github.com/juferdinand/WhisperFree/issues)
 
-## Projektstatus
+## Project status
 
-WhisperFree ist in früher Entwicklung. Der Quellcode der Version **0.1.0** ist verfügbar;
-ein fertig paketiertes App-Release steht noch aus. Für den Einstieg baust du die App aus dem Quellcode.
+WhisperFree is in early development. The source code for version **0.1.0** is available;
+a packaged app release is still pending. To get started, build the app from source.
 
-| Plattform | Stand |
+| Platform | Status |
 | --- | --- |
-| macOS 14+ | Native Swift-App; Builds für Apple Silicon und Intel vorgesehen |
-| Linux und Windows | Geplant, noch nicht implementiert — siehe [Plattformplan](docs/PLATFORMS.md) |
+| macOS 14+ | Native Swift app; builds target Apple Silicon and Intel |
+| Linux and Windows | Planned, not implemented yet — see the [platform plan](docs/PLATFORMS.md) (German) |
 
-## Funktionen
+## Features
 
-- **Systemweites Diktieren:** Text im aktiven Textfeld einfügen, in die Zwischenablage kopieren oder in einem Texteditor öffnen.
-- **Dein Auslöser:** Frei belegbare Tastenkombinationen, einzelne Modifier-Tasten, Fn oder zusätzliche Maustasten. Umschalten oder gedrückt halten (Push-to-Talk).
-- **Lokale Spracherkennung:** OpenAI Whisper und NVIDIA Parakeet über [whisper.cpp](https://github.com/ggml-org/whisper.cpp), mit Metal-Unterstützung auf Apple Silicon.
-- **Modellverwaltung:** Modelle herunterladen, wechseln, löschen oder kompatible eigene ggml-Dateien importieren. Die App schlägt Modelle passend zu Hardware und Systemsprache vor.
-- **Vokabular und Snippets:** Eigene Begriffe korrigieren lassen und gesprochene Kürzel durch hinterlegte Texte ersetzen, etwa „mein Link“ durch eine URL.
-- **Schwebendes Overlay:** Aufnahmepegel, Timer und Verarbeitungsstatus; verschiebbar und ohne den Fokus vom Textfeld zu nehmen.
-- **Alltagseinstellungen:** Start beim Anmelden, optionale Hinweistöne, Wiederherstellung der Zwischenablage und abschaltbarer lokaler Textverlauf.
+- **System-wide dictation:** Paste text into the active text field, copy it to the clipboard, or open it in a text editor.
+- **Your preferred trigger:** Configurable keyboard shortcuts, individual modifier keys, Fn, or extra mouse buttons. Toggle recording or use push-to-talk.
+- **Local speech recognition:** OpenAI Whisper and NVIDIA Parakeet through [whisper.cpp](https://github.com/ggml-org/whisper.cpp), with Metal support on Apple Silicon.
+- **Model management:** Download, switch, delete, or import compatible custom ggml models. The app suggests models based on your hardware and system language.
+- **Vocabulary and snippets:** Correct custom terms and replace spoken phrases with saved text, such as “my link” with a URL.
+- **Floating overlay:** Recording level, timer, and processing status; draggable without taking focus away from your text field.
+- **Everyday settings:** Launch at login, optional sound cues, clipboard restoration, and a local text history you can disable.
 
-## Voraussetzungen
+## Requirements
 
-- Ein Mac mit **macOS 14 oder neuer**.
-- Ein Mikrofon und genügend Speicherplatz für das gewählte Sprachmodell; die Downloadgröße wird in der App angezeigt.
-- Für den Build: aktuelle **Xcode Command Line Tools** oder Xcode mit Swift-Toolchain.
-- Internet für den ersten Build und den gewünschten Modell-Download. Danach funktioniert das Diktieren offline.
+- A Mac running **macOS 14 or later**.
+- A microphone and enough disk space for your chosen speech model; download sizes are shown in the app.
+- To build from source: current **Xcode Command Line Tools** or Xcode with its Swift toolchain.
+- Internet access for the initial build and model download. Dictation works offline after that.
 
 ## Installation
 
-### Aus dem Quellcode
+### Build from source
 
-Installiere bei Bedarf zuerst die Command Line Tools:
+Install the Command Line Tools first if needed:
 
 ```bash
 xcode-select --install
 ```
 
-Klone das Repository und baue die App:
+Clone the repository and build the app:
 
 ```bash
 git clone https://github.com/juferdinand/WhisperFree.git
@@ -64,139 +63,141 @@ make mac
 open macos/build/WhisperFree.app
 ```
 
-Der Build lädt das festgelegte whisper.cpp-XCFramework automatisch herunter und prüft dessen
-SHA-256-Prüfsumme. Du kannst die fertige `WhisperFree.app` anschließend nach `/Applications` ziehen.
+The build automatically downloads the pinned whisper.cpp XCFramework and verifies its SHA-256
+checksum. You can then drag the resulting `WhisperFree.app` into `/Applications`.
 
-Alternativ baut `make mac-install` die App, ersetzt eine vorhandene Installation in `/Applications`
-und startet sie.
+Alternatively, `make mac-install` builds the app, replaces an existing installation in
+`/Applications`, and launches it.
 
-### Paketierte Downloads
+### Packaged downloads
 
-Künftige App-Pakete findest du unter [GitHub Releases](https://github.com/juferdinand/WhisperFree/releases).
-Das vorgesehene macOS-Paket heißt `WhisperFree-macOS.zip`. Die aktuelle Release-Pipeline enthält
-keine Apple-Notarisierung; eine Code-Signatur allein ersetzt diese nicht.
+Future app packages will be available on [GitHub Releases](https://github.com/juferdinand/WhisperFree/releases).
+The planned macOS package is named `WhisperFree-macOS.zip`. The current release pipeline does
+not include Apple notarization; code signing alone does not provide it.
 
-## Erstes Diktat
+## Your first dictation
 
-1. Öffne WhisperFree. Die Einrichtung erreichst du auch über das Menüleisten-Symbol.
-2. Lade ein Modell in **Einstellungen → Modelle** und wähle es aus.
-3. Erlaube den **Mikrofonzugriff**.
-4. Erlaube **Bedienungshilfen**, wenn Text automatisch eingefügt werden soll. Für manuelles Einfügen wähle **Nur in die Zwischenablage kopieren**.
-5. Setze den Cursor in ein Textfeld. Drücke <kbd>⌥</kbd> + <kbd>Space</kbd>, sprich und drücke das Kürzel erneut.
+The app currently uses German labels; English translations are included below.
 
-Die Transkription beginnt nach dem Stoppen der Aufnahme. Auslöser, Aufnahmemodus, Sprache und
-Ausgabe lassen sich in den Einstellungen ändern. Ohne Bedienungshilfen stehen für den globalen
-Auslöser gewöhnliche Tastenkombinationen zur Verfügung; einzelne Modifier- und Maustasten benötigen die Berechtigung.
+1. Open WhisperFree. You can also access setup through the menu bar icon.
+2. Download and select a model in **Einstellungen → Modelle** (Settings → Models).
+3. Grant **Microphone** access.
+4. Grant **Accessibility** access to paste text automatically. For manual pasting, select **Nur in die Zwischenablage kopieren** (Copy to clipboard only).
+5. Place your cursor in a text field. Press <kbd>⌥</kbd> + <kbd>Space</kbd>, speak, then press the shortcut again.
 
-## Modelle und Sprachen
+Transcription starts once recording stops. You can change the trigger, recording mode, language,
+and output in settings. Without Accessibility access, standard keyboard shortcuts are available
+as global triggers; individual modifier keys and mouse buttons require that permission.
 
-| Modellfamilie | Auswahl in WhisperFree | Sprachverhalten |
+## Models and languages
+
+| Model family | Available in WhisperFree | Language behavior |
 | --- | --- | --- |
-| OpenAI Whisper | Tiny, Base, Small, Medium, Large v3 Turbo; auch komprimiertes Turbo-Modell | Manuelle Sprachwahl oder automatische Erkennung; Vokabular zusätzlich als Erkennungshinweis |
-| NVIDIA Parakeet TDT v3 | Volle Präzision sowie q8- und q4-Varianten | Automatische Spracherkennung; die manuelle Sprachwahl wird nicht angewendet |
+| OpenAI Whisper | Tiny, Base, Small, Medium, Large v3 Turbo; also a compressed Turbo model | Manual language selection or automatic detection; custom vocabulary is also passed as a recognition prompt |
+| NVIDIA Parakeet TDT v3 | Full precision, q8, and q4 variants | Automatic language detection; manual language selection does not apply |
 
-Die anschließende Vokabular-Korrektur und Snippets funktionieren mit beiden Modellfamilien.
-Verfügbare Dateien, Downloadgrößen und die Sprachliste für Parakeet stehen im
-[Modellkatalog](shared/models.json). Erkennungsgeschwindigkeit und Qualität hängen unter anderem
-von Modell, Hardware, Sprache und Aufnahme ab.
+Vocabulary correction after recognition and snippets work with both model families.
+Available files, download sizes, and the Parakeet language list are defined in the
+[model catalog](shared/models.json). Recognition speed and quality depend on factors including
+the model, hardware, language, and recording.
 
-## Datenschutz
+## Privacy
 
-Die Spracherkennung läuft im App-Prozess auf deinem Mac. WhisperFree lädt keine Audioaufnahmen
-oder Transkripte zur Erkennung hoch und enthält keine Telemetrie-Anbindung.
+Speech recognition runs inside the app process on your Mac. WhisperFree does not upload audio
+recordings or transcripts for recognition and has no telemetry integration.
 
-| Daten oder Verbindung | Verhalten |
+| Data or connection | Behavior |
 | --- | --- |
-| Audio | Die App verarbeitet Samples im Arbeitsspeicher und schreibt keine Audiodateien. |
-| Modelle | Download auf Anforderung von Hugging Face, einschließlich dessen Download-Infrastruktur; Ablage unter `~/Library/Application Support/WhisperFree/Models`. |
-| Einstellungen und Verlauf | Lokale User Defaults. Der Verlauf speichert standardmäßig die letzten 20 Textdiktate; unter **Verlauf** abschaltbar und löschbar. |
-| Snippets | Lokal unter `~/Library/Application Support/WhisperFree/snippets.json`. |
-| Ausgabe im Texteditor | Schreibt Textdateien nach `~/Library/Application Support/WhisperFree/Diktate`; diese bleiben unabhängig vom Verlauf bestehen. |
-| Updates | Nur bei konfiguriertem Update-Repository: abschaltbare automatische Prüfung über die GitHub-API, Download eines Updates nach Klick. |
+| Audio | The app processes samples in memory and does not write audio files. |
+| Models | Downloaded on request from Hugging Face, including its download infrastructure; stored in `~/Library/Application Support/WhisperFree/Models`. |
+| Settings and history | Local User Defaults. By default, history stores the last 20 text dictations; disable or clear it under **Verlauf** (History). |
+| Snippets | Stored locally in `~/Library/Application Support/WhisperFree/snippets.json`. |
+| Text editor output | Writes text files to `~/Library/Application Support/WhisperFree/Diktate`; these persist independently of history. |
+| Updates | Only when an update repository is configured: optional automatic checks through the GitHub API, with an update downloaded after you click to install it. |
 
-Ausgegebener Text gelangt in die Zwischenablage und gegebenenfalls in die von dir gewählte App.
-Deren Speicherung und Synchronisierung richtet sich nach deinen dortigen Einstellungen.
+Output text goes to the clipboard and, depending on your settings, to the app you choose.
+That app's storage and synchronization follow its own settings.
 
-## Hilfe bei Problemen
+## Troubleshooting
 
-| Problem | Was du prüfen kannst |
+| Problem | What to check |
 | --- | --- |
-| Kein Text wird eingefügt | Bedienungshilfen für WhisperFree erlauben und ein aktives Textfeld wählen. Alternativ den Zwischenablage-Modus verwenden und selbst mit `⌘V` einfügen. |
-| „Kein Mikrofonzugriff“ oder „Nichts gehört“ | Mikrofonberechtigung, das Standard-Eingabegerät und den Eingangspegel in macOS prüfen. |
-| Das Kürzel reagiert nicht | Ein anderes Kürzel wählen und auf Konflikte mit System- oder App-Kürzeln prüfen. Für Fn, einzelne Modifier und Maustasten Bedienungshilfen erlauben. |
-| Kurze Sätze werden in der falschen Sprache erkannt | Bei Whisper die Sprache ausdrücklich einstellen. Parakeet verwendet immer automatische Erkennung. |
-| Nach einem lokalen Rebuild fehlen Berechtigungen | Eine wechselnde Ad-hoc-Signatur kann erneute Freigaben erfordern; ein dauerhaftes lokales Entwicklungszertifikat hilft. Siehe [Entwicklung](#entwicklung). |
-| „Updates sind in diesem Build nicht konfiguriert“ | Das ist bei normalen Quellcode-Builds vorgesehen. Aktualisiere den Quellcode und baue die App erneut. |
+| Text is not pasted | Grant Accessibility access to WhisperFree and focus a text field. Alternatively, use clipboard mode and paste manually with `⌘V`. |
+| “Kein Mikrofonzugriff” (no microphone access) or “Nichts gehört” (nothing heard) | Check microphone permission, the default input device, and the input level in macOS. |
+| The shortcut does not respond | Try another shortcut and check for conflicts with system or app shortcuts. Fn, individual modifiers, and mouse buttons require Accessibility access. |
+| Short phrases are recognized in the wrong language | Set the language explicitly when using Whisper. Parakeet always detects the language automatically. |
+| Permissions stop working after a local rebuild | A changing ad-hoc signature can require permissions to be granted again; a persistent local development certificate helps. See [Development](#development). |
+| “Updates sind in diesem Build nicht konfiguriert” (updates are not configured in this build) | This is expected for normal source builds. Update the source code and build the app again. |
 
-Noch offen? [Erstelle ein Issue](https://github.com/juferdinand/WhisperFree/issues/new) mit macOS-Version,
-Mac-Chip, WhisperFree-Version, verwendetem Modell und Schritten zum Nachstellen.
-Bitte entferne persönliche Diktate und andere vertrauliche Angaben aus angehängten Logs.
+Still stuck? [Open an issue](https://github.com/juferdinand/WhisperFree/issues/new) with your macOS
+version, Mac chip, WhisperFree version, selected model, and steps to reproduce the problem.
+Remove personal dictations and other confidential information from any logs you attach.
 
-## Grenzen und Ausblick
+## Limitations and roadmap
 
-Die aktuelle App transkribiert nach der Aufnahme; eine laufende Textvorschau ist noch nicht implementiert.
-Ebenso gibt es derzeit keine Linux- oder Windows-App, Cloud-Synchronisierung oder LLM-Nachbearbeitung.
-Automatisches Einfügen verwendet die Zwischenablage und einen simulierten Tastendruck; das Verhalten
-kann je nach Ziel-App variieren.
+The current app transcribes after recording; a live text preview is not implemented yet.
+Linux and Windows apps, cloud synchronization, and LLM post-processing are also not available.
+Automatic pasting uses the clipboard and a simulated keyboard shortcut, so behavior can vary
+between target apps.
 
-Nächste Schritte sind ein erstes signiertes App-Release und die weitere Erprobung der macOS-App.
-Ideen und geplante Plattformen stehen in [SPEC.md](SPEC.md) und [docs/PLATFORMS.md](docs/PLATFORMS.md).
-Das sind Planungen, keine zugesagten Veröffentlichungstermine.
+Next steps include a first signed app release and further testing of the macOS app.
+Ideas and platform plans are described in [SPEC.md](SPEC.md) and
+[docs/PLATFORMS.md](docs/PLATFORMS.md), both in German.
+These are plans, not promised release dates.
 
-## Entwicklung
+## Development
 
 ```bash
-make test                      # Tests für Textverarbeitung und Modellkatalog
-make mac                       # Lokales App-Bundle bauen
-make -C macos app UNIVERSAL=1   # Universal-Bundle für Apple Silicon und Intel
+make test                      # Test text processing and the model catalog
+make mac                       # Build a local app bundle
+make -C macos app UNIVERSAL=1   # Build a universal bundle for Apple Silicon and Intel
 ```
 
-Die [CI](https://github.com/juferdinand/WhisperFree/actions/workflows/ci.yml) führt auf macOS die
-Tests aus und baut das Universal-Bundle. Die Tests verwenden gemeinsame Fälle aus
+The [CI workflow](https://github.com/juferdinand/WhisperFree/actions/workflows/ci.yml) runs tests
+and builds the universal bundle on macOS. Tests use shared cases from
 [`shared/test-vectors.json`](shared/test-vectors.json).
 
-Für eine gleichbleibende lokale Signatur kannst du auf deinem Mac einmal
-`macos/scripts/create-dev-cert.sh` ausführen. Der Build verwendet das Zertifikat **WhisperFree Dev**,
-wenn es im Schlüsselbund vorhanden ist.
+For a consistent local signature, run `macos/scripts/create-dev-cert.sh` once on your Mac.
+The build uses the **WhisperFree Dev** certificate when it is available in your keychain.
 
 ```text
 macos/
-  Sources/WhisperFree/       App, Aufnahme, Hotkeys, Ausgabe und Oberfläche
-  Sources/WhisperFreeCore/   Textbereinigung, Vokabular, Snippets und Modellkatalog
-  Tests/                    Tests mit Swift Testing
-  scripts/                  Build, Abhängigkeiten und Signierung
-shared/                     Gemeinsamer Modellkatalog und Testfälle
-docs/                       Plattformplanung
-.github/workflows/          CI und manueller Release-Workflow
-VERSION                     Projektversion
+  Sources/WhisperFree/       App, recording, hotkeys, output, and interface
+  Sources/WhisperFreeCore/   Text cleanup, vocabulary, snippets, and model catalog
+  Tests/                    Tests using Swift Testing
+  scripts/                  Build, dependencies, and signing
+shared/                     Shared model catalog and test cases
+docs/                       Platform planning
+.github/workflows/          CI and manual release workflow
+VERSION                     Project version
 ```
 
 <details>
-<summary>Releases für Maintainer</summary>
+<summary>Releases for maintainers</summary>
 
-Der [Release-Workflow](.github/workflows/release.yml) benötigt eine dauerhafte Signieridentität
-in den Repository-Secrets `SIGNING_CERT_P12` und `SIGNING_CERT_PASSWORD`.
-Das Hilfsskript `macos/scripts/export-dev-cert.sh juferdinand/WhisperFree` ist für den Export
-des lokalen Entwicklungszertifikats auf macOS vorgesehen und noch nicht durch einen ersten Release-Lauf validiert.
+The [release workflow](.github/workflows/release.yml) requires a persistent signing identity
+in the repository secrets `SIGNING_CERT_P12` and `SIGNING_CERT_PASSWORD`.
+The helper script `macos/scripts/export-dev-cert.sh juferdinand/WhisperFree` is intended to export
+the local development certificate on macOS and has not yet been validated through a first release run.
 
-Anschließend wird der Workflow unter **Actions → Release → Run workflow** mit einer neuen
-Version im Format `X.Y.Z` gestartet. Er setzt `VERSION`, erzeugt Commit und Tag, baut das
-Universal-Bundle und veröffentlicht das ZIP. Dabei wird das Update-Repository im Bundle hinterlegt.
-Der Updater prüft heruntergeladene Apps gegen die Signaturanforderung der laufenden App;
-die Signieridentität muss deshalb über Releases hinweg erhalten bleiben.
+Then start the workflow under **Actions → Release → Run workflow**, supplying a new version
+in `X.Y.Z` format. It updates `VERSION`, creates a commit and tag, builds the universal bundle,
+and publishes the ZIP. The update repository is embedded in the bundle during the build.
+The updater checks downloaded apps against the running app's signature requirement,
+so the signing identity must be preserved across releases.
 
 </details>
 
-## Mitmachen
+## Contributing
 
-Fehlerberichte, Verbesserungen an der Dokumentation und Pull Requests sind willkommen — auf Deutsch
-oder Englisch. Eine Anleitung für Beiträge findest du in [CONTRIBUTING.md](CONTRIBUTING.md).
-Besonders hilfreich sind reproduzierbare Berichte zu verschiedenen Macs, Ziel-Apps und Sprachen.
+Bug reports, documentation improvements, and pull requests are welcome in English or German.
+See [CONTRIBUTING.md](CONTRIBUTING.md) (currently in German) for contribution guidelines.
+Reproducible reports covering different Macs, target apps, and languages are especially helpful.
 
-## Lizenz und Danksagung
+## License and acknowledgments
 
-WhisperFree steht unter der [MIT-Lizenz](LICENSE).
-Die Spracherkennung baut auf [whisper.cpp](https://github.com/ggml-org/whisper.cpp),
-[OpenAI Whisper](https://github.com/openai/whisper) und
-[NVIDIA Parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) auf.
-Für Bibliotheken und heruntergeladene Modelle gelten zusätzlich deren jeweilige Lizenzbedingungen.
+WhisperFree is released under the [MIT License](LICENSE).
+Speech recognition builds on [whisper.cpp](https://github.com/ggml-org/whisper.cpp),
+[OpenAI Whisper](https://github.com/openai/whisper), and
+[NVIDIA Parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3).
+Libraries and downloaded models are also subject to their respective licenses.

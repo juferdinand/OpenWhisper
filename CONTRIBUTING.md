@@ -20,7 +20,8 @@ Kleine Korrekturen kannst du direkt als Pull Request einreichen.
 ## Lokal arbeiten
 
 Du brauchst macOS 14+ und eine aktuelle Swift-Toolchain aus Xcode oder den Command Line Tools.
-Installation und erster Start stehen in der [README](README.md#installation).
+Installation und erster Start stehen in der [deutschen README](README.de.md#installation)
+oder der [englischen README](README.md#installation).
 
 1. Forke das Repository und klone deinen Fork.
 2. Erstelle einen Branch für deine Änderung, etwa `git switch -c fix/clipboard`.
@@ -33,6 +34,7 @@ make mac
 ```
 
 Für reine Dokumentationsänderungen reichen die Prüfung von Inhalt, Links und Formatierung.
+Halte die deutsche und englische README bei inhaltlichen Änderungen synchron.
 Bei Änderungen an Aufnahme, Berechtigungen, Hotkeys oder Einfügen prüfe das Verhalten zusätzlich
 manuell auf einem Mac; die Core-Tests decken diese Systemintegration nicht ab.
 

@@ -2,7 +2,8 @@
 
 Kostenlose, 100 % lokale Diktier-App (Open Source, MIT) nach dem Prinzip von WhisperBar / Wispr Flow:
 Auslöser drücken → sprechen → Text landet an der Cursor-Position. Keine Cloud, kein Konto, kein Abo.
-Sprache der UI, Kommentare und Doku: **Deutsch**.
+Sprache der UI, Kommentare und weiterer Doku: **Deutsch**. Die README ist zweisprachig:
+`README.md` auf Englisch, `README.de.md` auf Deutsch; beide gegenseitig verlinken und inhaltlich synchron halten.
 
 ## Struktur
 
