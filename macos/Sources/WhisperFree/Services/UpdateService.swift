@@ -1,6 +1,7 @@
 import AppKit
 import os
 import Security
+import WhisperFreeCore
 
 private let updateLog = Logger(subsystem: "io.github.whisperfree", category: "update")
 
@@ -35,7 +36,7 @@ final class UpdateService: ObservableObject {
     /// "owner/repo" aus der Info.plist (WFUpdateRepository). Leer → Updates deaktiviert.
     let repository: String? = {
         let value = Bundle.main.object(forInfoDictionaryKey: "WFUpdateRepository") as? String
-        guard let value, value.contains("/"), !value.hasPrefix("OWNER") else { return nil }
+        guard let value, UpdatePolicy.isValidRepository(value), !value.hasPrefix("OWNER") else { return nil }
         return value
     }()
 
@@ -88,15 +89,15 @@ final class UpdateService: ObservableObject {
             }
             let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
             lastCheck = Date()
-            let version = release.tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
-            guard Self.isNewer(version, than: currentVersion) else {
+            guard !release.draft, !release.prerelease,
+                  let asset = release.assets.first(where: { $0.name == UpdatePolicy.assetName }) else {
+                throw UpdateError.message("Release enthält kein unterstütztes macOS-Paket")
+            }
+            let version = try UpdatePolicy.validateRelease(repository: repository, tag: release.tagName,
+                assetName: asset.name, assetURL: asset.browserDownloadURL, pageURL: release.htmlURL)
+            guard UpdatePolicy.isNewer(version, than: currentVersion) else {
                 status = .upToDate
                 return
-            }
-            // Ein Release enthält Artefakte für alle Plattformen – hier nur das macOS-Zip.
-            let zips = release.assets.filter { $0.name.lowercased().hasSuffix(".zip") }
-            guard let asset = zips.first(where: { $0.name.lowercased().contains("macos") }) ?? zips.first else {
-                throw UpdateError.message("Release \(release.tagName) enthält keine .zip-Datei")
             }
             status = .available(Release(version: version, notes: release.body ?? "",
                                         assetURL: asset.browserDownloadURL, pageURL: release.htmlURL))
@@ -122,7 +123,7 @@ final class UpdateService: ObservableObject {
                 result = .failure(UpdateError.message("Download fehlgeschlagen"))
             }
             DispatchQueue.main.async {
-                UpdateService.shared.finishDownload(result)
+                UpdateService.shared.finishDownload(result, expectedVersion: release.version)
             }
         }
         downloadObservation = task.progress.observe(\.fractionCompleted) { progress, _ in
@@ -134,16 +135,19 @@ final class UpdateService: ObservableObject {
         task.resume()
     }
 
-    private func finishDownload(_ result: Result<URL, Error>) {
+    private func finishDownload(_ result: Result<URL, Error>, expectedVersion: String) {
         downloadObservation = nil
         switch result {
         case .failure(let error):
             status = .failed(error.localizedDescription)
         case .success(let zip):
             status = .installing
+            let installedVersion = currentVersion
+            let identifier = Bundle.main.bundleIdentifier ?? ""
             Task.detached {
                 do {
-                    let newApp = try Self.unpackAndVerify(zip)
+                    let newApp = try Self.unpackAndVerify(zip, expectedVersion: expectedVersion,
+                                                        currentVersion: installedVersion, identifier: identifier)
                     await MainActor.run { UpdateService.shared.replaceAndRelaunch(with: newApp) }
                 } catch {
                     await MainActor.run { UpdateService.shared.status = .failed(error.localizedDescription) }
@@ -152,18 +156,19 @@ final class UpdateService: ObservableObject {
         }
     }
 
-    private nonisolated static func unpackAndVerify(_ zip: URL) throws -> URL {
-        let folder = zip.deletingPathExtension()
-        try? FileManager.default.removeItem(at: folder)
-        try run("/usr/bin/ditto", ["-x", "-k", zip.path, folder.path])
-        try? FileManager.default.removeItem(at: zip)
-
-        guard let app = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
-            .first(where: { $0.pathExtension == "app" }) else {
-            throw UpdateError.message("Keine App im Update gefunden")
+    private nonisolated static func unpackAndVerify(_ zip: URL, expectedVersion: String,
+                                                   currentVersion: String, identifier: String) throws -> URL {
+        defer { try? FileManager.default.removeItem(at: zip) }
+        let app = try UpdateArchive.extract(zip)
+        do {
+            try verifySignature(of: app)
+            try UpdatePolicy.validateBundle(at: app, expectedVersion: expectedVersion,
+                                            currentVersion: currentVersion, bundleIdentifier: identifier)
+            return app
+        } catch {
+            try? FileManager.default.removeItem(at: app.deletingLastPathComponent())
+            throw error
         }
-        try verifySignature(of: app)
-        return app
     }
 
     /// Das Update muss dieselbe Designated Requirement erfüllen wie die laufende App.
@@ -176,21 +181,14 @@ final class UpdateService: ObservableObject {
               SecCodeCopyDesignatedRequirement(staticSelf, [], &requirement) == errSecSuccess, let requirement else {
             throw UpdateError.message("Eigene Signatur konnte nicht gelesen werden")
         }
-        var newCode: SecStaticCode?
-        guard SecStaticCodeCreateWithPath(app as CFURL, [], &newCode) == errSecSuccess, let newCode else {
-            throw UpdateError.message("Update ist nicht signiert")
-        }
-        let flags = SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSCheckNestedCode | kSecCSStrictValidate)
-        let status = SecStaticCodeCheckValidity(newCode, flags, requirement)
-        guard status == errSecSuccess else {
-            throw UpdateError.message("Signatur des Updates passt nicht (\(status)) – Installation abgebrochen")
-        }
+        try UpdateSignatureVerifier.verify(app, requirement: requirement)
     }
 
     /// Ein kleines Shell-Skript wartet, bis die App beendet ist, tauscht das Bundle aus und startet neu.
     private func replaceAndRelaunch(with newApp: URL) {
         let current = Bundle.main.bundleURL
         guard let script = Bundle.main.url(forResource: "install-update", withExtension: "sh") else {
+            try? FileManager.default.removeItem(at: newApp.deletingLastPathComponent())
             status = .failed("Update-Installer fehlt im App-Bundle")
             return
         }
@@ -207,29 +205,9 @@ final class UpdateService: ObservableObject {
             updateLog.notice("Update wird installiert, App startet neu")
             NSApp.terminate(nil)
         } catch {
+            try? FileManager.default.removeItem(at: newApp.deletingLastPathComponent())
             status = .failed("Installation fehlgeschlagen: \(error.localizedDescription)")
         }
-    }
-
-    private nonisolated static func run(_ tool: String, _ arguments: [String]) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: tool)
-        process.arguments = arguments
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { throw UpdateError.message("\(tool) fehlgeschlagen") }
-    }
-
-    /// Vergleicht "1.2.10" numerisch mit "1.2.9".
-    nonisolated static func isNewer(_ candidate: String, than current: String) -> Bool {
-        let a = candidate.split(separator: ".").map { Int($0) ?? 0 }
-        let b = current.split(separator: ".").map { Int($0) ?? 0 }
-        for i in 0..<max(a.count, b.count) {
-            let x = i < a.count ? a[i] : 0
-            let y = i < b.count ? b[i] : 0
-            if x != y { return x > y }
-        }
-        return false
     }
 }
 
@@ -246,6 +224,8 @@ private struct GitHubRelease: Decodable {
     let body: String?
     let htmlURL: URL
     let assets: [Asset]
+    let draft: Bool
+    let prerelease: Bool
 
     struct Asset: Decodable {
         let name: String
@@ -262,5 +242,6 @@ private struct GitHubRelease: Decodable {
         case body
         case htmlURL = "html_url"
         case assets
+        case draft, prerelease
     }
 }

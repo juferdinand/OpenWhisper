@@ -191,8 +191,10 @@ VERSION                     Projektversion
 
 Der [Release-Workflow](.github/workflows/release.yml) benötigt eine dauerhafte Signieridentität
 in den Repository-Secrets `SIGNING_CERT_P12` und `SIGNING_CERT_PASSWORD`.
-Das Hilfsskript `macos/scripts/export-dev-cert.sh juferdinand/WhisperFree` kann ein lokales
-Entwicklungszertifikat auf macOS exportieren; dieses Export-Hilfsskript wurde hier noch nicht validiert.
+Um eine vorhandene Identität hochzuladen, exportiere in der macOS-Schlüsselbundverwaltung nur
+diese Identität samt privatem Schlüssel als verschlüsselte `.p12`-Datei. Starte danach
+`macos/scripts/export-dev-cert.sh juferdinand/WhisperFree /pfad/zur/identitaet.p12`.
+Das Skript fragt das Passwort ab und lädt ausschließlich die ausgewählte Datei hoch.
 Die öffentliche Release-Identität ist bereits eingerichtet. Behalte sie für weitere Releases bei;
 ein neu erzeugtes lokales Zertifikat würde die Signaturkompatibilität für Updates aufheben.
 
@@ -210,6 +212,7 @@ die Signieridentität muss deshalb über Releases hinweg erhalten bleiben.
 Fehlerberichte, Verbesserungen an der Dokumentation und Pull Requests sind willkommen — auf Deutsch
 oder Englisch. Eine Anleitung für Beiträge findest du in [CONTRIBUTING.md](CONTRIBUTING.md).
 Besonders hilfreich sind reproduzierbare Berichte zu verschiedenen Macs, Ziel-Apps und Sprachen.
+Nutze für Sicherheitslücken die [vertrauliche Sicherheitsmeldung](SECURITY.md) statt öffentlicher Issues.
 
 ## Lizenz und Danksagung
 

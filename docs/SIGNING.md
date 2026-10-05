@@ -43,6 +43,11 @@ Apple explains [Gatekeeper and notarization](https://support.apple.com/102445) a
 
 ## Implemented protections
 
+- Release URLs must match the configured GitHub repository, version tag, and exact macOS asset name.
+  The signed bundle must have the expected app identifier and release version, newer than the installed version.
+- Archives are extracted into fresh private directories using macOS bsdtar with its default path
+  traversal protections. The expected app directory is required; symlinks leaving it are rejected.
+  Invalid archives and rejected apps are removed. Tests exercise traversal and symlink attacks.
 - The updater validates the downloaded app's code signature against the running app's designated
   requirement before starting replacement, including nested code and all architectures.
 - The replacement script is part of the signed app bundle. Paths are passed as arguments, never
@@ -55,6 +60,7 @@ Apple explains [Gatekeeper and notarization](https://support.apple.com/102445) a
   the release job ends. Release signing has no ad-hoc fallback.
 
 These measures reduce specific risks; they are not a complete security audit or a guarantee against compromise.
+See [SECURITY.md](../SECURITY.md) for automated checks, repository protections, reporting, and review limits.
 
 ## Maintaining the release identity
 

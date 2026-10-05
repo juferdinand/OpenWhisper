@@ -86,16 +86,18 @@ for key continuity and a future Developer ID migration; changing identities requ
 - CI runs tests, builds a universal app, and uploads the packaged ZIP as an Actions artifact.
   CI builds use ad-hoc signing and do not enable the in-app updater.
 - The manual Release workflow runs from `main`, checks the requested `X.Y.Z` version,
-  imports the persistent signing identity, tests, builds, verifies, and publishes the ZIP
+  tests, imports the persistent signing identity, builds, verifies, and publishes the ZIP
   and `SHA256SUMS` on GitHub Releases.
 - `WFUpdateRepository` is set through `UPDATE_REPO` during release builds.
 - Signing requires the repository secrets `SIGNING_CERT_P12` and `SIGNING_CERT_PASSWORD`.
-  `macos/scripts/export-dev-cert.sh owner/repo` can export a local macOS development identity;
-  the export helper has not yet been validated here.
+  `macos/scripts/export-dev-cert.sh owner/repo /path/to/identity.p12` uploads one encrypted identity
+  previously exported using Keychain Access. Never export all keychain identities or rotate the release key.
 - Do not rotate the release signing identity casually or commit signing material.
   Local signing backups belong under the ignored `.local/` directory.
 - Release publication must follow successful tests, packaging, and signature verification.
   Preserve both README languages when changing installation or release instructions.
+- CI repeats weekly. See `SECURITY.md` for the security policy.
+- Preserve strict update-source, version, archive, and signature checks and their regression tests.
 
 ## Future work
 
