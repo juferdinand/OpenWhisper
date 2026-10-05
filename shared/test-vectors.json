@@ -1,18 +1,18 @@
 {
-  "$comment": "Plattformübergreifende Testfälle für die Textverarbeitung nach der Erkennung. Jede WhisperFree-Implementierung (macOS/Swift, Desktop/Rust) muss alle Fälle bestehen.",
+  "$comment": "Cross-platform tests for text processing after recognition. Every WhisperFree implementation (macOS/Swift, Desktop/Rust) must pass all cases. Preserve multilingual test inputs and expected results.",
   "cleaner": [
-    { "name": "entfernt Nicht-Sprache-Marker", "input": " [BLANK_AUDIO] Hallo  Welt (Musik) ", "expected": "Hallo Welt" },
-    { "name": "entfernt Untertitel-Halluzination", "input": "Untertitel im Auftrag des ZDF für funk, 2017", "expected": "" },
-    { "name": "nur Satzzeichen wird leer", "input": " . ", "expected": "" }
+    { "name": "removes non-speech markers", "input": " [BLANK_AUDIO] Hallo  Welt (Musik) ", "expected": "Hallo Welt" },
+    { "name": "removes subtitle hallucinations", "input": "Untertitel im Auftrag des ZDF für funk, 2017", "expected": "" },
+    { "name": "punctuation-only input becomes empty", "input": " . ", "expected": "" }
   ],
   "vocabulary": {
     "terms": "WhisperFree, Kubernetes, Jira\nNVIDIA",
     "cases": [
-      { "name": "zusammengezogene Wörter", "input": "Ein Test für Whisper Free.", "expected": "Ein Test für WhisperFree." },
-      { "name": "kleiner Tippfehler", "input": "Wir deployen auf Kubernetis", "expected": "Wir deployen auf Kubernetes" },
-      { "name": "kurze Begriffe nur exakt", "input": "Er studiert Jura und nutzt jira", "expected": "Er studiert Jura und nutzt Jira" },
-      { "name": "fremder Text bleibt", "input": "Morgen um 15 Uhr treffen wir uns im Büro in Hamburg.", "expected": "Morgen um 15 Uhr treffen wir uns im Büro in Hamburg." },
-      { "name": "Großschreibung", "input": "Das Modell von Nvidia ist gut", "expected": "Das Modell von NVIDIA ist gut" }
+      { "name": "joins split words", "input": "Ein Test für Whisper Free.", "expected": "Ein Test für WhisperFree." },
+      { "name": "minor typo", "input": "Wir deployen auf Kubernetis", "expected": "Wir deployen auf Kubernetes" },
+      { "name": "short terms require exact matches", "input": "Er studiert Jura und nutzt jira", "expected": "Er studiert Jura und nutzt Jira" },
+      { "name": "unrelated text stays unchanged", "input": "Morgen um 15 Uhr treffen wir uns im Büro in Hamburg.", "expected": "Morgen um 15 Uhr treffen wir uns im Büro in Hamburg." },
+      { "name": "capitalization", "input": "Das Modell von Nvidia ist gut", "expected": "Das Modell von NVIDIA ist gut" }
     ]
   },
   "snippets": {
@@ -23,11 +23,11 @@
       { "trigger": "Geheim", "expansion": "nie", "enabled": false }
     ],
     "cases": [
-      { "name": "ganzes Diktat ohne Satzzeichen", "input": "YouTube-Kanal-Link.", "expected": "https://youtube.com/@example" },
-      { "name": "inline, Groß/klein egal", "input": "Schau mal hier: youtube kanal link und abonnieren!", "expected": "Schau mal hier: https://youtube.com/@example und abonnieren!" },
-      { "name": "nicht innerhalb von Wörtern", "input": "Die E-Mails sind da", "expected": "Die E-Mails sind da" },
-      { "name": "deaktiviertes Snippet", "input": "Das bleibt Geheim", "expected": "Das bleibt Geheim" },
-      { "name": "Dollar wörtlich", "input": "Der Preis ist gut", "expected": "Der $10 ist gut" }
+      { "name": "whole dictation without punctuation", "input": "YouTube-Kanal-Link.", "expected": "https://youtube.com/@example" },
+      { "name": "inline case-insensitive matching", "input": "Schau mal hier: youtube kanal link und abonnieren!", "expected": "Schau mal hier: https://youtube.com/@example und abonnieren!" },
+      { "name": "does not match inside words", "input": "Die E-Mails sind da", "expected": "Die E-Mails sind da" },
+      { "name": "disabled snippet", "input": "Das bleibt Geheim", "expected": "Das bleibt Geheim" },
+      { "name": "literal dollar sign", "input": "Der Preis ist gut", "expected": "Der $10 ist gut" }
     ]
   }
 }

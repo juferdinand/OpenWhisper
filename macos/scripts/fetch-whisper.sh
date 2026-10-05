@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Lädt das vorgebaute whisper.cpp-XCFramework (MIT) nach Vendor/, falls es noch fehlt.
+# Downloads the prebuilt whisper.cpp XCFramework (MIT) to Vendor/ if missing.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -16,7 +16,7 @@ fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-echo "→ Lade whisper.cpp ${VERSION} XCFramework …"
+echo "→ Downloading whisper.cpp ${VERSION} XCFramework …"
 curl -fL --progress-bar -o "$TMP/whisper.zip" "$URL"
 echo "${SHA256}  $TMP/whisper.zip" | shasum -a 256 -c - >/dev/null
 unzip -q "$TMP/whisper.zip" -d "$TMP"

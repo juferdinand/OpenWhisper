@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>de</string>
+	<string>en</string>
 	<key>CFBundleExecutable</key>
 	<string>WhisperFree</string>
 	<key>CFBundleIdentifier</key>
@@ -28,10 +28,10 @@
 	<string>public.app-category.productivity</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
-	<!-- GitHub-Repository für Updates ("owner/repo"); "OWNER/…" deaktiviert den Updater. -->
+	<!-- GitHub repository for updates ("owner/repo"); "OWNER/…" disables the updater. -->
 	<key>WFUpdateRepository</key>
 	<string>OWNER/WhisperFree</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>WhisperFree braucht Mikrofonzugriff, um deine Stimme aufzunehmen. Alles bleibt lokal auf deinem Mac.</string>
+	<string>WhisperFree needs microphone access to record your voice. Everything stays on your Mac.</string>
 </dict>
 </plist>

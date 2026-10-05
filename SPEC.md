@@ -1,46 +1,46 @@
-# WhisperFree – Spezifikation
+# WhisperFree specification
 
-## Ziel
+## Goal
 
-Eine schlanke macOS-Menüleisten-App für systemweites Diktieren. Nutzer drücken ein globales Kürzel,
-sprechen und erhalten den erkannten Text an der Cursor-Position der gerade aktiven App.
+A lightweight macOS menu bar app for system-wide dictation. Users press a global shortcut,
+speak, and receive the recognized text at the cursor in the active app.
 
-Leitprinzipien:
+Guiding principles:
 
-1. **Lokal** – Inferenz auf dem Gerät, keine Server, keine Telemetrie.
-2. **Kostenlos & offen** – MIT-Lizenz, kein Konto, kein Lizenzschlüssel.
-3. **Klein** – nur die Funktionen, die man täglich braucht: Kürzel, Snippets, mehrere Sprachen.
+1. **Local** — inference on the device, no recognition servers, no telemetry.
+2. **Free and open** — MIT License, no account or license key.
+3. **Small** — everyday essentials: shortcuts, snippets, and multiple languages.
 
-## Funktionen
+## Features
 
-| Bereich | Verhalten |
+| Area | Behavior |
 |---|---|
-| Auslöser | Systemweiter `CGEvent`-Tap (Bedienungshilfen): Tastenkombination, einzelne Modifier-Taste (Fn, rechte ⌥ …, seitengenau) oder Maustaste ab Nr. 3. Aufnehmen des Auslösers ebenfalls über den Tap, also fokusunabhängig. Auslösende Events werden geschluckt. Ohne Berechtigung: Carbon-`RegisterEventHotKey` als Fallback für Kombinationen. Modi: *Umschalten* oder *Halten* (Push-to-Talk). Wird während eines gehaltenen Modifiers eine andere Taste gedrückt (z. B. ⌥E), wird die Aufnahme verworfen. |
-| Overlay | Nicht aktivierendes, randloses `NSPanel` (`.statusBar`-Level, alle Spaces, über Vollbild-Apps). Zeigt Mikrofon / pulsierenden Punkt + Waveform + Timer / Spinner / Erfolg / Fehler. Klick = Start/Stopp, Ziehen = Verschieben (Position wird gespeichert), ✕ verwirft eine Aufnahme. |
-| Aufnahme | `AVAudioEngine` Input-Tap, `AVAudioConverter` → 16 kHz mono Float32 im RAM. Aufnahmen < 0,3 s werden ignoriert, Aufnahmen ohne nennenswerten Pegel als „nichts gehört“ gemeldet (verhindert Whisper-Halluzinationen bei Stille). |
-| Transkription | whisper.cpp als XCFramework, in-process. Kontext bleibt geladen; Laden startet bereits beim Aufnahmebeginn. Greedy-Decoding, keine Timestamps, optionaler `initial_prompt` aus dem Vokabular-Feld. Sprache fest oder `auto`. |
-| Nachbearbeitung | Entfernt Nicht-Sprache-Marker (`[BLANK_AUDIO]`, `(Musik)` …) und bekannte Untertitel-Halluzinationen, normalisiert Leerraum, wendet Snippets an. |
-| Snippets | Trigger → Expansion. Case-insensitive, Leerzeichen/Bindestriche austauschbar, nur ganze Wörter. Besteht das Diktat nur aus dem Trigger, wird ausschließlich die Expansion ausgegeben. |
-| Ausgabe | Text in die Zwischenablage, dann ⌘V per `CGEvent` (benötigt Bedienungshilfen). Vorherige Zwischenablage wird nach 0,5 s wiederhergestellt, sofern sich zwischenzeitlich nichts geändert hat. Ohne Berechtigung: nur Zwischenablage + Hinweis. |
-| Modelle | Katalog (tiny, base, small, medium, large-v3-turbo, large-v3-turbo-q5_0) mit Download von Hugging Face, Fortschritt, Abbrechen, Löschen; Import eigener ggml-Dateien. Ablage: `~/Library/Application Support/WhisperFree/Models`. |
-| Einstellungen | Einrichtung (Checkliste), Allgemein, Modelle, Snippets, Verlauf, Über. |
+| Trigger | System-wide `CGEvent` tap with Accessibility permission: keyboard shortcut, individual modifier key (Fn, right ⌥, etc., distinguishing left and right), or mouse button 3 and above. Trigger capture also uses the tap, regardless of window focus. Trigger events are consumed. Without permission, Carbon `RegisterEventHotKey` provides a fallback for key combinations. Modes: toggle or hold (push-to-talk). Pressing another key while holding a modifier, such as ⌥E, discards the recording. |
+| Overlay | Non-activating, borderless `NSPanel` at `.statusBar` level, visible across Spaces and above full-screen apps. Shows a microphone, pulsing dot, waveform, timer, spinner, success, or error. Click to start or stop; drag to move (position is saved); ✕ discards a recording. |
+| Recording | `AVAudioEngine` input tap with `AVAudioConverter` to 16 kHz mono Float32 in memory. Recordings shorter than 0.3 seconds are ignored. Recordings without a meaningful audio level report no audio detected to reduce hallucinations during silence. |
+| Transcription | In-process whisper.cpp XCFramework. The context stays loaded; model loading starts when recording begins. Greedy decoding, no timestamps, optional `initial_prompt` from the vocabulary field. Fixed language or `auto` for Whisper; automatic detection for Parakeet. |
+| Post-processing | Removes non-speech markers such as `[BLANK_AUDIO]` and `(Music)`, known subtitle hallucinations, and extra whitespace; applies vocabulary corrections and snippets. |
+| Snippets | Trigger → expansion. Case-insensitive, spaces and hyphens interchangeable, whole words only. If the dictation consists only of the trigger, returns just the expansion. |
+| Output | Copies text to the clipboard, then simulates ⌘V through `CGEvent` (requires Accessibility access). Restores the previous clipboard after 0.5 seconds if its contents have not changed. Without permission, copies text and shows a notice. Optional output to a text editor. |
+| Models | Whisper and Parakeet catalog with downloads from Hugging Face, progress, cancellation, deletion, and import of custom ggml files. Stored in `~/Library/Application Support/WhisperFree/Models`. |
+| Settings | Setup checklist, General, Models, Snippets, History, and About. The interface is in English; dictation supports multiple languages. |
 
-## Zustandsmaschine
+## State machine
 
 ```
-idle ──start──► recording ──stop──► transcribing ──ok──► done(msg) ──1,2 s──► idle
-  ▲                 │                     └──fehler──► error(msg) ──2,5 s──► idle
+idle ──start──► recording ──stop──► transcribing ──ok──► done(msg) ──1.2 s──► idle
+  ▲                 │                     └──error──► error(msg) ──2.5 s──► idle
   └────cancel───────┘
 ```
 
-## Nicht-Ziele (vorerst)
+## Out of scope for now
 
-Live-Streaming-Transkription, Cloud-Sync, KI-Umformulierung, Befehlsmodus, Sandbox/App Store.
+Live streaming transcription, cloud sync, AI rewriting, command mode, and sandboxing/App Store distribution.
 
-## Ideen für später
+## Future ideas
 
-- Streaming-Vorschau während der Aufnahme
-- Automatische Groß-/Kleinschreibung und Satzzeichen-Kommandos („neue Zeile“, „Punkt“)
-- Einfügen direkt über AX-Selection-Ranges statt ⌘V
-- Optionale lokale LLM-Nachbearbeitung (z. B. über Ollama)
-- Universal Binary + notarisiertes Release über GitHub Actions
+- Streaming preview during recording.
+- Automatic capitalization and spoken punctuation commands, such as “new line” and “period”.
+- Text insertion through AX selection ranges instead of ⌘V.
+- Optional local LLM post-processing, for example through Ollama.
+- Apple Developer ID signing and notarization for GitHub releases.

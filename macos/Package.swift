@@ -5,10 +5,10 @@ let package = Package(
     name: "WhisperFree",
     platforms: [.macOS(.v14)],
     targets: [
-        // whisper.cpp als vorgebautes XCFramework (Metal + Accelerate). Wird von scripts/fetch-whisper.sh geladen.
+        // Prebuilt whisper.cpp XCFramework (Metal + Accelerate), downloaded by scripts/fetch-whisper.sh.
         .binaryTarget(name: "whisper", path: "Vendor/whisper.xcframework"),
 
-        // Reine Logik ohne System-Abhängigkeiten (testbar).
+        // Testable text processing, model catalog, and platform-specific update validation.
         .target(name: "WhisperFreeCore", path: "Sources/WhisperFreeCore"),
 
         .executableTarget(

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Strikte Grenzen für Metadaten aus der Release-API und dem heruntergeladenen Bundle.
+/// Strict validation of metadata from the release API and downloaded bundle.
 public enum UpdatePolicy {
     public static let assetName = "WhisperFree-macOS.zip"
 
@@ -55,10 +55,10 @@ public enum UpdateValidationError: LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .invalidRelease: return "Ungültige Update-Quelle oder Release-Version"
-        case .invalidBundle: return "App-Identität oder Version des Updates stimmt nicht überein"
-        case .invalidArchive: return "Ungültiges oder unsicheres Update-Archiv"
-        case .invalidSignature(let status): return "Signatur des Updates passt nicht (\(status)) – Installation abgebrochen"
+        case .invalidRelease: return "Invalid update source or release version"
+        case .invalidBundle: return "Update app identity or version does not match"
+        case .invalidArchive: return "Invalid or unsafe update archive"
+        case .invalidSignature(let status): return "Update signature does not match (\(status)); installation canceled"
         }
     }
 }

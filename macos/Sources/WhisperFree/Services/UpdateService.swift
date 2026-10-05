@@ -5,10 +5,10 @@ import WhisperFreeCore
 
 private let updateLog = Logger(subsystem: "io.github.whisperfree", category: "update")
 
-/// Prüft GitHub Releases auf neue Versionen und installiert sie per Klick.
+/// Checks GitHub Releases for new versions and installs them on request.
 ///
-/// Sicherheit: Ein heruntergeladenes Update wird nur installiert, wenn seine Code-Signatur die
-/// Designated Requirement der laufenden App erfüllt – also mit demselben Zertifikat signiert ist.
+/// Security: a downloaded update is installed only if its code signature satisfies the
+/// running app's designated requirement, preserving the same signing certificate.
 @MainActor
 final class UpdateService: ObservableObject {
     static let shared = UpdateService()
@@ -33,7 +33,7 @@ final class UpdateService: ObservableObject {
     @Published private(set) var status: Status = .idle
     @Published private(set) var lastCheck: Date?
 
-    /// "owner/repo" aus der Info.plist (WFUpdateRepository). Leer → Updates deaktiviert.
+    /// "owner/repo" from Info.plist (WFUpdateRepository). Empty disables updates.
     let repository: String? = {
         let value = Bundle.main.object(forInfoDictionaryKey: "WFUpdateRepository") as? String
         guard let value, UpdatePolicy.isValidRepository(value), !value.hasPrefix("OWNER") else { return nil }
@@ -55,7 +55,7 @@ final class UpdateService: ObservableObject {
     func startAutomaticChecks() {
         guard repository != nil else { return }
         timer?.invalidate()
-        // Einmal kurz nach dem Start, danach alle 24 Stunden.
+        // Once shortly after launch, then every 24 hours.
         timer = Timer.scheduledTimer(withTimeInterval: 24 * 60 * 60, repeats: true) { _ in
             Task { @MainActor in UpdateService.shared.checkIfEnabled() }
         }
@@ -72,7 +72,7 @@ final class UpdateService: ObservableObject {
 
     func check() async {
         guard let repository else {
-            status = .failed("Kein Update-Repository konfiguriert")
+            status = .failed("No update repository configured")
             return
         }
         switch status {
@@ -85,13 +85,13 @@ final class UpdateService: ObservableObject {
             request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
             let (data, response) = try await URLSession.shared.data(for: request)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-                throw UpdateError.message("GitHub antwortete mit HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+                throw UpdateError.message("GitHub returned HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
             }
             let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
             lastCheck = Date()
             guard !release.draft, !release.prerelease,
                   let asset = release.assets.first(where: { $0.name == UpdatePolicy.assetName }) else {
-                throw UpdateError.message("Release enthält kein unterstütztes macOS-Paket")
+                throw UpdateError.message("Release does not contain a supported macOS package")
             }
             let version = try UpdatePolicy.validateRelease(repository: repository, tag: release.tagName,
                 assetName: asset.name, assetURL: asset.browserDownloadURL, pageURL: release.htmlURL)
@@ -101,10 +101,10 @@ final class UpdateService: ObservableObject {
             }
             status = .available(Release(version: version, notes: release.body ?? "",
                                         assetURL: asset.browserDownloadURL, pageURL: release.htmlURL))
-            updateLog.notice("Update verfügbar: \(version, privacy: .public)")
+            updateLog.notice("Update available: \(version, privacy: .public)")
         } catch {
             status = .failed(error.localizedDescription)
-            updateLog.error("Update-Prüfung fehlgeschlagen: \(error.localizedDescription, privacy: .public)")
+            updateLog.error("Update check failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -112,7 +112,7 @@ final class UpdateService: ObservableObject {
         guard let release = availableRelease else { return }
         status = .downloading(0)
         let task = URLSession.shared.downloadTask(with: release.assetURL) { tempURL, response, error in
-            // Datei muss noch im Callback verschoben werden.
+            // Move the file before returning from this callback.
             let result: Result<URL, Error>
             if let error {
                 result = .failure(error)
@@ -120,7 +120,7 @@ final class UpdateService: ObservableObject {
                 let kept = FileManager.default.temporaryDirectory.appendingPathComponent("WhisperFree-update-\(UUID().uuidString).zip")
                 result = Result { try FileManager.default.moveItem(at: tempURL, to: kept); return kept }
             } else {
-                result = .failure(UpdateError.message("Download fehlgeschlagen"))
+                result = .failure(UpdateError.message("Download failed"))
             }
             DispatchQueue.main.async {
                 UpdateService.shared.finishDownload(result, expectedVersion: release.version)
@@ -171,7 +171,7 @@ final class UpdateService: ObservableObject {
         }
     }
 
-    /// Das Update muss dieselbe Designated Requirement erfüllen wie die laufende App.
+    /// The update must satisfy the running app's designated requirement.
     private nonisolated static func verifySignature(of app: URL) throws {
         var selfCode: SecCode?
         var requirement: SecRequirement?
@@ -179,22 +179,22 @@ final class UpdateService: ObservableObject {
         guard SecCodeCopySelf([], &selfCode) == errSecSuccess, let selfCode,
               SecCodeCopyStaticCode(selfCode, [], &staticSelf) == errSecSuccess, let staticSelf,
               SecCodeCopyDesignatedRequirement(staticSelf, [], &requirement) == errSecSuccess, let requirement else {
-            throw UpdateError.message("Eigene Signatur konnte nicht gelesen werden")
+            throw UpdateError.message("Could not read the current app’s signature")
         }
         try UpdateSignatureVerifier.verify(app, requirement: requirement)
     }
 
-    /// Ein kleines Shell-Skript wartet, bis die App beendet ist, tauscht das Bundle aus und startet neu.
+    /// A small shell script waits for the app to exit, replaces the bundle, and relaunches it.
     private func replaceAndRelaunch(with newApp: URL) {
         let current = Bundle.main.bundleURL
         guard let script = Bundle.main.url(forResource: "install-update", withExtension: "sh") else {
             try? FileManager.default.removeItem(at: newApp.deletingLastPathComponent())
-            status = .failed("Update-Installer fehlt im App-Bundle")
+            status = .failed("Update installer is missing from the app bundle")
             return
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        // Dateinamen dürfen weder Command Substitution noch neue Shell-Befehle auslösen.
+        // Filenames must not trigger command substitution or inject shell commands.
         process.arguments = [script.path, String(ProcessInfo.processInfo.processIdentifier),
                              current.path, newApp.path, newApp.deletingLastPathComponent().path]
         var environment = ProcessInfo.processInfo.environment
@@ -202,11 +202,11 @@ final class UpdateService: ObservableObject {
         process.environment = environment
         do {
             try process.run()
-            updateLog.notice("Update wird installiert, App startet neu")
+            updateLog.notice("Installing update; the app will restart")
             NSApp.terminate(nil)
         } catch {
             try? FileManager.default.removeItem(at: newApp.deletingLastPathComponent())
-            status = .failed("Installation fehlgeschlagen: \(error.localizedDescription)")
+            status = .failed("Installation failed: \(error.localizedDescription)")
         }
     }
 }

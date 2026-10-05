@@ -12,7 +12,7 @@ enum Permissions {
         await AVCaptureDevice.requestAccess(for: .audio)
     }
 
-    /// Bedienungshilfen werden nur fürs automatische Einfügen (⌘V simulieren) gebraucht.
+    /// Accessibility access is used to simulate ⌘V for automatic text insertion.
     static var accessibilityGranted: Bool {
         AXIsProcessTrusted()
     }

@@ -9,16 +9,16 @@ enum SpeechEngineError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .modelLoadFailed(let name): "Modell konnte nicht geladen werden (\(name))"
-        case .notLoaded: "Kein Modell geladen"
-        case .inferenceFailed(let code): "Transkription fehlgeschlagen (Code \(code))"
+        case .modelLoadFailed(let name): "Could not load model (\(name))"
+        case .notLoaded: "No model loaded"
+        case .inferenceFailed(let code): "Transcription failed (code \(code))"
         }
     }
 }
 
-/// Wrapper um die C-APIs von whisper.cpp – sowohl für Whisper- als auch für Parakeet-Modelle.
-/// Das Modell bleibt zwischen Diktaten geladen; alle Aufrufe laufen seriell auf einer Queue,
-/// weil die Kontexte nicht thread-safe sind.
+/// Wrapper around whisper.cpp C APIs for both Whisper and Parakeet models.
+/// The model stays loaded between dictations; all calls run serially on a queue
+/// because the contexts are not thread-safe.
 final class SpeechEngine: @unchecked Sendable {
     private enum Context {
         case whisper(OpaquePointer)
@@ -30,7 +30,7 @@ final class SpeechEngine: @unchecked Sendable {
     private var loadedPath: String?
 
     init() {
-        // whisper.cpp/ggml loggen sonst jede Menge auf stderr.
+        // Suppress verbose whisper.cpp/ggml logging to stderr.
         whisper_log_set({ _, _, _ in }, nil)
         parakeet_log_set({ _, _, _ in }, nil)
     }
@@ -69,8 +69,8 @@ final class SpeechEngine: @unchecked Sendable {
         }
     }
 
-    /// Muss vor Prozessende aufgerufen werden: ggml-metal bricht sonst in seinen
-    /// atexit-Destruktoren ab, wenn noch ein Kontext Metal-Ressourcen hält.
+    /// Call before process exit: ggml-metal can abort in its atexit destructors
+    /// if a context still holds Metal resources.
     func shutdown() {
         queue.sync { self.free() }
     }
@@ -80,8 +80,8 @@ final class SpeechEngine: @unchecked Sendable {
     }
 
     /// - Parameters:
-    ///   - language: ISO-Code ("de", "en", …) oder "auto". Parakeet erkennt die Sprache immer selbst.
-    ///   - prompt: Optionales Vokabular (nur Whisper), verbessert die Schreibweise von Namen.
+    ///   - language: ISO code ("de", "en", etc.) or "auto". Parakeet always detects the language itself.
+    ///   - prompt: Optional vocabulary (Whisper only), improving the spelling of names.
     func transcribe(_ samples: [Float], language: String, prompt: String?) async throws -> String {
         try await run {
             switch self.context {
@@ -147,7 +147,7 @@ final class SpeechEngine: @unchecked Sendable {
         return parts.joined(separator: " ")
     }
 
-    // MARK: - Hilfen
+    // MARK: - Helpers
 
     private func free() {
         switch context {

@@ -6,11 +6,11 @@ xcuserdata/
 *.xcodeproj
 Package.resolved
 /macos/Vendor/
-# künftige Desktop-App (Tauri)
+# Future desktop app (Tauri)
 /desktop/target/
 /desktop/node_modules/
 
-# Lokale Konfiguration und Signiermaterial
+# Local configuration and signing material
 /.local/
 /.agents/
 /.aws/

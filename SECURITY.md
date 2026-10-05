@@ -36,11 +36,3 @@ independently of the update bot. A checksum proves agreement with a file, not ab
 These are automated tests and maintainer checks, not an independent security audit. No paid audit
 is planned at this stage. Manual tests for microphone access, Accessibility permissions, hotkeys,
 dictation, and a complete GUI update on a physical Mac remain part of release verification.
-
-## Deutsch
-
-Bitte melde Sicherheitslücken [vertraulich über GitHub](https://github.com/juferdinand/WhisperFree/security/advisories/new).
-Nenne Version, Schritte zum Nachstellen und mögliche Auswirkungen. Veröffentliche keine Schlüssel,
-Zugangsdaten, Aufnahmen oder Exploit-Details in einem öffentlichen Issue vor der koordinierten Behebung.
-Sicherheitskorrekturen erfolgen für die neueste Version. Es gibt aktuell kein bezahltes Bug-Bounty-Programm,
-keine garantierte Reaktionszeit und kein unabhängiges Sicherheitsaudit.

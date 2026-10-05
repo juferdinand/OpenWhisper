@@ -1,6 +1,6 @@
 APP := build/WhisperFree.app
 CLT_DEV := /Library/Developer/CommandLineTools/Library/Developer
-# Nur mit den Command Line Tools (ohne Xcode) muss swift-testing explizit verlinkt werden.
+# Command Line Tools-only installations need explicit swift-testing linker paths.
 ifeq ($(shell xcode-select -p 2>/dev/null),/Library/Developer/CommandLineTools)
 TEST_FLAGS := -Xswiftc -F -Xswiftc $(CLT_DEV)/Frameworks \
 	-Xlinker -F -Xlinker $(CLT_DEV)/Frameworks \
@@ -8,7 +8,7 @@ TEST_FLAGS := -Xswiftc -F -Xswiftc $(CLT_DEV)/Frameworks \
 	-Xlinker -rpath -Xlinker $(CLT_DEV)/usr/lib
 endif
 
-# UNIVERSAL=1 baut für Apple Silicon + Intel (braucht Xcode), UPDATE_REPO=owner/repo aktiviert den Updater.
+# UNIVERSAL=1 builds for Apple Silicon and Intel; UPDATE_REPO=owner/repo enables updates.
 BUILD_ENV := UNIVERSAL="$(UNIVERSAL)" UPDATE_REPO="$(UPDATE_REPO)"
 
 .PHONY: app run install test zip dmg release clean
@@ -26,7 +26,7 @@ install: app
 
 test:
 	scripts/fetch-whisper.sh
-	# Die Integrationstests starten Systemprozesse und prüfen Code-Signaturen synchron.
+	# Integration tests launch system processes and check code signatures synchronously.
 	swift test --no-parallel $(TEST_FLAGS)
 
 zip: app
@@ -36,7 +36,7 @@ zip: app
 dmg: app
 	bash scripts/build-dmg.sh
 
-# Lokal: make release UPDATE_REPO=user/WhisperFree – normalerweise erledigt das .github/workflows/release.yml
+# Local: make release UPDATE_REPO=user/WhisperFree; normally handled by .github/workflows/release.yml
 release: zip dmg
 
 clean:

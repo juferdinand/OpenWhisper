@@ -1,7 +1,5 @@
 # WhisperFree
 
-**English** | [Deutsch](README.de.md)
-
 **Press. Speak. Keep writing. Local dictation for macOS.**
 
 [![CI](https://github.com/juferdinand/WhisperFree/actions/workflows/ci.yml/badge.svg)](https://github.com/juferdinand/WhisperFree/actions/workflows/ci.yml)
@@ -12,7 +10,7 @@ WhisperFree is a native menu bar app that turns speech into text locally on your
 Press <kbd>⌥</kbd> + <kbd>Space</kbd>, speak, then press the shortcut again:
 your text is pasted into the active text field. No account, API key, or subscription.
 
-> **App language:** The interface is currently in German. This README is available in English and German.
+> **App language:** The interface is in English. Dictation supports multiple languages.
 
 [Installation](#installation) · [Features](#features) · [Privacy](#privacy) ·
 [Contributing](#contributing) · [Report an issue](https://github.com/juferdinand/WhisperFree/issues)
@@ -25,7 +23,7 @@ WhisperFree is in early development. Download the packaged macOS app from
 | Platform | Status |
 | --- | --- |
 | macOS 14+ | Native Swift app; universal package for Apple Silicon and Intel |
-| Linux and Windows | Planned, not implemented yet — see the [platform plan](docs/PLATFORMS.md) (German) |
+| Linux and Windows | Planned, not implemented yet — see the [platform plan](docs/PLATFORMS.md) |
 
 ## Features
 
@@ -92,12 +90,10 @@ Alternatively, `make mac-install` builds the app, replaces an existing installat
 
 ## Your first dictation
 
-The app currently uses German labels; English translations are included below.
-
 1. Open WhisperFree. You can also access setup through the menu bar icon.
-2. Download and select a model in **Einstellungen → Modelle** (Settings → Models).
+2. Download and select a model in **Settings → Models**.
 3. Grant **Microphone** access.
-4. Grant **Accessibility** access to paste text automatically. For manual pasting, select **Nur in die Zwischenablage kopieren** (Copy to clipboard only).
+4. Grant **Accessibility** access to paste text automatically. For manual pasting, select **Copy to clipboard only**.
 5. Place your cursor in a text field. Press <kbd>⌥</kbd> + <kbd>Space</kbd>, speak, then press the shortcut again.
 
 Transcription starts once recording stops. You can change the trigger, recording mode, language,
@@ -125,9 +121,9 @@ recordings or transcripts for recognition and has no telemetry integration.
 | --- | --- |
 | Audio | The app processes samples in memory and does not write audio files. |
 | Models | Downloaded on request from Hugging Face, including its download infrastructure; stored in `~/Library/Application Support/WhisperFree/Models`. |
-| Settings and history | Local User Defaults. By default, history stores the last 20 text dictations; disable or clear it under **Verlauf** (History). |
+| Settings and history | Local User Defaults. By default, history stores the last 20 text dictations; disable or clear it under **History**. |
 | Snippets | Stored locally in `~/Library/Application Support/WhisperFree/snippets.json`. |
-| Text editor output | Writes text files to `~/Library/Application Support/WhisperFree/Diktate`; these persist independently of history. |
+| Text editor output | Writes text files to `~/Library/Application Support/WhisperFree/Transcripts`; existing installations keep their previous `Diktate` folder. These files persist independently of history. |
 | Updates | Only when an update repository is configured: optional automatic checks through the GitHub API, with an update downloaded after you click to install it. |
 
 Output text goes to the clipboard and, depending on your settings, to the app you choose.
@@ -138,11 +134,11 @@ That app's storage and synchronization follow its own settings.
 | Problem | What to check |
 | --- | --- |
 | Text is not pasted | Grant Accessibility access to WhisperFree and focus a text field. Alternatively, use clipboard mode and paste manually with `⌘V`. |
-| “Kein Mikrofonzugriff” (no microphone access) or “Nichts gehört” (nothing heard) | Check microphone permission, the default input device, and the input level in macOS. |
+| “No microphone access” or “No audio detected” | Check microphone permission, the default input device, and the input level in macOS. |
 | The shortcut does not respond | Try another shortcut and check for conflicts with system or app shortcuts. Fn, individual modifiers, and mouse buttons require Accessibility access. |
 | Short phrases are recognized in the wrong language | Set the language explicitly when using Whisper. Parakeet always detects the language automatically. |
 | Permissions stop working after a local rebuild | A changing ad-hoc signature can require permissions to be granted again; a persistent local development certificate helps. See [Development](#development). |
-| “Updates sind in diesem Build nicht konfiguriert” (updates are not configured in this build) | This is expected for normal source builds. Update the source code and build the app again. |
+| “Updates are not configured in this build” | This is expected for normal source builds. Update the source code and build the app again. |
 
 Still stuck? [Open an issue](https://github.com/juferdinand/WhisperFree/issues/new) with your macOS
 version, Mac chip, WhisperFree version, selected model, and steps to reproduce the problem.
@@ -157,7 +153,7 @@ between target apps.
 
 Next steps include further testing of the macOS app and Apple Developer ID signing with notarization.
 Ideas and platform plans are described in [SPEC.md](SPEC.md) and
-[docs/PLATFORMS.md](docs/PLATFORMS.md), both in German.
+[docs/PLATFORMS.md](docs/PLATFORMS.md).
 These are plans, not promised release dates.
 
 ## Development
@@ -169,7 +165,7 @@ make -C macos app UNIVERSAL=1   # Build a universal bundle for Apple Silicon and
 ```
 
 The [CI workflow](https://github.com/juferdinand/WhisperFree/actions/workflows/ci.yml) runs tests,
-builds a universal ZIP, and retains it as a downloadable Actions artifact for 14 days.
+builds universal DMG and ZIP packages, verifies the DMG, and retains both as downloadable Actions artifacts for 14 days.
 These development builds use ad-hoc signing and do not enable the in-app updater.
 For normal installation, use the signed packages on [Releases](https://github.com/juferdinand/WhisperFree/releases/latest).
 Tests use shared cases from
@@ -216,8 +212,8 @@ so the signing identity must be preserved across releases.
 
 ## Contributing
 
-Bug reports, documentation improvements, and pull requests are welcome in English or German.
-See [CONTRIBUTING.md](CONTRIBUTING.md) (currently in German) for contribution guidelines.
+Bug reports, documentation improvements, and pull requests are welcome. Please use English.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 Reproducible reports covering different Macs, target apps, and languages are especially helpful.
 For vulnerabilities, use [private security reporting](SECURITY.md) instead of public issues.
 

@@ -6,14 +6,14 @@ enum RecorderError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .noInputDevice: "Kein Mikrofon gefunden"
-        case .converterUnavailable: "Audioformat wird nicht unterstützt"
+        case .noInputDevice: "No microphone found"
+        case .converterUnavailable: "Unsupported audio format"
         }
     }
 }
 
-/// Nimmt vom Standard-Mikrofon auf und hält das Audio als 16 kHz Mono Float32 im Speicher –
-/// genau das Format, das whisper.cpp erwartet. Es wird nie eine Datei geschrieben.
+/// Records the default microphone and keeps audio in memory as 16 kHz mono Float32,
+/// the format expected by whisper.cpp. Never writes an audio file.
 final class AudioRecorder: @unchecked Sendable {
     static let sampleRate: Double = 16_000
 
@@ -25,7 +25,7 @@ final class AudioRecorder: @unchecked Sendable {
     private var samples: [Float] = []
     private let lock = NSLock()
 
-    /// Wird vom Audio-Thread mit dem RMS-Pegel jedes Puffers aufgerufen.
+    /// Called from the audio thread with each buffer's RMS level.
     var onLevel: ((Float) -> Void)?
 
     func start() throws {
@@ -50,7 +50,7 @@ final class AudioRecorder: @unchecked Sendable {
         try engine.start()
     }
 
-    /// Stoppt die Aufnahme und gibt alle gesammelten Samples zurück.
+    /// Stops recording and returns all collected samples.
     func stop() -> [Float] {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()

@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import WhisperFreeCore
 
-/// Chip und Arbeitsspeicher – für die Modell-Empfehlung.
+/// Chip and memory information for model recommendations.
 struct MacHardware {
     let chip: String
     let memoryGB: Int
@@ -29,11 +29,11 @@ struct MacHardware {
     var summary: String { "\(chip) · \(memoryGB) GB" }
 }
 
-/// Verwaltet die lokal gespeicherten Modelle. Der einzige Netzwerkzugriff dafür ist der
-/// einmalige, explizit vom Nutzer gestartete Download von Hugging Face.
+/// Manages locally stored models. The only network access here is the
+/// one-time download from Hugging Face explicitly requested by the user.
 @MainActor
 final class ModelManager: ObservableObject {
-    /// Gemeinsamer Katalog aus shared/models.json (wird von build-app.sh ins Bundle kopiert).
+    /// Shared catalog from shared/models.json (copied into the bundle by build-app.sh).
     static let catalogData: ModelCatalog? = {
         guard let url = Bundle.main.url(forResource: "models", withExtension: "json") else { return nil }
         return try? ModelCatalog.load(from: url)
@@ -46,7 +46,7 @@ final class ModelManager: ObservableObject {
         let reason: String
     }
 
-    /// Zwei Vorschläge passend zu Hardware und Systemsprache; der erste ist der Standard.
+    /// Two recommendations for the hardware and system language; the first is the default.
     static var recommendations: [Recommendation] {
         guard let catalogData else { return [] }
         let hw = MacHardware.current
@@ -54,8 +54,8 @@ final class ModelManager: ObservableObject {
         let language = Locale.preferredLanguages.first.map { String($0.prefix(2)) } ?? "en"
         return catalogData.recommendations(for: tier, language: language).map { model in
             Recommendation(model: model, reason: model.family == .parakeet
-                ? "Beste Wahl für Deutsch & europäische Sprachen"
-                : "Alle ~99 Sprachen + Vokabular-Prompt")
+                ? "Recommended for German & European languages"
+                : "All ~99 languages + vocabulary prompt")
         }
     }
 
@@ -83,7 +83,7 @@ final class ModelManager: ObservableObject {
         refresh()
     }
 
-    /// Alle Modelle im Ordner – auch selbst importierte, die nicht im Katalog stehen.
+    /// All models in the folder, including imported models not in the catalog.
     var allModels: [SpeechModel] {
         Self.catalog + importedModels
     }
@@ -93,7 +93,7 @@ final class ModelManager: ObservableObject {
             .filter { id in !Self.catalog.contains { $0.id == id } }
             .sorted()
             .map { SpeechModel(id: $0, title: $0, family: ModelFamily.detect(fileName: $0), file: "\($0).bin",
-                               repository: "", size: "", note: "Importiert") }
+                               repository: "", size: "", note: "Imported") }
     }
 
     var selectedModel: SpeechModel? {
@@ -117,7 +117,7 @@ final class ModelManager: ObservableObject {
         installed = Set(files.filter { $0.hasSuffix(".bin") }.map { file in
             Self.catalog.first { $0.file == file }?.id ?? String(file.dropLast(4))
         })
-        // Falls das gewählte Modell fehlt, auf ein vorhandenes ausweichen.
+        // If the selected model is missing, fall back to an installed model.
         if !installed.contains(selectedID), let fallback = allModels.first(where: { installed.contains($0.id) }) {
             selectedID = fallback.id
         }
@@ -130,12 +130,12 @@ final class ModelManager: ObservableObject {
         lastError = nil
         let destination = url(forID: model.id)
         let task = URLSession.shared.downloadTask(with: downloadURL) { [weak self] tempURL, response, error in
-            // Die temporäre Datei muss noch in diesem Callback verschoben werden.
+            // Move the temporary file before returning from this callback.
             var failure: String?
             if let error {
                 if (error as? URLError)?.code != .cancelled { failure = error.localizedDescription }
             } else if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-                failure = "Server antwortete mit HTTP \(http.statusCode)"
+                failure = "Server returned HTTP \(http.statusCode)"
             } else if let tempURL {
                 do {
                     try? FileManager.default.removeItem(at: destination)
@@ -168,7 +168,7 @@ final class ModelManager: ObservableObject {
 
     func importModel() {
         let panel = NSOpenPanel()
-        panel.title = "ggml-Whisper-Modell auswählen"
+        panel.title = "Choose a ggml speech model"
         panel.allowedContentTypes = [.data]
         panel.allowsMultipleSelection = false
         NSApp.activate(ignoringOtherApps: true)
@@ -194,7 +194,7 @@ final class ModelManager: ObservableObject {
         observations[model.id] = nil
         progress[model.id] = nil
         if let error {
-            lastError = "Download von \(model.title) fehlgeschlagen: \(error)"
+            lastError = "Failed to download \(model.title): \(error)"
         }
         refresh()
         if error == nil, installed.contains(model.id), !installed.contains(selectedID) || installed.count == 1 {

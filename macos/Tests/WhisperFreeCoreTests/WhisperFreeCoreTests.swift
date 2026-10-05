@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import WhisperFreeCore
 
-/// Die Testfälle liegen plattformübergreifend in shared/ – jede Implementierung muss sie bestehen.
+/// Cross-platform test cases live in shared/; every implementation must pass them.
 private let sharedDirectory = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()  // WhisperFreeCoreTests
     .deletingLastPathComponent()  // Tests
     .deletingLastPathComponent()  // macos
-    .deletingLastPathComponent()  // Repo-Wurzel
+    .deletingLastPathComponent()  // Repository root
     .appendingPathComponent("shared")
 
 private struct Vectors: Decodable {

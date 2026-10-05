@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Baut build/WhisperFree.app (Release) – nur mit den Xcode Command Line Tools, ohne Xcode.
+# Builds build/WhisperFree.app (release) using Xcode Command Line Tools; full Xcode is optional.
 #
-#   SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh   # Release mit Developer ID (+ Hardened Runtime)
-#   scripts/build-app.sh   # nutzt "WhisperFree Dev" (scripts/create-dev-cert.sh), sonst Ad-hoc
+#   SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh   # Release with Developer ID (+ Hardened Runtime)
+#   scripts/build-app.sh   # uses "WhisperFree Dev" (scripts/create-dev-cert.sh), otherwise ad-hoc signing
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -12,17 +12,17 @@ APP="build/${APP_NAME}.app"
 if [[ -n "${SIGN_IDENTITY:-}" ]]; then
   IDENTITY="$SIGN_IDENTITY"
 elif DEV_HASH="$(security find-identity -p codesigning 2>/dev/null | awk '/"WhisperFree Dev"/ {print $2; exit}')" && [[ -n "$DEV_HASH" ]]; then
-  # Feste lokale Identität: Bedienungshilfen-Berechtigung überlebt Rebuilds.
+  # Persistent local identity: Accessibility permission survives rebuilds.
   IDENTITY="$DEV_HASH"
 else
   IDENTITY="-"
-  echo "Hinweis: Ad-hoc-Signatur – nach jedem Rebuild Bedienungshilfen neu erteilen (oder scripts/create-dev-cert.sh ausführen)."
+  echo "Note: ad-hoc signing may require granting Accessibility access again after a rebuild (or run scripts/create-dev-cert.sh)."
 fi
 
 scripts/fetch-whisper.sh
 
 if [[ "${UNIVERSAL:-}" == "1" ]]; then
-  # Beide Architekturen einzeln bauen und zusammenfügen – funktioniert auch ohne Xcode.
+  # Build each architecture separately, then combine them; works without full Xcode.
   BINARIES=()
   for ARCH in arm64 x86_64; do
     echo "→ swift build (release, $ARCH)"

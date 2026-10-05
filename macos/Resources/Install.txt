@@ -1,20 +1,3 @@
-WhisperFree installieren
-=======================
-
-1. Ziehe WhisperFree.app auf den Programme-Ordner (Applications) in diesem Fenster.
-2. Wirf das WhisperFree-Laufwerk im Finder aus.
-3. Starte WhisperFree aus dem Programme-Ordner.
-
-Die App erscheint in der Menüleiste. Lade dort ein Sprachmodell und erlaube beim
-Einrichten den Mikrofonzugriff. Für automatisches Einfügen benötigt sie zusätzlich
-die Berechtigung für Bedienungshilfen.
-
-Die App ist selbst signiert und nicht von Apple notarisiert. Falls macOS den ersten
-Start blockiert, kannst du sie nach Prüfung der Herkunft unter Systemeinstellungen
-→ Datenschutz & Sicherheit → Dennoch öffnen freigeben.
-
-Anleitung: https://github.com/juferdinand/WhisperFree/blob/main/README.de.md
-
 Install WhisperFree
 ===================
 

@@ -38,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state.preloadModel()
         UpdateService.shared.startAutomaticChecks()
 
-        // Beim ersten Start (oder solange etwas fehlt) die Einrichtung zeigen.
+        // Show setup on first launch or while required configuration is missing.
         let defaults = UserDefaults.standard
         if !defaults.bool(forKey: Prefs.setupShown) || !state.models.hasAnyModel {
             defaults.set(true, forKey: Prefs.setupShown)
@@ -63,7 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if Self.mode == .hold { state.stop() }
         }
         hotkeys.onInterrupt = {
-            // Modifier wurde für eine normale Tastenkombination benutzt (z. B. ⌥E) – kein Diktat.
+            // Modifier used for a regular shortcut (e.g. ⌥E); do not dictate.
             state.cancel()
         }
         hotkeys.start()

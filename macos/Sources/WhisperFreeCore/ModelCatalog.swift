@@ -1,9 +1,9 @@
 import Foundation
 
 public enum ModelFamily: String, Codable, Sendable {
-    /// OpenAI Whisper: ~99 Sprachen, Sprache wählbar, Vokabular per Prompt.
+    /// OpenAI Whisper: ~99 languages, language selection, vocabulary prompt.
     case whisper
-    /// NVIDIA Parakeet TDT v3: 25 europäische Sprachen, erkennt die Sprache selbst, sehr schnell.
+    /// NVIDIA Parakeet TDT v3: 25 European languages, automatic language detection, very fast.
     case parakeet
 
     public static func detect(fileName: String) -> ModelFamily {
@@ -42,7 +42,7 @@ public struct SpeechModel: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
-/// Gemeinsamer Katalog aus shared/models.json – dieselbe Datei nutzen alle Plattformen.
+/// Shared catalog from shared/models.json; all platforms use the same file.
 public struct ModelCatalog: Decodable, Sendable {
     public enum HardwareTier: String, Decodable, Sendable {
         case strong, weak, cpuOnly
@@ -65,7 +65,7 @@ public struct ModelCatalog: Decodable, Sendable {
         models.first { $0.id == id }
     }
 
-    /// Zwei Vorschläge (Parakeet + Whisper) für die Hardware – der erste passt zur Sprache besser.
+    /// Two hardware recommendations (Parakeet + Whisper), ordered by language suitability.
     public func recommendations(for tier: HardwareTier, language: String) -> [SpeechModel] {
         guard let pick = recommendations[tier.rawValue],
               let parakeet = model(id: pick.parakeet),
@@ -81,7 +81,7 @@ public struct ModelCatalog: Decodable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         models = try container.decode([SpeechModel].self, forKey: .models)
         parakeetLanguages = try container.decode([String].self, forKey: .parakeetLanguages)
-        // "$comment"-Einträge überspringen.
+        // Skip "$comment" entries.
         let raw = try container.decode([String: FailableDecodable<Pick>].self, forKey: .recommendations)
         recommendations = raw.compactMapValues(\.value)
     }

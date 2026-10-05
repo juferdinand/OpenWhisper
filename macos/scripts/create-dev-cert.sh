@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Legt ein lokales, selbstsigniertes Code-Signing-Zertifikat "WhisperFree Dev" im Login-Schlüsselbund an.
+# Creates a local self-signed code-signing certificate, "WhisperFree Dev", in the login keychain.
 #
-# Warum: Ad-hoc-signierte Builds haben bei jedem Rebuild einen neuen Hash – macOS verwirft dann die
-# Bedienungshilfen-Berechtigung. Mit einer festen Signatur-Identität bleibt sie über Rebuilds erhalten.
-# build-app.sh verwendet das Zertifikat automatisch, sobald es existiert.
+# Ad-hoc builds get a new hash on rebuild, which can cause macOS to discard
+# Accessibility permission. A persistent signing identity preserves it across rebuilds.
+# build-app.sh automatically uses the certificate when available.
 #
-# Entfernen: Schlüsselbundverwaltung → "WhisperFree Dev" löschen.
+# To remove: delete "WhisperFree Dev" in Keychain Access.
 set -euo pipefail
 
 NAME="WhisperFree Dev"
 KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 
 if security find-certificate -c "$NAME" "$KEYCHAIN" >/dev/null 2>&1; then
-  echo "✓ Zertifikat \"$NAME\" existiert bereits"
+  echo "✓ Certificate \"$NAME\" already exists"
   exit 0
 fi
 
@@ -34,11 +34,11 @@ EOF
 
 openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
   -keyout "$TMP/key.pem" -out "$TMP/cert.pem" -config "$TMP/cert.cnf" >/dev/null 2>&1
-# -legacy: macOS' security-Tool versteht die neueren PKCS12-Verschlüsselungen von OpenSSL 3 nicht.
+# -legacy: macOS security does not support newer OpenSSL 3 PKCS#12 encryption.
 LEGACY=""
 openssl pkcs12 -help 2>&1 | grep -q -- "-legacy" && LEGACY="-legacy"
 openssl pkcs12 -export $LEGACY -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
   -name "$NAME" -out "$TMP/cert.p12" -passout pass:whisperfree
 
 security import "$TMP/cert.p12" -k "$KEYCHAIN" -P whisperfree -T /usr/bin/codesign >/dev/null
-echo "✓ Zertifikat \"$NAME\" angelegt"
+echo "✓ Created certificate \"$NAME\""

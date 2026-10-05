@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Erstellt ein komprimiertes Installations-Image mit App und Programme-Verknüpfung.
+# Creates a compressed installation image with the app and an Applications shortcut.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 APP="build/WhisperFree.app"
 DMG="build/WhisperFree-macOS.dmg"
-[[ -d "$APP" ]] || { echo "Zuerst die App bauen" >&2; exit 1; }
+[[ -d "$APP" ]] || { echo "Build the app first" >&2; exit 1; }
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

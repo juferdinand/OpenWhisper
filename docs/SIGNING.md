@@ -88,7 +88,7 @@ When the project chooses to fund an Apple Developer Program membership:
 3. Plan the updater transition. The current self-signed app's signature requirement will reject
    a binary signed with a different identity. Use a compatible migration release or document
    the need for a manual installation; do not just overwrite the signing secrets.
-4. Update both READMEs, release notes, and this document to describe the new signing status.
+4. Update the README, release notes, and this document to describe the new signing status.
 
 Apple documents [membership fees](https://developer.apple.com/programs/enroll/) and
 [Developer ID certificates](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/).

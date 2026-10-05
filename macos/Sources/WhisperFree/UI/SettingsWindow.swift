@@ -8,12 +8,12 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .setup: "Einrichtung"
-        case .general: "Allgemein"
-        case .models: "Modelle"
+        case .setup: "Setup"
+        case .general: "General"
+        case .models: "Models"
         case .snippets: "Snippets"
-        case .history: "Verlauf"
-        case .about: "Über"
+        case .history: "History"
+        case .about: "About"
         }
     }
 
@@ -34,8 +34,8 @@ final class SettingsRouter: ObservableObject {
     @Published var tab: SettingsTab = .general
 }
 
-/// Eigenes Fenster statt SwiftUI-`Settings`-Scene, weil eine reine Menüleisten-App
-/// (LSUIElement) die Settings-Scene nicht zuverlässig nach vorne holt.
+/// Use a dedicated window because a menu bar-only app (LSUIElement) cannot reliably
+/// bring a SwiftUI Settings scene to the front.
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
@@ -63,7 +63,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             if !window.setFrameUsingName("WhisperFreeSettings") { window.center() }
             self.window = window
         }
-        // Für die Dauer des Fensters als normale App mit Dock-Icon auftreten, damit es Fokus bekommt.
+        // Temporarily show a Dock icon so the settings window can receive focus.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)

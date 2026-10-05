@@ -7,9 +7,9 @@ or subscription. The project is open source under the MIT License.
 ## Documentation and language
 
 - Keep `AGENTS.md` and `CLAUDE.md` in English and synchronized.
-- The app interface, source comments, and other existing project documentation are primarily German.
-- `README.md` is the English entry point; `README.de.md` is the German version.
-  Keep their content aligned and link them to each other.
+- Keep the app interface, source comments, logs, scripts, workflows, and project documentation in English.
+- `README.md` is the single documentation entry point.
+- Preserve multilingual speech-processing patterns and test inputs; use English test names and comments.
 
 ## Project structure
 
@@ -98,7 +98,7 @@ for key continuity and a future Developer ID migration; changing identities requ
 - Do not rotate the release signing identity casually or commit signing material.
   Local signing backups belong under the ignored `.local/` directory.
 - Release publication must follow successful tests, packaging, and signature verification.
-  Preserve both README languages when changing installation or release instructions.
+  Keep the README and release instructions aligned with the app.
 - CI repeats weekly. See `SECURITY.md` for the security policy.
 - Renovate tracks Actions and whisper.cpp versions; keep SHA pins and auto-merge disabled.
   A whisper.cpp update also needs a reviewed SHA-256 change; never bypass checksum verification.

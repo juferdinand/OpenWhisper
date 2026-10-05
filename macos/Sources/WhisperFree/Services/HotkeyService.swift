@@ -5,10 +5,10 @@ import SwiftUI
 
 let hotkeyLog = Logger(subsystem: "io.github.whisperfree", category: "hotkey")
 
-// MARK: - Auslöser
+// MARK: - Triggers
 
-/// Was das Diktat auslöst: eine Tastenkombination, eine einzelne Modifier-Taste (Fn, rechte ⌥ …)
-/// oder eine Maustaste (Mitte, Seitentasten …).
+/// What triggers dictation: a keyboard shortcut, individual modifier key (Fn, right ⌥, etc.),
+/// or a mouse button (middle, side buttons, etc.).
 enum Trigger: Codable, Equatable {
     case keys(keyCode: Int64, modifiers: UInt64, name: String)
     case modifier(keyCode: Int64)
@@ -29,18 +29,18 @@ enum Trigger: Codable, Equatable {
             if flags.contains(.maskCommand) { s += "⌘" }
             return s + name
         case .modifier(let keyCode):
-            return ModifierKey(keyCode: keyCode)?.title ?? "Taste \(keyCode)"
+            return ModifierKey(keyCode: keyCode)?.title ?? "Key \(keyCode)"
         case .mouse(let button):
             switch button {
-            case 2: return "Maustaste 3 (Mitte)"
-            case 3: return "Maustaste 4 (Zurück)"
-            case 4: return "Maustaste 5 (Vor)"
-            default: return "Maustaste \(button + 1)"
+            case 2: return "Mouse button 3 (Middle)"
+            case 3: return "Mouse button 4 (Back)"
+            case 4: return "Mouse button 5 (Forward)"
+            default: return "Mouse button \(button + 1)"
             }
         }
     }
 
-    /// Carbon-Fallback ohne Bedienungshilfen (nur Tastenkombinationen).
+    /// Carbon fallback without Accessibility access (keyboard shortcuts only).
     var carbon: (keyCode: UInt32, modifiers: UInt32)? {
         guard case .keys(let keyCode, let modifiers, _) = self else { return nil }
         let flags = CGEventFlags(rawValue: modifiers)
@@ -53,7 +53,7 @@ enum Trigger: Codable, Equatable {
     }
 }
 
-/// Einzelne Modifier-Tasten mit seitengenauen Gerätemasken (links/rechts unterscheidbar).
+/// Individual modifier keys with device masks that distinguish left and right.
 struct ModifierKey {
     let keyCode: Int64
     let title: String
@@ -62,14 +62,14 @@ struct ModifierKey {
     init?(keyCode: Int64) {
         let table: [Int: (String, UInt64)] = [
             kVK_Function: ("Fn / 🌐", CGEventFlags.maskSecondaryFn.rawValue),
-            kVK_RightOption: ("Rechte ⌥ Wahltaste", 0x40),
-            kVK_Option: ("Linke ⌥ Wahltaste", 0x20),
-            kVK_RightCommand: ("Rechte ⌘ Befehlstaste", 0x10),
-            kVK_Command: ("Linke ⌘ Befehlstaste", 0x08),
-            kVK_RightControl: ("Rechte ⌃ Control", 0x2000),
-            kVK_Control: ("Linke ⌃ Control", 0x01),
-            kVK_RightShift: ("Rechte ⇧ Umschalt", 0x04),
-            kVK_Shift: ("Linke ⇧ Umschalt", 0x02),
+            kVK_RightOption: ("Right ⌥ Option", 0x40),
+            kVK_Option: ("Left ⌥ Option", 0x20),
+            kVK_RightCommand: ("Right ⌘ Command", 0x10),
+            kVK_Command: ("Left ⌘ Command", 0x08),
+            kVK_RightControl: ("Right ⌃ Control", 0x2000),
+            kVK_Control: ("Left ⌃ Control", 0x01),
+            kVK_RightShift: ("Right ⇧ Shift", 0x04),
+            kVK_Shift: ("Left ⇧ Shift", 0x02),
         ]
         guard let (title, mask) = table[Int(keyCode)] else { return nil }
         self.keyCode = keyCode
@@ -94,7 +94,7 @@ enum KeyNames {
     static let functionKeys = [kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10,
                                kVK_F11, kVK_F12, kVK_F13, kVK_F14, kVK_F15, kVK_F16, kVK_F17, kVK_F18, kVK_F19, kVK_F20]
 
-    /// Name der Taste im aktuellen Layout ohne Modifier (⌥L zeigt "L", nicht "@").
+    /// Key name in the current layout without modifiers (⌥L shows "L", not "@" on a German layout).
     static func name(for keyCode: Int64) -> String {
         if let special = special[Int(keyCode)] { return special }
         guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
@@ -115,9 +115,9 @@ enum KeyNames {
 
 // MARK: - Service
 
-/// Systemweite Auslöser über einen CGEvent-Tap (braucht Bedienungshilfen). Der Tap fängt auch das
-/// Aufnehmen eines neuen Kürzels ab – unabhängig davon, welches Fenster gerade den Fokus hat.
-/// Ohne Berechtigung bleibt für Tastenkombinationen ein Carbon-Hotkey als Fallback.
+/// System-wide triggers through a CGEvent tap (requires Accessibility access). The tap also
+/// captures new shortcuts regardless of which window currently has focus.
+/// Without permission, keyboard combinations use a Carbon hotkey fallback.
 @MainActor
 final class HotkeyService: ObservableObject {
     static let shared = HotkeyService()
@@ -129,7 +129,7 @@ final class HotkeyService: ObservableObject {
 
     var onPress: (() -> Void)?
     var onRelease: (() -> Void)?
-    /// Eine andere Taste wurde gedrückt, während die Modifier-Taste gehalten wurde (z. B. ⌥E für €).
+    /// Another key was pressed while holding the modifier (e.g. ⌥E for € on a German layout).
     var onInterrupt: (() -> Void)?
 
     private let storageKey = "trigger"
@@ -140,7 +140,7 @@ final class HotkeyService: ObservableObject {
     private var carbonRef: EventHotKeyRef?
     private var carbonHandlerInstalled = false
 
-    // Laufzeitzustand des Tap-Handlers
+    // Runtime state of the tap handler
     fileprivate var triggerHeld = false
     fileprivate var pendingModifier: Int64?
 
@@ -161,12 +161,12 @@ final class HotkeyService: ObservableObject {
         trigger = newValue
         triggerHeld = false
         UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: storageKey)
-        hotkeyLog.info("Auslöser gesetzt: \(newValue?.display ?? "keiner", privacy: .public)")
+        hotkeyLog.info("Trigger set: \(newValue?.display ?? "none", privacy: .public)")
         updateFallbacks()
         if case .modifier = newValue, !tapActive { Permissions.promptAccessibility() }
     }
 
-    // MARK: Aufnehmen
+    // MARK: Capture
 
     func beginRecording() {
         guard !isRecording else { return }
@@ -175,7 +175,7 @@ final class HotkeyService: ObservableObject {
         isRecording = true
         unregisterCarbon()
         if !tapActive { installLocalRecorder() }
-        hotkeyLog.info("Aufnahme des Auslösers gestartet (Tap aktiv: \(self.tapActive))")
+        hotkeyLog.info("Trigger capture started (tap active: \(self.tapActive))")
     }
 
     func endRecording() {
@@ -185,7 +185,7 @@ final class HotkeyService: ObservableObject {
         updateFallbacks()
     }
 
-    /// Gemeinsame Logik für Tap und lokalen Monitor. Gibt true zurück, wenn das Event geschluckt werden soll.
+    /// Shared tap and local monitor logic. Returns true when the event should be consumed.
     fileprivate func record(type: CGEventType, keyCode: Int64, flags: CGEventFlags, button: Int64) -> Bool {
         let modifiers = flags.intersection(Trigger.relevantFlags)
         switch type {
@@ -197,8 +197,8 @@ final class HotkeyService: ObservableObject {
                 set(nil)
                 endRecording()
             } else if modifiers.isEmpty, !KeyNames.functionKeys.contains(Int(keyCode)) {
-                // Eine einzelne Buchstabentaste würde global das Tippen blockieren.
-                recordingHint = "Einzelne Tasten bitte mit ⌘ ⌥ ⌃ oder ⇧ kombinieren (F-Tasten gehen auch allein)."
+                // A single letter key would block typing system-wide.
+                recordingHint = "Combine letter keys with ⌘ ⌥ ⌃ or ⇧. Function keys can be used on their own."
                 NSSound.beep()
             } else {
                 set(.keys(keyCode: keyCode, modifiers: modifiers.rawValue, name: KeyNames.name(for: keyCode)))
@@ -211,7 +211,7 @@ final class HotkeyService: ObservableObject {
             if modifier.isDown(flags) {
                 pendingModifier = keyCode
             } else if pendingModifier == keyCode {
-                // Modifier allein gedrückt und wieder losgelassen → als Einzeltaste übernehmen.
+                // A modifier pressed and released on its own becomes a single-key trigger.
                 set(.modifier(keyCode: keyCode))
                 endRecording()
             }
@@ -232,8 +232,8 @@ final class HotkeyService: ObservableObject {
     private func activate() {
         if createTap() { return }
         updateFallbacks()
-        // Ohne Bedienungshilfen schlägt der Tap fehl – regelmäßig neu versuchen,
-        // damit es nach dem Erteilen der Berechtigung ohne Neustart funktioniert.
+        // Without Accessibility access the tap fails; retry periodically
+        // so granting permission takes effect without restarting.
         retryTimer?.invalidate()
         retryTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
             Task { @MainActor in
@@ -259,7 +259,7 @@ final class HotkeyService: ObservableObject {
             userInfo: nil
         ) else {
             if tapActive || retryTimer == nil {
-                hotkeyLog.notice("Event-Tap nicht verfügbar – Bedienungshilfen fehlen, nutze Carbon-Fallback")
+                hotkeyLog.notice("Event tap unavailable: no Accessibility access; using Carbon fallback")
             }
             tapActive = false
             return false
@@ -273,11 +273,11 @@ final class HotkeyService: ObservableObject {
         unregisterCarbon()
         removeGlobalMouseMonitor()
         if isRecording { removeLocalRecorder() }
-        hotkeyLog.notice("Event-Tap aktiv")
+        hotkeyLog.notice("Event tap active")
         return true
     }
 
-    /// Läuft auf dem Main-Runloop (dort hängt die Tap-Quelle).
+    /// Runs on the main run loop, where the tap source is installed.
     private nonisolated static func handleTap(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         MainActor.assumeIsolated {
             let service = HotkeyService.shared
@@ -324,7 +324,7 @@ final class HotkeyService: ObservableObject {
             case (.mouse(let wanted), .otherMouseDown) where button == wanted:
                 service.triggerHeld = true
                 service.fire(down: true)
-                return nil // schlucken, damit z. B. „Zurück“ im Browser nicht zusätzlich auslöst
+                return nil // consume to avoid also triggering the button's normal action, such as browser Back
 
             case (.mouse(let wanted), .otherMouseUp) where button == wanted:
                 service.triggerHeld = false
@@ -339,11 +339,11 @@ final class HotkeyService: ObservableObject {
     }
 
     private func fire(down: Bool) {
-        hotkeyLog.info("Auslöser \(down ? "gedrückt" : "losgelassen", privacy: .public)")
+        hotkeyLog.info("Trigger \(down ? "pressed" : "released", privacy: .public)")
         DispatchQueue.main.async { down ? self.onPress?() : self.onRelease?() }
     }
 
-    // MARK: Lokaler Recorder (ohne Tap)
+    // MARK: Local recorder (without tap)
 
     private var localMonitor: Any?
 
@@ -357,7 +357,7 @@ final class HotkeyService: ObservableObject {
             case .flagsChanged: .flagsChanged
             default: .otherMouseDown
             }
-            // keyCode darf bei Maus-Events nicht abgefragt werden (wirft eine Exception).
+            // Do not read keyCode for mouse events; it throws an exception.
             let isMouse = event.type == .otherMouseDown
             let swallow = service.record(type: type, keyCode: isMouse ? -1 : Int64(event.keyCode),
                                          flags: cg.flags, button: isMouse ? Int64(event.buttonNumber) : -1)
@@ -370,12 +370,12 @@ final class HotkeyService: ObservableObject {
         localMonitor = nil
     }
 
-    // MARK: Maus-Fallback (ohne Tap)
+    // MARK: Mouse fallback (without tap)
 
     private var globalMouseMonitor: Any?
 
-    /// Globale Monitore für Maus-Events brauchen keine Bedienungshilfen, können das Event aber
-    /// nicht schlucken – die Taste löst also zusätzlich ihre normale Funktion aus.
+    /// Global mouse event monitors do not require Accessibility access, but cannot consume
+    /// events, so the button also performs its normal action.
     private func installGlobalMouseMonitor() {
         guard globalMouseMonitor == nil else { return }
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.otherMouseDown, .otherMouseUp]) { event in
@@ -386,7 +386,7 @@ final class HotkeyService: ObservableObject {
             service.triggerHeld = down
             service.fire(down: down)
         }
-        hotkeyLog.notice("Maus-Fallback aktiv (ohne Bedienungshilfen)")
+        hotkeyLog.notice("Mouse fallback active (without Accessibility access)")
     }
 
     private func removeGlobalMouseMonitor() {
@@ -404,7 +404,7 @@ final class HotkeyService: ObservableObject {
         guard let carbon = trigger?.carbon else { return }
         let id = EventHotKeyID(signature: 0x57465245, id: 1) // "WFRE"
         let status = RegisterEventHotKey(carbon.keyCode, carbon.modifiers, id, GetEventDispatcherTarget(), 0, &carbonRef)
-        hotkeyLog.notice("Carbon-Fallback registriert: \(status == noErr ? "ok" : "Fehler \(status)", privacy: .public)")
+        hotkeyLog.notice("Carbon fallback registered: \(status == noErr ? "ok" : "Error \(status)", privacy: .public)")
     }
 
     private func unregisterCarbon() {
@@ -427,10 +427,10 @@ final class HotkeyService: ObservableObject {
     }
 }
 
-// MARK: - Recorder-UI
+// MARK: - Recorder UI
 
-/// Klick → nächste Taste, Tastenkombination, Fn/Modifier oder Maustaste wird übernommen.
-/// Esc bricht ab, ⌫ entfernt den Auslöser.
+/// Click to capture the next key, shortcut, Fn/modifier, or mouse button.
+/// Esc cancels; ⌫ clears the trigger.
 struct HotkeyRecorder: View {
     @ObservedObject private var service = HotkeyService.shared
 
@@ -440,14 +440,14 @@ struct HotkeyRecorder: View {
                 Button {
                     service.isRecording ? service.endRecording() : service.beginRecording()
                 } label: {
-                    Text(service.isRecording ? "Taste oder Maustaste drücken …" : (service.trigger?.display ?? "Kein Auslöser"))
+                    Text(service.isRecording ? "Press a key or mouse button …" : (service.trigger?.display ?? "No trigger"))
                         .font(.system(size: 12, weight: .medium).monospaced())
                         .frame(minWidth: 170)
                 }
                 .tint(service.isRecording ? .accentColor : nil)
                 .buttonStyle(.bordered)
                 .focusable(false)
-                .help("Klicken, dann Kombination (z. B. ⌥Space), Einzeltaste (Fn, rechte ⌥) oder Maustaste drücken. Esc bricht ab, ⌫ entfernt.")
+                .help("Click, then press a shortcut (e.g. ⌥Space), modifier key (Fn, right ⌥), or mouse button. Esc cancels; ⌫ clears.")
             }
             if let hint = service.recordingHint, service.isRecording {
                 Text(hint).font(.caption).foregroundStyle(.orange)
@@ -456,13 +456,13 @@ struct HotkeyRecorder: View {
                     .font(.caption).foregroundStyle(.orange)
                     .multilineTextAlignment(.trailing)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("Bedienungshilfen erlauben …") {
+                Button("Allow Accessibility access …") {
                     Permissions.promptAccessibility()
                     Permissions.openAccessibilitySettings()
                 }
                 .controlSize(.small)
             } else if case .modifier(let code) = service.trigger, code == Int64(kVK_Function) {
-                Text("Tipp: Tastatur-Einstellungen → „🌐-Taste drücken für“ → „Keine Aktion“.")
+                Text("Tip: Keyboard settings → “Press 🌐 key to” → “Do Nothing”.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -471,9 +471,9 @@ struct HotkeyRecorder: View {
 
     private static func missingPermissionHint(for trigger: Trigger?) -> String {
         switch trigger {
-        case .modifier: "Einzeltasten wie Fn funktionieren erst mit Bedienungshilfen-Berechtigung."
-        case .mouse: "Funktioniert, aber die Maustaste löst zusätzlich ihre normale Aktion aus. Mit Bedienungshilfen wird sie abgefangen."
-        default: "Ohne Bedienungshilfen: kein automatisches Einfügen, keine Einzeltasten/Maustasten-Abfangen."
+        case .modifier: "Single modifier keys such as Fn require Accessibility access."
+        case .mouse: "Works, but the mouse button also performs its normal action. Accessibility access allows the app to capture it."
+        default: "Without Accessibility access: no automatic pasting, individual modifier keys, or mouse button capture."
         }
     }
 }

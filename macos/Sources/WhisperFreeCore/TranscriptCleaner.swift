@@ -1,13 +1,13 @@
 import Foundation
 
 public enum TranscriptCleaner {
-    /// Marker, die Whisper für Nicht-Sprache ausgibt: [BLANK_AUDIO], [Musik], (Applaus), *lacht* …
+    /// Non-speech markers emitted by Whisper: [BLANK_AUDIO], [Music], (Applause), *laughs*, etc.
     private static let nonSpeech = try! NSRegularExpression(
         pattern: "\\[[^\\]]*\\]|\\([^)]*(musik|music|applaus|applause|lacht|laughs|stille|silence|geräusch|noise)[^)]*\\)|\\*[^*]+\\*",
         options: [.caseInsensitive]
     )
 
-    /// Bekannte Halluzinationen aus Untertitel-Trainingsdaten, die bei Stille auftauchen.
+    /// Known subtitle-training hallucinations that can appear during silence.
     private static let hallucinations = try! NSRegularExpression(
         pattern: "(Untertitel(ung)?[^.]*?(ZDF|Amara\\.org|funk)[^.]*\\.?)|(Subtitles by the Amara\\.org community\\.?)",
         options: [.caseInsensitive]
@@ -22,7 +22,7 @@ public enum TranscriptCleaner {
         }
         text = whitespace.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: " ")
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Übrig gebliebene Satzzeichen ohne Inhalt (".", "…") verwerfen.
+        // Discard remaining punctuation without content (".", "…").
         if text.unicodeScalars.allSatisfy({ CharacterSet.punctuationCharacters.contains($0) || CharacterSet.whitespaces.contains($0) }) {
             return ""
         }

@@ -17,15 +17,5 @@ if you choose to allow it. See [Apple's instructions](https://support.apple.com/
 grep '  WhisperFree-macOS[.]dmg$' SHA256SUMS | shasum -a 256 -c -
 ```
 
-The app interface is currently in German. Read the [English README](https://github.com/juferdinand/WhisperFree#readme)
-or [deutsche README](https://github.com/juferdinand/WhisperFree/blob/main/README.de.md) for setup and permissions.
-
-## Installation auf Deutsch
-
-**WhisperFree-macOS.dmg** herunterladen und öffnen. **WhisperFree.app** auf **Applications / Programme** ziehen,
-das WhisperFree-Laufwerk auswerfen und die App aus Programme starten. Ein ZIP ist ebenfalls verfügbar.
-Benötigt macOS 14 oder neuer; Apple Silicon und Intel sind enthalten.
-Die App ist selbstsigniert, aber nicht von Apple notarisiert. Falls macOS den ersten Start blockiert,
-kannst du sie nach Prüfung der Herkunft unter **Systemeinstellungen → Datenschutz & Sicherheit → Dennoch öffnen** freigeben.
-Wir verwenden vorerst die selbstsignierte Variante, damit die ersten Open-Source-Releases ohne
-die jährliche Apple-Developer-Mitgliedschaft auskommen. Eine spätere Apple-Signierung und Notarisierung bleiben möglich.
+The app interface is in English. Read the [README](https://github.com/juferdinand/WhisperFree#readme)
+for setup and permissions. Dictation still supports multiple languages.

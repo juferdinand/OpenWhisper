@@ -1,60 +1,59 @@
-# Zu WhisperFree beitragen
+# Contributing to WhisperFree
 
-Beiträge können Fehlerberichte, Dokumentation, Tests oder Code sein.
-Issues und Pull Requests sind auf Deutsch und Englisch willkommen. Oberfläche, Kommentare und
-Projektdokumentation sind aktuell überwiegend deutsch.
+Contributions can include bug reports, documentation, tests, or code. The app interface,
+source comments, and project documentation are in English. Please use English for issues
+and pull requests so the wider community can participate.
 
-## Fehler melden und Ideen besprechen
+## Reporting bugs and discussing ideas
 
-Prüfe zuerst die [vorhandenen Issues](https://github.com/juferdinand/WhisperFree/issues).
-Ein hilfreicher Fehlerbericht enthält:
+Check the [existing issues](https://github.com/juferdinand/WhisperFree/issues) first.
+A useful bug report includes:
 
-- WhisperFree-Version oder Commit sowie macOS-Version und Mac-Chip.
-- Modell, Sprache, Ausgabemodus und gegebenenfalls die betroffene Ziel-App.
-- Schritte zum Nachstellen, erwartetes Verhalten und tatsächlich beobachtetes Verhalten.
-- Passende Fehlermeldungen ohne private Diktate, Tokens oder andere vertrauliche Daten.
+- WhisperFree version or commit, macOS version, and Mac chip.
+- Model, dictation language, output mode, and affected target app, if applicable.
+- Steps to reproduce, expected behavior, and actual behavior.
+- Relevant error messages without private dictations, tokens, or other confidential data.
 
-Bei größeren Funktionen lohnt sich zuerst ein Issue, um Ziel und Umfang abzustimmen.
-Kleine Korrekturen kannst du direkt als Pull Request einreichen.
+For larger features, open an issue first to agree on the goal and scope.
+Small fixes can be submitted directly as pull requests.
 
-## Lokal arbeiten
+## Working locally
 
-Du brauchst macOS 14+ und eine aktuelle Swift-Toolchain aus Xcode oder den Command Line Tools.
-Installation und erster Start stehen in der [deutschen README](README.de.md#installation)
-oder der [englischen README](README.md#installation).
+You need macOS 14+ and a recent Swift toolchain from Xcode or the Command Line Tools.
+See the [README](README.md#installation) for installation and first launch.
 
-1. Forke das Repository und klone deinen Fork.
-2. Erstelle einen Branch für deine Änderung, etwa `git switch -c fix/clipboard`.
-3. Halte die Änderung auf ein nachvollziehbares Problem begrenzt.
-4. Prüfe relevante Änderungen mit den folgenden Befehlen:
+1. Fork the repository and clone your fork.
+2. Create a branch for your change, such as `git switch -c fix/clipboard`.
+3. Keep the change focused on one clearly defined problem.
+4. Verify relevant changes with:
 
 ```bash
 make test
 make mac
 ```
 
-Für reine Dokumentationsänderungen reichen die Prüfung von Inhalt, Links und Formatierung.
-Halte die deutsche und englische README bei inhaltlichen Änderungen synchron.
-Bei Änderungen an Aufnahme, Berechtigungen, Hotkeys oder Einfügen prüfe das Verhalten zusätzlich
-manuell auf einem Mac; die Core-Tests decken diese Systemintegration nicht ab.
+For documentation-only changes, check content, links, and formatting.
+Changes to recording, permissions, hotkeys, or text insertion also need manual testing
+on a Mac; the core tests do not cover all of this system integration.
 
-## Aufbau und Tests
+## Structure and tests
 
-- `macos/Sources/WhisperFreeCore/` enthält die eigenständig testbare Textverarbeitung und den Modellkatalog.
-- `macos/Sources/WhisperFree/` enthält Oberfläche und macOS-Integration.
-- `shared/models.json` ist die gemeinsame Quelle für Modelle und Empfehlungen.
-- `shared/test-vectors.json` enthält Testfälle für Textbereinigung, Vokabular und Snippets. Ergänze bei behobenen Verarbeitungsfehlern einen passenden Fall.
+- `macos/Sources/WhisperFreeCore/` contains testable text processing, the model catalog, and update validation.
+- `macos/Sources/WhisperFree/` contains the interface and macOS integration.
+- `shared/models.json` is the shared source for models and recommendations.
+- `shared/test-vectors.json` contains text cleanup, vocabulary, and snippet tests. Add an appropriate case when fixing a processing bug.
 
-Folge dem Stil der umgebenden Dateien. Ändere gemeinsame Datenformate bewusst, da sie auch
-für die geplanten weiteren Plattformen vorgesehen sind.
+Follow the surrounding code style. Change shared data formats deliberately, as they are also
+intended for future platforms. Keep multilingual test inputs and expected results in their
+original language; test names and comments should be in English.
 
-## Pull Request einreichen
+## Submitting a pull request
 
-Beschreibe das Problem, die Änderung und wie du sie geprüft hast. Bei sichtbaren UI-Änderungen
-hilft ein Screenshot; bei Fehlerbehebungen ein reproduzierbares Beispiel.
-Verlinke ein zugehöriges Issue und nenne offen, welche Prüfungen du nicht durchführen konntest.
+Describe the problem, the change, and how you verified it. Include a screenshot for visible
+interface changes and a reproducible example for bug fixes. Link any related issue and state
+which checks you could not perform.
 
-Bitte committe keine Modelle, Build-Ausgaben, Aufnahmen, persönlichen Konfigurationen oder
-Signierschlüssel. Versionsänderungen und Releases erfolgen getrennt über den Release-Workflow.
+Do not commit models, build output, recordings, personal configuration, or signing keys.
+Version changes and releases are handled separately through the release workflow.
 
-Beiträge zu diesem Repository werden unter der bestehenden [MIT-Lizenz](LICENSE) veröffentlicht.
+Contributions to this repository are published under the existing [MIT License](LICENSE).

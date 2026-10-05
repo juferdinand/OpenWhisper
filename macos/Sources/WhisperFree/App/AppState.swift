@@ -14,7 +14,7 @@ enum Phase: Equatable {
     var isBusy: Bool { self == .recording || self == .transcribing }
 }
 
-/// Zentrale Zustandsmaschine: idle → recording → transcribing → done/error → idle.
+/// Central state machine: idle → recording → transcribing → done/error → idle.
 @MainActor
 final class AppState: ObservableObject {
     static let shared = AppState()
@@ -29,7 +29,7 @@ final class AppState: ObservableObject {
     let models = ModelManager()
     let snippets = SnippetStore()
 
-    /// Wird gesetzt, wenn der Nutzer etwas einrichten muss (z. B. Modell fehlt).
+    /// Set when the user needs to complete setup (e.g. a missing model).
     var openSettings: ((SettingsTab) -> Void)?
 
     private let recorder = AudioRecorder()
@@ -44,7 +44,7 @@ final class AppState: ObservableObject {
     private var defaults: UserDefaults { .standard }
 
     init() {
-        // AppState wird schon beim Aufbau der SwiftUI-Scene erzeugt, also vor applicationDidFinishLaunching.
+        // AppState is created while constructing the SwiftUI scene, before applicationDidFinishLaunching.
         Prefs.registerDefaults()
         if defaults.bool(forKey: Prefs.keepHistory) {
             history = defaults.stringArray(forKey: Prefs.history) ?? []
@@ -54,7 +54,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    // MARK: - Steuerung
+    // MARK: - Controls
 
     func toggle() {
         switch phase {
@@ -68,7 +68,7 @@ final class AppState: ObservableObject {
         guard !phase.isBusy else { return }
 
         guard let modelPath = models.selectedModelPath else {
-            show(.error("Kein Modell installiert"))
+            show(.error("No model installed"))
             openSettings?(.models)
             return
         }
@@ -79,11 +79,11 @@ final class AppState: ObservableObject {
         case .notDetermined:
             Task {
                 let granted = await Permissions.requestMicrophone()
-                show(granted ? .done("Mikrofon erlaubt – nochmal drücken") : .error("Kein Mikrofonzugriff"))
+                show(granted ? .done("Microphone access granted — press again") : .error("No microphone access"))
             }
             return
         default:
-            show(.error("Kein Mikrofonzugriff"))
+            show(.error("No microphone access"))
             Permissions.openMicrophoneSettings()
             return
         }
@@ -100,10 +100,10 @@ final class AppState: ObservableObject {
         levels = Array(repeating: 0, count: Self.barCount)
         recordingStartedAt = Date()
         phase = .recording
-        stateLog.info("Aufnahme gestartet")
+        stateLog.info("Recording started")
         playSound("Tink")
 
-        // Modell schon während der Aufnahme laden, falls es noch nicht im Speicher ist.
+        // Start loading the model during recording if it is not already in memory.
         Task { try? await engine.load(modelAt: modelPath) }
     }
 
@@ -114,17 +114,17 @@ final class AppState: ObservableObject {
         playSound("Pop")
 
         let duration = Double(samples.count) / AudioRecorder.sampleRate
-        stateLog.info("Aufnahme gestoppt: \(duration, format: .fixed(precision: 1))s, Pegel \(self.peakLevel)")
+        stateLog.info("Recording stopped: \(duration, format: .fixed(precision: 1))s, level \(self.peakLevel)")
         guard duration >= minimumDuration else {
             phase = .idle
             return
         }
         guard peakLevel >= silenceThreshold else {
-            show(.error("Nichts gehört – Mikrofon prüfen"))
+            show(.error("No audio detected — check your microphone"))
             return
         }
         guard let modelPath = models.selectedModelPath else {
-            show(.error("Kein Modell installiert"))
+            show(.error("No model installed"))
             return
         }
 
@@ -142,7 +142,7 @@ final class AppState: ObservableObject {
                 )
                 let text = SnippetExpander.apply(corrected, snippets: snippets.snippets)
                 guard !text.isEmpty else {
-                    show(.error("Nichts erkannt"))
+                    show(.error("No speech recognized"))
                     return
                 }
                 remember(text)
@@ -153,7 +153,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Aufnahme verwerfen, ohne zu transkribieren.
+    /// Discard the recording without transcribing it.
     func cancel() {
         guard phase == .recording else { return }
         _ = recorder.stop()
@@ -169,11 +169,11 @@ final class AppState: ObservableObject {
         )
         switch result {
         case .pasted:
-            show(.done("Eingefügt"))
+            show(.done("Inserted"))
         case .copied:
-            show(.done(OutputMode.current == .paste ? "Kopiert – für Auto-Einfügen Bedienungshilfen erlauben" : "In Zwischenablage kopiert"))
+            show(.done(OutputMode.current == .paste ? "Copied — allow Accessibility access to paste automatically" : "Copied to clipboard"))
         case .opened(let app):
-            show(.done("In \(app) geöffnet"))
+            show(.done("Opened in \(app)"))
         case .failed(let message):
             show(.error(message))
         }
@@ -206,12 +206,12 @@ final class AppState: ObservableObject {
         Task { try? await engine.load(modelAt: path) }
     }
 
-    // MARK: - Intern
+    // MARK: - Internals
 
     private func push(level: Float) {
         guard phase == .recording else { return }
         peakLevel = max(peakLevel, level)
-        // Sprachpegel liegen typischerweise bei 0.01–0.2 RMS; auf 0…1 strecken.
+        // Typical speech levels are 0.01–0.2 RMS; scale to 0…1.
         let normalized = min(1, (level * 14).squareRoot())
         levels.removeFirst()
         levels.append(normalized)

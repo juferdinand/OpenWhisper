@@ -41,17 +41,17 @@ enum OutputMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .paste: "An der Cursor-Position einfügen"
-        case .clipboard: "Nur in die Zwischenablage kopieren"
-        case .editor: "In einem Texteditor öffnen"
+        case .paste: "Insert at the cursor"
+        case .clipboard: "Copy to clipboard only"
+        case .editor: "Open in a text editor"
         }
     }
 
     var detail: String {
         switch self {
-        case .paste: "Text erscheint direkt im aktiven Textfeld. Braucht die Bedienungshilfen-Berechtigung."
-        case .clipboard: "Du fügst selbst mit ⌘V ein. Keine zusätzliche Berechtigung nötig."
-        case .editor: "Jedes Diktat wird als Textdatei in der App deiner Wahl geöffnet (und zusätzlich kopiert)."
+        case .paste: "Text appears in the active text field. Requires Accessibility access."
+        case .clipboard: "Paste with ⌘V yourself. No additional permission needed."
+        case .editor: "Each dictation opens as a text file in your chosen app and is also copied to the clipboard."
         }
     }
 
@@ -68,8 +68,8 @@ enum RecordingMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .toggle: "Umschalten – einmal drücken startet, nochmal drücken stoppt"
-        case .hold: "Gedrückt halten (Push-to-Talk)"
+        case .toggle: "Toggle: press once to start, again to stop"
+        case .hold: "Hold to record (push-to-talk)"
         }
     }
 }
@@ -78,28 +78,28 @@ struct DictationLanguage: Identifiable, Hashable {
     let id: String
     let title: String
 
-    /// Systemsprache, falls Whisper sie kennt – sonst automatische Erkennung.
-    /// (Auto-Erkennung irrt sich bei kurzen Aufnahmen gern Richtung Englisch.)
+    /// Use the system language if supported by Whisper; otherwise detect automatically.
+    /// (Automatic detection can mistake short recordings for English.)
     static var systemDefault: String {
         let code = Locale.preferredLanguages.first.map { String($0.prefix(2)) } ?? ""
         return all.contains { $0.id == code } ? code : "auto"
     }
 
     static let all: [DictationLanguage] = [
-        .init(id: "auto", title: "Automatisch erkennen"),
-        .init(id: "de", title: "Deutsch"),
-        .init(id: "en", title: "Englisch"),
-        .init(id: "fr", title: "Französisch"),
-        .init(id: "es", title: "Spanisch"),
-        .init(id: "it", title: "Italienisch"),
-        .init(id: "pt", title: "Portugiesisch"),
-        .init(id: "nl", title: "Niederländisch"),
-        .init(id: "pl", title: "Polnisch"),
-        .init(id: "tr", title: "Türkisch"),
-        .init(id: "ru", title: "Russisch"),
-        .init(id: "uk", title: "Ukrainisch"),
-        .init(id: "zh", title: "Chinesisch"),
-        .init(id: "ja", title: "Japanisch"),
-        .init(id: "ko", title: "Koreanisch"),
+        .init(id: "auto", title: "Detect automatically"),
+        .init(id: "de", title: "German"),
+        .init(id: "en", title: "English"),
+        .init(id: "fr", title: "French"),
+        .init(id: "es", title: "Spanish"),
+        .init(id: "it", title: "Italian"),
+        .init(id: "pt", title: "Portuguese"),
+        .init(id: "nl", title: "Dutch"),
+        .init(id: "pl", title: "Polish"),
+        .init(id: "tr", title: "Turkish"),
+        .init(id: "ru", title: "Russian"),
+        .init(id: "uk", title: "Ukrainian"),
+        .init(id: "zh", title: "Chinese"),
+        .init(id: "ja", title: "Japanese"),
+        .init(id: "ko", title: "Korean"),
     ]
 }

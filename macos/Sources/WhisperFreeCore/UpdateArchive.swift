@@ -1,7 +1,7 @@
 import Foundation
 
 public enum UpdateArchive {
-    /// Neues privates Verzeichnis; bsdtar behält seine Schutzprüfungen gegen Pfadausbrüche.
+    /// Use a fresh private directory and retain bsdtar's path traversal protections.
     public static func extract(_ zip: URL) throws -> URL {
         let manager = FileManager.default
         let folder = manager.temporaryDirectory.appendingPathComponent("WhisperFree-stage-\(UUID().uuidString)")
@@ -10,7 +10,7 @@ public enum UpdateArchive {
         do {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
-            // Kein -P: Das würde die Prüfungen für .. und Symlink-Traversierung deaktivieren.
+            // Do not use -P: it disables checks for .. and symlink traversal.
             process.arguments = ["-x", "-f", zip.path, "-C", folder.path, "--no-same-owner"]
             process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
             try process.run()

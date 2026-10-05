@@ -3,7 +3,7 @@ import Foundation
 import Security
 
 public enum UpdateSignatureVerifier {
-    /// Alle Architekturen, verschachtelter Code und versiegelte Ressourcen müssen passen.
+    /// Validate all architectures, nested code, and sealed resources.
     public static func verify(_ app: URL, requirement: SecRequirement) throws {
         var code: SecStaticCode?
         let creationStatus = SecStaticCodeCreateWithPath(app as CFURL, [], &code)

@@ -1,29 +1,29 @@
 #!/usr/bin/env bash
-# Überträgt genau eine zuvor exportierte Signieridentität in die GitHub-Secrets.
-# In der Schlüsselbundverwaltung nur das gewünschte Zertifikat MIT privatem Schlüssel
-# markieren und als verschlüsselte .p12-Datei exportieren. Niemals alle Identitäten exportieren.
-# Die bestehende Release-Identität nicht durch ein neu erzeugtes Zertifikat ersetzen.
+# Uploads exactly one previously exported signing identity to GitHub secrets.
+# In Keychain Access, select only the intended certificate WITH its private key
+# and export it as an encrypted .p12 file. Never export all identities.
+# Do not replace the existing release identity with a newly generated certificate.
 #
 #   scripts/export-dev-cert.sh <owner/repo> <identity.p12>
 set -euo pipefail
 set +x
 umask 077
 
-REPO="${1:?Aufruf: scripts/export-dev-cert.sh <owner/repo> <identity.p12>}"
-P12="${2:?Bitte genau die gewünschte Identität in der Schlüsselbundverwaltung als .p12 exportieren}"
-[[ -f "$P12" ]] || { echo "PKCS#12-Datei nicht gefunden" >&2; exit 1; }
-read -r -s -p "Passwort der PKCS#12-Datei: " PASSWORD
+REPO="${1:?Usage: scripts/export-dev-cert.sh <owner/repo> <identity.p12>}"
+P12="${2:?Export only the intended identity from Keychain Access as a .p12 file}"
+[[ -f "$P12" ]] || { echo "PKCS#12 file not found" >&2; exit 1; }
+read -r -s -p "PKCS#12 file password: " PASSWORD
 printf '\n'
-[[ -n "$PASSWORD" ]] || { echo "Ein verschlüsselter Export mit Passwort ist erforderlich" >&2; exit 1; }
+[[ -n "$PASSWORD" ]] || { echo "A password-protected encrypted export is required" >&2; exit 1; }
 trap 'unset PASSWORD' EXIT
 
 LEGACY=""
 if openssl pkcs12 -help 2>&1 | /usr/bin/grep -- '-legacy' >/dev/null; then LEGACY=1; fi
-# Der entschlüsselte Schlüssel fließt nur durch eine Pipe, nie in eine Datei oder ins Terminal.
-# Das Passwort wird über einen Dateideskriptor statt als Prozessargument übergeben.
+# The decrypted key passes through a pipe, never a file or terminal output.
+# Pass the password through a file descriptor, not a process argument.
 openssl pkcs12 ${LEGACY:+-legacy} -in "$P12" -passin fd:3 -nocerts -nodes 3<<< "$PASSWORD" |
   awk '/-----BEGIN .*PRIVATE KEY-----/ { count++ } END { exit count != 1 }'
 
 base64 < "$P12" | gh secret set SIGNING_CERT_P12 --repo "$REPO"
 printf '%s' "$PASSWORD" | gh secret set SIGNING_CERT_PASSWORD --repo "$REPO"
-echo "✓ Signier-Secrets in $REPO gesetzt; verschlüsseltes Backup sicher aufbewahren."
+echo "✓ Signing secrets set in $REPO; keep the encrypted backup safe."

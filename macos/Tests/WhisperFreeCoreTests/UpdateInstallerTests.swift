@@ -61,7 +61,7 @@ private struct InstallerFixture {
         try "old".write(to: current.appendingPathComponent("content.txt"), atomically: true, encoding: .utf8)
         try "new".write(to: updated.appendingPathComponent("content.txt"), atomically: true, encoding: .utf8)
 
-        // Im Test werden nur Launch Services und xattr ersetzt; die Dateioperationen sind echt.
+        // The test replaces Launch Services and xattr; file operations use the actual filesystem.
         try writeTool("open", body: "printf '%s' \"$1\" > \"$WF_TEST_OPEN_LOG\"")
         try writeTool("xattr", body: "exit 0")
         try writeTool("mv", body: """

@@ -2,8 +2,8 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// Schwebendes Panel, das nie den Fokus stiehlt – der Cursor bleibt in der Ziel-App,
-/// damit der Text dort eingefügt werden kann.
+/// Floating panel that never takes focus; the cursor stays in the target app
+/// so text can be inserted there.
 final class OverlayPanel: NSPanel {
     init(size: NSSize) {
         super.init(
@@ -27,7 +27,7 @@ final class OverlayPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-/// Klicks sollen auch dann wirken, wenn das Panel nicht key ist.
+/// Handle clicks even when the panel is not the key window.
 private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
@@ -75,7 +75,7 @@ final class OverlayController {
     private func savedOrigin() -> NSPoint? {
         guard let string = UserDefaults.standard.string(forKey: Prefs.overlayOrigin) else { return nil }
         let point = NSPointFromString(string)
-        // Nur übernehmen, wenn die Position noch auf einem angeschlossenen Bildschirm liegt.
+        // Restore the position only if it is still on a connected display.
         let rect = NSRect(origin: point, size: size)
         return NSScreen.screens.contains { $0.frame.intersects(rect) } ? point : nil
     }
@@ -105,7 +105,7 @@ struct OverlayView: View {
                         .foregroundStyle(.white.opacity(0.6))
                 }
                 .buttonStyle(.plain)
-                .help("Aufnahme verwerfen")
+                .help("Discard recording")
             }
         }
         .padding(.horizontal, 14)
@@ -125,7 +125,7 @@ struct OverlayView: View {
         .animation(.easeOut(duration: 0.15), value: state.phase)
     }
 
-    /// Ziehen verschiebt das Panel, ein kurzer Klick startet/stoppt die Aufnahme.
+    /// Dragging moves the panel; a short click starts or stops recording.
     private var dragOrTap: some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .global)
             .onChanged { _ in
@@ -167,7 +167,7 @@ struct OverlayView: View {
     private var content: some View {
         switch state.phase {
         case .idle:
-            Text("Klicken oder Kürzel drücken").font(.system(size: 12, weight: .medium)).opacity(0.75)
+            Text("Click or press your shortcut").font(.system(size: 12, weight: .medium)).opacity(0.75)
         case .recording:
             Waveform(levels: state.levels)
             if let start = state.recordingStartedAt {
@@ -178,7 +178,7 @@ struct OverlayView: View {
                 }
             }
         case .transcribing:
-            Text("Transkribiere …").font(.system(size: 12, weight: .medium))
+            Text("Transcribing …").font(.system(size: 12, weight: .medium))
         case .done(let message), .error(let message):
             Text(message).font(.system(size: 12, weight: .medium)).lineLimit(1)
         }

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Pfade kommen ausschließlich als Argumente; niemals als ausführbarer Shell-Code.
+# Paths are passed only as arguments, never as executable shell source.
 set -eu
 
 if [ "$#" -ne 4 ]; then
@@ -15,7 +15,7 @@ backup_app="$staging_directory/previous.app"
 
 while kill -0 "$process_id" 2>/dev/null; do sleep 0.2; done
 
-# Die bisherige App bleibt erhalten, bis ihr Ersatz erfolgreich verschoben wurde.
+# Keep the previous app until its replacement has been moved successfully.
 mv "$current_app" "$backup_app"
 if ! mv "$updated_app" "$current_app"; then
   mv "$backup_app" "$current_app"

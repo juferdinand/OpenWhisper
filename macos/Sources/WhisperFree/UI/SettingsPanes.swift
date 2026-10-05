@@ -2,7 +2,7 @@ import AVFoundation
 import WhisperFreeCore
 import SwiftUI
 
-// MARK: - Einrichtung
+// MARK: - Setup
 
 struct SetupPane: View {
     @EnvironmentObject private var models: ModelManager
@@ -14,8 +14,8 @@ struct SetupPane: View {
 
     private var accessibilityDetail: String {
         outputMode == OutputMode.paste.rawValue
-            ? "Nötig, damit der Text automatisch an der Cursor-Position landet und Maustasten/Fn als Auslöser abgefangen werden."
-            : "Optional – nur nötig, wenn Fn/Einzeltasten als Auslöser dienen oder Maustasten abgefangen werden sollen."
+            ? "Required to insert text at the cursor automatically and capture mouse buttons or Fn as triggers."
+            : "Optional: only needed for Fn or individual modifier keys as triggers, or to capture mouse buttons."
     }
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -23,32 +23,32 @@ struct SetupPane: View {
     var body: some View {
         Form {
             Section {
-                Text("WhisperFree wandelt deine Sprache direkt auf diesem Mac in Text um. Kein Konto, keine Cloud, kein Abo – deine Aufnahmen verlassen nie den Rechner.")
+                Text("WhisperFree turns speech into text directly on this Mac. No account, cloud, or subscription. Your recordings never leave your computer.")
                     .foregroundStyle(.secondary)
             }
 
-            Section("In sechs Schritten startklar") {
-                step(1, "Sprachmodell laden", done: models.hasAnyModel,
-                     detail: "Einmaliger Download, danach komplett offline. Empfehlung für deinen Mac: \(ModelManager.recommendations[0].model.title) (\(ModelManager.recommendations[0].model.size)).") {
-                    Button("Modelle öffnen") { router.tab = .models }
+            Section("Get started in six steps") {
+                step(1, "Download a speech model", done: models.hasAnyModel,
+                     detail: "Download once, then work offline. Recommended for your Mac: \(ModelManager.recommendations[0].model.title) (\(ModelManager.recommendations[0].model.size)).") {
+                    Button("Open models") { router.tab = .models }
                 }
 
-                step(2, "Mikrofon erlauben", done: micStatus == .authorized,
-                     detail: "Wir brauchen Mikrofonzugriff, um deine Stimme aufzunehmen. Alles bleibt lokal auf deinem Mac.") {
+                step(2, "Allow microphone access", done: micStatus == .authorized,
+                     detail: "Microphone access is needed to record your voice. Everything stays on your Mac.") {
                     if micStatus == .notDetermined {
-                        Button("Erlauben") {
+                        Button("Allow") {
                             Task {
                                 _ = await Permissions.requestMicrophone()
                                 micStatus = Permissions.microphone
                             }
                         }
                     } else {
-                        Button("Systemeinstellungen") { Permissions.openMicrophoneSettings() }
+                        Button("System Settings") { Permissions.openMicrophoneSettings() }
                     }
                 }
 
-                step(3, "Sprache wählen", done: language != "auto", alwaysShowAction: true,
-                     detail: "In welcher Sprache diktierst du meistens? „Automatisch“ irrt sich bei kurzen Sätzen gern Richtung Englisch.") {
+                step(3, "Choose a language", done: language != "auto", alwaysShowAction: true,
+                     detail: "Which language do you usually dictate in? Automatic detection can mistake short phrases for English.") {
                     Picker("", selection: $language) {
                         ForEach(DictationLanguage.all) { Text($0.title).tag($0.id) }
                     }
@@ -57,22 +57,22 @@ struct SetupPane: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    step(4, "Wohin soll der Text?", done: true, alwaysShowAction: true,
+                    step(4, "Where should the text go?", done: true, alwaysShowAction: true,
                          detail: OutputMode(rawValue: outputMode)?.detail ?? "") { EmptyView() }
                     OutputSettings()
                         .padding(.leading, 40)
                 }
 
-                step(5, "Bedienungshilfen erlauben", done: accessibility,
+                step(5, "Allow Accessibility access", done: accessibility,
                      detail: accessibilityDetail) {
-                    Button("Erlauben") {
+                    Button("Allow") {
                         Permissions.promptAccessibility()
                         Permissions.openAccessibilitySettings()
                     }
                 }
 
-                step(6, "Auslöser festlegen & ausprobieren", done: false, alwaysShowAction: true,
-                     detail: "Taste, Kombination oder Maustaste wählen. Dann Cursor in ein Textfeld setzen, auslösen, sprechen, nochmal auslösen.") {
+                step(6, "Set a trigger and try it", done: false, alwaysShowAction: true,
+                     detail: "Choose a key, shortcut, or mouse button. Place the cursor in a text field, press the trigger, speak, then press it again.") {
                     HotkeyRecorder()
                 }
             }
@@ -102,7 +102,7 @@ struct SetupPane: View {
     }
 }
 
-// MARK: - Allgemein
+// MARK: - General
 
 struct GeneralPane: View {
     @EnvironmentObject private var models: ModelManager
@@ -116,37 +116,37 @@ struct GeneralPane: View {
 
     var body: some View {
         Form {
-            Section("Aufnahme") {
-                LabeledContent("Auslöser") { HotkeyRecorder() }
-                Picker("Verhalten", selection: $mode) {
+            Section("Recording") {
+                LabeledContent("Trigger") { HotkeyRecorder() }
+                Picker("Mode", selection: $mode) {
                     ForEach(RecordingMode.allCases) { Text($0.title).tag($0.rawValue) }
                 }
-                Picker("Sprache", selection: $language) {
+                Picker("Language", selection: $language) {
                     ForEach(DictationLanguage.all) { Text($0.title).tag($0.id) }
                 }
                 if models.selectedModel?.family == .parakeet {
-                    Text("Das aktive Parakeet-Modell erkennt die Sprache automatisch – die Auswahl gilt nur für Whisper-Modelle.")
+                    Text("The active Parakeet model detects the language automatically. This selection only applies to Whisper models.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Toggle("Start- und Stopp-Ton", isOn: $playSounds)
+                Toggle("Play start and stop sounds", isOn: $playSounds)
             }
 
             Section {
-                TextField("Vokabular", text: $vocabulary, prompt: Text("z. B. Kubernetes, Jira, SwiftUI, Grafana"), axis: .vertical)
+                TextField("Vocabulary", text: $vocabulary, prompt: Text("e.g. Kubernetes, Jira, SwiftUI, Grafana"), axis: .vertical)
                     .lineLimit(2...4)
             } header: {
-                Text("Eigene Begriffe")
+                Text("Custom vocabulary")
             } footer: {
-                Text("Namen und Fachbegriffe, kommagetrennt. Nach jeder Erkennung werden ähnlich geschriebene Wörter korrigiert (z. B. „Whisper Free“ → „WhisperFree“) – mit jedem Modell. Whisper-Modelle bekommen die Begriffe zusätzlich schon bei der Erkennung mit.")
+                Text("Names and technical terms, separated by commas. Similar spellings are corrected after recognition (e.g. “Whisper Free” → “WhisperFree”) with any model. Whisper models also receive these terms during recognition.")
             }
 
-            Section("Ausgabe") {
+            Section("Output") {
                 OutputSettings()
             }
 
-            Section("Darstellung & System") {
-                Toggle("Overlay auch im Ruhezustand anzeigen", isOn: $showIdleOverlay)
-                Toggle("Beim Anmelden starten", isOn: $launchAtLogin)
+            Section("Appearance & system") {
+                Toggle("Show overlay when idle", isOn: $showIdleOverlay)
+                Toggle("Launch at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in
                         do {
                             try LaunchAtLogin.set(enabled)
@@ -165,9 +165,9 @@ struct GeneralPane: View {
     }
 }
 
-// MARK: - Ausgabe
+// MARK: - Output
 
-/// Auswahl Einfügen / Zwischenablage / Texteditor – im Onboarding und unter „Allgemein“.
+/// Paste / clipboard / text editor selection in setup and General settings.
 struct OutputSettings: View {
     @AppStorage(Prefs.outputMode) private var outputMode = OutputMode.paste.rawValue
     @AppStorage(Prefs.restoreClipboard) private var restoreClipboard = true
@@ -175,7 +175,7 @@ struct OutputSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Picker("Ausgabe", selection: $outputMode) {
+            Picker("Output", selection: $outputMode) {
                 ForEach(OutputMode.allCases) { Text($0.title).tag($0.rawValue) }
             }
             .pickerStyle(.radioGroup)
@@ -183,7 +183,7 @@ struct OutputSettings: View {
 
             switch OutputMode(rawValue: outputMode) ?? .paste {
             case .paste:
-                Toggle("Vorherige Zwischenablage danach wiederherstellen", isOn: $restoreClipboard)
+                Toggle("Restore the previous clipboard afterward", isOn: $restoreClipboard)
                     .padding(.leading, 20)
             case .clipboard:
                 EmptyView()
@@ -193,8 +193,8 @@ struct OutputSettings: View {
                     Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
                         .resizable().frame(width: 20, height: 20)
                     Text(TextInjector.appName(at: url))
-                    Button("Anderen Editor wählen …") { chooseEditor() }
-                    Button("Diktate-Ordner") {
+                    Button("Choose another editor …") { chooseEditor() }
+                    Button("Transcripts folder") {
                         NSWorkspace.shared.activateFileViewerSelecting([TextInjector.transcriptsDirectory])
                     }
                 }
@@ -205,7 +205,7 @@ struct OutputSettings: View {
 
     private func chooseEditor() {
         let panel = NSOpenPanel()
-        panel.title = "Texteditor wählen"
+        panel.title = "Choose a text editor"
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
         panel.allowedContentTypes = [.application]
         panel.canChooseDirectories = false
@@ -215,7 +215,7 @@ struct OutputSettings: View {
     }
 }
 
-// MARK: - Modelle
+// MARK: - Models
 
 struct ModelsPane: View {
     @EnvironmentObject private var models: ModelManager
@@ -226,8 +226,8 @@ struct ModelsPane: View {
             Section {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Dein Mac: \(MacHardware.current.summary)").font(.headline)
-                        Text("Die markierten Modelle passen am besten zu deiner Hardware und Sprache.")
+                        Text("Your Mac: \(MacHardware.current.summary)").font(.headline)
+                        Text("The highlighted models are recommended for your hardware and language.")
                             .font(.callout).foregroundStyle(.secondary)
                     }
                 } icon: {
@@ -240,7 +240,7 @@ struct ModelsPane: View {
             } header: {
                 Text("NVIDIA Parakeet")
             } footer: {
-                Text("25 europäische Sprachen (u. a. Deutsch, Englisch, Französisch, Spanisch, Italienisch, Polnisch, Niederländisch, Ukrainisch). Erkennt die Sprache selbst.")
+                Text("25 European languages, including German, English, French, Spanish, Italian, Polish, Dutch, and Ukrainian. Detects the language automatically.")
             }
 
             Section {
@@ -248,11 +248,11 @@ struct ModelsPane: View {
             } header: {
                 Text("OpenAI Whisper")
             } footer: {
-                Text("Rund 99 Sprachen inklusive Chinesisch, Japanisch, Koreanisch, Türkisch. Unterstützt feste Sprachwahl und eigenes Vokabular.")
+                Text("About 99 languages, including Chinese, Japanese, Korean, and Turkish. Supports a fixed language and custom vocabulary.")
             }
 
             if !models.importedModels.isEmpty {
-                Section("Importiert") {
+                Section("Imported") {
                     ForEach(models.importedModels) { row($0) }
                 }
             }
@@ -263,11 +263,11 @@ struct ModelsPane: View {
 
             Section {
                 HStack {
-                    Button("Eigenes Modell importieren …") { models.importModel() }
-                    Button("Im Finder zeigen") { models.revealInFinder() }
+                    Button("Import a model …") { models.importModel() }
+                    Button("Show in Finder") { models.revealInFinder() }
                 }
             } footer: {
-                Text("Alle Modelle laufen komplett lokal über whisper.cpp (Metal). Download einmalig von Hugging Face. Eigene ggml-Dateien: Parakeet wird am Dateinamen („parakeet“) erkannt.")
+                Text("All models run locally using whisper.cpp (Metal). Download once from Hugging Face. For imported ggml files, Parakeet is identified by “parakeet” in the filename.")
             }
         }
         .formStyle(.grouped)
@@ -287,7 +287,7 @@ struct ModelsPane: View {
                 HStack(spacing: 6) {
                     Text(model.title).font(.headline)
                     if let highlight {
-                        Text("Empfohlen: \(highlight)").font(.caption2.bold())
+                        Text("Recommended: \(highlight)").font(.caption2.bold())
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(Capsule().fill(Color.accentColor.opacity(0.2)))
                     }
@@ -299,18 +299,18 @@ struct ModelsPane: View {
             Spacer()
             if let progress = models.progress[model.id] {
                 ProgressView(value: progress).frame(width: 110)
-                Button("Abbrechen") { models.cancelDownload(model) }
+                Button("Cancel") { models.cancelDownload(model) }
             } else if installed {
                 if !selected {
-                    Button("Verwenden") { models.selectedID = model.id }
+                    Button("Use") { models.selectedID = model.id }
                 } else {
-                    Text("Aktiv").font(.caption.bold()).foregroundStyle(.green)
+                    Text("Active").font(.caption.bold()).foregroundStyle(.green)
                 }
                 Button(role: .destructive) { models.delete(model) } label: { Image(systemName: "trash") }
                     .buttonStyle(.borderless)
-                    .help("Löschen")
+                    .help("Delete")
             } else if !model.repository.isEmpty {
-                Button("Laden") { models.download(model) }
+                Button("Download") { models.download(model) }
             }
         }
         .padding(.vertical, 2)
@@ -326,16 +326,16 @@ struct SnippetsPane: View {
         Form {
             Section {
                 if store.snippets.isEmpty {
-                    Text("Noch keine Snippets. Beispiel: Sagst du „mein YouTube Link“, wird stattdessen die URL eingefügt.")
+                    Text("No snippets yet. For example, say “my YouTube link” to insert a URL instead.")
                         .foregroundStyle(.secondary)
                 }
                 ForEach($store.snippets) { $snippet in
                     HStack(alignment: .top, spacing: 10) {
                         Toggle("", isOn: $snippet.enabled).labelsHidden()
-                        TextField("Wenn ich sage …", text: $snippet.trigger)
+                        TextField("When I say …", text: $snippet.trigger)
                             .frame(width: 170)
                         Image(systemName: "arrow.right").foregroundStyle(.secondary).padding(.top, 4)
-                        TextField("… füge ein", text: $snippet.expansion, axis: .vertical)
+                        TextField("… insert", text: $snippet.expansion, axis: .vertical)
                             .lineLimit(1...5)
                         Button(role: .destructive) { store.remove(snippet.id) } label: { Image(systemName: "trash") }
                             .buttonStyle(.borderless)
@@ -344,18 +344,18 @@ struct SnippetsPane: View {
             } header: {
                 Text("Snippets")
             } footer: {
-                Text("Groß-/Kleinschreibung, Bindestriche und Satzzeichen am Ende spielen keine Rolle.")
+                Text("Matching ignores letter case, hyphens, and trailing punctuation.")
             }
 
             Section {
-                Button("Snippet hinzufügen") { store.add() }
+                Button("Add snippet") { store.add() }
             }
         }
         .formStyle(.grouped)
     }
 }
 
-// MARK: - Verlauf
+// MARK: - History
 
 struct HistoryPane: View {
     @EnvironmentObject private var state: AppState
@@ -364,12 +364,12 @@ struct HistoryPane: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Letzte 20 Diktate lokal speichern", isOn: $keepHistory)
+                Toggle("Save the last 20 dictations locally", isOn: $keepHistory)
                     .onChange(of: keepHistory) { _, keep in if !keep { state.clearHistory() } }
             }
-            Section("Letzte Diktate") {
+            Section("Recent dictations") {
                 if state.history.isEmpty {
-                    Text("Noch nichts diktiert.").foregroundStyle(.secondary)
+                    Text("No dictations yet.").foregroundStyle(.secondary)
                 }
                 ForEach(Array(state.history.enumerated()), id: \.offset) { _, text in
                     HStack(alignment: .top) {
@@ -377,19 +377,19 @@ struct HistoryPane: View {
                         Spacer()
                         Button { state.copyToClipboard(text) } label: { Image(systemName: "doc.on.doc") }
                             .buttonStyle(.borderless)
-                            .help("Kopieren")
+                            .help("Copy")
                     }
                 }
             }
             if !state.history.isEmpty {
-                Section { Button("Verlauf löschen", role: .destructive) { state.clearHistory() } }
+                Section { Button("Clear history", role: .destructive) { state.clearHistory() } }
             }
         }
         .formStyle(.grouped)
     }
 }
 
-// MARK: - Über
+// MARK: - About
 
 struct AboutPane: View {
     @ObservedObject private var updates = UpdateService.shared
@@ -405,22 +405,22 @@ struct AboutPane: View {
                         Text("Version \(updates.currentVersion)").foregroundStyle(.secondary)
                     }
                 }
-                Text("Diktieren in jede App – 100 % lokal, 100 % kostenlos, Open Source (MIT).")
-                Text("Spracherkennung: whisper.cpp (MIT) mit den Whisper-Modellen von OpenAI (MIT).")
+                Text("Dictate into any app. Fully local, free, and open source (MIT).")
+                Text("Speech recognition: whisper.cpp (MIT) with OpenAI Whisper and NVIDIA Parakeet models.")
                     .font(.callout).foregroundStyle(.secondary)
             }
 
             Section {
                 if updates.repository == nil {
-                    Text("Updates sind in diesem Build nicht konfiguriert.").foregroundStyle(.secondary)
+                    Text("Updates are not configured in this build.").foregroundStyle(.secondary)
                 } else {
-                    Toggle("Automatisch nach Updates suchen (einmal täglich)", isOn: $autoCheck)
+                    Toggle("Automatically check for updates (once a day)", isOn: $autoCheck)
                     updateRow
                 }
             } header: {
                 Text("Updates")
             } footer: {
-                Text("Fragt nur die öffentliche GitHub-Releases-Seite ab. Updates werden nur installiert, wenn sie mit demselben Zertifikat signiert sind.")
+                Text("Checks the public GitHub Releases endpoint. Updates are only installed if signed with the same certificate.")
             }
         }
         .formStyle(.grouped)
@@ -433,26 +433,26 @@ struct AboutPane: View {
             HStack {
                 Group {
                     if case .upToDate = updates.status {
-                        Label("Du hast die neueste Version.", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                        Label("You have the latest version.", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                     } else if case .failed(let message) = updates.status {
                         Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                     } else {
-                        Text("Noch nicht geprüft.").foregroundStyle(.secondary)
+                        Text("Not checked yet.").foregroundStyle(.secondary)
                     }
                 }
                 Spacer()
-                Button("Jetzt prüfen") { Task { await updates.check() } }
+                Button("Check now") { Task { await updates.check() } }
             }
         case .checking:
-            HStack { ProgressView().controlSize(.small); Text("Suche nach Updates …") }
+            HStack { ProgressView().controlSize(.small); Text("Checking for updates …") }
         case .available(let release):
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Label("Version \(release.version) ist verfügbar", systemImage: "arrow.down.circle.fill")
+                    Label("Version \(release.version) is available", systemImage: "arrow.down.circle.fill")
                         .foregroundStyle(Color.accentColor)
                     Spacer()
                     Link("Details", destination: release.pageURL)
-                    Button("Jetzt aktualisieren") { updates.install() }
+                    Button("Update now") { updates.install() }
                         .buttonStyle(.borderedProminent)
                 }
                 if !release.notes.isEmpty {
@@ -460,9 +460,9 @@ struct AboutPane: View {
                 }
             }
         case .downloading(let progress):
-            HStack { Text("Lade Update …"); ProgressView(value: progress) }
+            HStack { Text("Downloading update …"); ProgressView(value: progress) }
         case .installing:
-            HStack { ProgressView().controlSize(.small); Text("Installiere und starte neu …") }
+            HStack { ProgressView().controlSize(.small); Text("Installing and restarting …") }
         }
     }
 }

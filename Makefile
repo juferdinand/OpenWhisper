@@ -1,4 +1,4 @@
-# Einstiegspunkt für alle Plattformen. Details je Plattform im jeweiligen Unterordner.
+# Entry point for all platforms. See each platform directory for details.
 .PHONY: mac mac-install test clean
 
 mac:

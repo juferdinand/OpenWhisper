@@ -1,11 +1,11 @@
 import Foundation
 
-/// Korrigiert Schreibweisen nach der Erkennung anhand einer Begriffsliste (Namen, Fachbegriffe).
+/// Corrects spelling after recognition using a list of names and technical terms.
 ///
-/// Funktioniert unabhängig vom Modell – wichtig für Parakeet, das keinen Text-Prompt kennt.
-/// Verglichen werden Fenster aus 1–3 Wörtern, normalisiert (klein, ohne Leer-/Sonderzeichen,
-/// ohne Akzente). Lange Begriffe dürfen leicht abweichen, kurze müssen exakt passen, damit
-/// keine normalen Wörter versehentlich ersetzt werden.
+/// Works with any model, including Parakeet, which does not accept a text prompt.
+/// Compares normalized windows of 1–3 words (lowercase, without whitespace, punctuation,
+/// or accents). Long terms allow small differences; short terms require exact matches
+/// to avoid accidentally replacing ordinary words.
 public enum VocabularyCorrector {
     public static func parse(_ vocabulary: String) -> [String] {
         vocabulary
@@ -37,7 +37,7 @@ public enum VocabularyCorrector {
             }
         }
 
-        // Beste Treffer zuerst (bei Gleichstand der längere), überlappende verwerfen.
+        // Prefer the best match, then the longer one; discard overlapping matches.
         matches.sort { ($0.score, $0.last - $0.first) > ($1.score, $1.last - $1.first) }
         var used = IndexSet()
         var chosen: [Match] = []
@@ -49,7 +49,7 @@ public enum VocabularyCorrector {
         var result = text
         for match in chosen.sorted(by: { $0.first > $1.first }) {
             let range = words[match.first].lowerBound..<words[match.last].upperBound
-            // Range auf das Original beziehen: result ist bis hierhin nur hinter `range` verändert.
+            // Map the range to the original: result has only changed after `range` so far.
             result.replaceSubrange(range, with: match.term)
         }
         return result
@@ -58,8 +58,8 @@ public enum VocabularyCorrector {
     static func threshold(for length: Int) -> Double {
         switch length {
         case ..<5: 1.0     // "Jira" ≠ "Jura"
-        case ..<8: 0.84    // 1 Fehler
-        default: 0.8       // ~2 Fehler bei 10 Zeichen
+        case ..<8: 0.84    // 1 error
+        default: 0.8       // ~2 errors in 10 characters
         }
     }
 

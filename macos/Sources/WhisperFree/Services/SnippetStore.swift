@@ -1,7 +1,7 @@
 import Foundation
 import WhisperFreeCore
 
-/// Speichert Snippets als JSON unter ~/Library/Application Support/WhisperFree.
+/// Stores snippets as JSON under ~/Library/Application Support/WhisperFree.
 @MainActor
 final class SnippetStore: ObservableObject {
     @Published var snippets: [Snippet] = [] {

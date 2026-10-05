@@ -1,7 +1,7 @@
 import Foundation
 
-/// Ein gesprochenes Stichwort, das durch einen längeren Text ersetzt wird
-/// (z. B. "mein YouTube Link" -> "https://youtube.com/@...").
+/// A spoken phrase replaced with a longer text
+/// (e.g. "my YouTube link" -> "https://youtube.com/@...").
 public struct Snippet: Codable, Identifiable, Hashable, Sendable {
     public var id: UUID
     public var trigger: String
@@ -17,12 +17,12 @@ public struct Snippet: Codable, Identifiable, Hashable, Sendable {
 }
 
 public enum SnippetExpander {
-    /// Ersetzt alle aktiven Snippet-Trigger im Text.
+    /// Replaces all enabled snippet triggers in the text.
     ///
-    /// Groß-/Kleinschreibung ist egal, Leerzeichen und Bindestriche zwischen den Wörtern sind
-    /// austauschbar ("YouTube-Kanal Link" == "youtube kanal-link"), weil Whisper das je nach
-    /// Laune unterschiedlich schreibt. Besteht das ganze Diktat nur aus dem Trigger, wird
-    /// ausschließlich die Expansion zurückgegeben (ohne den Punkt, den Whisper gern anhängt).
+    /// Matching ignores case and treats spaces and hyphens between words as interchangeable
+    /// ("YouTube-Channel Link" == "youtube channel-link"), because Whisper can vary
+    /// its spelling. If the entire dictation consists of the trigger, return only the
+    /// expansion, without the period that Whisper often appends.
     public static func apply(_ text: String, snippets: [Snippet]) -> String {
         let active = snippets.filter { $0.enabled && !$0.trigger.trimmingCharacters(in: .whitespaces).isEmpty }
         guard !active.isEmpty else { return text }

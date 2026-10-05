@@ -8,45 +8,45 @@ struct MenuContent: View {
     var body: some View {
         Text(statusText)
 
-        Button(state.phase == .recording ? "Aufnahme stoppen" : "Aufnahme starten") {
+        Button(state.phase == .recording ? "Stop recording" : "Start recording") {
             state.toggle()
         }
         .disabled(state.phase == .transcribing)
 
         if let trigger = HotkeyService.shared.trigger {
-            Text("Auslöser: \(trigger.display)")
+            Text("Trigger: \(trigger.display)")
         }
 
         if !state.history.isEmpty {
             Divider()
-            Menu("Letzte Diktate") {
+            Menu("Recent dictations") {
                 ForEach(Array(state.history.prefix(10).enumerated()), id: \.offset) { _, text in
                     Button(Self.preview(text)) { state.copyToClipboard(text) }
                 }
                 Divider()
-                Button("Verlauf löschen") { state.clearHistory() }
+                Button("Clear history") { state.clearHistory() }
             }
         }
 
         if let release = updates.availableRelease {
             Divider()
-            Button("Update auf \(release.version) installieren") { updates.install() }
+            Button("Install update to \(release.version)") { updates.install() }
         }
 
         Divider()
-        Button("Einstellungen …") { openSettings() }
+        Button("Settings …") { openSettings() }
             .keyboardShortcut(",")
-        Button("WhisperFree beenden") { NSApp.terminate(nil) }
+        Button("Quit WhisperFree") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
     }
 
     private var statusText: String {
         switch state.phase {
-        case .idle: state.models.selectedModelPath == nil ? "Kein Modell installiert" : "Bereit"
-        case .recording: "Nimmt auf …"
-        case .transcribing: "Transkribiere …"
+        case .idle: state.models.selectedModelPath == nil ? "No model installed" : "Ready"
+        case .recording: "Recording …"
+        case .transcribing: "Transcribing …"
         case .done(let message): message
-        case .error(let message): "Fehler: \(message)"
+        case .error(let message): "Error: \(message)"
         }
     }
 

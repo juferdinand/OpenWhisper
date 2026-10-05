@@ -103,7 +103,7 @@ struct UpdateArchiveTests {
         let fixture = try SecurityFixture()
         defer { fixture.cleanup() }
         let app = try fixture.makeApp()
-        // Frameworks enthalten solche relativen Links; sie müssen erhalten bleiben.
+        // Frameworks contain relative links like these; they must be preserved.
         try FileManager.default.createSymbolicLink(atPath: app.appendingPathComponent("Contents/Resources/link").path,
                                                   withDestinationPath: "payload.txt")
         try fixture.sign(app)

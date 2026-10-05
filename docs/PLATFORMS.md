@@ -1,89 +1,84 @@
-# Plattformen: macOS heute, Linux & Windows später
+# Platforms: macOS today, Linux and Windows later
 
-## Kurzfassung
+## Overview
 
-| Plattform | Umsetzung | Status |
+| Platform | Implementation | Status |
 |---|---|---|
-| macOS 14+ | Native App in Swift (`macos/`) | ✅ fertig |
-| Linux | **Tauri-App** (Rust + Web-UI) in `desktop/` | geplant |
-| Windows | **dieselbe Tauri-App** wie Linux | geplant |
+| macOS 14+ | Native Swift app in `macos/` | Available |
+| Linux | Tauri app (Rust + web UI) in `desktop/` | Planned |
+| Windows | The same Tauri app as Linux | Planned |
 
-**Empfehlung:** macOS bleibt nativ, Linux und Windows teilen sich *eine* Tauri-App.
-Gemeinsam für alle sind das Modell (whisper.cpp), der Modellkatalog und das Verhalten der
-Textverarbeitung (`shared/`).
+The plan is to keep macOS native and share one Tauri app between Linux and Windows.
+All platforms share whisper.cpp, the model catalog, and text processing behavior in `shared/`.
+The options below are implementation plans, not features already available in WhisperFree.
 
-## Warum nicht alles in einer App?
+## Why separate platform implementations?
 
-Der größte Teil einer Diktier-App ist Betriebssystem-Integration, nicht UI:
+Much of a dictation app depends on operating system integration:
 
-| Aufgabe | macOS | Windows | Linux |
+| Task | macOS | Windows | Linux |
 |---|---|---|---|
-| Globaler Auslöser inkl. Loslassen (Push-to-Talk) | CGEvent-Tap | `RegisterHotKey` / Low-Level-Hook | X11: `XGrabKey` · Wayland: `evdev` oder Desktop-Portal |
-| Text in fremde App einfügen | Zwischenablage + ⌘V via CGEvent | Zwischenablage + `SendInput` (Strg+V) | X11: `xdotool` · Wayland: `wtype` / `ydotool` |
-| Overlay ohne Fokus-Diebstahl | `NSPanel` (`.nonactivatingPanel`) | `WS_EX_NOACTIVATE` | X11 ok · Wayland je nach Compositor (`layer-shell`) |
-| Mikrofon | AVAudioEngine | WASAPI | PipeWire/PulseAudio |
-| GPU für whisper.cpp | Metal | CUDA / Vulkan | CUDA / Vulkan |
+| Global trigger with release events (push-to-talk) | CGEvent tap | `RegisterHotKey` / low-level hook | X11: `XGrabKey`; Wayland: desktop portal or device access |
+| Insert text into another app | Clipboard + ⌘V through CGEvent | Clipboard + `SendInput` (Ctrl+V) | X11: `xdotool`; Wayland: compositor-dependent tools such as `wtype` / `ydotool` |
+| Overlay without taking focus | `NSPanel` with `.nonactivatingPanel` | `WS_EX_NOACTIVATE` | X11 supported; Wayland depends on compositor and `layer-shell` support |
+| Microphone | AVAudioEngine | WASAPI | PipeWire/PulseAudio |
+| GPU for whisper.cpp | Metal | CUDA / Vulkan | CUDA / Vulkan |
 
-Diese Teile müssen *in jedem Fall* pro Betriebssystem geschrieben werden. Ein gemeinsames UI-Framework
-spart nur das Einstellungsfenster – auf dem Mac würde es die Integration sogar verschlechtern.
+These integrations need platform-specific implementations even with a shared settings UI.
+Keeping the Mac app native preserves its existing integration.
 
-## Warum Tauri statt Electron?
+## Why Tauri?
 
-| | Tauri | Electron |
-|---|---|---|
-| Downloadgröße | ~10 MB | ~150–250 MB |
-| RAM im Leerlauf | ~30–60 MB | ~150–300 MB |
-| Backend-Sprache | Rust – whisper.cpp direkt via [`whisper-rs`](https://github.com/tazz4843/whisper-rs) | Node – whisper.cpp nur über native Addons |
-| Globaler Shortcut mit Loslassen | ✅ (`tauri-plugin-global-shortcut`, Pressed/Released) | ❌ (`globalShortcut` kennt nur Drücken) |
-| Auto-Update | ✅ `tauri-plugin-updater` (signiert, GitHub Releases) | ✅ electron-updater |
+Tauri is the planned choice for the Linux and Windows app because a Rust backend can integrate
+with whisper.cpp through [`whisper-rs`](https://github.com/tazz4843/whisper-rs), while the settings
+window can use a web UI. `tauri-plugin-global-shortcut` and `tauri-plugin-updater` are candidates
+for shortcut handling and signed updates.
 
-Für eine App, die permanent im Hintergrund läuft, sind Größe und RAM entscheidend – und Push-to-Talk
-ist mit Electron nicht sauber machbar.
+Download size, idle memory use, push-to-talk behavior, and platform compatibility must be measured
+in the implementation before making performance claims or committing to these dependencies.
 
-## Geplanter Aufbau von `desktop/`
+## Planned `desktop/` structure
 
 ```
 desktop/
-  src-tauri/          Rust: Audio (cpal), whisper-rs, Hotkeys, Einfügen, Overlay-Fenster, Updater
-    src/text/         Port von WhisperFreeCore (Cleaner, Vokabular, Snippets)
-  src/                Web-UI (Einstellungen, Overlay) – z. B. Svelte oder plain TS
+  src-tauri/          Rust: audio (cpal), whisper-rs, hotkeys, insertion, overlay, updater
+    src/text/         Port of WhisperFreeCore (cleanup, vocabulary, snippets)
+  src/                Web UI (settings, overlay), for example Svelte or plain TypeScript
 ```
 
-Verbindlich für die Portierung:
+Porting requirements:
 
-- **`shared/models.json`** ist der Modellkatalog (auch die Hardware-Empfehlungen `strong`/`weak`/`cpuOnly`).
-- **`shared/test-vectors.json`** – die Rust-Umsetzung von Cleaner, Vokabular-Korrektur und Snippets
-  muss alle Fälle bestehen (die Swift-Tests prüfen dieselbe Datei).
-- Speicherorte analog zu macOS: `%APPDATA%\WhisperFree` bzw. `~/.local/share/whisperfree`
-  (Modelle, `snippets.json` im selben JSON-Format).
+- Use `shared/models.json` for the catalog and `strong` / `weak` / `cpuOnly` recommendations.
+- The Rust cleanup, vocabulary, and snippet implementations must pass `shared/test-vectors.json`,
+  the same cases used by Swift tests. Preserve multilingual input and expected output.
+- Use equivalent storage locations, such as `%APPDATA%\WhisperFree` and
+  `~/.local/share/whisperfree`, for models and `snippets.json` in the same JSON format.
 
-## Linux-Besonderheit: Wayland
+## Linux and Wayland
 
-Unter Wayland dürfen Apps aus Sicherheitsgründen weder global Tasten abgreifen noch Eingaben simulieren.
-Realistische Optionen:
+Global input capture and simulated input require special handling on Wayland. Evaluate:
 
-1. **`evdev` + `uinput`** (funktioniert überall, Nutzer muss in die Gruppe `input`) – so machen es die
-   meisten Diktier-Tools.
-2. **XDG Desktop Portal** `GlobalShortcuts` (GNOME 47+/KDE 6) für den Auslöser, `wtype`/`ydotool` zum Einfügen.
-3. Fallback: nur Zwischenablage + Benachrichtigung.
+1. XDG Desktop Portal `GlobalShortcuts` for triggers and supported compositor tools for insertion.
+2. `evdev` / `uinput` where appropriate permissions are available. Assess the access required before adopting this approach.
+3. A clipboard-only fallback with a notification.
 
-Unter X11 reichen `XGrabKey` und `xdotool`.
+Under X11, evaluate `XGrabKey` and `xdotool`. Confirm the supported desktop environments during implementation.
 
 ## Releases
 
-Ein GitHub-Release (`vX.Y.Z`) enthält die Artefakte aller Plattformen:
+A GitHub release (`vX.Y.Z`) will eventually contain assets for all supported platforms:
 
-- `WhisperFree-macOS.zip`
-- `WhisperFree-Linux.AppImage` / `.deb` (später)
-- `WhisperFree-Windows.msi` (später)
+- `WhisperFree-macOS.dmg` for installation and `WhisperFree-macOS.zip` for the updater.
+- `WhisperFree-Linux.AppImage` / `.deb` (planned).
+- `WhisperFree-Windows.msi` (planned).
 
-`.github/workflows/release.yml` bekommt dafür pro Plattform einen Job (Tauri bietet mit
-`tauri-apps/tauri-action` fertige Linux/Windows-Builds). Der macOS-Updater wählt gezielt das
-`macOS`-Asset; der Tauri-Updater bekommt ein eigenes `latest.json`.
+Add a job per platform to `.github/workflows/release.yml`. Evaluate `tauri-apps/tauri-action`
+for Linux and Windows builds. The macOS updater selects its exact ZIP asset;
+a Tauri updater would use a separate `latest.json`.
 
-## Reihenfolge, falls es losgeht
+## Implementation order
 
-1. `desktop/` mit Tauri anlegen, Text-Verarbeitung nach Rust portieren, gegen `shared/test-vectors.json` testen.
-2. Audio + whisper-rs + Modell-Download (Katalog aus `shared/models.json`).
-3. **Windows zuerst** (Hotkeys und Einfügen sind dort unkompliziert), dann Linux X11, dann Wayland.
-4. Release-Job ergänzen.
+1. Create `desktop/` with Tauri, port text processing to Rust, and run the shared test vectors.
+2. Add audio, whisper-rs, and model downloads using the shared catalog.
+3. Implement Windows integration, then Linux X11, then Wayland.
+4. Add release jobs and verify installation and updates on each platform.

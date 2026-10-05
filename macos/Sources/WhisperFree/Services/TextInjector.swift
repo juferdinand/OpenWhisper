@@ -8,9 +8,9 @@ enum DeliveryResult {
     case failed(String)
 }
 
-/// Bringt den Text an die Cursor-Position: Zwischenablage setzen und ⌘V simulieren.
-/// Das funktioniert in praktisch jeder App (Browser, Electron, Terminal, IDEs) – im Gegensatz zum
-/// direkten Setzen über kAXValueAttribute, das viele Controls nicht unterstützen.
+/// Inserts text at the cursor by setting the clipboard and simulating ⌘V.
+/// Works across browsers, Electron apps, terminals, and IDEs, unlike setting
+/// kAXValueAttribute directly, which many controls do not support.
 @MainActor
 enum TextInjector {
     static func deliver(_ text: String, mode: OutputMode, restoreClipboard: Bool) async -> DeliveryResult {
@@ -28,8 +28,8 @@ enum TextInjector {
         sendPasteShortcut()
 
         if let previous {
-            // Der Ziel-App Zeit zum Lesen geben, dann den alten Inhalt zurücklegen –
-            // aber nur, wenn inzwischen nichts anderes kopiert wurde.
+            // Give the target app time to read, then restore the previous contents,
+            // but only if nothing else has been copied in the meantime.
             try? await Task.sleep(nanoseconds: 500_000_000)
             if pasteboard.changeCount == ourChange {
                 pasteboard.clearContents()
@@ -41,7 +41,10 @@ enum TextInjector {
 
     static var transcriptsDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let dir = base.appendingPathComponent("WhisperFree/Diktate", isDirectory: true)
+        // Keep existing transcript folders accessible; use English names for new installations.
+        let legacy = base.appendingPathComponent("WhisperFree/Diktate", isDirectory: true)
+        let dir = FileManager.default.fileExists(atPath: legacy.path)
+            ? legacy : base.appendingPathComponent("WhisperFree/Transcripts", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -55,14 +58,14 @@ enum TextInjector {
         FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
     }
 
-    /// Schreibt das Diktat in eine Textdatei und öffnet sie im gewählten Editor.
+    /// Writes the dictation to a text file and opens it in the chosen editor.
     private static func openInEditor(_ text: String) async -> DeliveryResult {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
 
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        let file = transcriptsDirectory.appendingPathComponent("Diktat \(formatter.string(from: Date())).txt")
+        let file = transcriptsDirectory.appendingPathComponent("Dictation \(formatter.string(from: Date())).txt")
         do {
             try text.write(to: file, atomically: true, encoding: .utf8)
             let app = editorURL
@@ -71,7 +74,7 @@ enum TextInjector {
             _ = try await NSWorkspace.shared.open([file], withApplicationAt: app, configuration: configuration)
             return .opened(appName(at: app))
         } catch {
-            return .failed("Editor konnte nicht geöffnet werden")
+            return .failed("Could not open editor")
         }
     }
 
