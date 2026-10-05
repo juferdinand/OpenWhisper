@@ -35,7 +35,9 @@ jobs:
         run: make release UNIVERSAL=1
 
       - name: Verify installation image
-        run: bash scripts/verify-dmg.sh build/WhisperFree-macOS.dmg build/WhisperFree.app
+        run: |
+          bash scripts/test-signing-requirement.sh build/WhisperFree.app
+          bash scripts/verify-dmg.sh build/WhisperFree-macOS.dmg build/WhisperFree.app
 
       - name: Upload macOS package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

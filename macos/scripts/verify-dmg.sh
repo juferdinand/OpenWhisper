@@ -27,9 +27,8 @@ hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT" "$DMG"
 MOUNTED=1
 [[ "$(readlink "$MOUNT/Applications")" == /Applications ]]
 [[ -f "$MOUNT/Install.txt" ]]
-REQUIREMENT="$(codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => //p')"
-[[ -n "$REQUIREMENT" ]]
-codesign --verify --deep --strict -R "=$REQUIREMENT" "$MOUNT/WhisperFree.app"
+swift "$(dirname "$0")/extract-signing-requirement.swift" "$APP" "$TMP/requirement.bin"
+codesign --verify --all-architectures --deep --strict -R "$TMP/requirement.bin" "$MOUNT/WhisperFree.app"
 cmp "$APP/Contents/MacOS/WhisperFree" "$MOUNT/WhisperFree.app/Contents/MacOS/WhisperFree"
 cmp "$APP/Contents/Info.plist" "$MOUNT/WhisperFree.app/Contents/Info.plist"
 echo "✓ DMG, Programme-Verknüpfung und enthaltene App geprüft"
