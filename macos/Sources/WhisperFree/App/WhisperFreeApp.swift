@@ -33,6 +33,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let state = AppState.shared
         state.openSettings = { [weak self] tab in self?.showSettings(tab) }
 
+        if CommandLine.arguments.contains("--ui-smoke-test") {
+            showSettings(.about)
+            return
+        }
+
         overlay = OverlayController(state: state)
         registerHotkey(state)
         state.preloadModel()

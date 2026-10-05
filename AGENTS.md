@@ -23,18 +23,32 @@ or subscription. The project is open source under the MIT License.
     `AudioRecorder`, `HotkeyService` (CGEvent tap, Fn/modifier/mouse triggers, Carbon fallback,
     push-to-talk), `TextInjector` (paste, clipboard, or editor), `ModelManager`,
     `UpdateService` (GitHub Releases with signature verification), `Permissions`, and `SnippetStore`.
-  - `Sources/WhisperFree/UI/`: non-activating `NSPanel` overlay and a settings window implemented
-    with a dedicated `NSWindow`, rather than a SwiftUI Settings scene.
+  - `Sources/WhisperFree/UI/`: native non-activating `NSPanel` overlay and a dedicated
+    `NSWindow` hosting `SharedSettingsView` (WKWebView). The settings use the same compiled
+    UI assets as Linux. Only trusted bundle files can navigate or invoke the native bridge.
   - `Vendor/whisper.xcframework`: downloaded by `scripts/fetch-whisper.sh`;
     pinned to `b5130`, including the Parakeet API.
 - `shared/`: authoritative cross-platform model catalog (`models.json`) and test cases
   (`test-vectors.json`).
-- `docs/PLATFORMS.md`: plans for a future Linux/Windows Tauri app in `desktop/`; not implemented yet.
+- `desktop/src/`: shared custom settings UI for macOS and Linux. Keep one layout, icon set,
+  font, and navigation structure. `bridge.ts` selects Tauri IPC or the native WebKit reply handler.
+- `desktop/src-tauri/`: Linux Rust backend (CPAL audio, portals, clipboard, downloads, and history).
+- `desktop/crates/core/`: text processing against the same shared fixtures as Swift.
+- `desktop/crates/speech/` and `desktop/native/`: pinned whisper.cpp / Parakeet C++ bridge.
+  Speech contexts stay on one worker thread. CPU is the baseline; Vulkan is experimental.
+- `desktop/public/app-icon.png` and `src-tauri/icons/icon.png`: exact 256px PNG from the existing
+  Mac ICNS. Do not redesign one platform's logo independently. Inter is bundled with its license.
+- `docs/LINUX.md`: build dependencies, support matrix, validation evidence, and remaining tests.
+- `docs/PLATFORMS.md`: architecture and remaining platform work. Windows is not implemented.
 - `VERSION`: one project version for all platforms.
 
 ## Commands
 
 ```bash
+make linux-test                   # Check Linux frontend, Rust tests, Clippy, and shared assets
+make linux                        # Build the Linux CPU preview
+make linux-install                # Install the local Linux build for this user
+cd desktop && npm run test:ui      # Shared UI tests (install Playwright Chromium first)
 make test                         # Run Swift tests against shared/test-vectors.json
 make mac                          # Build macos/build/WhisperFree.app
 make mac-install                  # Replace the app in /Applications and launch it
@@ -49,7 +63,10 @@ For live logs, use the absolute path because `log` may be a shell function in zs
 /usr/bin/log stream --info --predicate 'subsystem == "io.github.whisperfree"' --style compact
 ```
 
-Run `make test` for logic changes and build the app for application changes.
+Run `make test` for Swift logic changes and build the Mac app for application changes.
+Mac builds now also require Node.js/npm to build the shared UI.
+Run `make linux-test` for Linux changes and shared UI tests for UI changes.
+The macOS app supports `--ui-smoke-test` for a native WebKit bundle/bridge check in CI.
 Recording, permissions, hotkeys, and pasting also need manual testing on macOS.
 For documentation-only changes, check content, links, and formatting.
 
@@ -99,12 +116,17 @@ for key continuity and a future Developer ID migration; changing identities requ
   Local signing backups belong under the ignored `.local/` directory.
 - Release publication must follow successful tests, packaging, and signature verification.
   Keep the README and release instructions aligned with the app.
+- Linux CI builds on Ubuntu 22.04, checks both host UI adapters, and uploads development
+  packages. A main push never changes versions, tags, or public releases. Linux public releases
+  require separate desktop acceptance; do not present intended distro support as tested.
+- The manual version step uses `desktop/scripts/set-version.py` to synchronize all manifests.
 - CI repeats weekly. See `SECURITY.md` for the security policy.
-- Renovate tracks Actions and whisper.cpp versions; keep SHA pins and auto-merge disabled.
+- Renovate tracks Cargo, npm, Actions, and whisper.cpp versions; keep SHA pins and auto-merge disabled.
   A whisper.cpp update also needs a reviewed SHA-256 change; never bypass checksum verification.
 - Preserve strict update-source, version, archive, and signature checks and their regression tests.
 
 ## Future work
 
 - Apple Developer ID signing and notarization.
-- Linux/Windows support in `desktop/` according to `docs/PLATFORMS.md`.
+- Linux desktop acceptance, installation tests, overlay, and GPU validation; Windows implementation.
+- Keep shared UI changes common to both hosts while retaining platform-specific permissions and services.

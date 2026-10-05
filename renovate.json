@@ -5,7 +5,7 @@
   "schedule": ["* 6-9 * * 1"],
   "automerge": false,
   "prConcurrentLimit": 5,
-  "enabledManagers": ["github-actions", "custom.regex"],
+  "enabledManagers": ["github-actions", "custom.regex", "cargo", "npm"],
   "customManagers": [
     {
       "customType": "regex",
@@ -25,7 +25,7 @@
       "matchPackageNames": ["ggml-org/whisper.cpp"],
       "dependencyDashboardApproval": true,
       "prBodyNotes": [
-        "Review the upstream release and XCFramework compatibility, then update SHA256 in macos/scripts/fetch-whisper.sh to the independently verified new artifact checksum. CI must pass before merging; checksum verification must remain enabled."
+        "Review the upstream release and both platform APIs. Update the XCFramework SHA256 in macos/scripts/fetch-whisper.sh and the matching tag, commit and source archive SHA256 in desktop/native/whisper-source.json. CI must pass on macOS and Linux; checksum verification must remain enabled."
       ]
     }
   ]

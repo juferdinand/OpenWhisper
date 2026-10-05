@@ -1,0 +1,13 @@
+[package]
+name = "whisperfree-speech"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+vulkan = []
+
+[build-dependencies]
+cmake = "0.1"
+cc = "1"

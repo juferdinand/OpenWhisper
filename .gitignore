@@ -6,9 +6,14 @@ xcuserdata/
 *.xcodeproj
 Package.resolved
 /macos/Vendor/
-# Future desktop app (Tauri)
+# Shared UI and Linux build outputs
 /desktop/target/
 /desktop/node_modules/
+/desktop/dist/
+/desktop/src-tauri/gen/
+/desktop/test-results/
+/desktop/playwright-report/
+/desktop/vendor/
 
 # Local configuration and signing material
 /.local/

@@ -29,26 +29,17 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     }
 }
 
-@MainActor
-final class SettingsRouter: ObservableObject {
-    @Published var tab: SettingsTab = .general
-}
-
 /// Use a dedicated window because a menu bar-only app (LSUIElement) cannot reliably
 /// bring a SwiftUI Settings scene to the front.
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
-    private let router = SettingsRouter()
+    private var sharedView: SharedSettingsView?
 
     func show(tab: SettingsTab) {
-        router.tab = tab
         if window == nil {
-            let view = SettingsView()
-                .environmentObject(AppState.shared)
-                .environmentObject(AppState.shared.models)
-                .environmentObject(AppState.shared.snippets)
-                .environmentObject(router)
+            let view = SharedSettingsView(tab: tab)
+            sharedView = view
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
                 styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -56,7 +47,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 defer: false
             )
             window.title = "WhisperFree"
-            window.contentView = NSHostingView(rootView: view)
+            window.contentView = view.webView
             window.isReleasedWhenClosed = false
             window.delegate = self
             window.setFrameAutosaveName("WhisperFreeSettings")
@@ -67,35 +58,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        sharedView?.show(tab: tab)
     }
 
     func windowWillClose(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-    }
-}
-
-struct SettingsView: View {
-    @EnvironmentObject private var router: SettingsRouter
-
-    var body: some View {
-        NavigationSplitView {
-            List(SettingsTab.allCases, selection: Binding(get: { router.tab }, set: { if let t = $0 { router.tab = t } })) { tab in
-                Label(tab.title, systemImage: tab.symbol).tag(tab)
-            }
-            .navigationSplitViewColumnWidth(170)
-        } detail: {
-            Group {
-                switch router.tab {
-                case .setup: SetupPane()
-                case .general: GeneralPane()
-                case .models: ModelsPane()
-                case .snippets: SnippetsPane()
-                case .history: HistoryPane()
-                case .about: AboutPane()
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-        .frame(minWidth: 680, minHeight: 460)
     }
 }

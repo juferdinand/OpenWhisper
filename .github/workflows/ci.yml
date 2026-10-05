@@ -12,6 +12,65 @@ permissions:
   contents: read
 
 jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev patchelf cmake ninja-build ffmpeg
+          rustup toolchain install 1.99.0 --profile minimal --component rustfmt,clippy
+          rustup default 1.99.0
+      - name: Cache native source and test model
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            desktop/vendor
+            desktop/target/speech-smoke
+          key: linux-speech-${{ hashFiles('desktop/native/whisper-source.json', 'desktop/scripts/test-recognition.sh') }}
+      - name: Prepare and verify frontend
+        run: |
+          bash scripts/fetch-native.sh
+          python3 scripts/check-assets.py
+          npm ci
+          npm run build
+          npx playwright install --with-deps chromium
+          npm run test:ui
+      - name: Test Linux backend
+        run: |
+          cargo fmt --all --check
+          cargo test --locked --workspace
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          bash scripts/test-recognition.sh
+      - name: Build development packages
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: npm run tauri build -- --bundles deb,appimage
+      - name: Verify and checksum packages
+        run: |
+          dpkg-deb --info target/release/bundle/deb/*.deb
+          cd target/release/bundle
+          sha256sum deb/*.deb appimage/*.AppImage > SHA256SUMS
+      - name: Upload Linux development packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: WhisperFree-Linux-preview-${{ github.sha }}
+          path: |
+            desktop/target/release/bundle/deb/*.deb
+            desktop/target/release/bundle/appimage/*.AppImage
+            desktop/target/release/bundle/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
   macos:
     runs-on: macos-15
     timeout-minutes: 30
@@ -20,6 +79,10 @@ jobs:
         working-directory: macos
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
 
       - name: Cache whisper.cpp
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -38,6 +101,10 @@ jobs:
         run: |
           bash scripts/test-signing-requirement.sh build/WhisperFree.app
           bash scripts/verify-dmg.sh build/WhisperFree-macOS.dmg build/WhisperFree.app
+
+      - name: Smoke test the shared UI in native WebKit
+        timeout-minutes: 2
+        run: build/WhisperFree.app/Contents/MacOS/WhisperFree --ui-smoke-test
 
       - name: Upload macOS package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

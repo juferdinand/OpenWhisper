@@ -25,6 +25,7 @@ final class AppState: ObservableObject {
     @Published private(set) var levels: [Float] = Array(repeating: 0, count: AppState.barCount)
     @Published private(set) var recordingStartedAt: Date?
     @Published private(set) var history: [String] = []
+    @Published private(set) var latestTranscript = ""
 
     let models = ModelManager()
     let snippets = SnippetStore()
@@ -185,6 +186,7 @@ final class AppState: ObservableObject {
     }
 
     func clearHistory() {
+        latestTranscript = ""
         history = []
         defaults.removeObject(forKey: Prefs.history)
     }
@@ -230,6 +232,7 @@ final class AppState: ObservableObject {
     }
 
     private func remember(_ text: String) {
+        latestTranscript = text
         guard defaults.bool(forKey: Prefs.keepHistory) else { return }
         history.insert(text, at: 0)
         if history.count > historyLimit { history.removeLast(history.count - historyLimit) }
