@@ -18,14 +18,20 @@ target the latest release; older versions do not receive a separate maintenance 
   [the signing decision and its limits](docs/SIGNING.md) before installing.
 - GitHub secret scanning and push protection are enabled. Automated dependency changes
   require maintainer review.
+- `renovate.json` configures weekly GitHub Actions updates, keeping full commit pins, and tracks
+  whisper.cpp release versions in the download script. Auto-merge is disabled. The hosted
+  [Renovate GitHub App](https://github.com/apps/renovate) must be granted access to this repository
+  before it can run; committing configuration alone does not activate the service.
 - `main` rejects force pushes and deletion, including for administrators. Normal pushes remain
   possible for the maintainer and release workflow. There is currently one repository administrator.
 - Workflow tokens default to read-only and cannot approve pull requests. Publication needs the
   release job's explicit write permission. Untrusted pull requests never receive signing secrets.
 
-The manually downloaded whisper.cpp binary and model files need explicit tracking. Maintainers
-must review their upstream releases and advisories before updating the pinned binary. CI verifies
-that binary's SHA-256; this proves agreement with the pinned file, not absence of vulnerabilities.
+Renovate requires dashboard approval before proposing a whisper.cpp update. Maintainers must
+review the upstream release, verify the XCFramework checksum independently, and update its pinned
+SHA-256 before merging. A version-only update deliberately fails checksum verification. Downloaded
+model files are not tracked by this configuration. GitHub vulnerability alerts remain enabled
+independently of the update bot. A checksum proves agreement with a file, not absence of vulnerabilities.
 
 These are automated tests and maintainer checks, not an independent security audit. No paid audit
 is planned at this stage. Manual tests for microphone access, Accessibility permissions, hotkeys,

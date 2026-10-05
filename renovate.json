@@ -1,0 +1,32 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "timezone": "Europe/Berlin",
+  "schedule": ["* 6-9 * * 1"],
+  "automerge": false,
+  "prConcurrentLimit": 5,
+  "enabledManagers": ["github-actions", "custom.regex"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^macos/scripts/fetch-whisper\\.sh$/"],
+      "matchStrings": ["VERSION=\"(?<currentValue>b[0-9]+)\""],
+      "depNameTemplate": "ggml-org/whisper.cpp",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "regex:^b(?<major>[0-9]+)$"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "matchPackageNames": ["ggml-org/whisper.cpp"],
+      "dependencyDashboardApproval": true,
+      "prBodyNotes": [
+        "Review the upstream release and XCFramework compatibility, then update SHA256 in macos/scripts/fetch-whisper.sh to the independently verified new artifact checksum. CI must pass before merging; checksum verification must remain enabled."
+      ]
+    }
+  ]
+}

@@ -97,6 +97,8 @@ for key continuity and a future Developer ID migration; changing identities requ
 - Release publication must follow successful tests, packaging, and signature verification.
   Preserve both README languages when changing installation or release instructions.
 - CI repeats weekly. See `SECURITY.md` for the security policy.
+- Renovate tracks Actions and whisper.cpp versions; keep SHA pins and auto-merge disabled.
+  A whisper.cpp update also needs a reviewed SHA-256 change; never bypass checksum verification.
 - Preserve strict update-source, version, archive, and signature checks and their regression tests.
 
 ## Future work
