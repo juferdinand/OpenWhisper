@@ -19,12 +19,12 @@ Der Text wird in das aktive Textfeld eingefügt. Kein Konto, kein API-Schlüssel
 
 ## Projektstatus
 
-WhisperFree ist in früher Entwicklung. Der Quellcode der Version **0.1.0** ist verfügbar;
-ein fertig paketiertes App-Release steht noch aus. Für den Einstieg baust du die App aus dem Quellcode.
+WhisperFree ist in früher Entwicklung. Lade die fertige macOS-App unter
+[GitHub Releases](https://github.com/juferdinand/WhisperFree/releases/latest) herunter oder baue sie aus dem Quellcode.
 
 | Plattform | Stand |
 | --- | --- |
-| macOS 14+ | Native Swift-App; Builds für Apple Silicon und Intel vorgesehen |
+| macOS 14+ | Native Swift-App; Universal-Paket für Apple Silicon und Intel |
 | Linux und Windows | Geplant, noch nicht implementiert — siehe [Plattformplan](docs/PLATFORMS.md) |
 
 ## Funktionen
@@ -42,9 +42,28 @@ ein fertig paketiertes App-Release steht noch aus. Für den Einstieg baust du di
 - Ein Mac mit **macOS 14 oder neuer**.
 - Ein Mikrofon und genügend Speicherplatz für das gewählte Sprachmodell; die Downloadgröße wird in der App angezeigt.
 - Für den Build: aktuelle **Xcode Command Line Tools** oder Xcode mit Swift-Toolchain.
-- Internet für den ersten Build und den gewünschten Modell-Download. Danach funktioniert das Diktieren offline.
+- Internet zum Download der App und eines Sprachmodells beziehungsweise der Abhängigkeiten für einen Quellcode-Build. Nach der Einrichtung funktioniert das Diktieren offline.
 
 ## Installation
+
+### App herunterladen
+
+1. Lade [**WhisperFree-macOS.zip**](https://github.com/juferdinand/WhisperFree/releases/latest/download/WhisperFree-macOS.zip) herunter.
+2. Entpacke das ZIP und ziehe **WhisperFree.app** nach `/Applications`.
+3. Öffne die App und folge den Schritten unter [Erstes Diktat](#erstes-diktat).
+
+Releases verwenden ein dauerhaftes, selbstsigniertes Zertifikat und sind **nicht von Apple notarisiert**.
+So kommen die ersten Open-Source-Releases vorerst ohne die jährliche Gebühr des Apple Developer Program aus.
+Developer-ID-Signierung und Notarisierung bleiben eine spätere Option; siehe die [Entscheidung zur Signierung](docs/SIGNING.md) (Englisch).
+Falls macOS den ersten Start blockiert, prüfe die Herkunft der App. Wenn du sie freigeben möchtest,
+verwende **Systemeinstellungen → Datenschutz & Sicherheit → Dennoch öffnen**.
+Siehe [Apples Anleitung](https://support.apple.com/de-de/102445).
+
+Jedes Release enthält `SHA256SUMS`. Lege diese Datei neben das ZIP und prüfe den Download mit:
+
+```bash
+shasum -a 256 -c SHA256SUMS
+```
 
 ### Aus dem Quellcode
 
@@ -68,12 +87,6 @@ SHA-256-Prüfsumme. Du kannst die fertige `WhisperFree.app` anschließend nach `
 
 Alternativ baut `make mac-install` die App, ersetzt eine vorhandene Installation in `/Applications`
 und startet sie.
-
-### Paketierte Downloads
-
-Künftige App-Pakete findest du unter [GitHub Releases](https://github.com/juferdinand/WhisperFree/releases).
-Das vorgesehene macOS-Paket heißt `WhisperFree-macOS.zip`. Die aktuelle Release-Pipeline enthält
-keine Apple-Notarisierung; eine Code-Signatur allein ersetzt diese nicht.
 
 ## Erstes Diktat
 
@@ -138,7 +151,7 @@ Ebenso gibt es derzeit keine Linux- oder Windows-App, Cloud-Synchronisierung ode
 Automatisches Einfügen verwendet die Zwischenablage und einen simulierten Tastendruck; das Verhalten
 kann je nach Ziel-App variieren.
 
-Nächste Schritte sind ein erstes signiertes App-Release und die weitere Erprobung der macOS-App.
+Nächste Schritte sind die weitere Erprobung der macOS-App sowie Apple-Developer-ID-Signierung und Notarisierung.
 Ideen und geplante Plattformen stehen in [SPEC.md](SPEC.md) und [docs/PLATFORMS.md](docs/PLATFORMS.md).
 Das sind Planungen, keine zugesagten Veröffentlichungstermine.
 
@@ -150,8 +163,11 @@ make mac                       # Lokales App-Bundle bauen
 make -C macos app UNIVERSAL=1   # Universal-Bundle für Apple Silicon und Intel
 ```
 
-Die [CI](https://github.com/juferdinand/WhisperFree/actions/workflows/ci.yml) führt auf macOS die
-Tests aus und baut das Universal-Bundle. Die Tests verwenden gemeinsame Fälle aus
+Die [CI](https://github.com/juferdinand/WhisperFree/actions/workflows/ci.yml) führt Tests aus,
+baut ein Universal-ZIP und hält es 14 Tage als herunterladbares Actions-Artefakt vor.
+Diese Entwicklungs-Builds sind ad-hoc-signiert und aktivieren den In-App-Updater nicht.
+Für die normale Installation verwende die signierten Pakete unter [Releases](https://github.com/juferdinand/WhisperFree/releases/latest).
+Die Tests verwenden gemeinsame Fälle aus
 [`shared/test-vectors.json`](shared/test-vectors.json).
 
 Für eine gleichbleibende lokale Signatur kannst du auf deinem Mac einmal
@@ -175,12 +191,15 @@ VERSION                     Projektversion
 
 Der [Release-Workflow](.github/workflows/release.yml) benötigt eine dauerhafte Signieridentität
 in den Repository-Secrets `SIGNING_CERT_P12` und `SIGNING_CERT_PASSWORD`.
-Das Hilfsskript `macos/scripts/export-dev-cert.sh juferdinand/WhisperFree` ist für den Export
-des lokalen Entwicklungszertifikats auf macOS vorgesehen und noch nicht durch einen ersten Release-Lauf validiert.
+Das Hilfsskript `macos/scripts/export-dev-cert.sh juferdinand/WhisperFree` kann ein lokales
+Entwicklungszertifikat auf macOS exportieren; dieses Export-Hilfsskript wurde hier noch nicht validiert.
+Die öffentliche Release-Identität ist bereits eingerichtet. Behalte sie für weitere Releases bei;
+ein neu erzeugtes lokales Zertifikat würde die Signaturkompatibilität für Updates aufheben.
 
 Anschließend wird der Workflow unter **Actions → Release → Run workflow** mit einer neuen
 Version im Format `X.Y.Z` gestartet. Er setzt `VERSION`, erzeugt Commit und Tag, baut das
-Universal-Bundle und veröffentlicht das ZIP. Dabei wird das Update-Repository im Bundle hinterlegt.
+Universal-Bundle und veröffentlicht das ZIP mit `SHA256SUMS`. Das Paket wird zusätzlich als Actions-Artefakt gespeichert.
+Dabei wird das Update-Repository im Bundle hinterlegt.
 Der Updater prüft heruntergeladene Apps gegen die Signaturanforderung der laufenden App;
 die Signieridentität muss deshalb über Releases hinweg erhalten bleiben.
 

@@ -19,12 +19,12 @@ your text is pasted into the active text field. No account, API key, or subscrip
 
 ## Project status
 
-WhisperFree is in early development. The source code for version **0.1.0** is available;
-a packaged app release is still pending. To get started, build the app from source.
+WhisperFree is in early development. Download the packaged macOS app from
+[GitHub Releases](https://github.com/juferdinand/WhisperFree/releases/latest), or build it from source.
 
 | Platform | Status |
 | --- | --- |
-| macOS 14+ | Native Swift app; builds target Apple Silicon and Intel |
+| macOS 14+ | Native Swift app; universal package for Apple Silicon and Intel |
 | Linux and Windows | Planned, not implemented yet — see the [platform plan](docs/PLATFORMS.md) (German) |
 
 ## Features
@@ -42,9 +42,28 @@ a packaged app release is still pending. To get started, build the app from sour
 - A Mac running **macOS 14 or later**.
 - A microphone and enough disk space for your chosen speech model; download sizes are shown in the app.
 - To build from source: current **Xcode Command Line Tools** or Xcode with its Swift toolchain.
-- Internet access for the initial build and model download. Dictation works offline after that.
+- Internet access to download the app and a speech model, or dependencies for a source build. Dictation works offline after setup.
 
 ## Installation
+
+### Download the app
+
+1. Download [**WhisperFree-macOS.zip**](https://github.com/juferdinand/WhisperFree/releases/latest/download/WhisperFree-macOS.zip).
+2. Extract the ZIP and move **WhisperFree.app** to `/Applications`.
+3. Open the app and follow [Your first dictation](#your-first-dictation).
+
+Releases use a persistent, self-signed certificate and are **not notarized by Apple**.
+For these early open-source releases, this avoids the annual Apple Developer Program fee.
+Developer ID signing and notarization remain a future option; see the [signing decision](docs/SIGNING.md).
+If macOS blocks the first launch, review the app's origin and, if you choose to allow it,
+use **System Settings → Privacy & Security → Open Anyway**.
+See [Apple's instructions](https://support.apple.com/102445).
+
+Each release includes `SHA256SUMS`. To verify the download, place that file beside the ZIP and run:
+
+```bash
+shasum -a 256 -c SHA256SUMS
+```
 
 ### Build from source
 
@@ -68,12 +87,6 @@ checksum. You can then drag the resulting `WhisperFree.app` into `/Applications`
 
 Alternatively, `make mac-install` builds the app, replaces an existing installation in
 `/Applications`, and launches it.
-
-### Packaged downloads
-
-Future app packages will be available on [GitHub Releases](https://github.com/juferdinand/WhisperFree/releases).
-The planned macOS package is named `WhisperFree-macOS.zip`. The current release pipeline does
-not include Apple notarization; code signing alone does not provide it.
 
 ## Your first dictation
 
@@ -140,7 +153,7 @@ Linux and Windows apps, cloud synchronization, and LLM post-processing are also 
 Automatic pasting uses the clipboard and a simulated keyboard shortcut, so behavior can vary
 between target apps.
 
-Next steps include a first signed app release and further testing of the macOS app.
+Next steps include further testing of the macOS app and Apple Developer ID signing with notarization.
 Ideas and platform plans are described in [SPEC.md](SPEC.md) and
 [docs/PLATFORMS.md](docs/PLATFORMS.md), both in German.
 These are plans, not promised release dates.
@@ -153,8 +166,11 @@ make mac                       # Build a local app bundle
 make -C macos app UNIVERSAL=1   # Build a universal bundle for Apple Silicon and Intel
 ```
 
-The [CI workflow](https://github.com/juferdinand/WhisperFree/actions/workflows/ci.yml) runs tests
-and builds the universal bundle on macOS. Tests use shared cases from
+The [CI workflow](https://github.com/juferdinand/WhisperFree/actions/workflows/ci.yml) runs tests,
+builds a universal ZIP, and retains it as a downloadable Actions artifact for 14 days.
+These development builds use ad-hoc signing and do not enable the in-app updater.
+For normal installation, use the signed packages on [Releases](https://github.com/juferdinand/WhisperFree/releases/latest).
+Tests use shared cases from
 [`shared/test-vectors.json`](shared/test-vectors.json).
 
 For a consistent local signature, run `macos/scripts/create-dev-cert.sh` once on your Mac.
@@ -177,12 +193,15 @@ VERSION                     Project version
 
 The [release workflow](.github/workflows/release.yml) requires a persistent signing identity
 in the repository secrets `SIGNING_CERT_P12` and `SIGNING_CERT_PASSWORD`.
-The helper script `macos/scripts/export-dev-cert.sh juferdinand/WhisperFree` is intended to export
-the local development certificate on macOS and has not yet been validated through a first release run.
+The helper script `macos/scripts/export-dev-cert.sh juferdinand/WhisperFree` can export
+a local development certificate on macOS; that export helper has not been validated here.
+The public release identity is already configured. Preserve it when preparing future releases;
+replacing it with a newly generated local certificate would break update signature compatibility.
 
 Then start the workflow under **Actions → Release → Run workflow**, supplying a new version
 in `X.Y.Z` format. It updates `VERSION`, creates a commit and tag, builds the universal bundle,
-and publishes the ZIP. The update repository is embedded in the bundle during the build.
+and publishes the ZIP with `SHA256SUMS`. It also retains the package as an Actions artifact.
+The update repository is embedded in the bundle during the build.
 The updater checks downloaded apps against the running app's signature requirement,
 so the signing identity must be preserved across releases.
 

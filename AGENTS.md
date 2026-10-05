@@ -78,6 +78,11 @@ For documentation-only changes, check content, links, and formatting.
 
 Repository: https://github.com/juferdinand/WhisperFree (public).
 
+Signing decision (2026-10-05): use persistent self-signing for the initial public releases to avoid
+the annual Apple Developer Program fee during early development. Clearly document that the app
+is not Apple-notarized and may need a first-launch exception. Follow [docs/SIGNING.md](docs/SIGNING.md)
+for key continuity and a future Developer ID migration; changing identities requires an updater transition.
+
 - CI runs tests, builds a universal app, and uploads the packaged ZIP as an Actions artifact.
   CI builds use ad-hoc signing and do not enable the in-app updater.
 - The manual Release workflow runs from `main`, checks the requested `X.Y.Z` version,

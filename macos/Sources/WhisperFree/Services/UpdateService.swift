@@ -190,17 +190,18 @@ final class UpdateService: ObservableObject {
     /// Ein kleines Shell-Skript wartet, bis die App beendet ist, tauscht das Bundle aus und startet neu.
     private func replaceAndRelaunch(with newApp: URL) {
         let current = Bundle.main.bundleURL
-        let script = """
-        while kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do sleep 0.2; done
-        rm -rf "\(current.path)"
-        mv "\(newApp.path)" "\(current.path)"
-        xattr -dr com.apple.quarantine "\(current.path)" 2>/dev/null
-        open "\(current.path)"
-        rm -rf "\(newApp.deletingLastPathComponent().path)"
-        """
+        guard let script = Bundle.main.url(forResource: "install-update", withExtension: "sh") else {
+            status = .failed("Update-Installer fehlt im App-Bundle")
+            return
+        }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", script]
+        // Dateinamen dürfen weder Command Substitution noch neue Shell-Befehle auslösen.
+        process.arguments = [script.path, String(ProcessInfo.processInfo.processIdentifier),
+                             current.path, newApp.path, newApp.deletingLastPathComponent().path]
+        var environment = ProcessInfo.processInfo.environment
+        environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        process.environment = environment
         do {
             try process.run()
             updateLog.notice("Update wird installiert, App startet neu")

@@ -28,7 +28,7 @@ jobs:
     env:
       VERSION: ${{ inputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
@@ -44,11 +44,10 @@ jobs:
             echo "::error::Tag v$VERSION existiert bereits"; exit 1
           fi
 
-      - name: Cache whisper.cpp
-        uses: actions/cache@v4
-        with:
-          path: macos/Vendor
-          key: whisper-${{ hashFiles('macos/scripts/fetch-whisper.sh') }}
+      # Release-Abhängigkeiten frisch laden und per SHA-256 prüfen; kein Build-Cache.
+      - name: Tests
+        working-directory: macos
+        run: make test
 
       - name: Signier-Zertifikat importieren
         env:
@@ -76,10 +75,6 @@ jobs:
           fi
           echo "SIGN_IDENTITY=$SIGN_IDENTITY" >> "$GITHUB_ENV"
 
-      - name: Tests
-        working-directory: macos
-        run: make test
-
       - name: Version setzen, committen, taggen
         run: |
           echo "$VERSION" > VERSION
@@ -105,7 +100,7 @@ jobs:
           shasum -a 256 WhisperFree-macOS.zip > SHA256SUMS
 
       - name: Paket als Workflow-Artefakt sichern
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: WhisperFree-macOS-v${{ inputs.version }}
           path: |

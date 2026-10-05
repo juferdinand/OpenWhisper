@@ -51,6 +51,7 @@ if [[ -n "${UPDATE_REPO:-}" ]]; then
 fi
 [[ -f Resources/AppIcon.icns ]] && cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 cp ../shared/models.json "$APP/Contents/Resources/"
+cp Resources/install-update.sh "$APP/Contents/Resources/"
 cp -R Vendor/whisper.xcframework/macos-arm64_x86_64/whisper.framework "$APP/Contents/Frameworks/"
 
 echo "→ codesign (${IDENTITY})"
