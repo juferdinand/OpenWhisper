@@ -4908,7 +4908,7 @@ dependencies = [
 
 [[package]]
 name = "whisperfree-core"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "regex",
  "serde",
@@ -4919,7 +4919,7 @@ dependencies = [
 
 [[package]]
 name = "whisperfree-desktop"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "ashpd",
  "cpal",
@@ -4943,7 +4943,7 @@ dependencies = [
 
 [[package]]
 name = "whisperfree-speech"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "cc",
  "cmake",
