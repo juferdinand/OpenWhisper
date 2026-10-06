@@ -1,6 +1,7 @@
 """Keep Linux branding and settings navigation aligned with the native Mac app."""
 from pathlib import Path
 import json
+import plistlib
 import re
 import struct
 
@@ -36,8 +37,16 @@ german = json.loads((root / "shared/locales/de.json").read_text())
 assert english.keys() == german.keys(), "Translation keys must match"
 for key, value in german.items():
     assert set(re.findall(r"\{[a-z_]+\}", key)) == set(re.findall(r"\{[a-z_]+\}", value)), f"Translation placeholders differ: {key}"
-for key in re.findall(r'\bt\("([^"\n]+)"', frontend):
+ui_sources = "\n".join(path.read_text() for path in (root / "shared/ui/src").glob("*.ts"))
+for key in re.findall(r'\bt\("([^"\n]+)"', ui_sources):
     assert key in german, f"Missing translation: {key}"
 for model in json.loads((root / "shared/models.json").read_text())["models"]:
     assert model["note"] in german, f"Missing model description: {model['id']}"
 print("English/German translation keys, placeholders, and shared UI messages match.")
+
+policy = (root / "shared/ui/index.html").read_text()
+assert "connect-src ipc: http://ipc.localhost;" in policy, "Renderer connections must stay limited to native IPC"
+assert "connect-src ipc: http://ipc.localhost;" in (root / "linux/src-tauri/tauri.conf.json").read_text(), "Linux renderer connections must stay limited to native IPC"
+ats = plistlib.loads((root / "macos/Resources/Info.plist").read_bytes())["NSAppTransportSecurity"]
+assert ats == {"NSExceptionDomains": {host: {"NSExceptionAllowsInsecureHTTPLoads": True} for host in ["127.0.0.1", "::1"]}}, "Only exact numeric loopback HTTP exceptions are allowed"
+print("Native loopback HTTP exceptions and renderer IPC policy match.")

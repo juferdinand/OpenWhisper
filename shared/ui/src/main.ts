@@ -1,6 +1,7 @@
 import { invoke, listen } from "./bridge";
 import { setLocale, t, type UILanguage } from "./i18n";
 import "./style.css";
+import { mountProcessingPreview, type ProcessingProfile } from "./local-processing";
 
 interface Snippet {
   id: string;
@@ -10,6 +11,7 @@ interface Snippet {
 }
 type NativeTrigger = { kind: "key"; key: number } | { kind: "mouse"; button: number };
 interface Preferences {
+  local_processing?: ProcessingProfile;
   ui_language: UILanguage;
   setup_completed: boolean;
   model: string;
@@ -182,7 +184,7 @@ async function command(
   }
 }
 // Send only the edited fields. Serializing writes also keeps delayed host replies in order.
-async function savePreferences(changes: Partial<Preferences>): Promise<boolean> {
+async function savePreferences(changes: Omit<Partial<Preferences>, "local_processing"> & { local_processing?: Partial<ProcessingProfile> }): Promise<boolean> {
   pendingPreferences++;
   const saved = preferenceQueue.then(async () => {
     try {
@@ -313,6 +315,8 @@ function render() {
     .querySelectorAll<HTMLButtonElement>("[data-tab]")
     .forEach((b) => b.classList.toggle("selected", b.dataset.tab === tab));
   syncPreferenceControls();
+  const processing = document.querySelector<HTMLElement>("#processing-preview");
+  if (processing) mountProcessingPreview(processing, state.preferences.local_processing, state.transcript, changes => savePreferences({ local_processing: changes }));
   const triggerBusy = portalBusy || ["recording", "transcribing"].includes(state.status) || ["downloading", "installing"].includes(state.updates.status);
   document.querySelectorAll<HTMLButtonElement>('[data-portal="enable_shortcut"], [data-portal="clear_shortcut"], [data-portal="desktop_shortcut"]').forEach(button => {
     button.disabled = triggerBusy || (button.dataset.portal === "enable_shortcut" && !state.native_shortcuts && !state.shortcut_portal);
@@ -329,7 +333,7 @@ function render() {
     tab === "general"
       ? { ui_language: state.preferences.ui_language, setup_completed: state.preferences.setup_completed,
           model: state.preferences.model, output: state.preferences.output }
-      : state.preferences,
+      : tab === "models" ? { ...state.preferences, local_processing: undefined } : state.preferences,
     state.installed,
     state.microphones,
     state.shortcut_portal,
@@ -576,13 +580,18 @@ function render() {
         }
       });
   } else if (tab === "models") {
+    // Speech-model state can change while a manual preview field owns focus.
+    // Refresh its sibling list without replacing the preview's inputs or listeners.
+    if (!content.querySelector("#speech-models"))
+      content.innerHTML = '<div id="speech-models"></div><section id="processing-preview"></section>';
+    const speechModels = content.querySelector<HTMLElement>("#speech-models")!;
     const modelRow = (m: Model) => {
       const installed = state.installed.includes(m.id),
         selected = p.model === m.id && installed,
         downloading = state.download === m.id;
       return `<div class="model-row ${selected ? "active-model" : ""}"><button class="model-radio" aria-label="${esc(t("Use {model}", { model: m.title }))}" aria-pressed="${selected}" data-select="${esc(m.id)}" ${!installed ? "disabled" : ""}><span></span></button><div class="model-description"><strong>${esc(m.title)}</strong>${(isMac() ? state.macos!.recommended.includes(m.id) : m.id === "base") ? `<span class="recommendation">${esc(t("Recommended"))}</span>` : ""}<p>${esc(m.size)} · ${esc(t(m.note))}</p></div><div class="model-buttons">${downloading ? `<progress aria-label="${esc(t("Download progress"))}" value="${state.progress}" max="1"></progress><button data-cancel-download>${esc(t("Cancel"))}</button>` : installed ? `${selected ? `<span class="success">${esc(t("Active"))}</span>` : `<button data-select="${esc(m.id)}">${esc(t("Use"))}</button>`}` : `<button data-download="${esc(m.id)}" ${state.download || ["downloading", "installing"].includes(state.updates.status) ? "disabled" : ""}>${esc(t("Download"))}</button>`}${installed && isMac() ? `<button data-delete="${esc(m.id)}" aria-label="${esc(t("Delete {model}", { model: m.title }))}" class="destructive">×</button>` : ""}</div></div>`;
     };
-    content.innerHTML =
+    speechModels.innerHTML =
       section(
         "",
         `<strong>${esc(t("Your computer:"))} ${esc(state.desktop)} · ${esc(state.session)} · ${isMac() ? t("Native speech engine") : state.gpu_available ? "CPU / Vulkan" : "CPU"}</strong><p class="secondary">${esc(t("Highlighted models are recommended for your device."))}</p>`,
@@ -637,6 +646,7 @@ function render() {
     content
       .querySelector("#show-models")!
       .addEventListener("click", () => void command("show_models_folder"));
+    mountProcessingPreview(content.querySelector<HTMLElement>("#processing-preview")!, p.local_processing, state.transcript, changes => savePreferences({ local_processing: changes }));
   } else if (tab === "snippets") {
     content.innerHTML = `<form id="snippet-form">${section(t("Snippets"), `<div id="snippets">${p.snippets.length ? p.snippets.map(snippetRow).join("") : `<p id="empty-snippets" class="secondary">${esc(t("No snippets yet. For example, say “my YouTube link” to insert a URL instead."))}</p>`}</div>`, t("Matching ignores letter case, hyphens, and trailing punctuation."))}${section("", `<button type="button" id="add-snippet">${esc(t("Add snippet"))}</button><div class="edit-actions" id="snippet-actions" hidden><button type="submit">${esc(t("Save snippets"))}</button><button type="button" data-discard>${esc(t("Discard"))}</button></div>`)}</form>`;
     const mark = () => {

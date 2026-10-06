@@ -55,6 +55,12 @@ jobs:
           build/OpenWhisper.app/Contents/MacOS/OpenWhisper --ui-smoke-test
           build/OpenWhisper.app/Contents/MacOS/OpenWhisper --overlay-smoke-test
 
+      - name: Test native model communication from the bundled app
+        timeout-minutes: 1
+        env:
+          WF_LOCAL_PROCESSING_FIXTURE: ${{ github.workspace }}/shared/tests/local-processing-server.py
+        run: build/OpenWhisper.app/Contents/MacOS/OpenWhisper --local-processing-smoke-test
+
       - name: Upload native macOS UI previews
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

@@ -1,0 +1,384 @@
+{
+  "valid_endpoints": [
+    {
+      "provider": "lm_studio",
+      "endpoint": "http://127.0.0.1:1234/v1",
+      "request_url": "http://127.0.0.1:1234/v1/chat/completions"
+    },
+    {
+      "provider": "lm_studio",
+      "endpoint": "http://[::1]:1234/v1/",
+      "request_url": "http://[::1]:1234/v1/chat/completions"
+    },
+    {
+      "provider": "ollama",
+      "endpoint": "http://127.0.0.1:11434",
+      "request_url": "http://127.0.0.1:11434/api/chat"
+    },
+    {
+      "provider": "lm_studio",
+      "endpoint": "http://127.0.0.1:80/v1",
+      "request_url": "http://127.0.0.1/v1/chat/completions"
+    },
+    {
+      "provider": "lm_studio",
+      "endpoint": "http://127.0.0.1:01234/v1",
+      "request_url": "http://127.0.0.1:1234/v1/chat/completions"
+    },
+    {
+      "provider": "lm_studio",
+      "endpoint": "http://[::1]:80/v1",
+      "request_url": "http://[::1]/v1/chat/completions"
+    },
+    {
+      "provider": "ollama",
+      "endpoint": "http://[::1]:11434/",
+      "request_url": "http://[::1]:11434/api/chat"
+    },
+    {
+      "provider": "ollama",
+      "endpoint": "http://127.0.0.1:80/",
+      "request_url": "http://127.0.0.1/api/chat"
+    }
+  ],
+  "invalid_endpoints": [
+    "http://localhost:1234/v1",
+    "http://127.0.0.2:1234/v1",
+    "http://example.com:1234/v1",
+    "http://2130706433:1234/v1",
+    "http://127.1:1234/v1",
+    "http://0x7f000001:1234/v1",
+    "https://127.0.0.1:1234/v1",
+    "http://127.0.0.1/v1",
+    "http://127.0.0.1:0/v1",
+    "http://user:pass@127.0.0.1:1234/v1",
+    "http://127.0.0.1:1234/v1?key=private",
+    "http://127.0.0.1:1234/v1#secret",
+    "http://127.0.0.1:1234/v1/other",
+    "http://[::ffff:127.0.0.1]:1234/v1",
+    "http://127.0.0.1:65536/v1",
+    "http://127.0.0.1:00000/v1",
+    "http://127.0.0.1:1234/other/../v1",
+    "http://127.0.0.1:1234/%76%31",
+    "http://127.0.0.1:1234/v1\n",
+    "http://127.0.0.1:1234/v1/../v1",
+    "http://127.0.0.1:1234/v1\\",
+    "http://127.0.0.1:1234/v1%2F",
+    "http://[::1]:1234/v1?secret=fixture",
+    "http://127.0.0.1:1234/v1?",
+    "http://127.0.0.1:1234/v1#",
+    "http://127.0.0.1:abc/v1",
+    "http://127.0.0.1:000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080/v1"
+  ],
+  "responses": [
+    {
+      "provider": "lm_studio",
+      "value": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "message": {
+              "role": "assistant",
+              "content": "  Ein Plan.\nZweiter Schritt.  "
+            }
+          }
+        ]
+      },
+      "expected": "Ein Plan.\nZweiter Schritt."
+    },
+    {
+      "provider": "ollama",
+      "value": {
+        "done": true,
+        "done_reason": "stop",
+        "message": {
+          "role": "assistant",
+          "content": "A plan."
+        }
+      },
+      "expected": "A plan."
+    },
+    {
+      "provider": "ollama",
+      "value": {
+        "done": true,
+        "message": {
+          "role": "assistant",
+          "content": "Older compatible response."
+        }
+      },
+      "expected": "Older compatible response."
+    },
+    {
+      "provider": "lm_studio",
+      "value": {
+        "choices": [
+          {
+            "finish_reason": "length",
+            "message": {
+              "role": "assistant",
+              "content": "Truncated"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "provider": "lm_studio",
+      "value": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "message": {
+              "role": "assistant",
+              "content": " ",
+              "refusal": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "provider": "lm_studio",
+      "value": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "message": {
+              "role": "assistant",
+              "content": "Reply",
+              "refusal": "No"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "provider": "lm_studio",
+      "value": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "message": {
+              "role": "assistant",
+              "content": "Reply",
+              "tool_calls": [
+                {}
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "provider": "ollama",
+      "value": {
+        "done": false,
+        "message": {
+          "role": "assistant",
+          "content": "Partial"
+        }
+      }
+    },
+    {
+      "provider": "ollama",
+      "value": {
+        "done": true,
+        "done_reason": "length",
+        "message": {
+          "role": "assistant",
+          "content": "Partial"
+        }
+      }
+    },
+    {
+      "provider": "ollama",
+      "value": {
+        "done": true,
+        "message": {
+          "role": "user",
+          "content": "Wrong role"
+        }
+      }
+    },
+    {
+      "provider": "ollama",
+      "value": {
+        "done": true,
+        "message": {
+          "role": "assistant",
+          "content": "Bad\u0000control"
+        }
+      }
+    },
+    {
+      "provider": "ollama",
+      "value": {
+        "error": "private server detail"
+      }
+    },
+    {
+      "provider": "ollama",
+      "value": {
+        "done": true,
+        "message": {
+          "role": "assistant",
+          "content": "Unicode format ‎ remains text."
+        }
+      },
+      "expected": "Unicode format ‎ remains text."
+    },
+    {
+      "provider": "ollama",
+      "value": {
+        "done": true,
+        "message": {
+          "role": "assistant",
+          "content": "Badcontrol"
+        }
+      }
+    },
+    {
+      "provider": "ollama",
+      "value": {
+        "done": 1,
+        "message": {
+          "role": "assistant",
+          "content": "Number is not Boolean"
+        }
+      }
+    },
+    {
+      "provider": "ollama",
+      "value": {
+        "done": true,
+        "message": {
+          "role": "assistant",
+          "content": "C1 edge control"
+        }
+      }
+    },
+    {
+      "provider": "lm_studio",
+      "value": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "message": {
+              "role": "assistant",
+              "content": "Allowed\tformatting\nwith\rline breaks."
+            }
+          }
+        ]
+      },
+      "expected": "Allowed\tformatting\nwith\rline breaks."
+    },
+    {
+      "provider": "lm_studio",
+      "value": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "message": {
+              "role": "assistant",
+              "content": "Emoji plan: 👩‍💻 and family 👨‍👩‍👧."
+            }
+          }
+        ]
+      },
+      "expected": "Emoji plan: 👩‍💻 and family 👨‍👩‍👧."
+    },
+    {
+      "provider": "ollama",
+      "value": {
+        "done": true,
+        "done_reason": "stop",
+        "message": {
+          "role": "assistant",
+          "content": "Multilingual plan: ⁦مرحبا⁩ and ‎שלום."
+        }
+      },
+      "expected": "Multilingual plan: ⁦مرحبا⁩ and ‎שלום."
+    },
+    {
+      "provider": "ollama",
+      "value": {
+        "error": "private fixture error",
+        "done": true,
+        "message": {
+          "role": "assistant",
+          "content": "Not a successful response"
+        }
+      }
+    },
+    {
+      "provider": "lm_studio",
+      "value": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "message": {
+              "role": "assistant",
+              "content": "Reply",
+              "function_call": {
+                "name": "fixture-action"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "invalid_profiles": [
+    {
+      "unknown": true
+    },
+    {
+      "enabled": null
+    },
+    {
+      "max_tokens": 0
+    },
+    {
+      "max_tokens": 1.5
+    },
+    {
+      "timeout_seconds": 0
+    },
+    {
+      "timeout_seconds": 121
+    },
+    {
+      "instruction": " "
+    },
+    {
+      "model": "badmodel"
+    },
+    {
+      "provider": "unknown"
+    },
+    {
+      "model": 123
+    },
+    {
+      "timeout_seconds": null
+    },
+    {
+      "instruction": null
+    },
+    {
+      "enabled": "true"
+    }
+  ],
+  "valid_profile_patches": [
+    {
+      "model": "coder👩‍💻"
+    },
+    {
+      "model": "⁦نموذج⁩"
+    },
+    {
+      "model": "plan-‎שלום"
+    }
+  ]
+}

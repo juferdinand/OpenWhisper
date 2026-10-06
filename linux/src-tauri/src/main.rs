@@ -1,6 +1,7 @@
 mod audio;
 mod autostart;
 mod desktops;
+mod local_models;
 mod models;
 mod relaunch;
 mod settings;
@@ -168,7 +169,20 @@ fn save_preferences(
             {
                 return Err("Unknown or read-only preference".into());
             }
-            value[&key] = change;
+            if key == "local_processing" {
+                let patch = change
+                    .as_object()
+                    .ok_or("Invalid text processing profile")?;
+                let profile = value[&key].as_object_mut().unwrap();
+                for (field, update) in patch {
+                    if !profile.contains_key(field) {
+                        return Err("Unknown text processing preference".into());
+                    }
+                    profile.insert(field.clone(), update.clone());
+                }
+            } else {
+                value[&key] = change;
+            }
         }
         serde_json::from_value(value).map_err(|e| e.to_string())
     })
@@ -338,8 +352,11 @@ fn main() {
     }
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(local_models::PreviewService::default())
         .invoke_handler(tauri::generate_handler![
             get_state,
+            local_models::preview_local_processing,
+            local_models::cancel_local_processing,
             toggle_recording,
             cancel_recording,
             retry_transcription,

@@ -58,6 +58,7 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false, f
         transcript: "",
         history: [],
         preferences: {
+          local_processing: { enabled: false, provider: "lm_studio", endpoint: "http://127.0.0.1:1234/v1", model: "", instruction: "Synthetic default instruction", max_tokens: 1024, timeout_seconds: 30 },
           ui_language: "en",
           setup_completed: !fresh,
           model: "base",
@@ -130,9 +131,20 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false, f
         }
         if (command === "save_preferences") {
           if (host.saveDelay) await new Promise(resolve => setTimeout(resolve, host.saveDelay));
+          if (host.rejectNextSave) { host.rejectNextSave = false; throw new Error("Could not save settings"); }
           if (host.rejectSave) throw new Error("Could not save settings");
-          Object.assign(state.preferences, args.changes);
+          const { local_processing, ...changes } = args.changes;
+          Object.assign(state.preferences, changes);
+          if (local_processing) Object.assign(state.preferences.local_processing, local_processing);
         }
+        if (command === "preview_local_processing") {
+          if (host.previewError) throw new Error(host.previewError);
+          return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => resolve("A structured fixture plan."), host.previewDelay ?? 0);
+            host.cancelPreview = () => { clearTimeout(timer); reject(new Error("Text processing cancelled; your dictation is unchanged")); };
+          });
+        }
+        if (command === "cancel_local_processing") host.cancelPreview?.();
         if (command === "save_settings") state.preferences = args.preferences;
         if (command === "complete_setup") state.preferences.setup_completed = true;
         if (command === "save_settings" || command === "save_preferences" || command === "complete_setup") await host.saveTestPreferences(state.preferences);
@@ -572,3 +584,159 @@ test("Linux: modifier-only triggers explain toggle mode and disable push to talk
   await expect(page.getByRole("combobox", { name: "Recording mode" })).toBeDisabled();
   await expect(page.getByText("Modifier-only triggers use toggle mode.", { exact: false })).toBeVisible();
 });
+
+
+for (const platform of ["linux", "macos"] as const) {
+  test(`${platform} manual model preview keeps ordinary dictation unchanged`, async ({ page }) => {
+    await start(page, platform);
+    await page.getByRole("button", { name: "Models", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Text processing preview", exact: true })).toBeVisible();
+    await expect(page.locator("#processing-enabled")).not.toBeChecked();
+    await expect(page.locator("#processing-send")).toBeDisabled();
+    await expect(page.locator("#processing-input")).toHaveValue("");
+    await expect(page.locator("#processing-preview")).toContainText("may still send data remotely");
+    await page.locator("#processing-model").fill("owned-fixture");
+    await page.locator("#processing-input").click();
+    await page.locator("#processing-enabled").check();
+    await page.locator("#processing-input").fill("Unstructured German: Wünsche.");
+    await expect(page.locator("#processing-send")).toBeEnabled();
+    expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.command === "preview_local_processing"))).toHaveLength(0);
+    await page.locator("#processing-send").click();
+    await expect(page.locator("#processing-result")).toHaveValue("A structured fixture plan.");
+    await expect(page.locator("#processing-input")).toHaveValue("Unstructured German: Wünsche.");
+    expect(await page.evaluate(() => (window as any).testState.transcript)).toBe("");
+    expect(await page.evaluate(() => (window as any).testState.history)).toEqual([]);
+    const request = await page.evaluate(() => (window as any).calls.find((c: any) => c.command === "preview_local_processing"));
+    expect(request.args.text).toBe("Unstructured German: Wünsche.");
+    expect(Object.keys(request.args).sort()).toEqual(["requestId", "text"]);
+    await page.evaluate(() => { const host = window as any; host.testState.transcript = "Original dictation"; host.publishState(); });
+    await page.locator("#processing-use-latest").click();
+    await expect(page.locator("#processing-input")).toHaveValue("Original dictation");
+    await expect(page.locator("#processing-result")).toHaveValue("");
+    await page.locator("#processing-provider").selectOption("ollama");
+    await expect(page.locator("#processing-endpoint")).toHaveValue("http://127.0.0.1:11434");
+    await page.locator("#processing-send").click();
+    await expect(page.locator("#processing-result")).toHaveValue("A structured fixture plan.");
+    expect(await page.evaluate(() => (window as any).testState.transcript)).toBe("Original dictation");
+    await page.setViewportSize({ width: 960, height: 1200 });
+    await page.evaluate(() => document.querySelector("#processing-preview")!.scrollIntoView({ block: "start" }));
+    await page.screenshot({ path: `test-results/${platform}-text-processing-preview.png` });
+  });
+
+  test(`${platform} model profile patches keep switch nodes focus and rapid edits`, async ({ page }) => {
+    await start(page, platform);
+    await page.getByRole("button", { name: "Models", exact: true }).click();
+    await page.evaluate(() => { const host = window as any; host.saveDelay = 100; host.processingSwitch = document.querySelector("#processing-enabled"); });
+    await page.locator("#processing-enabled").check();
+    await page.locator("#processing-enabled").uncheck();
+    await page.locator("#processing-enabled").check();
+    await page.locator("#processing-model").fill("first-model");
+    await page.locator("#processing-instruction").fill("Keep my language and make a plan.");
+    await page.locator("#processing-model").fill("final-model");
+    await page.locator("#processing-input").fill("Unsent draft text.");
+    await page.evaluate(() => (window as any).publishState());
+    await expect(page.locator("#processing-input")).toBeFocused();
+    await expect.poll(() => page.evaluate(() => (window as any).testState.preferences.local_processing.model)).toBe("final-model");
+    await expect(page.locator("#processing-enabled")).toBeChecked();
+    await expect(page.locator("#processing-model")).toHaveValue("final-model");
+    await expect(page.locator("#processing-instruction")).toHaveValue("Keep my language and make a plan.");
+    await expect(page.locator("#processing-input")).toBeFocused();
+    await expect(page.locator("#processing-input")).toHaveValue("Unsent draft text.");
+    expect(await page.evaluate(() => (window as any).processingSwitch === document.querySelector("#processing-enabled"))).toBe(true);
+    const changes = await page.evaluate(() => (window as any).calls.filter((c: any) => c.command === "save_preferences").map((c: any) => c.args.changes));
+    expect(changes.every((p: any) => Object.keys(p).length === 1 && p.local_processing && Object.keys(p.local_processing).length === 1)).toBe(true);
+    expect(await page.evaluate(() => (window as any).testState.preferences.model)).toBe("base");
+    await page.locator("#processing-model").fill("still-typing");
+    await page.evaluate(() => { const host = window as any; host.testState.status = "recording"; host.testState.transcript = "Concurrent dictation"; host.publishState(); });
+    await expect(page.locator("#processing-model")).toBeFocused();
+    await expect(page.locator("#processing-model")).toHaveValue("still-typing");
+    expect(await page.evaluate(() => (window as any).processingSwitch === document.querySelector("#processing-enabled"))).toBe(true);
+    await page.locator("#processing-input").click();
+    await expect.poll(() => page.evaluate(() => (window as any).testState.preferences.local_processing.model)).toBe("still-typing");
+  });
+
+  test(`${platform} preview failures cancellation and page changes preserve input`, async ({ page }) => {
+    await start(page, platform);
+    await page.getByRole("button", { name: "Models", exact: true }).click();
+    await page.locator("#processing-model").fill("owned-fixture");
+    await page.locator("#processing-enabled").check();
+    await page.locator("#processing-input").fill("Original text remains.");
+    await page.evaluate(() => { (window as any).previewError = "Text processing timed out; your dictation is unchanged"; });
+    await page.locator("#processing-send").click();
+    await expect(page.locator("#processing-feedback")).toContainText("timed out");
+    await expect(page.locator("#processing-input")).toHaveValue("Original text remains.");
+    await expect(page.locator("#processing-result")).toHaveValue("");
+    await page.evaluate(() => { const host = window as any; host.previewError = null; host.previewDelay = 30000; });
+    await page.locator("#processing-send").click();
+    await expect(page.locator("#processing-cancel")).toBeVisible();
+    await page.getByRole("button", { name: "History", exact: true }).click();
+    await page.getByRole("button", { name: "Models", exact: true }).click();
+    await page.locator("#processing-cancel").click();
+    await expect(page.locator("#processing-send")).toBeEnabled();
+    await expect(page.locator("#processing-feedback")).toContainText("cancelled");
+    await expect(page.locator("#processing-input")).toHaveValue("Original text remains.");
+    await expect(page.locator("#processing-result")).toHaveValue("");
+    await page.getByRole("button", { name: "Deutsch", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Textverarbeitung ausprobieren", exact: true })).toBeVisible();
+    await expect(page.locator("#processing-input")).toHaveValue("Original text remains.");
+    await expect(page.locator("#processing-feedback")).toContainText("abgebrochen");
+  });
+
+  test(`${platform} failed profile saves restore confirmed values and never send drafts`, async ({ page }) => {
+    await start(page, platform);
+    await page.getByRole("button", { name: "Models", exact: true }).click();
+    await page.locator("#processing-model").fill("confirmed-model");
+    await page.locator("#processing-enabled").check();
+    await page.locator("#processing-input").fill("Renderer-only unsent text.");
+    await expect(page.locator("#processing-send")).toBeEnabled();
+    await page.evaluate(() => { const host = window as any; host.rejectSave = true; host.saveDelay = 100; });
+    await page.locator("#processing-model").fill("rejected-model");
+    await page.locator("#processing-input").click();
+    await expect(page.locator("#processing-send")).toBeDisabled();
+    await expect(page.locator("#processing-model")).toHaveValue("confirmed-model");
+    await expect(page.locator("#processing-send")).toBeEnabled();
+    await expect(page.locator("#processing-input")).toHaveValue("Renderer-only unsent text.");
+    expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.command === "preview_local_processing"))).toHaveLength(0);
+    await page.reload();
+    await page.getByRole("button", { name: "Models", exact: true }).click();
+    await expect(page.locator("#processing-enabled")).toBeChecked();
+    await expect(page.locator("#processing-model")).toHaveValue("confirmed-model");
+    await expect(page.locator("#processing-input")).toHaveValue("");
+    await expect(page.locator("#processing-result")).toHaveValue("");
+  });
+
+  test(`${platform} rejected focused provider and number edits return to confirmed values`, async ({ page }) => {
+    await start(page, platform);
+    await page.getByRole("button", { name: "Models", exact: true }).click();
+    await page.locator("#processing-model").fill("confirmed-model");
+    await page.locator("#processing-enabled").check();
+    await page.locator("#processing-input").fill("Unsent original.");
+    await expect(page.locator("#processing-send")).toBeEnabled();
+    await page.evaluate(() => { const host = window as any; host.rejectSave = true; host.saveDelay = 100; host.originalProvider = document.querySelector("#processing-provider"); });
+    await page.locator("#processing-provider").focus();
+    await page.locator("#processing-provider").selectOption("ollama");
+    await expect(page.locator("#processing-send")).toBeDisabled();
+    await expect(page.locator("#processing-send")).toBeEnabled();
+    await expect(page.locator("#processing-provider")).toHaveValue("lm_studio");
+    await expect(page.locator("#processing-provider")).toBeFocused();
+    expect(await page.evaluate(() => (window as any).originalProvider === document.querySelector("#processing-provider"))).toBe(true);
+    await expect(page.locator("#processing-endpoint")).toHaveValue("http://127.0.0.1:1234/v1");
+    await expect(page.locator("#processing-destination")).toContainText("1234/v1");
+    await page.locator("#processing-timeout_seconds").fill("45");
+    await page.locator("#processing-timeout_seconds").dispatchEvent("change");
+    await expect(page.locator("#processing-send")).toBeDisabled();
+    await expect(page.locator("#processing-send")).toBeEnabled();
+    await expect(page.locator("#processing-timeout_seconds")).toHaveValue("30");
+    await expect(page.locator("#processing-timeout_seconds")).toBeFocused();
+    await expect(page.locator("#processing-input")).toHaveValue("Unsent original.");
+    await page.evaluate(() => { const host = window as any; host.rejectSave = false; host.rejectNextSave = true; });
+    await page.locator("#processing-model").fill("rejected-earlier-edit");
+    await page.locator("#processing-model").dispatchEvent("change");
+    await page.locator("#processing-model").fill("newer-queued-edit");
+    await page.locator("#processing-model").dispatchEvent("change");
+    await expect.poll(() => page.evaluate(() => (window as any).testState.preferences.local_processing.model)).toBe("newer-queued-edit");
+    await expect(page.locator("#processing-model")).toHaveValue("newer-queued-edit");
+    await expect(page.locator("#processing-model")).toBeFocused();
+    expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.command === "preview_local_processing"))).toHaveLength(0);
+  });
+}

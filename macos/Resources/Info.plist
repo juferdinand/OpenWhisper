@@ -28,10 +28,27 @@
 	<string>public.app-category.productivity</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<!-- Native model requests allow only these two numeric loopback addresses. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>127.0.0.1</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<key>::1</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
 	<!-- GitHub repository for updates ("owner/repo"); "OWNER/…" disables the updater. -->
 	<key>WFUpdateRepository</key>
 	<string>OWNER/OpenWhisper</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>OpenWhisper needs microphone access to record your voice. Everything stays on your Mac.</string>
+	<string>OpenWhisper needs microphone access to record your voice. Speech recognition runs on your Mac.</string>
 </dict>
 </plist>

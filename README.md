@@ -78,6 +78,12 @@ and in [docs/LINUX.md](docs/LINUX.md).
 - **Linux recording recovery:** Stopped recordings are privately backed up before recognition. Inference runs in a separate process, uses bounded sections, and retries failed sections with smaller windows and CPU fallback. After a failure or app restart, use **Retry transcription** or **Discard saved recording**. Successful clipboard delivery removes the temporary audio; unfinished WAV files remain in the XDG configuration directory under `whisperfree/recovery/`.
 - **Everyday settings:** Launch at login and a local text history you can disable on both platforms. Sound cues, clipboard restoration, and text editor output are currently macOS features.
 
+Development builds also include a disabled manual LM Studio/Ollama text preview on the **Models**
+page. Review the text and destination before sending; results never replace dictation, history,
+or a saved recording. Loopback transport alone does not prove that the server runs models locally.
+This first slice still needs supervised acceptance and is not in the 0.2.4 release. See
+[setup, limits, and acceptance checks](docs/LOCAL_MODELS.md).
+
 ## Requirements
 
 For Linux, see [dependencies and supported environments](docs/LINUX.md#build-from-source).
@@ -272,6 +278,7 @@ The table below uses macOS paths. Linux storage paths and permissions are listed
 | Snippets | Stored locally in `~/Library/Application Support/WhisperFree/snippets.json`. |
 | Text editor output | Writes text files to `~/Library/Application Support/WhisperFree/Transcripts`; existing installations keep their previous `Diktate` folder. These files persist independently of history. |
 | Updates | Only when an update repository is configured: optional daily checks through GitHub, with an update downloaded after you click to install it. |
+| Manual text preview (development) | Only on **Send preview**: the visible text and instruction go to the selected numeric loopback server. That server may use remote models; review its configuration first. Input/results are not saved by OpenWhisper. |
 
 Output text goes to the clipboard and, depending on your settings, to the app you choose.
 That app's storage and synchronization follow its own settings.
@@ -313,13 +320,14 @@ Remove personal dictations and other confidential information from any logs you 
 
 The current app transcribes after recording; a live text preview is not implemented yet.
 Linux has packaged releases; acceptance testing across additional desktops is still pending. Windows,
-cloud synchronization, and LLM post-processing are not implemented.
+cloud synchronization, and automatic LLM post-processing are not implemented.
 Automatic pasting uses the clipboard and a simulated keyboard shortcut, so behavior can vary
 between target apps.
 
 Next steps include desktop acceptance across Linux distributions and further macOS testing.
 The [roadmap](docs/ROADMAP.md) tracks Obsidian output, optional LM Studio/Ollama processing,
-configurable agent actions, and spoken responses. These integrations are not implemented yet.
+configurable agent actions, and spoken responses. The manual model preview is described above;
+the other integrations are not implemented yet.
 [SPEC.md](SPEC.md) describes current behavior; [docs/PLATFORMS.md](docs/PLATFORMS.md) explains
 the shared UI and native services. Apple Developer ID signing and notarization remain future work.
 These are plans, not promised release dates.

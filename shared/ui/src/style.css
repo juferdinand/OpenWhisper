@@ -897,3 +897,15 @@ html.overlay,
 .row.approval > span:first-child { flex-shrink: 1; }
 
 .trigger-controls { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+
+.processing-preview .processing-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0;
+}
+.processing-preview textarea, .processing-preview .processing-field input { width: 100%; box-sizing: border-box; }
+.processing-limits { display: flex; flex-wrap: wrap; gap: 16px; }
+.processing-limits label { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 150px; }
+.processing-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+#processing-destination { overflow-wrap: anywhere; }

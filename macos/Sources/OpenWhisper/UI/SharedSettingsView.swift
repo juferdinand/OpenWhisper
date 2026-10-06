@@ -277,7 +277,13 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                   changes.keys.allSatisfy({ values[$0] != nil && $0 != "setup_completed" }) else {
                 throw UIError.message("Unknown or read-only preference")
             }
-            values.merge(changes) { _, new in new }
+            if changes["local_processing"] != nil && !(changes["local_processing"] is [String: Any]) { throw UIError.message("Invalid text processing profile") }
+            if let patch = changes["local_processing"] as? [String: Any], var profile = values["local_processing"] as? [String: Any] {
+                guard patch.keys.allSatisfy({ profile[$0] != nil }) else { throw UIError.message("Unknown text processing preference") }
+                profile.merge(patch) { _, new in new }
+                values["local_processing"] = profile
+            }
+            values.merge(changes.filter { $0.key != "local_processing" }) { _, new in new }
             let preferences = try JSONDecoder().decode(UISettings.self, from: JSONSerialization.data(withJSONObject: values))
             try save(preferences)
             return snapshot()
@@ -285,6 +291,12 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
             guard let value = args["preferences"] else { throw UIError.message("Settings are missing") }
             let preferences = try JSONDecoder().decode(UISettings.self, from: JSONSerialization.data(withJSONObject: value))
             try save(preferences)
+        case "preview_local_processing":
+            guard let requestID = args["requestId"] as? String, let text = args["text"] as? String else { throw UIError.message("Invalid preview request") }
+            return try await LocalProcessingService.shared.preview(requestID: requestID, profile: processingProfile(), text: text)
+        case "cancel_local_processing":
+            guard let requestID = args["requestId"] as? String else { throw UIError.message("Invalid preview request") }
+            await LocalProcessingService.shared.cancel(requestID: requestID)
         case "copy_transcript": state.copyToClipboard(state.latestTranscript)
         case "clear_history", "clear_transcript": state.clearHistory()
         case "copy_history":
@@ -342,10 +354,12 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
               value.snippets.allSatisfy({ $0.trigger.utf8.count <= 128 && $0.expansion.utf8.count <= 8192 }) else {
             throw UIError.message("Invalid settings")
         }
+        try value.local_processing?.validate()
         if let enabled = value.launch_at_login, enabled != LaunchAtLogin.isEnabled { try LaunchAtLogin.set(enabled) }
         let changedModel = state.models.selectedID != value.model
         state.models.selectedID = value.model
         let defaults = UserDefaults.standard
+        if let profile = value.local_processing { defaults.set(try JSONEncoder().encode(profile), forKey: Prefs.localProcessing) }
         defaults.set(value.ui_language ?? "en", forKey: Prefs.uiLanguage)
         defaults.set(value.language, forKey: Prefs.language)
         defaults.set(value.output, forKey: Prefs.outputMode)
@@ -362,6 +376,13 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
         if changedModel { state.modelSelectionChanged() }
     }
 
+    private func processingProfile() -> LocalProcessingProfile {
+        guard let data = UserDefaults.standard.data(forKey: Prefs.localProcessing),
+              let profile = try? JSONDecoder().decode(LocalProcessingProfile.self, from: data),
+              (try? profile.validate()) != nil else { return LocalProcessingProfile() }
+        return profile
+    }
+
     private func snapshot() -> [String: Any] {
         let state = AppState.shared, models = state.models, defaults = UserDefaults.standard
         let status: String, message: String
@@ -374,6 +395,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
         }
         let snippets = state.snippets.snippets.map { ["id": $0.id.uuidString, "trigger": $0.trigger, "expansion": $0.expansion, "enabled": $0.enabled] as [String: Any] }
         let preferences: [String: Any] = [
+            "local_processing": (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(processingProfile()))) as Any? ?? [:],
             "ui_language": defaults.string(forKey: Prefs.uiLanguage) ?? "en",
             "setup_completed": defaults.bool(forKey: Prefs.setupCompleted),
             "model": models.selectedID, "language": defaults.string(forKey: Prefs.language) ?? "auto",
@@ -434,6 +456,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
 }
 
 private struct UISettings: Decodable {
+    let local_processing: LocalProcessingProfile?
     let ui_language: String?
     let model, language, vocabulary, output: String
     let snippets: [Snippet]

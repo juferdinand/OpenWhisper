@@ -10,6 +10,7 @@ use std::{
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
+    pub local_processing: crate::local_models::Profile,
     pub ui_language: String,
     pub setup_completed: bool,
     pub auto_check_updates: bool,
@@ -30,6 +31,7 @@ pub struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            local_processing: crate::local_models::Profile::default(),
             ui_language: "en".into(),
             setup_completed: false,
             auto_check_updates: true,
@@ -51,6 +53,7 @@ impl Default for Preferences {
 }
 impl Preferences {
     pub fn validate(&self) -> Result<(), String> {
+        self.local_processing.validate()?;
         if let Some(trigger) = &self.native_trigger {
             trigger.validate()?;
             if self.hold_to_record && trigger.modifier_only() {
@@ -111,9 +114,17 @@ impl Paths {
         if !path.exists() {
             return Ok(Preferences::default());
         }
-        let value: serde_json::Value =
+        let mut value: serde_json::Value =
             serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
                 .map_err(|e| format!("Cannot read settings: {e}"))?;
+        // Optional preview corruption must not reset ordinary dictation preferences.
+        // New edits still pass the strict validator in save(); this is load recovery only.
+        if value.get("local_processing").is_some_and(|profile| {
+            serde_json::from_value::<crate::local_models::Profile>(profile.clone())
+                .map_or(true, |profile| profile.validate().is_err())
+        }) {
+            value.as_object_mut().unwrap().remove("local_processing");
+        }
         let mut prefs: Preferences = serde_json::from_value(value.clone())
             .map_err(|e| format!("Cannot read settings: {e}"))?;
         // Existing installations must not return to onboarding after an update.
@@ -234,6 +245,41 @@ mod tests {
         assert_eq!(prefs.vocabulary, "WhisperFree");
         assert_eq!(prefs.ui_language, "en");
         assert!(paths.load().unwrap().setup_completed);
+        fs::remove_dir_all(paths.config).unwrap();
+    }
+
+    #[test]
+    fn malformed_optional_preview_preserves_all_ordinary_preferences() {
+        let paths = isolated();
+        let ordinary = Preferences {
+            model: "tiny".into(),
+            language: "de".into(),
+            ui_language: "de".into(),
+            gpu: false,
+            gpu_configured: true,
+            setup_completed: true,
+            native_trigger: Some(crate::desktops::kde::Trigger::Mouse { button: 8 }),
+            vocabulary: "Synthetic vocabulary".into(),
+            ..Preferences::default()
+        };
+        let expected = serde_json::to_value(&ordinary).unwrap();
+        for malformed in [
+            serde_json::json!({"enabled":false,"endpoint":"http://localhost:1234/v1"}),
+            serde_json::json!({"enabled":true,"model":5}),
+            serde_json::json!({"unknown":true}),
+            serde_json::Value::Null,
+        ] {
+            let mut value = expected.clone();
+            value["local_processing"] = malformed;
+            let bytes = serde_json::to_vec(&value).unwrap();
+            private_write(&paths.config.join("settings.json"), &bytes).unwrap();
+            let restored = paths.load().unwrap();
+            assert_eq!(serde_json::to_value(restored).unwrap(), expected);
+            assert_eq!(fs::read(paths.config.join("settings.json")).unwrap(), bytes);
+        }
+        let mut invalid_edit = ordinary;
+        invalid_edit.local_processing.endpoint = "http://localhost:1234/v1".into();
+        assert!(paths.save(&invalid_edit).is_err());
         fs::remove_dir_all(paths.config).unwrap();
     }
 }

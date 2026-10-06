@@ -30,6 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settings = SettingsWindowController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if CommandLine.arguments.contains("--local-processing-smoke-test") {
+            LocalProcessingSmokeTest.run()
+            return
+        }
         let state = AppState.shared
         state.openSettings = { [weak self] tab in self?.showSettings(tab) }
 

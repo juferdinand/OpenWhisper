@@ -144,6 +144,13 @@ jobs:
           build/OpenWhisper.app/Contents/MacOS/OpenWhisper --ui-smoke-test
           build/OpenWhisper.app/Contents/MacOS/OpenWhisper --overlay-smoke-test
 
+      - name: Test native model communication from the bundled app
+        timeout-minutes: 1
+        working-directory: macos
+        env:
+          WF_LOCAL_PROCESSING_FIXTURE: ${{ github.workspace }}/shared/tests/local-processing-server.py
+        run: build/OpenWhisper.app/Contents/MacOS/OpenWhisper --local-processing-smoke-test
+
       - name: Clean up keychain
         if: always()
         run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true

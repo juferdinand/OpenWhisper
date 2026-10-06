@@ -15,6 +15,7 @@ enum Prefs {
     static let overlayOrigin = "overlayOrigin"
     static let setupShown = "setupShown"
     static let setupCompleted = "setupCompleted"
+    static let localProcessing = "localProcessing"
     static let uiLanguage = "uiLanguage"
     static let autoCheckUpdates = "autoCheckUpdates"
 
