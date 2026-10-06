@@ -126,6 +126,11 @@ def main():
     result = None
     command_process = None
 
+    def interrupted(signum, _frame):
+        nonlocal result
+        result = 128 + signum
+        raise SystemExit(result)
+
     def start(name, values, pipe=False):
         log = (root / (name + ".log")).open("w")
         logs.append(log)
@@ -152,6 +157,9 @@ def main():
             time.sleep(0.1)
 
     try:
+        # Keep interruption inside this cleanup scope, including before any child starts.
+        signal.signal(signal.SIGTERM, interrupted)
+        signal.signal(signal.SIGINT, interrupted)
         display = start("xvfb", ["Xvfb", "-displayfd", "1", "-screen", "0", "1280x800x24", "-nolisten", "tcp"], True)
         number = line(display)
         if not number.isdigit():
@@ -210,6 +218,9 @@ def main():
         print(("PASS" if result == 0 else "FAIL") + ": owned " + args.session + " command, exit " + str(result), flush=True)
         return result
     finally:
+        # A second interrupt must not interrupt cleanup of the owned processes.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         # Stop the owned service/command groups. test-session.py cleans its separate app group.
         for process in reversed(processes):
             try:

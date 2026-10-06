@@ -205,6 +205,7 @@ The built acceptance image ID was
 | Debian 13 package removal preserves private settings/history/model storage | PASS | Settings/history SHA-256 and model-link checks after APT removal; `debian13-accepted.log` |
 | Live-session guards | PASS | Three unsafe combinations reject before desktop/audio tools; `isolation-guards.log` |
 | Harness timeout cleanup | PASS | Expected exit 124; owned application groups disappeared and runtime was removed; `timeout-cleanup-check.log` |
+| Harness interruption cleanup | PASS | SIGTERM/SIGINT during owned capture preserve exit 143/130; app/service groups and private runtime disappear; `harness-interruption-final.log` |
 | Earlier harness attempts | FAIL, superseded | Stale AT-SPI objects after restart, shallow container script path, missing `at-spi2-core` / `libglib2.0-bin`, language switch's toggle-button role; corrected harnesses were rerun |
 | GNOME, wlroots, target-distribution Wayland portals, signed update/restart and physical devices | SKIP | Not exercised by these owned checks |
 | Full session login/autostart, tray acceptance, real shortcut/hold edges, portal denial, XWayland paste and target-field focus | MANUAL REQUIRED | Run the supervised checklist below; no desktop-support claim follows from the owned overlay's unfocused accessibility button |
@@ -344,6 +345,7 @@ Use a new output directory for each run:
 
 ```bash
 python3 linux/tests/test-owned-session-guards.py
+python3 linux/tests/test-owned-session-interruption.py
 python3 linux/scripts/run-owned-desktop.py --session x11 \
   --output .local/acceptance-review-x11 -- \
   python3 linux/scripts/test-session.py --owned --recovery
@@ -352,8 +354,10 @@ python3 linux/scripts/run-owned-desktop.py --session kde-wayland \
   python3 linux/scripts/test-session.py --owned --recovery
 ```
 
-The default duration remains 126 seconds. The script handles SIGTERM so a harness timeout
-still stops its separate application process group and unloads its virtual sink.
+The default duration remains 126 seconds. The session script handles SIGTERM so a harness
+timeout still stops its separate application process group and unloads its virtual sink.
+The harness handles SIGTERM/SIGINT within its cleanup scope, including during service startup,
+and preserves exit 143/130 while stopping its owned services and removing the private runtime.
 `--recovery` replaces only the test's private model
 link with an invalid disposable model, verifies its retained WAV after restart, restores the
 link and retries. Owned runs also complete onboarding through **Finish setup**, assert the
