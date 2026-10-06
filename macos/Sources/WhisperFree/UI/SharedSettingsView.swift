@@ -13,16 +13,19 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
     private var requestedTab: SettingsTab
     private var lastSnapshot: Data?
 
-    init(tab: SettingsTab) {
+    init(tab: SettingsTab, overlay: Bool = false) {
         requestedTab = tab
         root = Bundle.main.resourceURL!.appendingPathComponent("WebUI", isDirectory: true)
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.underPageBackgroundColor = .clear
         super.init()
         webView.configuration.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "whisperfree")
         webView.navigationDelegate = self
-        webView.loadFileURL(root.appendingPathComponent("index.html"), allowingReadAccessTo: root)
+        var location = URLComponents(url: root.appendingPathComponent("index.html"), resolvingAgainstBaseURL: false)!
+        if overlay { location.query = "overlay" }
+        webView.loadFileURL(location.url!, allowingReadAccessTo: root)
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.publish() }
         }
@@ -56,6 +59,23 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                     Array.from(document.fonts).some(font => font.family === 'WhisperFree Inter' && font.status === 'loaded')
                     """)
                 guard valid as? Bool == true else { throw UIError.message("Shared UI did not initialize correctly") }
+                if let directory = ProcessInfo.processInfo.environment["WF_UI_SNAPSHOT_DIR"] {
+                    let folder = URL(fileURLWithPath: directory, isDirectory: true)
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    for (theme, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                        webView.window?.appearance = NSAppearance(named: appearance)
+                        for tab in SettingsTab.allCases {
+                            send("navigate", value: tab.rawValue)
+                            try await Task.sleep(nanoseconds: 300_000_000)
+                            let image = try await webView.takeSnapshot(with: nil)
+                            guard let tiff = image.tiffRepresentation,
+                                  let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else {
+                                throw UIError.message("Could not render native UI preview")
+                            }
+                            try png.write(to: folder.appendingPathComponent("macos-\(theme)-\(tab.rawValue).png"))
+                        }
+                    }
+                }
                 print("Shared UI smoke test passed: native bridge, six tabs, icon, and font loaded from the app bundle.")
                 NSApplication.shared.terminate(nil)
             } catch {
@@ -160,8 +180,9 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
         defaults.set(value.output, forKey: Prefs.outputMode)
         defaults.set(value.hold_to_record ? RecordingMode.hold.rawValue : RecordingMode.toggle.rawValue, forKey: Prefs.recordingMode)
         defaults.set(value.vocabulary, forKey: Prefs.vocabulary)
+        let wasKeepingHistory = defaults.bool(forKey: Prefs.keepHistory)
         defaults.set(value.keep_history, forKey: Prefs.keepHistory)
-        if !value.keep_history { state.clearHistory() }
+        if wasKeepingHistory && !value.keep_history { state.clearHistory() }
         for (key, enabled) in [(Prefs.restoreClipboard, value.restore_clipboard), (Prefs.playSounds, value.play_sounds),
                                (Prefs.showIdleOverlay, value.show_idle_overlay), (Prefs.autoCheckUpdates, value.auto_check_updates)] {
             if let enabled { defaults.set(enabled, forKey: key) }
@@ -210,7 +231,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
             "clipboard_available": true, "shortcut_portal": true, "paste_portal": true,
             "shortcut": HotkeyService.shared.trigger?.display as Any? ?? NSNull(), "paste_ready": Permissions.accessibilityGranted,
             "gpu_available": false, "download": download as Any? ?? NSNull(), "progress": download.flatMap { models.progress[$0] } ?? 0,
-            "elapsed": Int(state.recordingStartedAt.map { Date().timeIntervalSince($0) } ?? 0), "model_directory": models.directory.path,
+            "elapsed": Int(state.recordingStartedAt.map { Date().timeIntervalSince($0) } ?? 0), "level": state.levels.last ?? 0, "model_directory": models.directory.path,
             "macos": ["microphone_allowed": Permissions.microphone == .authorized, "recording_shortcut": HotkeyService.shared.isRecording,
                       "shortcut_hint": HotkeyService.shared.recordingHint ?? "Press a key, shortcut, or mouse button. Escape cancels.",
                       "editor": TextInjector.appName(at: TextInjector.editorURL), "recommended": ModelManager.recommendations.map { $0.model.id },

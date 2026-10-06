@@ -38,15 +38,17 @@ The app must report detected capabilities and any fallback it uses.
   Model contexts stay loaded and inference is serialized. CPU support is the baseline; GPU acceleration
   is optional and must be tested separately.
 - Captures the selected microphone locally and convert audio to 16 kHz mono. Keep recordings in
-  memory. Includes error handling, a silence threshold, cancellation before transcription, and
-  a two-minute recording limit. Microphone acceptance testing is still required.
+  memory. Includes error handling, a silence threshold and cancellation before transcription, with
+  no fixed recording duration limit. Stop or cancel explicitly when finished. Audio is held in RAM, so longer recordings use more memory. Microphone acceptance testing is still required.
 - Uses the GlobalShortcuts portal when available. Offers toggle and hold-to-record when release
   events are available. Provide clear setup and failure states rather than silently ignoring keys.
 - For automatic pasting on Wayland, request keyboard control through the RemoteDesktop portal.
   Request keyboard access only; do not request screen capture. Clipboard output remains available
   if permission is denied or the backend is unsupported. Do not require root or input-group access.
 - Tray controls remain available when the settings window is closed. The preview uses an
-  in-window recording control; a separate floating overlay is not implemented.
+  in-window recording control and the same floating recording UI as macOS. KDE and other
+  layer-shell Wayland compositors use `gtk-layer-shell` with keyboard focus disabled; X11 uses
+  a non-focusable floating window. Unsupported compositors keep the in-window control.
 - Store configuration and models in the user's XDG directories. Do not migrate or delete existing
   files without a documented migration. Avoid logging dictated text or private audio.
 - Start with local builds and development packages. Public Linux releases remain a manual action,
@@ -94,13 +96,13 @@ Install Rust/Cargo, Node.js/npm, Python 3, a C++ compiler, CMake, pkg-config, an
 CachyOS / Arch build and runtime dependencies:
 
 ```bash
-sudo pacman -S --needed rust nodejs npm base-devel cmake python curl webkit2gtk-4.1 gtk3 libappindicator-gtk3 alsa-lib pipewire-alsa wl-clipboard xclip
+sudo pacman -S --needed rust nodejs npm base-devel cmake python curl webkit2gtk-4.1 gtk3 libappindicator-gtk3 alsa-lib pipewire-alsa gtk-layer-shell wl-clipboard xclip
 ```
 
 Ubuntu 22.04+ / Debian build dependencies (desktop validation is still pending):
 
 ```bash
-sudo apt install build-essential cmake pkg-config python3 curl libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev patchelf wl-clipboard xclip
+sudo apt install build-essential cmake pkg-config python3 curl libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libgtk-layer-shell0 patchelf wl-clipboard xclip
 ```
 
 Install a current Rust toolchain and Node.js separately if the distribution packages are too old.
@@ -142,7 +144,9 @@ Portal setup is session-scoped in this preview; enable it again after restarting
 If your desktop lacks a portal, keep using the Record button and clipboard output. No root,
 `input` group membership, `evdev`, or `uinput` access is required. The app never disables Wayland
 security controls. Linux automatic updates, custom model import, clipboard restoration, text
-editor output, start/stop sounds, autostart, and the floating overlay are not implemented yet.
+editor output, start/stop sounds, and autostart are not implemented yet. The floating indicator
+requires `gtk-layer-shell` on a Wayland compositor supporting layer-shell; GNOME does not
+provide that protocol. Its availability is shown in General.
 
 ## Data storage
 

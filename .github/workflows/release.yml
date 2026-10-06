@@ -122,6 +122,11 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Smoke test shared UI
+        timeout-minutes: 2
+        working-directory: macos
+        run: build/WhisperFree.app/Contents/MacOS/WhisperFree --ui-smoke-test
+
       - name: Push and publish release
         env:
           GH_TOKEN: ${{ github.token }}

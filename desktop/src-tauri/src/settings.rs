@@ -19,6 +19,7 @@ pub struct Preferences {
     pub hold_to_record: bool,
     pub gpu: bool,
     pub keep_history: bool,
+    pub show_idle_overlay: bool,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -32,6 +33,7 @@ impl Default for Preferences {
             hold_to_record: false,
             gpu: false,
             keep_history: true,
+            show_idle_overlay: false,
         }
     }
 }

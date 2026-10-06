@@ -62,9 +62,11 @@ interface State {
   shortcut: string | null;
   paste_ready: boolean;
   gpu_available: boolean;
+  overlay_available?: boolean;
   download: string | null;
   progress: number;
   elapsed: number;
+  level?: number;
   model_directory: string;
 }
 type Tab = "setup" | "general" | "models" | "snippets" | "history" | "about";
@@ -74,6 +76,8 @@ let dirty = false;
 let portalBusy = false;
 let contentKey = "";
 const app = document.querySelector<HTMLDivElement>("#app")!;
+const overlay = new URLSearchParams(location.search).has("overlay");
+document.documentElement.classList.toggle("overlay", overlay);
 const esc = (text: string) =>
   text.replace(
     /[&<>"']/g,
@@ -155,7 +159,20 @@ async function preference(name: string, value: unknown) {
   });
 }
 
-app.innerHTML = `<aside><nav aria-label="Settings">${tabs.map(([id, title, path]) => `<button data-tab="${id}">${symbol(path)}<span>${title}</span></button>`).join("")}</nav></aside><main><div id="notice" role="alert" hidden></div><div id="content"></div></main><div id="record-control"></div>`;
+const microphoneIcon =
+  "M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0V5M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8";
+const pageDescriptions: Record<Tab, string> = {
+  setup: "A few small steps. Then just speak your mind.",
+  general: "Choose how you record and where your words go.",
+  models: "Find the right balance of speed, size, and accuracy.",
+  snippets: "Turn a few spoken words into something longer.",
+  history: "Your recent words, saved only on this device.",
+  about: "A little more freedom for your voice.",
+};
+app.innerHTML = `<aside><div class="sidebar-brand"><img src="./app-icon.png" width="38" height="38" alt=""><div><strong>WhisperFree</strong><span>Make yourself heard.</span></div></div><div class="nav-caption">WORKSPACE</div><nav aria-label="Settings">${tabs.map(([id, title, path]) => `<button data-tab="${id}">${symbol(path)}<span>${title}</span></button>`).join("")}</nav><div class="sidebar-foot">${symbol("M12 3 4 6v6c0 4 4 7 8 9 4-2 8-5 8-9V6l-8-3m-4 9 3 3 5-6")}<div><strong>Private by design</strong><span>Your voice stays here.</span></div></div></aside><main><header class="page-header"><div class="page-eyebrow">YOUR SPACE, YOUR PACE</div><h1 id="page-title"></h1><p id="page-description"></p></header><div id="notice" role="alert" hidden></div><div id="content"></div></main><div id="record-control"></div>`;
+if (overlay)
+  app.innerHTML =
+    '<div id="notice" role="alert" hidden></div><div id="record-control"></div>';
 document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach(
   (b) =>
     (b.onclick = () => {
@@ -175,11 +192,10 @@ function recordControl() {
     ? `Recording · ${Math.floor(state.elapsed / 60)}:${String(state.elapsed % 60).padStart(2, "0")}`
     : busy
       ? "Transcribing …"
-      : "Click or press your shortcut";
+      : "Start dictation";
   const controls = document.querySelector<HTMLDivElement>("#record-control")!;
   if (!controls.childElementCount) {
-    controls.innerHTML =
-      '<button id="record" class="capsule"><span id="record-symbol"></span><span id="record-label"></span></button><button id="cancel" aria-label="Discard recording" hidden>×</button><span id="status" role="status"></span>';
+    controls.innerHTML = `<div class="record-status"><div class="audio-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div><strong id="status-title"></strong><span id="status" role="status"></span></div></div><div class="record-actions"><button id="cancel" aria-label="Discard recording" hidden>Cancel</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-label"></span></button></div>`;
     document
       .querySelector("#record")!
       .addEventListener("click", () => void command("toggle_recording"));
@@ -191,11 +207,21 @@ function recordControl() {
   button.disabled = busy;
   button.classList.toggle("recording", recording);
   button.title = state.message;
-  document.querySelector("#record-symbol")!.textContent = recording
-    ? "●"
+  document.querySelector("#record-symbol")!.innerHTML = symbol(
+    recording ? "M6 6h12v12H6z" : busy ? "M12 3a9 9 0 1 1-9 9" : microphoneIcon,
+  );
+  controls.dataset.status = state.status;
+  controls.style.setProperty(
+    "--voice-level",
+    String(0.2 + (state.level ?? 0) * 0.8),
+  );
+  document.querySelector("#status-title")!.textContent = recording
+    ? "Listening to you"
     : busy
-      ? "◌"
-      : "♩";
+      ? "Finding your words"
+      : state.status === "error"
+        ? "Something needs attention"
+        : "Ready when you are";
   document.querySelector("#record-label")!.textContent = text;
   document.querySelector<HTMLElement>("#cancel")!.hidden = !recording;
   document.querySelector("#status")!.textContent = state.message;
@@ -204,6 +230,7 @@ function recordControl() {
 function render() {
   if (!state) return;
   recordControl();
+  if (overlay) return;
   document
     .querySelectorAll<HTMLButtonElement>("[data-tab]")
     .forEach((b) => b.classList.toggle("selected", b.dataset.tab === tab));
@@ -229,6 +256,20 @@ function render() {
   ]);
   if (contentKey === nextKey) return;
   contentKey = nextKey;
+  document.querySelector("#page-title")!.textContent = tabs.find(
+    ([id]) => id === tab,
+  )![1];
+  document.querySelector("#page-description")!.textContent =
+    pageDescriptions[tab];
+  document.querySelector<HTMLElement>(".page-header")!.hidden = tab === "about";
+  document
+    .querySelectorAll("[data-tab]")
+    .forEach((button) =>
+      button.setAttribute(
+        "aria-current",
+        button.getAttribute("data-tab") === tab ? "page" : "false",
+      ),
+    );
   const content = document.querySelector<HTMLDivElement>("#content")!;
   const p = state.preferences;
   if (tab === "setup") {
@@ -363,10 +404,20 @@ function render() {
               !!p.show_idle_overlay,
             ) +
               toggle("Launch at login", "launch_at_login", !!p.launch_at_login)
-          : row(
-              "Desktop",
-              `<span class="secondary">${esc(state.desktop)} · ${esc(state.session)}</span>`,
-            ) +
+          : (state.overlay_available
+              ? toggle(
+                  "Show overlay when idle",
+                  "show_idle_overlay",
+                  !!p.show_idle_overlay,
+                )
+              : row(
+                  "Floating recording indicator",
+                  '<span class="warning">Not supported by this desktop</span>',
+                )) +
+              row(
+                "Desktop",
+                `<span class="secondary">${esc(state.desktop)} · ${esc(state.session)}</span>`,
+              ) +
               row(
                 "Clipboard helper",
                 state.clipboard_available
@@ -386,7 +437,7 @@ function render() {
                 : row("Recognition", "CPU")),
         isMac()
           ? ""
-          : "A floating overlay and launch at login are still planned for Linux. Recording stops automatically after two minutes.",
+          : "There is no fixed recording limit. Stop or cancel when you are finished. Launch at login is not yet available on Linux.",
       );
     const vocabulary =
       document.querySelector<HTMLTextAreaElement>("#vocabulary")!;
@@ -412,7 +463,7 @@ function render() {
       const installed = state.installed.includes(m.id),
         selected = p.model === m.id && installed,
         downloading = state.download === m.id;
-      return `<div class="model-row"><button class="model-radio" aria-label="Use ${esc(m.title)}" data-select="${esc(m.id)}" ${!installed ? "disabled" : ""}>${selected ? "◉" : "○"}</button><div class="model-description"><strong>${esc(m.title)}</strong>${(isMac() ? state.macos!.recommended.includes(m.id) : m.id === "base") ? '<span class="recommendation">Recommended</span>' : ""}<p>${esc(m.size)} · ${esc(m.note)}</p></div><div class="model-buttons">${downloading ? `<progress aria-label="Download progress" value="${state.progress}" max="1"></progress><button data-cancel-download>Cancel</button>` : installed ? `${selected ? '<span class="success">Active</span>' : `<button data-select="${esc(m.id)}">Use</button>`}` : `<button data-download="${esc(m.id)}" ${state.download ? "disabled" : ""}>Download</button>`}${installed && isMac() ? `<button data-delete="${esc(m.id)}" aria-label="Delete ${esc(m.title)}" class="destructive">×</button>` : ""}</div></div>`;
+      return `<div class="model-row ${selected ? "active-model" : ""}"><button class="model-radio" aria-label="Use ${esc(m.title)}" aria-pressed="${selected}" data-select="${esc(m.id)}" ${!installed ? "disabled" : ""}><span></span></button><div class="model-description"><strong>${esc(m.title)}</strong>${(isMac() ? state.macos!.recommended.includes(m.id) : m.id === "base") ? '<span class="recommendation">Recommended</span>' : ""}<p>${esc(m.size)} · ${esc(m.note)}</p></div><div class="model-buttons">${downloading ? `<progress aria-label="Download progress" value="${state.progress}" max="1"></progress><button data-cancel-download>Cancel</button>` : installed ? `${selected ? '<span class="success">Active</span>' : `<button data-select="${esc(m.id)}">Use</button>`}` : `<button data-download="${esc(m.id)}" ${state.download ? "disabled" : ""}>Download</button>`}${installed && isMac() ? `<button data-delete="${esc(m.id)}" aria-label="Delete ${esc(m.title)}" class="destructive">×</button>` : ""}</div></div>`;
     };
     content.innerHTML =
       section(
@@ -533,7 +584,7 @@ function render() {
                   `<div class="history-row"><p>${esc(text)}</p><button data-copy="${i}" aria-label="Copy dictation">Copy</button></div>`,
               )
               .join("")
-          : '<p class="secondary">No dictations yet.</p>',
+          : `<div class="empty-state">${symbol(microphoneIcon)}<strong>Your next thought belongs here.</strong><p>Start a dictation and your words will appear here.</p></div>`,
       ) +
       (!p.keep_history && state.transcript
         ? section(
@@ -565,10 +616,10 @@ function render() {
     content.innerHTML =
       section(
         "",
-        '<div class="about-brand"><img src="./app-icon.png" width="64" height="64" alt="WhisperFree app icon"><div><h1>WhisperFree</h1><p class="secondary">Version ' +
+        '<div class="about-brand"><img src="./app-icon.png" width="88" height="88" alt="WhisperFree app icon"><div><span class="page-eyebrow">LESS TYPING. MORE YOU.</span><h1>WhisperFree</h1><p class="version-badge">Version ' +
           esc(state.version) +
           (isMac() ? "" : " · Linux preview") +
-          '</p></div></div><p>Dictate into any app. Fully local, free, and open source (MIT).</p><p class="secondary">Speech recognition: whisper.cpp (MIT) with OpenAI Whisper and NVIDIA Parakeet models.</p>',
+          '</p></div></div><p class="about-intro">A little more freedom for your voice.</p><p class="secondary">Turn your thoughts into text, right on your computer.</p><div class="about-values"><span>On-device recognition</span><span>No subscription</span><span>Open source · MIT</span></div><p class="engine-credit">Powered by whisper.cpp, OpenAI Whisper, and NVIDIA Parakeet.</p>',
       ) +
       section(
         "Updates",

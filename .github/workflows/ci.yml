@@ -28,7 +28,7 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev patchelf cmake ninja-build ffmpeg
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libgtk-layer-shell0 patchelf cmake ninja-build ffmpeg xvfb dbus-x11
           rustup toolchain install 1.99.0 --profile minimal --component rustfmt,clippy
           rustup default 1.99.0
       - name: Cache native source and test model
@@ -61,6 +61,12 @@ jobs:
           dpkg-deb --info target/release/bundle/deb/*.deb
           cd target/release/bundle
           sha256sum deb/*.deb appimage/*.AppImage > SHA256SUMS
+      - name: Smoke test the shared UI in native WebKitGTK
+        timeout-minutes: 2
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/whisperfree-ui/config
+          XDG_DATA_HOME: ${{ runner.temp }}/whisperfree-ui/data
+        run: dbus-run-session -- xvfb-run -a target/release/whisperfree-desktop --ui-smoke-test
       - name: Upload Linux development packages
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -70,6 +76,12 @@ jobs:
             desktop/target/release/bundle/appimage/*.AppImage
             desktop/target/release/bundle/SHA256SUMS
           if-no-files-found: error
+          retention-days: 14
+      - name: Upload shared UI previews
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: WhisperFree-shared-UI-${{ github.sha }}
+          path: desktop/test-results/*.png
           retention-days: 14
   macos:
     runs-on: macos-15
@@ -104,7 +116,17 @@ jobs:
 
       - name: Smoke test the shared UI in native WebKit
         timeout-minutes: 2
+        env:
+          WF_UI_SNAPSHOT_DIR: ${{ github.workspace }}/macos/build/ui-previews
         run: build/WhisperFree.app/Contents/MacOS/WhisperFree --ui-smoke-test
+
+      - name: Upload native macOS UI previews
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: WhisperFree-native-macOS-UI-${{ github.sha }}
+          path: macos/build/ui-previews/*.png
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload macOS package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

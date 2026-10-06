@@ -128,5 +128,5 @@ for key continuity and a future Developer ID migration; changing identities requ
 ## Future work
 
 - Apple Developer ID signing and notarization.
-- Linux desktop acceptance, installation tests, overlay, and GPU validation; Windows implementation.
+- Linux desktop acceptance, installation tests, compositor coverage, and GPU validation; Windows implementation.
 - Keep shared UI changes common to both hosts while retaining platform-specific permissions and services.

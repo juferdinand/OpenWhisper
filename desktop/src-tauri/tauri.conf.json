@@ -15,10 +15,10 @@
       {
         "label": "main",
         "title": "WhisperFree",
-        "width": 720,
-        "height": 520,
-        "minWidth": 680,
-        "minHeight": 460
+        "width": 960,
+        "height": 680,
+        "minWidth": 800,
+        "minHeight": 560
       }
     ],
     "security": {
@@ -27,14 +27,20 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "appimage"],
+    "targets": [
+      "deb",
+      "appimage"
+    ],
     "category": "Utility",
     "shortDescription": "Free, local dictation for Linux",
     "longDescription": "Private, local dictation with Whisper and Parakeet. No account or subscription.",
-    "icon": ["icons/icon.png"],
+    "icon": [
+      "icons/icon.png"
+    ],
     "resources": {
       "../../LICENSE": "LICENSE",
-      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "../public/fonts/LICENSE.txt": "Inter-LICENSE.txt"
     },
     "linux": {
       "deb": {
@@ -42,6 +48,7 @@
           "libwebkit2gtk-4.1-0",
           "libgtk-3-0",
           "libasound2",
+          "libgtk-layer-shell0",
           "wl-clipboard",
           "xclip"
         ]

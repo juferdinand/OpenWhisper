@@ -41,12 +41,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             let view = SharedSettingsView(tab: tab)
             sharedView = view
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                contentRect: NSRect(x: 0, y: 0, width: 960, height: 680),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
                 backing: .buffered,
                 defer: false
             )
             window.title = "WhisperFree"
+            window.contentMinSize = NSSize(width: 800, height: 560)
             window.contentView = view.webView
             window.isReleasedWhenClosed = false
             window.delegate = self

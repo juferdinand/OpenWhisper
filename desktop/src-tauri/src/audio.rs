@@ -2,8 +2,6 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rubato::{FftFixedInOut, Resampler};
 use std::sync::{Arc, Mutex};
 
-pub const MAX_SECONDS: usize = 120;
-
 pub fn devices() -> Result<Vec<String>, String> {
     Ok(cpal::default_host()
         .input_devices()
@@ -20,6 +18,14 @@ pub struct Capture {
 }
 
 impl Capture {
+    pub fn level(&self) -> f32 {
+        let samples = self.samples.lock().unwrap();
+        let tail = &samples[samples.len().saturating_sub(self.rate as usize / 20)..];
+        (tail.iter().map(|v| v * v).sum::<f32>() / tail.len().max(1) as f32)
+            .sqrt()
+            .mul_add(8.0, 0.0)
+            .clamp(0.0, 1.0)
+    }
     pub fn start(name: &str) -> Result<Self, String> {
         let host = cpal::default_host();
         let device = if name.is_empty() {
@@ -79,14 +85,12 @@ fn input<T: cpal::SizedSample>(
 where
     f32: cpal::FromSample<T>,
 {
-    let maximum = config.sample_rate.0 as usize * MAX_SECONDS;
     device
         .build_input_stream(
             config,
             move |data: &[T], _| {
                 let mut buffer = samples.lock().unwrap();
-                let remaining = maximum.saturating_sub(buffer.len());
-                for frame in data.chunks_exact(channels).take(remaining) {
+                for frame in data.chunks_exact(channels) {
                     let value =
                         frame.iter().map(|v| v.to_sample::<f32>()).sum::<f32>() / channels as f32;
                     buffer.push(if value.is_finite() {

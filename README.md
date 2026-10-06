@@ -57,7 +57,7 @@ in [docs/LINUX.md](docs/LINUX.md).
 - **Local speech recognition:** OpenAI Whisper and NVIDIA Parakeet through [whisper.cpp](https://github.com/ggml-org/whisper.cpp), with Metal support on Apple Silicon.
 - **Model management:** Download, switch, delete, or import compatible custom ggml models. The app suggests models based on your hardware and system language.
 - **Vocabulary and snippets:** Correct custom terms and replace spoken phrases with saved text, such as “my link” with a URL.
-- **Floating overlay:** Recording level, timer, and processing status; draggable without taking focus away from your text field.
+- **Floating overlay:** A shared recording level, timer, stop/cancel controls, and processing status. It stays above your work without taking keyboard focus. Linux requires a compatible compositor; see the support matrix.
 - **Everyday settings:** Launch at login, optional sound cues, clipboard restoration, and a local text history you can disable.
 
 ## Requirements

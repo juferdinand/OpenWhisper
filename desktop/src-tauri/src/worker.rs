@@ -33,10 +33,8 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
         let should_toggle = matches!(command, Some(WorkerCommand::Toggle))
             || matches!(command, Some(WorkerCommand::ShortcutPressed))
                 && (!prefs.hold_to_record || recording.is_none());
-        let should_stop = recording
-            .as_ref()
-            .is_some_and(|(_, start, _)| start.elapsed().as_secs() >= audio::MAX_SECONDS as u64)
-            || matches!(command, Some(WorkerCommand::ShortcutReleased)) && prefs.hold_to_record;
+        let should_stop =
+            matches!(command, Some(WorkerCommand::ShortcutReleased)) && prefs.hold_to_record;
         if recording.is_none() && should_toggle {
             let model = catalog().into_iter().find(|m| m.id == prefs.model).unwrap();
             if !runtime.paths.models.join(model.file).is_file() {
@@ -131,8 +129,11 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
             }
             // Ignore shortcut repeats queued during inference.
             while commands.try_recv().is_ok() {}
-        } else if let Some((_, start, _)) = &recording {
-            runtime.update(|s| s.elapsed = start.elapsed().as_secs());
+        } else if let Some((capture, start, _)) = &recording {
+            runtime.update(|s| {
+                s.elapsed = start.elapsed().as_secs();
+                s.level = capture.level();
+            });
         }
     }
 }

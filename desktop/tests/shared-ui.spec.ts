@@ -201,6 +201,67 @@ for (const platform of ["linux", "macos"] as const) {
   });
 }
 
+for (const platform of ["linux", "macos"] as const) {
+  for (const theme of ["light", "dark"] as const) {
+    test(`${platform}: all ${theme} views fit the normal and minimum window`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: theme });
+      await start(page, platform);
+      for (const width of [960, 800]) {
+        await page.setViewportSize({
+          width,
+          height: width === 960 ? 680 : 560,
+        });
+        for (const tab of [
+          "Setup",
+          "General",
+          "Models",
+          "Snippets",
+          "History",
+          "About",
+        ]) {
+          await page.getByRole("button", { name: tab, exact: true }).click();
+          await expect(page.locator("nav .selected")).toHaveText(tab);
+          expect(
+            await page
+              .locator("main")
+              .evaluate((el) => el.scrollWidth <= el.clientWidth),
+          ).toBe(true);
+          await expect(
+            page.getByRole("button", { name: "Start dictation", exact: true }),
+          ).toBeInViewport();
+          if (width === 960)
+            await page.screenshot({
+              path: `test-results/${platform}-${theme}-${tab.toLowerCase()}.png`,
+            });
+        }
+      }
+    });
+  }
+}
+
+test("both native adapters render an identical navigation and recording bar", async ({
+  browser,
+}) => {
+  const pages = await Promise.all([browser.newPage(), browser.newPage()]);
+  await Promise.all(
+    pages.map(async (page, index) => {
+      await page.setViewportSize({ width: 960, height: 680 });
+      await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+      await start(page, index === 0 ? "linux" : "macos");
+      await page.evaluate(() => document.fonts.ready);
+    }),
+  );
+  for (const selector of ["aside", "#record-control", ".page-header"]) {
+    const images = await Promise.all(
+      pages.map((page) => page.locator(selector).screenshot()),
+    );
+    expect(images[0].equals(images[1]), selector).toBe(true);
+  }
+  await Promise.all(pages.map((page) => page.close()));
+});
+
 test("macOS retains native trigger capture, model import, and update actions", async ({
   page,
 }) => {

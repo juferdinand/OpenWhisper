@@ -1,7 +1,9 @@
 mod audio;
 mod integration;
 mod models;
+mod overlay;
 mod settings;
+mod smoke;
 mod worker;
 
 use serde::Serialize;
@@ -33,9 +35,11 @@ struct Snapshot {
     shortcut: Option<String>,
     paste_ready: bool,
     gpu_available: bool,
+    overlay_available: bool,
     download: Option<String>,
     progress: f64,
     elapsed: u64,
+    level: f32,
     model_directory: String,
 }
 
@@ -63,6 +67,11 @@ impl Runtime {
             change(&mut state);
             state.clone()
         };
+        overlay::update(
+            &self.app,
+            &snapshot.status,
+            snapshot.preferences.show_idle_overlay,
+        );
         let _ = self.app.emit("state", snapshot);
     }
     fn error(&self, error: String) {
@@ -116,6 +125,11 @@ fn save_settings(
     state.message = "Settings saved on this device.".into();
     let snapshot = state.clone();
     drop(state);
+    overlay::update(
+        &runtime.app,
+        &snapshot.status,
+        snapshot.preferences.show_idle_overlay,
+    );
     let _ = runtime.app.emit("state", snapshot);
     Ok(())
 }
@@ -185,6 +199,8 @@ async fn disable_paste(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), St
 }
 
 fn main() {
+    gtk::glib::set_prgname(Some("io.github.whisperfree"));
+    gtk::glib::set_application_name("WhisperFree");
     // WebKitGTK's DMABUF path can disconnect NVIDIA clients from KWin (WebKit bug 324551).
     // Set this before GTK or any worker starts; leave an explicit user override intact.
     if integration::wayland()
@@ -232,9 +248,43 @@ fn main() {
             enable_paste,
             disable_paste,
             models::download_model,
-            models::cancel_download
+            models::cancel_download,
+            smoke::complete
         ])
+        .on_page_load(|webview, payload| {
+            if smoke::enabled()
+                && webview.label() == "main"
+                && payload.event() == tauri::webview::PageLoadEvent::Finished
+            {
+                let _ = webview.eval(include_str!("../../tests/native-smoke.js"));
+            }
+        })
         .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                use gtk::prelude::*;
+                let native = window.gtk_window()?;
+                native.set_icon_name(Some("io.github.whisperfree"));
+                if let Some(application) = native.application() {
+                    // A launcher activation must also reopen a window previously hidden to the tray.
+                    application.connect_activate(move |_| {
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        native.present();
+                    });
+                }
+            }
+            if smoke::enabled() {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(30));
+                    eprintln!("Native UI smoke test timed out");
+                    handle.exit(1);
+                });
+            }
+            let overlay_available = overlay::create(app).unwrap_or_else(|error| {
+                eprintln!("Floating recording indicator unavailable: {error}");
+                false
+            });
             let paths = Paths::new()?;
             let (preferences, message) = match paths.load() {
                 Ok(p) => (p, "Choose a model, then make yourself heard.".into()),
@@ -281,9 +331,11 @@ fn main() {
                     shortcut: None,
                     paste_ready: false,
                     gpu_available: cfg!(feature = "vulkan"),
+                    overlay_available,
                     download: None,
                     progress: 0.0,
                     elapsed: 0,
+                    level: 0.0,
                     model_directory: paths.models.to_string_lossy().into_owned(),
                 }),
                 app: app.handle().clone(),

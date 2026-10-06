@@ -27,7 +27,7 @@ and platform-specific permission dialogs are controlled by the operating system.
 | Automatic insertion | Clipboard and CGEvent | Clipboard and keyboard-only RemoteDesktop portal session |
 | Clipboard helper | NSPasteboard | `wl-copy` on Wayland, `xclip` on X11 |
 | Background operation | Menu bar app | AppIndicator tray when the desktop displays it |
-| Overlay | Non-activating NSPanel | In-window control; floating overlay still planned |
+| Overlay | Non-activating NSPanel | Shared floating UI; non-focusable layer-shell on compatible Wayland compositors, floating window on X11 |
 | GPU | Metal | Optional, unverified Vulkan build; CPU is the tested baseline |
 | Updates | Release ZIP with signing-identity verification | No updater yet |
 
@@ -40,7 +40,7 @@ availability alone is not a successful permission or insertion test. See the [su
 1. Complete microphone, permission, shortcut, and insertion tests on CachyOS / KDE Wayland.
 2. Verify packaging and installation on Ubuntu / Debian and Arch-family systems.
 3. Test GNOME, Fedora KDE, and X11 independently; add a native X11 fallback if needed.
-4. Evaluate a Wayland-compatible non-activating overlay, GPU builds, and signed Linux updates.
+4. Validate the floating recording indicator on more compositors, GPU builds, and signed Linux updates.
 5. Implement Windows-specific audio, shortcuts, insertion, packaging, and update verification.
 
 Public Linux releases remain manual and separate from development artifacts. The public macOS
