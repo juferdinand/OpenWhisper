@@ -1,5 +1,7 @@
 # Release signing
 
+The macOS and Linux release identities are separate.
+
 ## Current decision
 
 As of 2026-10-05, WhisperFree uses a persistent, self-signed code-signing certificate for its
@@ -92,3 +94,26 @@ When the project chooses to fund an Apple Developer Program membership:
 
 Apple documents [membership fees](https://developer.apple.com/programs/enroll/) and
 [Developer ID certificates](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/).
+
+## Linux update signatures
+
+Starting with 0.2.1, Linux releases use a persistent Minisign/Ed25519 identity managed by Tauri.
+The public key is embedded in `desktop/src-tauri/tauri.conf.json`. The encrypted private key and
+password are configured as `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+in GitHub Actions. Protected local backups are under the ignored `.local/linux-update-signing/`.
+Never commit, print, upload as an artifact, or casually replace these secrets.
+
+`prepare-linux-update.py` signs the final AppImage and Debian assets with `--app-version`, verifies
+each package against the embedded public key and exact version, and writes `latest.json`.
+`requireSignedVersion` is mandatory: the updater rejects signatures without a signed version and
+rejects an older signed payload presented as a newer release. Source, tag, filename, package identity,
+and increasing version checks are additional constraints, not replacements for signature verification.
+Regression tests exercise modified packages, foreign keys, malformed signatures, missing signed
+versions, and version replay. Ordinary CI does not receive the release key or enable installation.
+
+AppImage installation replaces the file in place using Tauri's installer. Debian installation checks
+package metadata, then asks the system authentication agent to run `dpkg`; WhisperFree does not
+collect administrator passwords. Both paths restart after successful installation. A signature verifies
+origin relative to the embedded key and integrity, not the absence of vulnerabilities. The first download
+still depends on trusting the official release source. Losing or changing this key requires an explicit
+updater migration or manual installation; preserve it across releases.

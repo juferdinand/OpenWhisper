@@ -7,20 +7,26 @@ const catalog = JSON.parse(
   readFileSync(resolve("../shared/models.json"), "utf8"),
 ).models;
 
-async function start(page: Page, platform: "linux" | "macos", overlay = false) {
+async function start(page: Page, platform: "linux" | "macos", overlay = false, fresh = false) {
+  let savedPreferences: unknown = null;
+  await page.exposeBinding("loadTestPreferences", () => savedPreferences);
+  await page.exposeBinding("saveTestPreferences", (_, preferences) => { savedPreferences = preferences; });
   await page.addInitScript(
-    ({ platform, models, overlay }) => {
+    ({ platform, models, overlay, fresh }) => {
       const host = window as any;
       host.__WHISPERFREE_OVERLAY__ = platform === "macos" && overlay;
       host.calls = [];
       const state: any = {
         platform,
+        updates: { configured: true, status: "idle", version: null, progress: 0, error: null, package: platform === "linux" ? "appimage" : "macos" },
         version: "0.1.2",
         status: "idle",
         message: "Ready to dictate",
         transcript: "",
         history: [],
         preferences: {
+          ui_language: "en",
+          setup_completed: !fresh,
           model: "base",
           language: "en",
           microphone: "",
@@ -83,8 +89,16 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false) {
           return 1;
         }
         host.calls.push({ command, args });
-        if (command === "get_state") return JSON.parse(JSON.stringify(state));
+        if (command === "get_state") {
+          const saved = await host.loadTestPreferences();
+          if (saved) state.preferences = saved;
+          return JSON.parse(JSON.stringify(state));
+        }
         if (command === "save_settings") state.preferences = args.preferences;
+        if (command === "complete_setup") state.preferences.setup_completed = true;
+        if (command === "save_settings" || command === "complete_setup") await host.saveTestPreferences(state.preferences);
+        if (command === "check_updates") Object.assign(state.updates, { status: "available", version: "0.2.2" });
+        if (command === "install_update") state.updates.status = "downloading";
         if (command === "enable_shortcut")
           state.macos.recording_shortcut = true;
         if (command === "cancel_shortcut")
@@ -113,7 +127,7 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false) {
           unregisterCallback: (id: number) => callbacks.delete(id),
         };
     },
-    { platform, models: catalog, overlay },
+    { platform, models: catalog, overlay, fresh },
   );
   await page.goto(
     pathToFileURL(resolve("dist/index.html")).href +
@@ -124,7 +138,7 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false) {
     return;
   }
   await expect(
-    page.getByRole("heading", { name: "Recording", exact: true }),
+    page.getByRole("heading", { name: fresh ? "Get started in six steps" : "Recording", exact: true }),
   ).toBeVisible();
 }
 
@@ -168,7 +182,6 @@ for (const platform of ["linux", "macos"] as const) {
     page.on("pageerror", (error) => errors.push(error.message));
     await start(page, platform);
     await expect(page.locator("nav button")).toHaveText([
-      "Setup",
       "General",
       "Models",
       "Snippets",
@@ -254,7 +267,6 @@ for (const platform of ["linux", "macos"] as const) {
           height: width === 960 ? 680 : 560,
         });
         for (const tab of [
-          "Setup",
           "General",
           "Models",
           "Snippets",
@@ -330,3 +342,60 @@ test("macOS retains native trigger capture, model import, and update actions", a
     ]),
   );
 });
+
+for (const platform of ["linux", "macos"] as const) {
+  test(`${platform}: interface language persists without changing recognition language or user text`, async ({ page }) => {
+    await start(page, platform);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.testState.history = ["Recording", "<script>private text</script>"];
+      w.publishState();
+    });
+    await page.getByRole("button", { name: "Deutsch", exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "de");
+    await expect(page.getByRole("heading", { name: "Aufnahme", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Diktat starten", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Verlauf", exact: true }).click();
+    await expect(page.locator(".history-row p")).toHaveText(["Recording", "<script>private text</script>"]);
+    expect(await page.evaluate(() => (window as any).testState.preferences.language)).toBe("en");
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("lang", "de");
+    await expect(page.getByRole("button", { name: "Einrichtung", exact: true })).toHaveCount(0);
+    await page.locator('[data-ui-language="en"]').click();
+    await expect(page.getByRole("heading", { name: "Recording", exact: true })).toBeVisible();
+  });
+  test(`${platform}: setup is shown for a fresh installation and stays hidden after completion and restart`, async ({ page }) => {
+    await start(page, platform, false, true);
+    await expect(page.getByRole("button", { name: "Setup", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Setup", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Permissions", exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Setup", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Recording", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Allow", exact: true })).toBeVisible();
+  });
+  test(`${platform}: update controls show availability and prevent recording during installation`, async ({ page }) => {
+    await start(page, platform);
+    await page.getByRole("button", { name: "About", exact: true }).click();
+    await page.getByRole("button", { name: "Check now", exact: true }).click();
+    await expect(page.getByText("Version 0.2.2 is available.")).toBeVisible();
+    await page.getByRole("button", { name: "Download & install", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Start dictation", exact: true })).toBeDisabled();
+    await expect(page.getByText("Downloading update: 0%")).toBeVisible();
+  });
+  test(`${platform}: German views fit the minimum window and translate the floating timer`, async ({ page }) => {
+    await start(page, platform, false, true);
+    await page.setViewportSize({ width: 800, height: 560 });
+    await page.locator('[data-ui-language="de"]').click();
+    for (const title of ["Einrichtung", "Allgemein", "Modelle", "Textbausteine", "Verlauf", "Über"]) {
+      await page.getByRole("button", { name: title, exact: true }).click();
+      expect(await page.locator("main").evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+      await expect(page.getByRole("button", { name: "Diktat starten", exact: true })).toBeInViewport();
+    }
+    await page.evaluate(() => { const w = window as any; w.testState.status = "recording"; w.testState.elapsed = 126; w.publishState(); });
+    await expect(page.locator("#record-label")).toHaveText("Aufnahme · 2:06");
+    await expect(page.getByRole("button", { name: "Aufnahme verwerfen" })).toBeVisible();
+    await page.screenshot({ path: `test-results/${platform}-german.png` });
+  });
+}

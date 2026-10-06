@@ -16,7 +16,7 @@
     )
       throw new Error("Native state did not reach the UI");
     const tabs = Array.from(document.querySelectorAll("nav button"));
-    if (tabs.length !== 6) throw new Error("Missing navigation");
+    if (tabs.length !== (state.preferences.setup_completed ? 5 : 6)) throw new Error("Missing navigation");
     for (const tab of tabs) {
       tab.click();
       await wait();
@@ -37,6 +37,16 @@
       )
     )
       throw new Error("Bundled branding failed to load");
+    document.querySelector('[data-ui-language="de"]').click();
+    await wait(); await wait();
+    if ((await invoke("get_state")).preferences.ui_language !== "de" || document.documentElement.lang !== "de")
+      throw new Error("Language did not persist through native IPC");
+    await invoke("complete_setup");
+    await wait();
+    if (!(await invoke("get_state")).preferences.setup_completed || document.querySelector('[data-tab="setup"]'))
+      throw new Error("Completed onboarding is still visible");
+    document.querySelector('[data-ui-language="en"]').click();
+    await wait();
     await invoke("reactivate");
     await new Promise((resolve) => setTimeout(resolve, 500));
     await invoke("get_state");

@@ -96,7 +96,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                 try await Task.sleep(nanoseconds: 500_000_000)
                 let valid = try await webView.evaluateJavaScript("""
                     document.documentElement.dataset.ready === 'true' &&
-                    document.querySelectorAll('nav button').length === 6 &&
+                    document.querySelectorAll('nav button').length >= 5 &&
                     document.querySelector('.about-brand img')?.naturalWidth === 256 &&
                     Array.from(document.fonts).some(font => font.family === 'WhisperFree Inter' && font.status === 'loaded')
                     """)
@@ -115,7 +115,20 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                         }
                     }
                 }
-                print("Shared UI smoke test passed: native bridge, six tabs, icon, and font loaded from the app bundle.")
+                try await webView.evaluateJavaScript("document.querySelector('[data-ui-language=de]').click()")
+                try await Task.sleep(nanoseconds: 500_000_000)
+                guard UserDefaults.standard.string(forKey: Prefs.uiLanguage) == "de",
+                      NativeStrings.text("Settings …") == "Einstellungen …",
+                      (try await webView.evaluateJavaScript("document.documentElement.lang")) as? String == "de" else {
+                    throw UIError.message("Interface language did not persist or native translations are missing")
+                }
+                try await webView.evaluateJavaScript("void window.webkit.messageHandlers.whisperfree.postMessage({command: 'complete_setup', args: {}})")
+                try await Task.sleep(nanoseconds: 500_000_000)
+                guard (try await webView.evaluateJavaScript("document.querySelectorAll('nav button').length")) as? Int == 5 else {
+                    throw UIError.message("Completed setup is still visible")
+                }
+                UserDefaults.standard.set("en", forKey: Prefs.uiLanguage)
+                print("Shared UI smoke test passed: native bridge, onboarding completion, language persistence, icon, and font.")
                 NSApplication.shared.terminate(nil)
             } catch {
                 fputs("Shared UI smoke test failed: \(error.localizedDescription)\n", stderr)
@@ -171,10 +184,14 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
 
     private func execute(_ command: String, args: [String: Any]) async throws -> Any {
         let state = AppState.shared
+        if UpdateService.shared.isInstalling && ["download_model", "import_model", "delete_model"].contains(command) {
+            throw UIError.message("Wait for the update installation to finish")
+        }
         switch command {
         case "get_state": return snapshot()
         case "toggle_recording": state.toggle()
         case "cancel_recording": state.cancel()
+        case "complete_setup": UserDefaults.standard.set(true, forKey: Prefs.setupCompleted)
         case "save_settings":
             guard let value = args["preferences"] else { throw UIError.message("Settings are missing") }
             let preferences = try JSONDecoder().decode(UISettings.self, from: JSONSerialization.data(withJSONObject: value))
@@ -204,7 +221,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
             else { Permissions.openMicrophoneSettings() }
         case "choose_editor":
             let panel = NSOpenPanel()
-            panel.title = "Choose a text editor"
+            panel.title = NativeStrings.text("Choose a text editor")
             panel.directoryURL = URL(fileURLWithPath: "/Applications")
             panel.allowedContentTypes = [.application]
             panel.canChooseDirectories = false
@@ -229,6 +246,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
     private func save(_ value: UISettings) throws {
         let state = AppState.shared
         guard state.models.allModels.contains(where: { $0.id == value.model }),
+              ["en", "de"].contains(value.ui_language ?? "en"),
               DictationLanguage.all.contains(where: { $0.id == value.language }),
               OutputMode(rawValue: value.output) != nil,
               value.vocabulary.utf8.count <= 8192, value.snippets.count <= 100,
@@ -239,6 +257,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
         let changedModel = state.models.selectedID != value.model
         state.models.selectedID = value.model
         let defaults = UserDefaults.standard
+        defaults.set(value.ui_language ?? "en", forKey: Prefs.uiLanguage)
         defaults.set(value.language, forKey: Prefs.language)
         defaults.set(value.output, forKey: Prefs.outputMode)
         defaults.set(value.hold_to_record ? RecordingMode.hold.rawValue : RecordingMode.toggle.rawValue, forKey: Prefs.recordingMode)
@@ -261,11 +280,13 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
         case .idle: status = "idle"; message = models.lastError ?? "Ready to dictate"
         case .recording: status = "recording"; message = "Listening. Press your trigger again to stop."
         case .transcribing: status = "transcribing"; message = "Transcribing locally …"
-        case .done(let text): status = "done"; message = text
+        case .done(let text): status = "done"; message = text == state.latestTranscript && !text.isEmpty ? "Text is ready." : text
         case .error(let text): status = "error"; message = text
         }
         let snippets = state.snippets.snippets.map { ["id": $0.id.uuidString, "trigger": $0.trigger, "expansion": $0.expansion, "enabled": $0.enabled] as [String: Any] }
         let preferences: [String: Any] = [
+            "ui_language": defaults.string(forKey: Prefs.uiLanguage) ?? "en",
+            "setup_completed": defaults.bool(forKey: Prefs.setupCompleted),
             "model": models.selectedID, "language": defaults.string(forKey: Prefs.language) ?? "auto",
             "microphone": "", "vocabulary": defaults.string(forKey: Prefs.vocabulary) ?? "", "snippets": snippets,
             "output": OutputMode.current.rawValue, "hold_to_record": defaults.string(forKey: Prefs.recordingMode) == RecordingMode.hold.rawValue,
@@ -275,18 +296,23 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
             "auto_check_updates": defaults.bool(forKey: Prefs.autoCheckUpdates),
         ]
         let download = models.progress.keys.sorted().first
-        var updateStatus = "Not checked yet."
-        var canInstall = false, updateBusy = false
+        var updateStatus = "idle"
+        var updateVersion: String? = nil
+        var updateProgress = 0.0
+        var updateError: String? = nil
         switch UpdateService.shared.status {
         case .idle: break
-        case .checking: updateStatus = "Checking for updates …"; updateBusy = true
-        case .upToDate: updateStatus = "You have the latest version."
-        case .available(let release): updateStatus = "Version \(release.version) is available."; canInstall = true
-        case .downloading(let progress): updateStatus = "Downloading update: \(Int(progress * 100))%"; updateBusy = true
-        case .installing: updateStatus = "Verifying and installing update …"; updateBusy = true
-        case .failed(let message): updateStatus = message
+        case .checking: updateStatus = "checking"
+        case .upToDate: updateStatus = "current"
+        case .available(let release): updateStatus = "available"; updateVersion = release.version
+        case .downloading(let progress): updateStatus = "downloading"; updateProgress = progress
+        case .installing: updateStatus = "installing"
+        case .failed(let message): updateStatus = "error"; updateError = message
         }
         return [
+            "updates": ["configured": UpdateService.shared.repository != nil, "status": updateStatus,
+                        "version": updateVersion as Any? ?? NSNull(), "progress": updateProgress,
+                        "error": updateError as Any? ?? NSNull(), "package": "macos"],
             "platform": "macos", "initial_tab": requestedTab.rawValue, "version": UpdateService.shared.currentVersion, "status": status, "message": message,
             "transcript": state.latestTranscript, "history": state.history, "preferences": preferences,
             "models": models.allModels.map { ["id": $0.id, "title": $0.title, "family": $0.family.rawValue, "size": $0.size, "note": $0.note] },
@@ -298,8 +324,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
             "macos": ["microphone_allowed": Permissions.microphone == .authorized, "recording_shortcut": HotkeyService.shared.isRecording,
                       "shortcut_hint": HotkeyService.shared.recordingHint ?? "Press a key, shortcut, or mouse button. Escape cancels.",
                       "editor": TextInjector.appName(at: TextInjector.editorURL), "recommended": ModelManager.recommendations.map { $0.model.id },
-                      "updates_configured": UpdateService.shared.repository != nil, "update_status": updateStatus,
-                      "can_install_update": canInstall, "update_busy": updateBusy],
+                      "updates_configured": UpdateService.shared.repository != nil],
         ]
     }
 
@@ -319,6 +344,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
 }
 
 private struct UISettings: Decodable {
+    let ui_language: String?
     let model, language, vocabulary, output: String
     let snippets: [Snippet]
     let hold_to_record, keep_history: Bool

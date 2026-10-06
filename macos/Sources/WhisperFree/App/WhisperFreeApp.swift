@@ -52,10 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state.preloadModel()
         UpdateService.shared.startAutomaticChecks()
 
-        // Show setup on first launch or while required configuration is missing.
+        // Onboarding stays completed across launches and application updates.
         let defaults = UserDefaults.standard
-        if !defaults.bool(forKey: Prefs.setupShown) || !state.models.hasAnyModel {
-            defaults.set(true, forKey: Prefs.setupShown)
+        if !defaults.bool(forKey: Prefs.setupCompleted) {
             showSettings(.setup)
         }
     }

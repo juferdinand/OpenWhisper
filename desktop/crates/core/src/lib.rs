@@ -4,6 +4,8 @@ use std::sync::LazyLock;
 use unicode_categories::UnicodeCategories;
 use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 
+pub mod updates;
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Snippet {
     #[serde(default)]

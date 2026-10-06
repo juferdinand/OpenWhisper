@@ -9,7 +9,8 @@
     "tauri": "tauri",
     "bundle:linux": "tauri build --config src-tauri/bundle.conf.json --bundles deb,appimage && python3 scripts/name-packages.py",
     "test:ui": "playwright test",
-    "format:check": "prettier --check src vite.config.ts playwright.config.ts tests"
+    "format:check": "prettier --check src vite.config.ts playwright.config.ts tests",
+    "bundle:linux:release": "tauri build --config src-tauri/bundle.conf.json --features release-updater --bundles deb,appimage && python3 scripts/name-packages.py"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0"

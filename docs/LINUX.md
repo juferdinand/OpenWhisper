@@ -15,7 +15,7 @@ on this machine, and Whisper Tiny / Parakeet v3 q4 each transcribed the pinned u
 fixture twice with one loaded context. On 2026-10-06, the full native capture pipeline was also exercised
 with a private virtual microphone, including a 126-second recording, cancellation, silence, and clipboard output.
 This avoids recording the real microphone during automated checks.
-The settings and floating recording control use the same custom UI, six-section navigation, bundled font, and original icon
+The settings and floating recording control use the same custom UI, settings navigation, bundled font, and original icon
 as macOS. Tauri hosts these assets on Linux; WKWebView hosts them on macOS.
 
 ## Compatibility targets
@@ -57,8 +57,8 @@ The app must report detected capabilities and any fallback it uses.
 - Store configuration and models in the user's XDG directories. Do not migrate or delete existing
   files without a documented migration. Avoid logging dictated text or private audio.
 - Public Linux preview packages remain a manual action after desktop acceptance,
-  with package checksums and accurate support notes. Linux auto-update needs its own verified
-  distribution design; do not reuse the macOS certificate checks as if they applied to Linux.
+  with package checksums and accurate support notes. Release builds use a separate persistent Linux
+  signing key, verified with the embedded public key and signed package version before installation.
 
 ## Validation status
 
@@ -184,7 +184,7 @@ test with a virtual source proves the capture/inference/output path, not physica
 1. In **Models**, download a model and select **Use**.
 2. In **General**, select the system default microphone and your usual language.
 3. Click the recording control, speak, and click again. Inspect the result in **History**.
-4. In **Setup**, use **Set trigger …** to request a desktop-managed shortcut.
+4. In **General**, use **Set trigger …** to request a desktop-managed shortcut.
 5. For automatic insertion, choose **Allow** keyboard access and **Paste at the cursor**.
    This requests keyboard control only. No screen capture is requested.
 6. Focus a text field in another app and try the shortcut. With clipboard output, paste manually.
@@ -192,10 +192,28 @@ test with a virtual source proves the capture/inference/output path, not physica
 Portal setup is session-scoped in this preview; enable it again after restarting the app.
 If your desktop lacks a portal, keep using the Record button and clipboard output. No root,
 `input` group membership, `evdev`, or `uinput` access is required. The app never disables Wayland
-security controls. Linux automatic updates, custom model import, clipboard restoration, text
+security controls. Linux custom model import, clipboard restoration, text
 editor output, start/stop sounds, and autostart are not implemented yet. The floating indicator
 requires `gtk-layer-shell` on a Wayland compositor supporting layer-shell; GNOME does not
 provide that protocol. Its availability is shown in General.
+
+## Updates and first-run setup
+
+From 0.2.1, release AppImages and Debian packages offer **About → Check now** and optional daily
+checks. Installation is explicit. The updater requires an exact repository/tag/asset URL, a newer
+X.Y.Z version, the embedded public key, and a matching cryptographically signed package version.
+Tampered packages, foreign signatures, and replaying an old package as a newer version are rejected.
+
+AppImages update in place and must be writable by the current user. Debian updates request system
+authorization through `pkexec /usr/bin/dpkg --install`; a cancelled prompt is not retried using another
+authentication mechanism. The Debian package name, version, and architecture are checked first.
+The Debian authorization/install path still requires desktop acceptance on a Debian/Ubuntu machine.
+Source/CI builds disable installation. Linux 0.2.0 users must install 0.2.1 manually once.
+See [release signing](SIGNING.md#linux-update-signatures) for key continuity.
+
+Use the sidebar to choose English or German independently of dictation language. Setup stays hidden
+once completed and existing settings migrate as completed. Permissions and triggers are in General.
+Updating the app preserves settings, models, snippets, and history; it does not rerun onboarding.
 
 ## Data storage
 
@@ -230,7 +248,7 @@ review them before posting diagnostics publicly.
   ALSA’s device list can include compatibility endpoints that are not physical microphones.
 - **No global shortcut:** check the GlobalShortcuts capability in **General**. The initial
   preferred combination is Ctrl+Alt+Space; the desktop chooses and manages the actual binding.
-- **No pasted text:** enable keyboard access in **Setup**, select paste output, and focus a text
+- **No pasted text:** enable keyboard access in **General**, select paste output, and focus a text
   field. Targets with a different paste binding (including many terminals) may require manual paste.
 - **Clipboard unavailable:** install `wl-clipboard` on Wayland or `xclip` on X11. You can also
   select text directly in **History**. Clipboard contents may be saved by your desktop’s clipboard manager.
@@ -254,7 +272,7 @@ all packages with combined checksums. There is no separate CI dispatch or manual
 The complete release is a draft by default so its AppImage can receive desktop acceptance before
 publication. Public preview downloads use the stable asset names
 `WhisperFree-Linux-x86_64.AppImage` and `WhisperFree-Linux-amd64.deb`; their internal version still
-matches the tag. `SHA256SUMS` covers both Linux packages and the macOS DMG/ZIP.
+matches the tag. `SHA256SUMS` covers both Linux packages, signatures, update feed, and the macOS DMG/ZIP.
 Publication as a preview does not promote untested distributions to supported status.
 
 ## References

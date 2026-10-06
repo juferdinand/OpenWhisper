@@ -14,10 +14,18 @@ enum Prefs {
     static let history = "history"
     static let overlayOrigin = "overlayOrigin"
     static let setupShown = "setupShown"
+    static let setupCompleted = "setupCompleted"
+    static let uiLanguage = "uiLanguage"
     static let autoCheckUpdates = "autoCheckUpdates"
 
     static func registerDefaults() {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: setupCompleted) == nil && defaults.bool(forKey: setupShown) {
+            defaults.set(true, forKey: setupCompleted)
+        }
         UserDefaults.standard.register(defaults: [
+            uiLanguage: "en",
+            setupCompleted: false,
             language: DictationLanguage.systemDefault,
             recordingMode: RecordingMode.toggle.rawValue,
             outputMode: OutputMode.paste.rawValue,

@@ -47,6 +47,9 @@ jobs:
   linux:
     needs: validate
     uses: ./.github/workflows/linux-build.yml
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     with:
       version: ${{ inputs.version }}
       artifact_name: WhisperFree-Linux-v${{ inputs.version }}
@@ -170,10 +173,9 @@ jobs:
           (cd .release/linux && sha256sum -c SHA256SUMS)
           mkdir -p .release/assets
           cp .release/macos/WhisperFree-macOS.dmg .release/macos/WhisperFree-macOS.zip .release/assets/
-          cp ".release/linux/appimage/WhisperFree_${VERSION}_amd64.AppImage" .release/assets/WhisperFree-Linux-x86_64.AppImage
-          cp ".release/linux/deb/WhisperFree_${VERSION}_amd64.deb" .release/assets/WhisperFree-Linux-amd64.deb
+          cp .release/linux/WhisperFree-Linux-x86_64.AppImage .release/linux/WhisperFree-Linux-x86_64.AppImage.sig .release/linux/WhisperFree-Linux-amd64.deb .release/linux/WhisperFree-Linux-amd64.deb.sig .release/linux/latest.json .release/assets/
           cd .release/assets
-          sha256sum WhisperFree-macOS.dmg WhisperFree-macOS.zip WhisperFree-Linux-x86_64.AppImage WhisperFree-Linux-amd64.deb > SHA256SUMS
+          sha256sum WhisperFree-macOS.dmg WhisperFree-macOS.zip WhisperFree-Linux-x86_64.AppImage WhisperFree-Linux-x86_64.AppImage.sig WhisperFree-Linux-amd64.deb WhisperFree-Linux-amd64.deb.sig latest.json > SHA256SUMS
           sha256sum -c SHA256SUMS
       - name: Set version, commit, and tag
         run: |
@@ -194,7 +196,7 @@ jobs:
           git push --atomic origin HEAD:refs/heads/main "refs/tags/v$VERSION"
           EXTRA_ARGS=()
           if [[ "$RELEASE_DRAFT" == "true" ]]; then EXTRA_ARGS+=(--draft); fi
-          gh release create "v$VERSION" .release/assets/WhisperFree-macOS.dmg .release/assets/WhisperFree-macOS.zip .release/assets/WhisperFree-Linux-x86_64.AppImage .release/assets/WhisperFree-Linux-amd64.deb .release/assets/SHA256SUMS \
+          gh release create "v$VERSION" .release/assets/WhisperFree-macOS.dmg .release/assets/WhisperFree-macOS.zip .release/assets/WhisperFree-Linux-x86_64.AppImage .release/assets/WhisperFree-Linux-amd64.deb .release/assets/WhisperFree-Linux-x86_64.AppImage.sig .release/assets/WhisperFree-Linux-amd64.deb.sig .release/assets/latest.json .release/assets/SHA256SUMS \
             --title "WhisperFree $VERSION" \
             --verify-tag \
             --notes-file .github/release-notes.md \

@@ -67,6 +67,10 @@ final class AppState: ObservableObject {
 
     func start() {
         guard !phase.isBusy else { return }
+        guard !UpdateService.shared.isInstalling else {
+            show(.error("Wait for the update installation to finish"))
+            return
+        }
 
         guard let modelPath = models.selectedModelPath else {
             show(.error("No model installed"))

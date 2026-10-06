@@ -152,7 +152,7 @@ nav button {
   font-size: 13px;
   font-weight: 500;
 }
-nav button:nth-child(4) {
+nav button[data-tab="snippets"] {
   margin-top: 18px;
 }
 nav button:hover:not(:disabled) {
@@ -169,12 +169,30 @@ nav button.selected {
   font-weight: 600;
 }
 .sidebar-foot {
-  margin-top: auto;
+  margin-top: 0;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 18px 9px 0;
   color: var(--secondary);
+}
+.language-switch {
+  display: flex;
+  gap: 4px;
+  margin: auto 4px 0;
+  padding-top: 16px;
+}
+.language-switch button {
+  flex: 1;
+  padding: 7px 6px;
+  font-size: 11px;
+  background: transparent;
+  color: var(--secondary);
+}
+.language-switch button[aria-pressed="true"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: transparent;
 }
 .sidebar-foot svg {
   color: var(--accent);

@@ -168,7 +168,7 @@ final class ModelManager: ObservableObject {
 
     func importModel() {
         let panel = NSOpenPanel()
-        panel.title = "Choose a ggml speech model"
+        panel.title = NativeStrings.text("Choose a ggml speech model")
         panel.allowedContentTypes = [.data]
         panel.allowsMultipleSelection = false
         NSApp.activate(ignoringOtherApps: true)

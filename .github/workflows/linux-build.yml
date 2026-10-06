@@ -2,6 +2,11 @@ name: Linux build
 
 on:
   workflow_call:
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
     inputs:
       version:
         description: Optional release version to apply before building
@@ -62,11 +67,21 @@ jobs:
           cargo fmt --all --check
           cargo test --locked --workspace
           cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo build --locked -p whisperfree-core --example verify-update
+          python3 scripts/test-update-signatures.py
           bash scripts/test-recognition.sh
       - name: Build Linux packages
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
-        run: npm run bundle:linux
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ -n "$RELEASE_VERSION" ]]; then npm run bundle:linux:release; else npm run bundle:linux; fi
+      - name: Sign and verify Linux release updates
+        if: inputs.version != ''
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: python3 scripts/prepare-linux-update.py
       - name: Verify and checksum packages
         run: |
           dpkg-deb --info target/release/bundle/deb/*.deb
@@ -79,7 +94,16 @@ jobs:
           XDG_CONFIG_HOME: ${{ runner.temp }}/whisperfree-ui/config
           XDG_DATA_HOME: ${{ runner.temp }}/whisperfree-ui/data
         run: dbus-run-session -- xvfb-run -a target/release/whisperfree-desktop --ui-smoke-test
+      - name: Upload Linux release packages
+        if: inputs.version != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: desktop/target/release/bundle/release/*
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}
       - name: Upload Linux packages
+        if: inputs.version == ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ inputs.artifact_name }}

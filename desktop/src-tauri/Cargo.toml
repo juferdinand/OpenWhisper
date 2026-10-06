@@ -8,6 +8,7 @@ license.workspace = true
 default = []
 custom-protocol = ["tauri/custom-protocol"]
 vulkan = ["whisperfree-speech/vulkan"]
+release-updater = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -30,3 +31,4 @@ ashpd = { version = "0.13", default-features = false, features = ["tokio", "glob
 zbus = "5"
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
+tauri-plugin-updater = { version = "2.13.1", default-features = false, features = ["rustls-tls"] }

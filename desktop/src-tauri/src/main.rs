@@ -4,6 +4,7 @@ mod models;
 mod overlay;
 mod settings;
 mod smoke;
+mod updates;
 mod worker;
 
 use serde::Serialize;
@@ -17,6 +18,7 @@ use whisperfree_core::{catalog, Model};
 
 #[derive(Clone, Serialize)]
 struct Snapshot {
+    updates: updates::Snapshot,
     platform: String,
     version: String,
     status: String,
@@ -51,6 +53,8 @@ enum WorkerCommand {
 }
 
 struct Runtime {
+    updater: updates::Service,
+    tray_items: Mutex<Vec<tauri::menu::MenuItem<tauri::Wry>>>,
     state: Mutex<Snapshot>,
     app: tauri::AppHandle,
     paths: Paths,
@@ -110,10 +114,11 @@ fn cancel_recording(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), Strin
 #[tauri::command]
 fn save_settings(
     runtime: tauri::State<'_, Arc<Runtime>>,
-    preferences: Preferences,
+    mut preferences: Preferences,
 ) -> Result<(), String> {
     // Serialize history removal with the worker's writes when opting out.
     let mut state = runtime.state.lock().unwrap();
+    preferences.setup_completed |= state.preferences.setup_completed;
     runtime.paths.save(&preferences)?;
     if !preferences.keep_history {
         runtime.paths.save_history(&[])?;
@@ -130,8 +135,15 @@ fn save_settings(
         &snapshot.status,
         snapshot.preferences.show_idle_overlay,
     );
+    localize_tray(&runtime, &snapshot.preferences.ui_language);
     let _ = runtime.app.emit("state", snapshot);
     Ok(())
+}
+#[tauri::command]
+fn complete_setup(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
+    let mut preferences = runtime.state.lock().unwrap().preferences.clone();
+    preferences.setup_completed = true;
+    save_settings(runtime, preferences)
 }
 #[tauri::command]
 fn refresh_microphones(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
@@ -233,11 +245,15 @@ fn main() {
         return;
     }
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             get_state,
             toggle_recording,
             cancel_recording,
             save_settings,
+            complete_setup,
+            updates::check_updates,
+            updates::install_update,
             refresh_microphones,
             copy_transcript,
             clear_transcript,
@@ -306,7 +322,10 @@ fn main() {
             };
             let (commands, receiver) = mpsc::channel();
             let state = Arc::new(Runtime {
+                updater: updates::Service::default(),
+                tray_items: Mutex::new(vec![]),
                 state: Mutex::new(Snapshot {
+                    updates: updates::Snapshot::new(app.handle()),
                     platform: "linux".into(),
                     version: env!("CARGO_PKG_VERSION").into(),
                     status: "idle".into(),
@@ -351,6 +370,7 @@ fn main() {
                 cancel_download: AtomicBool::new(false),
             });
             app.manage(state.clone());
+            updates::start(state.clone());
             let worker = state.clone();
             std::thread::Builder::new()
                 .name("speech-worker".into())
@@ -404,6 +424,16 @@ fn main() {
                     _ => {}
                 })
                 .build(app);
+            let runtime = app.state::<Arc<Runtime>>();
+            *runtime.tray_items.lock().unwrap() = vec![show, record, quit];
+            let locale = runtime
+                .state
+                .lock()
+                .unwrap()
+                .preferences
+                .ui_language
+                .clone();
+            localize_tray(&runtime, &locale);
             if tray.is_ok() {
                 if let Some(window) = app.get_webview_window("main") {
                     let w = window.clone();
@@ -429,4 +459,25 @@ fn main() {
                 }
             }
         });
+}
+
+fn localize_tray(runtime: &Runtime, locale: &str) {
+    static GERMAN: std::sync::OnceLock<std::collections::HashMap<String, String>> =
+        std::sync::OnceLock::new();
+    let german = GERMAN.get_or_init(|| {
+        serde_json::from_str(include_str!("../../../shared/locales/de.json"))
+            .expect("Valid translations")
+    });
+    for (item, label) in runtime.tray_items.lock().unwrap().iter().zip([
+        "Open WhisperFree",
+        "Start / stop dictation",
+        "Quit",
+    ]) {
+        let text = if locale == "de" {
+            german.get(label).map(String::as_str).unwrap_or(label)
+        } else {
+            label
+        };
+        let _ = item.set_text(text);
+    }
 }

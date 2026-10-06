@@ -21,6 +21,9 @@ pub async fn download_model(
         .ok_or("Unknown model")?;
     {
         let mut state = runtime.state.lock().unwrap();
+        if state.updates.installing() {
+            return Err("Wait for the update installation to finish".into());
+        }
         if state.download.is_some() {
             return Err("A model download is already running".into());
         }

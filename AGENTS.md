@@ -7,7 +7,9 @@ or subscription. The project is open source under the MIT License.
 ## Documentation and language
 
 - Keep `AGENTS.md` and `CLAUDE.md` in English and synchronized.
-- Keep the app interface, source comments, logs, scripts, workflows, and project documentation in English.
+- Keep source comments, logs, scripts, workflows, and project documentation in English.
+- Default the shared app interface to English; maintain the requested English/German switch in
+  `shared/locales/`. Keep translation keys and placeholders synchronized, and never translate user text.
 - `README.md` is the single documentation entry point.
 - Preserve multilingual speech-processing patterns and test inputs; use English test names and comments.
 
@@ -126,10 +128,13 @@ for key continuity and a future Developer ID migration; changing identities requ
   macOS and Linux in parallel with that version. macOS uses the persistent signing identity;
   CI and Release share `.github/workflows/linux-build.yml` for Linux tests and packaging.
   Only after both builds succeed does the publication job commit/tag the version, verify artifact
-  checksums, and upload DMG, ZIP, AppImage, Debian package, and combined `SHA256SUMS`.
+  checksums, and upload DMG, ZIP, AppImage, Debian package, Linux signatures, `latest.json`, and combined `SHA256SUMS`.
   It creates a complete draft by default for Linux desktop acceptance. The `draft` input controls
   publication. No separate CI dispatch or manual Linux attachment is needed. Do not relabel
   packages from an older version.
+- Linux release signing uses `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+  Preserve the embedded public key and `requireSignedVersion`; never rotate the key casually.
+  First-run completion and interface language must survive upgrades.
 - `WFUpdateRepository` is set through `UPDATE_REPO` during release builds.
 - The DMG is the primary installation download. The in-app updater still consumes the ZIP asset.
   Verify the mounted DMG and its contained app with `macos/scripts/verify-dmg.sh` before publication.

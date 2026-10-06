@@ -41,6 +41,14 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
                 runtime.error("Download the selected model in Models before recording.".into());
                 continue;
             }
+            // Reserve recording under the same lock used by the installer before opening audio.
+            {
+                let mut state = runtime.state.lock().unwrap();
+                if state.updates.installing() {
+                    continue;
+                }
+                state.status = "recording".into();
+            }
             match audio::Capture::start(&prefs.microphone) {
                 Ok(capture) => {
                     recording = Some((capture, Instant::now(), prefs));

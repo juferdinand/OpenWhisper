@@ -137,20 +137,42 @@ chmod +x WhisperFree-Linux-x86_64.AppImage
 If FUSE is unavailable, run `APPIMAGE_EXTRACT_AND_RUN=1 ./WhisperFree-Linux-x86_64.AppImage`.
 On Debian/Ubuntu, the alternative [**WhisperFree-Linux-amd64.deb**](https://github.com/juferdinand/WhisperFree/releases/latest/download/WhisperFree-Linux-amd64.deb)
 can be installed with `sudo apt install ./WhisperFree-Linux-amd64.deb`.
-Verify downloads with the release's `SHA256SUMS`. Linux packages are not covered by the macOS certificate.
+Verify downloads with the release's `SHA256SUMS`. Linux updates use their own persistent signing key; see [signing](docs/SIGNING.md#linux-update-signatures).
 Consult the [runtime dependencies and desktop support notes](docs/LINUX.md) before installation;
 building the Debian package does not establish tested Debian/Ubuntu desktop support.
 
 ### Build the Linux preview
 
 See [Linux build instructions](docs/LINUX.md#build-from-source), then run `make linux` and
-`make linux-install`. The preview uses the same logo and the same six settings sections as macOS.
+`make linux-install`. The preview uses the same logo and the same settings navigation as macOS.
 Both apps now render the same custom UI assets, including the bundled font and original logo;
 permissions and feature availability are handled by their native backends.
 
+## Updates, interface language, and setup
+
+Use **About → Check now** to look for a new release on either platform. Automatic daily checks
+are enabled by default and can be switched off there. Downloads and installation start only when
+you choose **Download & install**. The app verifies the update and restarts; settings, models,
+snippets, and saved history are retained. Finish recordings and model downloads before installing.
+
+- **macOS:** release builds verify the downloaded ZIP's app against the current signing identity.
+- **Linux AppImage:** release builds replace the writable AppImage in place, using a signed,
+  version-bound package. Keep the file in a permanent folder owned by your user. From a source checkout,
+  `desktop/scripts/install-local.sh --appimage /path/to/WhisperFree-Linux-x86_64.AppImage`
+  installs a release for the current user with the correct desktop identity.
+- **Linux Debian package:** verified updates use the system administrator authorization dialog
+  (`pkexec` and `dpkg`). Cancelling the dialog cancels installation; the app never asks for your password.
+- **Linux 0.2.0 and source/CI builds:** install the 0.2.1 release manually once to get the updater.
+  Source and CI builds do not enable in-app installation.
+
+The sidebar switches the shared interface between **English** and **Deutsch**, including recording
+controls and native menus. The choice is saved independently of the speech-recognition language.
+Project documentation remains in English. Setup appears on a fresh installation until you choose
+**Finish setup**, then disappears. Existing installations migrate without reopening onboarding.
+
 ## Your first dictation (macOS)
 
-1. Open WhisperFree. You can also access setup through the menu bar icon.
+1. Open WhisperFree and follow the first-run setup. Click **Finish setup** when ready; it stays hidden after restarts and updates. Permissions and shortcuts remain available in **General**.
 2. Download and select a model in **Settings → Models**.
 3. Grant **Microphone** access.
 4. Grant **Accessibility** access to paste text automatically. For manual pasting, select **Copy to clipboard only**.
@@ -187,7 +209,7 @@ The table below uses macOS paths. Linux storage paths and permissions are listed
 | Settings and history | Local User Defaults. By default, history stores the last 20 text dictations; disable or clear it under **History**. |
 | Snippets | Stored locally in `~/Library/Application Support/WhisperFree/snippets.json`. |
 | Text editor output | Writes text files to `~/Library/Application Support/WhisperFree/Transcripts`; existing installations keep their previous `Diktate` folder. These files persist independently of history. |
-| Updates | Only when an update repository is configured: optional automatic checks through the GitHub API, with an update downloaded after you click to install it. |
+| Updates | Only when an update repository is configured: optional daily checks through GitHub, with an update downloaded after you click to install it. |
 
 Output text goes to the clipboard and, depending on your settings, to the app you choose.
 That app's storage and synchronization follow its own settings.
@@ -214,7 +236,7 @@ Remove personal dictations and other confidential information from any logs you 
 ## Limitations and roadmap
 
 The current app transcribes after recording; a live text preview is not implemented yet.
-Linux has an early source-build preview with incomplete desktop acceptance testing. Windows,
+Linux has an early packaged preview with incomplete desktop acceptance testing. Windows,
 cloud synchronization, and LLM post-processing are not implemented.
 Automatic pasting uses the clipboard and a simulated keyboard shortcut, so behavior can vary
 between target apps.
@@ -278,7 +300,7 @@ Then start the workflow under **Actions → Release → Run workflow**, supplyin
 in `X.Y.Z` format. The workflow applies the same version to both platform builds, then runs the
 macOS and Linux tests and packaging in parallel. Only after both succeed does the publication job
 create the version commit/tag and upload the universal DMG/ZIP, `WhisperFree-Linux-x86_64.AppImage`,
-`WhisperFree-Linux-amd64.deb`, and a combined `SHA256SUMS`. No separate CI dispatch or manual asset
+`WhisperFree-Linux-amd64.deb`, Linux `.sig` files, `latest.json`, and a combined `SHA256SUMS`. No separate CI dispatch or manual asset
 upload is needed. Packages are also retained as Actions artifacts.
 The workflow creates a draft by default. Download its AppImage and complete the
 [desktop acceptance checks](docs/LINUX.md#native-desktop-acceptance-test) on the primary system,
@@ -287,7 +309,9 @@ required desktop acceptance is already complete for the release source.
 The DMG contains the signed app and an Applications shortcut. CI mounts it read-only and checks
 its integrity, the contained app's signature, and agreement with the original build.
 The update repository is embedded in the bundle during the build.
-The in-app updater uses the ZIP asset.
+The macOS in-app updater uses the ZIP asset. Linux release signing additionally requires
+`TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; preserve that separate
+identity too. The Linux updater uses the version-bound `.sig` signatures in `latest.json`.
 The updater checks downloaded apps against the running app's signature requirement,
 so the signing identity must be preserved across releases.
 

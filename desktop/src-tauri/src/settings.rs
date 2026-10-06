@@ -10,6 +10,9 @@ use whisperfree_core::{catalog, Snippet};
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
+    pub ui_language: String,
+    pub setup_completed: bool,
+    pub auto_check_updates: bool,
     pub model: String,
     pub language: String,
     pub microphone: String,
@@ -24,6 +27,9 @@ pub struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            ui_language: "en".into(),
+            setup_completed: false,
+            auto_check_updates: true,
             model: "base".into(),
             language: "auto".into(),
             microphone: String::new(),
@@ -39,6 +45,9 @@ impl Default for Preferences {
 }
 impl Preferences {
     pub fn validate(&self) -> Result<(), String> {
+        if !["en", "de"].contains(&self.ui_language.as_str()) {
+            return Err("Unknown interface language".into());
+        }
         if !catalog().iter().any(|m| m.id == self.model) {
             return Err("Unknown model".into());
         }
@@ -90,9 +99,16 @@ impl Paths {
         if !path.exists() {
             return Ok(Preferences::default());
         }
-        let prefs: Preferences =
+        let value: serde_json::Value =
             serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
                 .map_err(|e| format!("Cannot read settings: {e}"))?;
+        let mut prefs: Preferences = serde_json::from_value(value.clone())
+            .map_err(|e| format!("Cannot read settings: {e}"))?;
+        // Existing installations must not return to onboarding after an update.
+        if value.get("setup_completed").is_none() {
+            prefs.setup_completed = true;
+            self.save(&prefs)?;
+        }
         prefs.validate()?;
         Ok(prefs)
     }
@@ -138,4 +154,51 @@ pub fn private_write(path: &Path, data: &[u8]) -> Result<(), String> {
         let _ = fs::remove_file(temporary);
     }
     result.map_err(|e: std::io::Error| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn isolated() -> Paths {
+        let config =
+            std::env::temp_dir().join(format!("whisperfree-settings-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&config).unwrap();
+        Paths {
+            models: config.join("models"),
+            config,
+        }
+    }
+    #[test]
+    fn fresh_setup_and_language_survive_restarts() {
+        let paths = isolated();
+        let mut prefs = paths.load().unwrap();
+        assert!(!prefs.setup_completed);
+        prefs.ui_language = "de".into();
+        paths.save(&prefs).unwrap();
+        assert!(!paths.load().unwrap().setup_completed);
+        prefs.setup_completed = true;
+        paths.save(&prefs).unwrap();
+        let reloaded = paths.load().unwrap();
+        assert!(reloaded.setup_completed);
+        assert_eq!(reloaded.ui_language, "de");
+        assert_eq!(reloaded.language, "auto");
+        fs::remove_dir_all(paths.config).unwrap();
+    }
+    #[test]
+    fn legacy_installations_migrate_without_reopening_setup_or_losing_preferences() {
+        let paths = isolated();
+        private_write(
+            &paths.config.join("settings.json"),
+            br#"{"model":"tiny","language":"de","vocabulary":"WhisperFree"}"#,
+        )
+        .unwrap();
+        let prefs = paths.load().unwrap();
+        assert!(prefs.setup_completed);
+        assert_eq!(prefs.model, "tiny");
+        assert_eq!(prefs.language, "de");
+        assert_eq!(prefs.vocabulary, "WhisperFree");
+        assert_eq!(prefs.ui_language, "en");
+        assert!(paths.load().unwrap().setup_completed);
+        fs::remove_dir_all(paths.config).unwrap();
+    }
 }

@@ -10,7 +10,8 @@ Both implementations use `shared/models.json`, the same pinned whisper.cpp relea
 `shared/test-vectors.json`. The Rust core passes the same cleanup, vocabulary, and snippet cases
 as Swift. The Linux C++ bridge exposes both Whisper and Parakeet; contexts belong to one worker.
 
-The Linux settings follow the same Setup, General, Models, Snippets, History, and About order.
+Both platforms share General, Models, Snippets, History, and About, with Setup shown only until
+first-run completion. The shared English/German language choice also applies to native menus.
 Its app icon is extracted unchanged from the existing Mac ICNS. `desktop/scripts/check-assets.py`
 checks branding, section order, project version, and speech source tag agreement. Both apps load the same compiled HTML/CSS/JavaScript and bundled Inter font.
 `desktop/src/bridge.ts` adapts Tauri IPC and the native WebKit reply handler. Mac recording,
@@ -31,7 +32,7 @@ and platform-specific permission dialogs are controlled by the operating system.
 | Background operation | Menu bar app | AppIndicator tray when the desktop displays it |
 | Overlay | Shared floating UI in non-activating NSPanel | Shared floating UI; non-focusable layer-shell on compatible Wayland compositors, floating window on X11 |
 | GPU | Metal | Optional, unverified Vulkan build; CPU is the tested baseline |
-| Updates | Release ZIP with signing-identity verification | No updater yet |
+| Updates | Release ZIP with signing-identity verification | Signed, version-bound AppImage/Debian updates (0.2.1+) |
 
 Linux does not use unrestricted device input access, root helpers, or input-group membership.
 Without suitable portals, the Record button and clipboard output remain the fallback. Portal

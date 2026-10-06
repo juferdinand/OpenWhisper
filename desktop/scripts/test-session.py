@@ -104,12 +104,12 @@ try:
     wait_button('Start dictation')
     print('PASS: floating Cancel discards the recording', flush=True)
     if args.portals:
-        click(wait_button('Setup'))
+        click(wait_button('General'))
         click(wait_button('Allow'))
         print('Waiting for KDE keyboard permission, if a consent dialog is shown…', flush=True)
         wait_button('Revoke', seconds=120)
         print('PASS: keyboard-only RemoteDesktop portal session', flush=True)
-        time.sleep(.5)  # Portal state is published before its IPC reply re-enables setup controls.
+        time.sleep(.5)  # Portal state is published before its IPC reply re-enables permission controls.
         click(wait_button('Set trigger'))
         deadline = time.monotonic() + 120
         while button('Set trigger') and time.monotonic() < deadline:

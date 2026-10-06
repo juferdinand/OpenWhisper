@@ -11,7 +11,7 @@ target the latest release; older versions do not receive a separate maintenance 
 
 ## Scope and current protections
 
-- The updater checks the expected GitHub repository and asset, the signed app's identity and version,
+- The macOS updater checks the expected GitHub repository and asset, the signed app's identity and version,
   and signing continuity before replacement. Tests cover changed signed files, an unexpected code
   identity, unsigned apps, unsafe archives, shell metacharacters, and failed replacement rollback.
 - Release signing is currently self-signed, without Apple notarization. Read
@@ -51,3 +51,12 @@ and tests. This source search is limited evidence, not a proof that the vulnerab
 The GitHub alert remains open and is not suppressed. The preview retains this known dependency
 risk; reassess it when the GTK/Tauri dependency chain changes or a compatible upstream fix is available.
 The native Swift macOS app does not link this Rust dependency.
+
+## Linux update verification
+
+Linux 0.2.1+ release builds verify update payloads against an embedded public key and require a
+matching signed version before installation. Strict repository, tag, asset, and increasing-version
+checks reject alternate sources and downgrades. CI tests tampering, foreign signatures, missing
+signed versions, and replayed versions. Debian elevation uses the system authentication agent only;
+the app never collects passwords or retries cancelled authorization through another mechanism.
+See [signing and key continuity](docs/SIGNING.md#linux-update-signatures).

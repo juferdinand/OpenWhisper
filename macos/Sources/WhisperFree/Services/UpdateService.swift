@@ -49,6 +49,13 @@ final class UpdateService: ObservableObject {
         return nil
     }
 
+    var isInstalling: Bool {
+        switch status {
+        case .downloading, .installing: true
+        default: false
+        }
+    }
+
     private var timer: Timer?
     private var downloadObservation: NSKeyValueObservation?
 
@@ -110,6 +117,10 @@ final class UpdateService: ObservableObject {
 
     func install() {
         guard let release = availableRelease else { return }
+        guard !AppState.shared.phase.isBusy, AppState.shared.models.progress.isEmpty else {
+            status = .failed("Finish dictation and model downloads before installing an update")
+            return
+        }
         status = .downloading(0)
         let task = URLSession.shared.downloadTask(with: release.assetURL) { tempURL, response, error in
             // Move the file before returning from this callback.

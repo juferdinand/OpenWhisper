@@ -30,7 +30,7 @@ pub fn complete(app: tauri::AppHandle, error: Option<String>) -> Result<(), Stri
         app.exit(1);
     } else {
         println!(
-            "Native UI smoke test passed: native IPC, six tabs, original icon, bundled font, and GTK reactivation."
+            "Native UI smoke test passed: native IPC, onboarding completion, language persistence, original icon, bundled font, and GTK reactivation."
         );
         app.exit(0);
     }
