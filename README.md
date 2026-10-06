@@ -11,7 +11,7 @@ and native audio and desktop integration. On macOS,
 press <kbd>⌥</kbd> + <kbd>Space</kbd>, speak, then press the shortcut again:
 your text is pasted into the active text field. No account, API key, or subscription.
 
-> **App language:** The interface is in English. Dictation supports multiple languages.
+> **App language:** Switch between English and German in the sidebar. Dictation supports multiple languages.
 
 [Installation](#installation) · [Features](#features) · [Privacy](#privacy) ·
 [Contributing](#contributing) · [Report an issue](https://github.com/juferdinand/WhisperFree/issues)
@@ -170,7 +170,7 @@ controls and native menus. The choice is saved independently of the speech-recog
 Project documentation remains in English. Setup appears on a fresh installation until you choose
 **Finish setup**, then disappears. Existing installations migrate without reopening onboarding.
 
-New builds after 0.2.1 add Linux Vulkan GPU recognition and **General → Launch at login** on both
+Version 0.2.2 adds Linux Vulkan GPU recognition and **General → Launch at login** on both
 platforms. Compatible GPUs are used by default, with CPU fallback; a manual CPU choice is retained.
 Whisper Tiny and Parakeet v3 q4 have been checked on an NVIDIA RTX 3060. Other GPUs need separate
 validation; see [Linux GPU and autostart details](docs/LINUX.md#build-from-source). The published

@@ -1,11 +1,15 @@
-## What's new in 0.2.1
+## What's new in 0.2.2
 
-- In-app update controls for both macOS and Linux, with daily checks and explicit download/install.
-- Signed, version-bound Linux AppImage and Debian updates, verified before installation. Linux 0.2.0 users need one manual upgrade to 0.2.1.
-- A persistent English/German interface switch in the sidebar, shared by both apps and their recording controls and native menus. Dictation language is independent.
-- First-run setup disappears after completion and stays hidden across restarts and updates. Existing installations migrate automatically; permissions and triggers remain in General.
-- Update installation is blocked during dictation/model downloads, and recording cannot start during installation.
-- One release workflow builds and verifies macOS and Linux together, including update signatures and the update feed.
+- Linux packages now include Vulkan GPU recognition for Whisper and Parakeet. Compatible GPUs are used by default, with a GPU/CPU preference and detected device shown in **General → Appearance & system**. Recoverable GPU errors retry the captured audio on the CPU.
+- Add Linux **Launch at login**, using the persistent installed AppImage path or installed executable. It can be enabled and disabled without administrator access.
+- Fix macOS settings switches changing position or overwriting neighboring preferences. Switches retain their controls while saving, and pending login-item approval remains visible and can be cancelled.
+- Show macOS hardware and Metal recognition information in the shared system section. Metal acceleration remains enabled where available.
+- Harden macOS recording against audio-device changes, concurrent callbacks, and native audio exceptions; recover settings and recording views after a WebKit content-process termination. Bounded local lifecycle diagnostics exclude dictated text and audio.
+- Preserve interface language, completed setup, models, and history across updates. Recording still has no fixed time limit.
+
+Update from 0.2.1 using **About → Check now**. Original Linux 0.2.0 installations need a manual
+upgrade to obtain the signed updater. Existing CPU-only installations enable GPU use when a
+compatible device is detected; a CPU choice made in a GPU-enabled build is preserved.
 
 ## macOS download and installation
 
@@ -39,15 +43,16 @@ The primary tested environment is **CachyOS x86_64, KDE Plasma 6, Wayland, and P
 - Wayland clipboard output requires `wl-clipboard`. Global shortcuts and automatic pasting require compatible desktop portals; keyboard access is requested only when enabled.
 - The floating indicator requires `gtk-layer-shell` and a compatible Wayland compositor. GNOME does not provide layer-shell; the main-window control remains available.
 - Enable the trigger and optional keyboard permission in General after launching. Portal setup is session-scoped in this preview.
-- Linux GPU acceleration, custom model import, clipboard restoration, editor output, sounds, and autostart are not included in this preview.
+- Vulkan recognition requires a Vulkan loader and compatible graphics driver. Whisper Tiny and Parakeet v3 q4 were tested on an NVIDIA RTX 3060; AMD/Intel GPUs and other drivers still need hardware acceptance. CPU recognition remains available without a compatible GPU.
+- Custom model import, clipboard restoration, editor output, and sounds are not included in the Linux preview.
 
 Linux updates use a separate persistent signing key and signed version. Verify the first download's origin and `SHA256SUMS`. The `.sig` files and `latest.json` are used by the updater.
 AppImages must be in a writable permanent location; Debian updates request system administrator
 authorization. Debian/Ubuntu update installation still needs desktop acceptance.
-Read the [Linux support and validation notes](https://github.com/juferdinand/WhisperFree/blob/v0.2.1/docs/LINUX.md)
+Read the [Linux support and validation notes](https://github.com/juferdinand/WhisperFree/blob/v0.2.2/docs/LINUX.md)
 for dependencies, tested behavior, and remaining checks. Physical microphone quality, physical hold/toggle shortcut events,
 XWayland insertion, and other distributions still need broader acceptance testing.
 
 Known dependency risk: the Linux GTK 3 stack includes `glib 0.18.5`, affected by
 [RUSTSEC-2024-0429](https://rustsec.org/advisories/RUSTSEC-2024-0429.html). The alert remains open;
-see the [scope and source review](https://github.com/juferdinand/WhisperFree/blob/v0.2.1/SECURITY.md#known-linux-dependency-advisory).
+see the [scope and source review](https://github.com/juferdinand/WhisperFree/blob/v0.2.2/SECURITY.md#known-linux-dependency-advisory).

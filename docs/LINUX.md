@@ -39,7 +39,7 @@ The app must report detected capabilities and any fallback it uses.
   UI assets with a native Swift bridge while preserving its existing services.
 - Text cleanup, vocabulary correction, and snippets pass the existing shared test vectors.
 - Uses the shared model catalog and the same pinned whisper.cpp source for Whisper and Parakeet.
-  Model contexts stay loaded and inference is serialized. New builds include Vulkan GPU acceleration
+  Model contexts stay loaded and inference is serialized. Version 0.2.2 includes Vulkan GPU acceleration
   with a portable CPU fallback. Hardware coverage is listed below; 0.2.1 packages remain CPU-only.
 - Captures the selected microphone locally and converts audio to 16 kHz mono. Keeps recordings in
   memory. Includes error handling, a silence threshold and cancellation before transcription, with
@@ -182,11 +182,13 @@ build also passed repeated Whisper recognition with Vulkan disabled. AMD and Int
 other drivers still need hardware acceptance. The first GPU inference can take longer while
 shaders compile; CPU work for audio conversion and other orchestration is still expected.
 
-**Launch at login** is available on both platforms in new builds after 0.2.1. On Linux it manages
+**Launch at login** is available on both platforms from 0.2.2. On Linux it manages
 only this user's XDG autostart file. AppImages use their persistent installed path, not a temporary
 extraction path. Moving an AppImage requires turning this setting off and on at its new location.
 No administrator access is needed. Automatic launch after a full desktop logout/login still needs
 manual acceptance; creation, disabling, path escaping, and native IPC are covered by tests.
+The installed AppImage also passed enabling/disabling through the native settings UI and launching
+its generated desktop entry in an isolated X11 session on CachyOS.
 
 ### Native desktop acceptance test
 
