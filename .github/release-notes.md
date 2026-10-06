@@ -44,3 +44,7 @@ Linux binaries are not covered by the macOS signing certificate. Verify their or
 Read the [Linux support and validation notes](https://github.com/juferdinand/WhisperFree/blob/v0.2.0/docs/LINUX.md)
 for dependencies, tested behavior, and remaining checks. Physical microphone quality, physical hold/toggle shortcut events,
 XWayland insertion, and other distributions still need broader acceptance testing.
+
+Known dependency risk: the Linux GTK 3 stack includes `glib 0.18.5`, affected by
+[RUSTSEC-2024-0429](https://rustsec.org/advisories/RUSTSEC-2024-0429.html). The alert remains open;
+see the [scope and source review](https://github.com/juferdinand/WhisperFree/blob/v0.2.0/SECURITY.md#known-linux-dependency-advisory).

@@ -237,6 +237,12 @@ review them before posting diagnostics publicly.
 - **No tray icon on GNOME:** support depends on the desktop’s AppIndicator integration. Keep the
   settings window open if a tray is unavailable; tray registration alone cannot prove it is visible.
 
+## Known dependency risk
+
+The GTK 3 dependency chain includes an open `glib` advisory. See the
+[security policy](../SECURITY.md#known-linux-dependency-advisory) for the affected code, review scope,
+and upstream constraint. Preview publication does not mean the dependency graph is free of advisories.
+
 ## Packaging and release policy
 
 CI on `main` builds development `.deb` and AppImage packages and retains artifacts for 14 days.

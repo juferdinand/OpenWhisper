@@ -36,3 +36,18 @@ independently of the update bot. A checksum proves agreement with a file, not ab
 These are automated tests and maintainer checks, not an independent security audit. No paid audit
 is planned at this stage. Manual tests for microphone access, Accessibility permissions, hotkeys,
 dictation, and a complete GUI update on a physical Mac remain part of release verification.
+
+## Known Linux dependency advisory
+
+The Linux preview locks `glib 0.18.5` through Tauri 2 / GTK 3. It is affected by
+[RUSTSEC-2024-0429 / GHSA-wrw7-89jp-8q8g](https://rustsec.org/advisories/RUSTSEC-2024-0429.html):
+`VariantStrIter` contains undefined behavior and can dereference a null pointer in optimized builds.
+The upstream fix is in `glib >=0.20`, outside GTK 3's current dependency range; see the
+[Tauri upstream issue](https://github.com/tauri-apps/tauri/issues/12048).
+
+Review on 2026-10-06 found no calls to `array_iter_str` or uses of `VariantStrIter` in WhisperFree
+or the locally resolved dependency sources outside glib's own implementation, documentation,
+and tests. This source search is limited evidence, not a proof that the vulnerability is unreachable.
+The GitHub alert remains open and is not suppressed. The preview retains this known dependency
+risk; reassess it when the GTK/Tauri dependency chain changes or a compatible upstream fix is available.
+The native Swift macOS app does not link this Rust dependency.
