@@ -30,6 +30,17 @@ struct AudioCaptureSessionTests {
         #expect(next.finish().count == 1024)
     }
 
+    @Test @MainActor func nativeTapCanDeliverSyntheticAudioOffTheMainActor() async {
+        let recorder = AudioRecorder()
+        let session = AudioCaptureSession()
+        let tap = recorder.audioTap(for: session)
+        let count = await Task.detached {
+            tap(buffer(), AVAudioTime(sampleTime: 0, atRate: 16_000))
+            return session.finish().count
+        }.value
+        #expect(count == 1024)
+    }
+
     @Test func stopCanRaceAnAudioCallbackWithoutReopeningTheSession() {
         for _ in 0..<100 {
             let session = AudioCaptureSession()

@@ -71,7 +71,7 @@ final class AudioRecorder {
         capture = session
         configurationObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
-        ) { [weak self] _ in
+        ) { @Sendable [weak self] _ in
             // Never stop the engine from its notification/audio thread.
             DispatchQueue.main.async {
                 guard let self, self.capture === session, self.engine?.isRunning == false else { return }
@@ -80,18 +80,24 @@ final class AudioRecorder {
             }
         }
         var error: NSError?
-        let started = WFStartAudioEngine(engine, { [weak self] buffer, _ in
-            guard let level = session.process(buffer) else { return }
-            DispatchQueue.main.async {
-                guard let self, self.capture === session else { return }
-                self.onLevel?(level)
-            }
-        }, &error)
+        let started = WFStartAudioEngine(engine, audioTap(for: session), &error)
         guard started else {
             _ = stop()
             AppDiagnostics.shared.record("audio.start_failed")
             throw error ?? NSError(domain: "io.github.whisperfree.audio", code: 0,
                                    userInfo: [NSLocalizedDescriptionKey: "Microphone unavailable or changed. Check your input device and try again."])
+        }
+    }
+
+    func audioTap(for session: AudioCaptureSession) -> AVAudioNodeTapBlock {
+        // The Objective-C block is not actor-annotated; explicitly opt out of main-actor
+        // inheritance because AVAudioEngine invokes it on its realtime audio thread.
+        { @Sendable [weak self] buffer, _ in
+            guard let level = session.process(buffer) else { return }
+            DispatchQueue.main.async {
+                guard let self, self.capture === session else { return }
+                self.onLevel?(level)
+            }
         }
     }
 
