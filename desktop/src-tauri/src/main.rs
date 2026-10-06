@@ -57,7 +57,7 @@ struct Runtime {
     commands: mpsc::Sender<WorkerCommand>,
     clipboard: Mutex<Option<Child>>,
     paste: tokio::sync::Mutex<Option<integration::PasteSession>>,
-    shortcut_task: tokio::sync::Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    shortcut_task: tokio::sync::Mutex<Option<integration::ShortcutHandle>>,
     cancel_download: AtomicBool,
 }
 impl Runtime {

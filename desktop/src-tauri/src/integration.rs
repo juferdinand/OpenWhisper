@@ -17,6 +17,49 @@ pub struct PasteSession {
     session: Session<RemoteDesktop>,
 }
 
+pub struct ShortcutHandle {
+    _task: tauri::async_runtime::JoinHandle<()>,
+    configure: tokio::sync::mpsc::UnboundedSender<()>,
+}
+
+fn shortcut_description(
+    shortcuts: &[ashpd::desktop::global_shortcuts::Shortcut],
+) -> Option<String> {
+    shortcuts
+        .iter()
+        .find(|shortcut| shortcut.id() == "dictate")
+        .map(|shortcut| shortcut.trigger_description().trim())
+        .filter(|description| !description.is_empty())
+        .map(str::to_owned)
+}
+
+fn update_shortcut(runtime: &Runtime, description: Option<String>) {
+    runtime.update(|state| {
+        state.message = if description.is_some() {
+            "Global shortcut enabled. Your desktop controls its key binding."
+        } else {
+            "No shortcut assigned. Choose a key combination in your desktop's shortcut settings."
+        }
+        .into();
+        state.shortcut = description;
+    });
+}
+
+async fn configure_shortcut(
+    proxy: &GlobalShortcuts,
+    session: &Session<GlobalShortcuts>,
+    runtime: &Runtime,
+) {
+    if let Err(error) = proxy
+        .configure_shortcuts(session, None, Default::default())
+        .await
+    {
+        runtime.update(|state| state.message = format!(
+            "Open your desktop's shortcut settings to change the trigger. The portal could not open them: {error}"
+        ));
+    }
+}
+
 pub fn wayland() -> bool {
     std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
@@ -135,8 +178,11 @@ pub async fn paste(runtime: &Arc<Runtime>) -> Result<(), String> {
 
 pub async fn enable_shortcut(runtime: Arc<Runtime>) -> Result<(), String> {
     let mut task = runtime.shortcut_task.lock().await;
-    if task.is_some() {
-        return Ok(());
+    if let Some(handle) = task.as_ref() {
+        return handle
+            .configure
+            .send(())
+            .map_err(|_| "Shortcut session ended. Restart the app to reconnect.".into());
     }
     let proxy = GlobalShortcuts::new()
         .await
@@ -148,6 +194,10 @@ pub async fn enable_shortcut(runtime: Arc<Runtime>) -> Result<(), String> {
     let mut activated = proxy.receive_activated().await.map_err(|e| e.to_string())?;
     let mut deactivated = proxy
         .receive_deactivated()
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut changed = proxy
+        .receive_shortcuts_changed()
         .await
         .map_err(|e| e.to_string())?;
     let response = proxy
@@ -162,30 +212,44 @@ pub async fn enable_shortcut(runtime: Arc<Runtime>) -> Result<(), String> {
         .map_err(|e| e.to_string())?
         .response()
         .map_err(|e| format!("Shortcut setup cancelled or denied: {e}"))?;
-    let description = response
-        .shortcuts()
-        .iter()
-        .find(|s| s.id() == "dictate")
-        .map(|s| s.trigger_description().to_string())
-        .ok_or("No shortcut was assigned")?;
+    let description = shortcut_description(response.shortcuts());
+    let unassigned = description.is_none();
     let session_path = serde_json::to_value(&session)
         .map_err(|e| e.to_string())?
         .as_str()
         .unwrap_or("")
         .to_string();
-    runtime.update(|s| {
-        s.shortcut = Some(description);
-        s.message = "Global shortcut enabled. Your desktop controls its key binding.".into();
-    });
+    update_shortcut(&runtime, description);
+    if unassigned {
+        configure_shortcut(&proxy, &session, &runtime).await;
+    }
     let state = runtime.clone();
-    *task = Some(tauri::async_runtime::spawn(async move {
+    let (configure, mut requests) = tokio::sync::mpsc::unbounded_channel();
+    let handle = tauri::async_runtime::spawn(async move {
         // Retain the session and proxy for the lifetime of the signal subscriptions.
         let mut closed = match session.receive_closed().await {
             Ok(stream) => stream,
-            Err(_) => return,
+            Err(error) => {
+                let _ = session.close().await;
+                state.update(|s| {
+                    s.shortcut = None;
+                    s.message = format!("Could not monitor the shortcut session: {error}. Enable it again in Settings.");
+                });
+                state.shortcut_task.lock().await.take();
+                return;
+            }
         };
         loop {
             tokio::select! {
+                request = requests.recv() => match request {
+                    Some(()) => configure_shortcut(&proxy, &session, &state).await,
+                    None => break,
+                },
+                signal = changed.next() => match signal {
+                    Some(s) if s.session_handle().as_str() == session_path => update_shortcut(&state, shortcut_description(s.shortcuts())),
+                    None => break,
+                    _ => {},
+                },
                 signal = activated.next() => match signal {
                     Some(s) if s.shortcut_id() == "dictate" && s.session_handle().as_str() == session_path => { let _ = state.commands.send(WorkerCommand::ShortcutPressed); },
                     None => break,
@@ -206,6 +270,10 @@ pub async fn enable_shortcut(runtime: Arc<Runtime>) -> Result<(), String> {
             s.message = "Shortcut session ended. Enable it again in Settings.".into();
         });
         state.shortcut_task.lock().await.take();
-    }));
+    });
+    *task = Some(ShortcutHandle {
+        _task: handle,
+        configure,
+    });
     Ok(())
 }
