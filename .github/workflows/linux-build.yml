@@ -46,9 +46,11 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libgtk-layer-shell0 libvulkan-dev patchelf cmake ninja-build ffmpeg xvfb dbus-x11
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libgtk-layer-shell0 libvulkan-dev patchelf cmake ninja-build ffmpeg xvfb dbus-x11 openssl squashfs-tools desktop-file-utils
           rustup toolchain install 1.99.0 --profile minimal --component rustfmt,clippy
           rustup default 1.99.0
+      - name: Test the terminal installer in disposable homes
+        run: python3 scripts/test-release-installer.py
       - name: Cache native source and test model
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -76,6 +78,7 @@ jobs:
           cargo clippy --locked --workspace --all-targets -- -D warnings
           cargo build --locked -p openwhisper-core --example verify-update
           python3 scripts/test-update-signatures.py
+          OPENWHISPER_UPDATE_VERIFIER="$PWD/target/debug/examples/verify-update" python3 scripts/test-release-installer.py ReleaseInstallerTests.test_native_verifier_matches_signature_and_version_decisions
           bash scripts/test-recognition.sh
       - name: Build Linux packages
         env:
