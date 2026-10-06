@@ -22,7 +22,7 @@ fi
 scripts/fetch-whisper.sh
 
 echo "→ Build shared settings UI"
-(cd ../desktop && npm ci && npm run build)
+(cd ../shared/ui && npm ci && npm run build)
 
 if [[ "${UNIVERSAL:-}" == "1" ]]; then
   # Build each architecture separately, then combine them; works without full Xcode.
@@ -54,7 +54,7 @@ if [[ -n "${UPDATE_REPO:-}" ]]; then
 fi
 [[ -f Resources/AppIcon.icns ]] && cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 cp ../shared/models.json "$APP/Contents/Resources/"
-cp -R ../desktop/dist "$APP/Contents/Resources/WebUI"
+cp -R ../shared/ui/dist "$APP/Contents/Resources/WebUI"
 cp Resources/install-update.sh "$APP/Contents/Resources/"
 cp -R Vendor/whisper.xcframework/macos-arm64_x86_64/whisper.framework "$APP/Contents/Frameworks/"
 

@@ -35,14 +35,14 @@ OpenWhisper is in early development. Download the packaged macOS or Linux app fr
 
 ### Linux compatibility
 
-Linux x86_64 releases are available as AppImage and `.deb` packages. Source is in `desktop/`.
+Linux x86_64 releases are available as AppImage and `.deb` packages. Source is in `linux/`.
 Version 0.2.3 adds single-key triggers on KDE Plasma 6 and direct extra mouse buttons on
 KDE Wayland (middle button: Plasma 6.3+), with saved bindings and no root access. Other desktops
 retain portal-based shortcuts. Version 0.2.4 adds isolated, adaptive recognition and local recovery
 for stopped Linux recordings.
 KDE integration is detected through KWin and KGlobalAccel capabilities, not a CachyOS check.
 Other distributions with the required Plasma 6 services can use that implementation, but each
-desktop/package combination still needs its own acceptance evidence.
+linux/package combination still needs its own acceptance evidence.
 See [trigger setup and limitations](docs/LINUX.md#first-use).
 Distribution targets below are **not claims of completed end-to-end testing**. On Linux, desktop environment, Wayland/X11, audio services, and portal support
 determine which features work. See the [Linux implementation and test plan](docs/LINUX.md).
@@ -86,7 +86,7 @@ The packaged macOS app requires:
 - A Mac running **macOS 14 or later**.
 - A microphone and enough disk space for your chosen speech model; download sizes are shown in the app.
 - To build from source: current **Xcode Command Line Tools** or Xcode with its Swift toolchain,
-  plus **Node.js 22+ and npm** for the shared settings UI.
+  plus **Node.js 22.12+ and npm** for the shared settings UI.
 - Internet access to download the app and a speech model, or dependencies for a source build. Dictation works offline after setup.
 
 ## Installation
@@ -184,7 +184,7 @@ For a per-user AppImage installation without administrator access, download and 
 AppImage, then use the existing installer from a source checkout:
 
 ```bash
-bash desktop/scripts/install-local.sh --appimage /absolute/path/to/WhisperFree-Linux-x86_64.AppImage
+bash linux/scripts/install-local.sh --appimage /absolute/path/to/WhisperFree-Linux-x86_64.AppImage
 ```
 
 This installer does not build the app. It creates the desktop entry and installs the icon and
@@ -212,7 +212,7 @@ open OpenWhisper manually; the updated package is already installed. The restart
 - **macOS:** release builds verify the downloaded ZIP's app against the current signing identity.
 - **Linux AppImage:** release builds replace the writable AppImage in place, using a signed,
   version-bound package. Keep the file in a permanent folder owned by your user. From a source checkout,
-  `bash desktop/scripts/install-local.sh --appimage /path/to/OpenWhisper-Linux-x86_64.AppImage`
+  `bash linux/scripts/install-local.sh --appimage /path/to/OpenWhisper-Linux-x86_64.AppImage`
   installs a release for the current user with the correct desktop identity.
 - **Linux Debian package:** verified updates use the system administrator authorization dialog
   (`pkexec` and `dpkg`). Cancelling the dialog cancels installation; the app never asks for your password.
@@ -355,8 +355,10 @@ macos/
   Sources/OpenWhisperCore/   Text cleanup, vocabulary, snippets, and model catalog
   Tests/                    Tests using Swift Testing
   scripts/                  Build, dependencies, and signing
-desktop/                    Shared custom UI; Linux Rust backend and native speech bridge
-shared/                     Shared model catalog and test cases
+linux/                      Linux Rust host, desktop integrations, packaging, and speech bridge
+  src-tauri/src/desktops/    KDE bindings and common Linux portal/clipboard services
+shared/                     Shared model catalog, locales, and test cases
+  ui/                       Common settings and recording UI for macOS and Linux
 docs/                       Platform planning
 .github/workflows/          CI and manual release workflow
 VERSION                     Project version

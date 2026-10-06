@@ -3,23 +3,23 @@
 LINUX_FEATURES ?= custom-protocol,vulkan
 
 linux:
-	bash desktop/scripts/fetch-native.sh
-	python3 desktop/scripts/fetch-vulkan-headers.py
-	cd desktop && npm ci && npm run build
-	cargo build --locked --release --manifest-path desktop/Cargo.toml -p openwhisper-desktop --features $(LINUX_FEATURES)
+	bash linux/scripts/fetch-native.sh
+	python3 linux/scripts/fetch-vulkan-headers.py
+	cd shared/ui && npm ci && npm run build
+	cargo build --locked --release --manifest-path linux/Cargo.toml -p openwhisper-desktop --features $(LINUX_FEATURES)
 
 linux-test:
-	bash desktop/scripts/fetch-native.sh
-	cd desktop && npm ci && npm run build
-	cargo test --locked --manifest-path desktop/Cargo.toml --workspace
-	cargo clippy --locked --manifest-path desktop/Cargo.toml --workspace --all-targets -- -D warnings
-	python3 desktop/scripts/check-assets.py
+	bash linux/scripts/fetch-native.sh
+	cd shared/ui && npm ci && npm run build
+	cargo test --locked --manifest-path linux/Cargo.toml --workspace
+	cargo clippy --locked --manifest-path linux/Cargo.toml --workspace --all-targets -- -D warnings
+	python3 linux/scripts/check-assets.py
 
 linux-run:
-	desktop/target/release/openwhisper-desktop
+	linux/target/release/openwhisper-desktop
 
 linux-install:
-	bash desktop/scripts/install-local.sh
+	bash linux/scripts/install-local.sh
 
 mac:
 	$(MAKE) -C macos app

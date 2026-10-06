@@ -7,13 +7,13 @@ xcuserdata/
 Package.resolved
 /macos/Vendor/
 # Shared UI and Linux build outputs
-/desktop/target/
-/desktop/node_modules/
-/desktop/dist/
-/desktop/src-tauri/gen/
-/desktop/test-results/
-/desktop/playwright-report/
-/desktop/vendor/
+/linux/target/
+/linux/node_modules/
+/linux/dist/
+/linux/src-tauri/gen/
+/linux/test-results/
+/linux/playwright-report/
+/linux/vendor/
 
 # Local configuration and signing material
 /.local/
@@ -29,3 +29,8 @@ Package.resolved
 *.key
 
 __pycache__/
+
+/shared/ui/node_modules/
+/shared/ui/dist/
+/shared/ui/test-results/
+/shared/ui/playwright-report/

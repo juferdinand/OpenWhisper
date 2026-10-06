@@ -1,6 +1,6 @@
 # Linux implementation and support
 
-The Linux app in `desktop/` is available as source and public AppImage / `.deb` releases.
+The Linux app in `linux/` is available as source and public AppImage / `.deb` releases.
 CI also provides development packages.
 A working build does not by itself establish support for
 global shortcuts, text insertion, microphone devices, or every desktop environment.
@@ -164,7 +164,7 @@ not required to install a release `.deb` or AppImage.
 
 Initial scope: x86_64 Linux with GTK 3, WebKitGTK 4.1, an ALSA-compatible microphone service,
 and a graphical desktop session. PipeWire through its ALSA compatibility layer is the primary
-path. The source build was checked with Rust 1.99.0 and Node 26; CI uses Rust 1.99.0 and Node 22.
+path. The source build was checked with Rust 1.99.0 and Node 26; CI uses Rust 1.99.0 and Node 24.
 Install Rust/Cargo, Node.js/npm, Python 3, a C++ compiler, CMake, pkg-config, and curl first.
 
 CachyOS / Arch build and runtime dependencies:
@@ -177,8 +177,8 @@ Ubuntu 22.04+ / Debian build dependencies (desktop validation is still pending):
 
 ```bash
 sudo apt install build-essential cmake ninja-build pkg-config python3 curl libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libgtk-layer-shell0 libvulkan-dev patchelf wl-clipboard xclip
-python3 desktop/scripts/build-glslc.py
-export PATH="$PWD/desktop/vendor/shaderc/bin:$PATH"
+python3 linux/scripts/build-glslc.py
+export PATH="$PWD/linux/vendor/shaderc/bin:$PATH"
 ```
 
 Install a current Rust toolchain and Node.js separately if the distribution packages are too old.
@@ -200,16 +200,16 @@ The local installer needs no root access. It places the executable and licenses 
 `make linux-run` runs the build directly. Builds made on a rolling distribution are not portable
 binaries for older distributions; the CI package baseline is Ubuntu 22.04.
 
-For development: run `bash desktop/scripts/fetch-native.sh`, then `npm ci` and
-`npm run tauri dev` inside `desktop/`. For the known-audio smoke test, install `ffmpeg` and run
-`bash desktop/scripts/test-recognition.sh`; this downloads the checksum-pinned Whisper Tiny model.
+For development: run `bash linux/scripts/fetch-native.sh`, then `npm ci` and `npm run tauri dev` inside `linux/`. The host builds the shared UI from
+`shared/ui/`; UI-only development and tests run in that shared directory. For the known-audio smoke test, install `ffmpeg` and run
+`bash linux/scripts/test-recognition.sh`; this downloads the checksum-pinned Whisper Tiny model.
 New packages and `make linux` include Vulkan. Install a Vulkan loader and a graphics driver with
 Vulkan support (NVIDIA's driver, or the appropriate Mesa driver for AMD/Intel). Build dependencies
 also include `glslc` and the Vulkan loader development library. Ubuntu 22.04 does not package
 `glslc`; the commands above build it locally from checksum-pinned Shaderc sources and dependencies,
 without changing the runtime distribution baseline. A recent distribution-provided `glslc` can
 also be used. The build script downloads
-checksum-pinned Khronos headers into `desktop/vendor/vulkan`; it does not install system packages.
+checksum-pinned Khronos headers into `linux/vendor/vulkan`; it does not install system packages.
 Use `make linux LINUX_FEATURES=custom-protocol` for a CPU-only development build.
 
 In **General → Appearance & system**, **Use GPU acceleration when available** is on by default.
@@ -237,8 +237,8 @@ its generated desktop entry in an isolated X11 session on CachyOS.
 After building, quit the running app and run this inside the graphical KDE Wayland session:
 
 ```bash
-bash desktop/scripts/test-recognition.sh
-python3 desktop/scripts/test-session.py
+bash linux/scripts/test-recognition.sh
+python3 linux/scripts/test-session.py
 ```
 
 The session test needs Python PyGObject/AT-SPI, `pactl`, `paplay`, `gdbus`, and `wl-paste`.
@@ -255,7 +255,7 @@ its shortcut binding can persist in KDE's settings. Launch it with the correct a
 
 ```bash
 systemd-run --user --wait --pipe --collect --unit=app-io.github.whisperfree \
-  python3 "$PWD/desktop/scripts/test-session.py" --portals
+  python3 "$PWD/linux/scripts/test-session.py" --portals
 ```
 
 Do not start a second instance while the test owns OpenWhisper's application ID. A recording
@@ -266,7 +266,7 @@ test with a virtual source proves the capture/inference/output path, not physica
 After a Vulkan-enabled build, run the explicit file-based regression with downloaded models:
 
 ```bash
-python3 desktop/scripts/test-long-recognition.py \
+python3 linux/scripts/test-long-recognition.py \
   --tiny /path/to/ggml-tiny.bin \
   --parakeet /path/to/ggml-parakeet-tdt-0.6b-v3-q4_0.bin --gpu
 ```
@@ -425,7 +425,7 @@ latest release would make that check fail. Keep both platform assets until the f
 After building with `make linux`, run:
 
 ```bash
-python3 desktop/scripts/test-kde-triggers.py --binary desktop/target/release/openwhisper-desktop
+python3 linux/scripts/test-kde-triggers.py --binary linux/target/release/openwhisper-desktop
 ```
 
 This optional desktop test requires Plasma 6.3+, Xvfb, libei, Python PyGObject, and the KDE
@@ -440,8 +440,8 @@ and trigger removal. Physical-device checks remain outstanding.
 
 ## Acceptance evidence
 
-Use one report per distribution, desktop/session, and package combination. Record the release
-tag/commit and package SHA-256, OS release, desktop/compositor and version, Wayland/X11,
+Use one report per distribution, linux/session, and package combination. Record the release
+tag/commit and package SHA-256, OS release, linux/compositor and version, Wayland/X11,
 portal/backend versions, audio service, GPU/driver, and AppImage or Debian installation method.
 Do not infer a passing result from a missing feature, a package build, or another distribution.
 

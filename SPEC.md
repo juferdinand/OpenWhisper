@@ -16,7 +16,7 @@ in the [roadmap](docs/ROADMAP.md); [README.md](README.md) is the documentation e
 
 | Area | Current behavior |
 | --- | --- |
-| Interface | `desktop/src/` supplies the same compiled settings and recording UI to both hosts. English/German interface language is independent of dictation language; user text is never translated by the UI. |
+| Interface | `shared/ui/src/` supplies the same compiled settings and recording UI to both hosts. English/German interface language is independent of dictation language; user text is never translated by the UI. |
 | Speech models | Both hosts use `shared/models.json` and the pinned whisper.cpp implementation for Whisper and NVIDIA Parakeet. Whisper supports fixed language or automatic detection; Parakeet detects language automatically and does not accept vocabulary prompts. |
 | Recording | Capture is converted to 16 kHz mono samples in RAM. No automatic duration cutoff or audio truncation. Longer recordings consume more RAM. Cancellation discards the active recording before inference. |
 | Text processing | Cleanup, vocabulary correction, and snippet expansion follow `shared/test-vectors.json`. Vocabulary correction runs after recognition for both model families. |
@@ -62,7 +62,7 @@ audio, transcripts, vocabulary, and clipboard contents must never be logged.
 
 CI checks processing logic, shared UI adapters, native webview smoke tests, packaging, and
 release verification. A passing CI run does not prove physical microphone quality, permission
-flows, global input handling, or insertion on every desktop. Each desktop/package combination
+flows, global input handling, or insertion on every desktop. Each linux/package combination
 needs the acceptance evidence described in [docs/LINUX.md](docs/LINUX.md#acceptance-checks).
 
 ## Planned extensions
