@@ -34,11 +34,12 @@ def startup_line(process):
 def check_fixture(fixture):
     process = None
     try:
+        print(f"Owned fixture startup preflight: Python {sys.version.split()[0]}; executable={sys.executable}; fixture={fixture}", flush=True)
         if not fixture.is_file():
             raise FileNotFoundError(f"fixture script is missing: {fixture}")
         # Match the command and pipe arrangement used by the native Swift helpers.
         process = subprocess.Popen(
-            ["/usr/bin/env", "python3", str(fixture)],
+            ["/usr/bin/env", "python3", str(fixture), "--startup-diagnostics"],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         startup_line(process)

@@ -1,12 +1,24 @@
 #!/usr/bin/env python3
 """One-request owned loopback fixture. Never connect this server to a model or microphone."""
+import sys
+
+
+def startup_phase(phase):
+    if "--startup-diagnostics" in sys.argv:
+        print(f"Owned fixture startup phase: {phase}", file=sys.stderr, flush=True)
+
+
+startup_phase("importing standard library")
 import argparse
 import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import socket
+from socketserver import TCPServer
 import time
 
+startup_phase("standard library imported")
 parser = argparse.ArgumentParser()
+parser.add_argument("--startup-diagnostics", action="store_true", help="Emit bounded synthetic startup phases to stderr")
 parser.add_argument("--provider", choices=["lm_studio", "ollama"], default="lm_studio")
 parser.add_argument("--status", type=int, default=200)
 parser.add_argument("--delay", type=float, default=0)
@@ -62,8 +74,16 @@ class Handler(BaseHTTPRequestHandler):
 class OwnedServer(HTTPServer):
     address_family = socket.AF_INET6 if args.host == "::1" else socket.AF_INET
 
+    def server_bind(self):
+        # HTTPServer calls getfqdn here; numeric loopback fixtures must never need DNS.
+        startup_phase("binding numeric loopback")
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+        startup_phase("numeric loopback bound")
+
 
 with OwnedServer((args.host, 0), Handler) as server:
     server.timeout = 10
+    startup_phase("listening; emitting startup port")
     print(server.server_port, flush=True)
     server.handle_request()
