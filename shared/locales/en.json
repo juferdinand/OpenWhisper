@@ -246,5 +246,6 @@
   "Keyboard permission unavailable: {error}. Clipboard output still works.": "Keyboard permission unavailable: {error}. Clipboard output still works.",
   "Transcript ready; history could not be saved: {error}": "Transcript ready; history could not be saved: {error}",
   "Could not monitor the shortcut session: {error}. Enable it again in Settings.": "Could not monitor the shortcut session: {error}. Enable it again in Settings.",
-  "Open your desktop's shortcut settings to change the trigger. The portal could not open them: {error}": "Open your desktop's shortcut settings to change the trigger. The portal could not open them: {error}"
+  "Open your desktop's shortcut settings to change the trigger. The portal could not open them: {error}": "Open your desktop's shortcut settings to change the trigger. The portal could not open them: {error}",
+  "Microphone unavailable or changed. Check your input device and try again.": "Microphone unavailable or changed. Check your input device and try again."
 }

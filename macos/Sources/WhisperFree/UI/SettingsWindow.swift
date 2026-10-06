@@ -63,6 +63,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        AppDiagnostics.shared.record("ui.settings_closed")
         NSApp.setActivationPolicy(.accessory)
     }
 }

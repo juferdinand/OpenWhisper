@@ -17,6 +17,8 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
     private var requestedTab: SettingsTab
     private var lastSnapshot: Data?
     private let isOverlay: Bool
+    private var recoveringContent = false
+    private var recentContentFailures: [Date] = []
     private var testing: Bool {
         CommandLine.arguments.contains("--ui-smoke-test") || CommandLine.arguments.contains("--overlay-smoke-test")
     }
@@ -56,7 +58,25 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
         if testing { fputs("Native WebKit navigation finished.\n", stderr) }
         send("navigate", value: requestedTab.rawValue)
         publish(force: true)
-        if testing { smokeTest() }
+        if recoveringContent {
+            recoveringContent = false
+            AppDiagnostics.shared.record(isOverlay ? "ui.overlay_recovered" : "ui.settings_recovered")
+        } else if testing { smokeTest() }
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        AppDiagnostics.shared.record(isOverlay ? "ui.overlay_process_terminated" : "ui.settings_process_terminated")
+        let now = Date()
+        recentContentFailures = recentContentFailures.filter { now.timeIntervalSince($0) < 60 }
+        guard recentContentFailures.count < 3 else {
+            AppDiagnostics.shared.record("ui.recovery_limit_reached")
+            return
+        }
+        recentContentFailures.append(now)
+        recoveringContent = true
+        lastSnapshot = nil
+        // Recover only the trusted bundled document, retaining its document-start overlay flag.
+        webView.loadFileURL(root.appendingPathComponent("index.html"), allowingReadAccessTo: root)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
@@ -83,6 +103,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                     guard valid as? Bool == true, webView.window?.canBecomeKey == false else {
                         throw UIError.message("Shared recording overlay did not initialize correctly")
                     }
+                    try await smokeTestRecovery()
                     if let directory = ProcessInfo.processInfo.environment["WF_UI_SNAPSHOT_DIR"] {
                         let folder = URL(fileURLWithPath: directory, isDirectory: true)
                         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -127,6 +148,10 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                 guard (try await webView.evaluateJavaScript("document.querySelectorAll('nav button').length")) as? Int == 5 else {
                     throw UIError.message("Completed setup is still visible")
                 }
+                try await smokeTestRecovery()
+                guard (try await webView.evaluateJavaScript("document.documentElement.lang === 'de' && document.querySelectorAll('nav button').length === 5")) as? Bool == true else {
+                    throw UIError.message("WebKit recovery lost language or onboarding state")
+                }
                 UserDefaults.standard.set("en", forKey: Prefs.uiLanguage)
                 print("Shared UI smoke test passed: native bridge, onboarding completion, language persistence, icon, and font.")
                 NSApplication.shared.terminate(nil)
@@ -135,6 +160,22 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                 exit(1)
             }
         }
+    }
+
+    private func smokeTestRecovery() async throws {
+        try await webView.evaluateJavaScript("window.__recoverySentinel = true")
+        // Exercise the real delegate recovery path without private WebKit process APIs.
+        webViewWebContentProcessDidTerminate(webView)
+        for _ in 0..<100 {
+            try await Task.sleep(nanoseconds: 100_000_000)
+            if (try? await webView.evaluateJavaScript("document.documentElement.dataset.ready === 'true' && !window.__recoverySentinel")) as? Bool == true {
+                let overlay = (try await webView.evaluateJavaScript("document.documentElement.classList.contains('overlay')")) as? Bool
+                guard overlay == isOverlay else { throw UIError.message("WebKit recovery lost the overlay mode") }
+                fputs("Native WebKit content recovery passed.\n", stderr)
+                return
+            }
+        }
+        throw UIError.message("WebKit content recovery timed out")
     }
 
     private func saveSnapshot(to file: URL) async throws {

@@ -47,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        AppDiagnostics.start()
         overlay = OverlayController(state: state)
         registerHotkey(state)
         state.preloadModel()
@@ -60,8 +61,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        AppDiagnostics.shared.record("session.termination_requested")
         AppState.shared.shutdown()
+        AppDiagnostics.shared.finish()
     }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func showSettings(_ tab: SettingsTab) {
         settings.show(tab: tab)

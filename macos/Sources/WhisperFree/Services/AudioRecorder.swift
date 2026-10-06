@@ -1,92 +1,110 @@
 import AVFoundation
+import WhisperFreeAudio
 
-enum RecorderError: LocalizedError {
-    case noInputDevice
-    case converterUnavailable
-
-    var errorDescription: String? {
-        switch self {
-        case .noInputDevice: "No microphone found"
-        case .converterUnavailable: "Unsupported audio format"
-        }
-    }
-}
-
-/// Records the default microphone and keeps audio in memory as 16 kHz mono Float32,
-/// the format expected by whisper.cpp. Never writes an audio file.
-final class AudioRecorder: @unchecked Sendable {
-    static let sampleRate: Double = 16_000
-
-    private let engine = AVAudioEngine()
+/// One capture owns its converter and samples. Late callbacks cannot reach a later recording.
+/// The lock covers conversion as well as collection, including the final buffer during stop.
+final class AudioCaptureSession: @unchecked Sendable {
+    private let lock = NSLock()
+    private var closed = false
+    private var converter: AVAudioConverter?
+    private var samples: [Float] = []
     private let targetFormat = AVAudioFormat(
         commonFormat: .pcmFormatFloat32, sampleRate: AudioRecorder.sampleRate, channels: 1, interleaved: false
     )!
-    private var converter: AVAudioConverter?
-    private var samples: [Float] = []
-    private let lock = NSLock()
 
-    /// Called from the audio thread with each buffer's RMS level.
-    var onLevel: ((Float) -> Void)?
-
-    func start() throws {
+    func process(_ buffer: AVAudioPCMBuffer) -> Float? {
         lock.withLock {
-            samples.removeAll(keepingCapacity: true)
-            samples.reserveCapacity(Int(Self.sampleRate) * 60)
+            guard !closed, buffer.frameLength > 0,
+                  buffer.format.sampleRate.isFinite, buffer.format.sampleRate > 0,
+                  buffer.format.channelCount > 0 else { return nil }
+            if converter?.inputFormat != buffer.format {
+                converter = AVAudioConverter(from: buffer.format, to: targetFormat)
+            }
+            guard let converter else { return nil }
+            let framesNeeded = Double(buffer.frameLength) * targetFormat.sampleRate / buffer.format.sampleRate + 64
+            guard framesNeeded.isFinite, framesNeeded < Double(UInt32.max),
+                  let output = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: AVAudioFrameCount(framesNeeded)) else { return nil }
+            var consumed = false
+            var error: NSError?
+            let status = converter.convert(to: output, error: &error) { _, inputStatus in
+                guard !consumed else { inputStatus.pointee = .noDataNow; return nil }
+                consumed = true
+                inputStatus.pointee = .haveData
+                return buffer
+            }
+            guard status != .error, let channel = output.floatChannelData?[0] else { return nil }
+            let frames = UnsafeBufferPointer(start: channel, count: Int(output.frameLength))
+            var energy: Float = 0
+            for sample in frames { energy += sample * sample }
+            samples.append(contentsOf: frames)
+            return frames.isEmpty ? 0 : (energy / Float(frames.count)).squareRoot()
         }
-
-        let input = engine.inputNode
-        let inputFormat = input.outputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else { throw RecorderError.noInputDevice }
-        guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
-            throw RecorderError.converterUnavailable
-        }
-        self.converter = converter
-
-        input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
-            self?.process(buffer)
-        }
-        engine.prepare()
-        try engine.start()
     }
 
-    /// Stops recording and returns all collected samples.
-    func stop() -> [Float] {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        converter = nil
-        return lock.withLock {
+    func finish() -> [Float] {
+        lock.withLock {
+            closed = true
+            converter = nil
             let result = samples
             samples = []
             return result
         }
     }
+}
 
-    private func process(_ buffer: AVAudioPCMBuffer) {
-        guard let converter else { return }
-        let ratio = targetFormat.sampleRate / buffer.format.sampleRate
-        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 64
-        guard let output = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else { return }
+/// Records the default microphone in RAM as 16 kHz mono Float32, with no duration limit.
+@MainActor
+final class AudioRecorder {
+    nonisolated static let sampleRate: Double = 16_000
+    private var engine: AVAudioEngine?
+    private var capture: AudioCaptureSession?
+    private var configurationObserver: NSObjectProtocol?
+    var onLevel: ((Float) -> Void)?
+    var onInterruption: (() -> Void)?
 
-        var consumed = false
-        var error: NSError?
-        let status = converter.convert(to: output, error: &error) { _, inputStatus in
-            if consumed {
-                inputStatus.pointee = .noDataNow
-                return nil
+    func start() throws {
+        _ = stop()
+        let session = AudioCaptureSession()
+        // A fresh engine avoids retaining a stale input graph after sleep or device changes.
+        let engine = AVAudioEngine()
+        self.engine = engine
+        capture = session
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
+        ) { [weak self] _ in
+            // Never stop the engine from its notification/audio thread.
+            DispatchQueue.main.async {
+                guard let self, self.capture === session, self.engine?.isRunning == false else { return }
+                AppDiagnostics.shared.record("audio.configuration_changed")
+                self.onInterruption?()
             }
-            consumed = true
-            inputStatus.pointee = .haveData
-            return buffer
         }
-        guard status != .error, let channel = output.floatChannelData?[0] else { return }
+        var error: NSError?
+        let started = WFStartAudioEngine(engine, { [weak self] buffer, _ in
+            guard let level = session.process(buffer) else { return }
+            DispatchQueue.main.async {
+                guard let self, self.capture === session else { return }
+                self.onLevel?(level)
+            }
+        }, &error)
+        guard started else {
+            _ = stop()
+            AppDiagnostics.shared.record("audio.start_failed")
+            throw error ?? NSError(domain: "io.github.whisperfree.audio", code: 0,
+                                   userInfo: [NSLocalizedDescriptionKey: "Microphone unavailable or changed. Check your input device and try again."])
+        }
+    }
 
-        let frames = UnsafeBufferPointer(start: channel, count: Int(output.frameLength))
-        var energy: Float = 0
-        for sample in frames { energy += sample * sample }
-        let rms = frames.isEmpty ? 0 : (energy / Float(frames.count)).squareRoot()
-
-        lock.withLock { samples.append(contentsOf: frames) }
-        onLevel?(rms)
+    func stop() -> [Float] {
+        if let observer = configurationObserver { NotificationCenter.default.removeObserver(observer) }
+        configurationObserver = nil
+        let result = capture?.finish() ?? []
+        capture = nil
+        if let engine {
+            var error: NSError?
+            if !WFStopAudioEngine(engine, &error) { AppDiagnostics.shared.record("audio.stop_failed") }
+        }
+        engine = nil
+        return result
     }
 }

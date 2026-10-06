@@ -21,7 +21,19 @@ final class AppState: ObservableObject {
 
     static let barCount = 26
 
-    @Published private(set) var phase: Phase = .idle
+    @Published private(set) var phase: Phase = .idle {
+        didSet {
+            let event: String
+            switch phase {
+            case .idle: event = "state.idle"
+            case .recording: event = "state.recording"
+            case .transcribing: event = "state.transcribing"
+            case .done: event = "state.done"
+            case .error: event = "state.error"
+            }
+            AppDiagnostics.shared.record(event)
+        }
+    }
     @Published private(set) var levels: [Float] = Array(repeating: 0, count: AppState.barCount)
     @Published private(set) var recordingStartedAt: Date?
     @Published private(set) var history: [String] = []
@@ -51,8 +63,10 @@ final class AppState: ObservableObject {
             history = defaults.stringArray(forKey: Prefs.history) ?? []
         }
         recorder.onLevel = { [weak self] level in
-            DispatchQueue.main.async { self?.push(level: level) }
+            self?.push(level: level)
         }
+        // Keep and transcribe the captured portion if hardware changes stop the engine.
+        recorder.onInterruption = { [weak self] in self?.stop() }
     }
 
     // MARK: - Controls

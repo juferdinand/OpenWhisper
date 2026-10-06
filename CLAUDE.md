@@ -99,6 +99,11 @@ For documentation-only changes, check content, links, and formatting.
   Public releases must keep the same signing identity in `SIGNING_CERT_P12`;
   the updater rejects apps whose signatures do not meet the running app's designated requirement.
   A self-signed certificate does not provide Apple notarization.
+- **macOS capture:** each recording owns its converter and synchronized sample buffer. Never
+  reset a converter concurrently with the tap callback or reuse an engine after a device change.
+  `WhisperFreeAudio` catches AVAudioEngine Objective-C exceptions before they cross Swift.
+  Synthetic capture tests must never open the microphone. Lifecycle diagnostics are bounded and
+  local; never log audio, transcripts, vocabulary, clipboard content, or device names.
 - **Metal shutdown:** ggml-metal can crash during process exit while a context remains loaded.
   Call `SpeechEngine.shutdown()` from `applicationWillTerminate`.
 - **Testing with Command Line Tools:** use Swift Testing. The Makefile supplies the Testing

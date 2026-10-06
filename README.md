@@ -227,6 +227,20 @@ The table below applies to macOS.
 | Short phrases are recognized in the wrong language | Set the language explicitly when using Whisper. Parakeet always detects the language automatically. |
 | Permissions stop working after a local rebuild | A changing ad-hoc signature can require permissions to be granted again; a persistent local development certificate helps. See [Development](#development). |
 | “Updates are not configured in this build” | This is expected for normal source builds. Update the source code and build the app again. |
+| The settings window or Dock icon disappears | Closing settings hides the Dock icon; dictation continues from the menu bar. If the menu bar icon also disappears, check the diagnostics below. |
+
+For unexpected macOS exits, check **Console → Crash Reports** for `WhisperFree` and the
+local files in `~/Library/Logs/DiagnosticReports/`. Starting with the next build after 0.2.1,
+WhisperFree also keeps `~/Library/Logs/WhisperFree/lifecycle.log` and one rotated copy (up to
+256 KiB each). These record app/OS version, CPU architecture, lifecycle stages, audio device
+changes, and WebKit recovery events. They contain no recordings, dictation text, vocabulary,
+clipboard contents, or device names and are never uploaded automatically. An unclean-exit
+marker can also result from force-quitting or power loss; it is not proof of a crash.
+
+Live macOS diagnostics are available with
+`/usr/bin/log stream --info --predicate 'subsystem == "io.github.whisperfree"' --style compact`.
+An audio-device change ends the current capture and processes the audio already collected;
+the next recording creates a fresh input engine. Recordings have no fixed time limit.
 
 Still stuck? [Open an issue](https://github.com/juferdinand/WhisperFree/issues/new) with your OS
 version, hardware, WhisperFree version, selected model, and steps to reproduce the problem.

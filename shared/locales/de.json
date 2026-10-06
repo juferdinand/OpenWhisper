@@ -246,5 +246,6 @@
   "Keyboard permission unavailable: {error}. Clipboard output still works.": "Tastaturzugriff nicht verfügbar: {error}. Die Zwischenablage-Ausgabe funktioniert weiterhin.",
   "Transcript ready; history could not be saved: {error}": "Transkript bereit; der Verlauf konnte nicht gespeichert werden: {error}",
   "Could not monitor the shortcut session: {error}. Enable it again in Settings.": "Die Tastenkürzel-Sitzung konnte nicht überwacht werden: {error}. Aktiviere sie erneut in den Einstellungen.",
-  "Open your desktop's shortcut settings to change the trigger. The portal could not open them: {error}": "Öffne die Tastenkürzel-Einstellungen deines Desktops, um den Auslöser zu ändern. Das Portal konnte sie nicht öffnen: {error}"
+  "Open your desktop's shortcut settings to change the trigger. The portal could not open them: {error}": "Öffne die Tastenkürzel-Einstellungen deines Desktops, um den Auslöser zu ändern. Das Portal konnte sie nicht öffnen: {error}",
+  "Microphone unavailable or changed. Check your input device and try again.": "Mikrofon nicht verfügbar oder geändert. Prüfe dein Eingabegerät und versuche es erneut."
 }

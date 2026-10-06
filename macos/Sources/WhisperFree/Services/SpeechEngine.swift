@@ -25,7 +25,7 @@ final class SpeechEngine: @unchecked Sendable {
         case parakeet(OpaquePointer)
     }
 
-    private let queue = DispatchQueue(label: "whisperfree.speech", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "whisperfree.speech", qos: .userInitiated, autoreleaseFrequency: .workItem)
     private var context: Context?
     private var loadedPath: String?
 
@@ -47,6 +47,7 @@ final class SpeechEngine: @unchecked Sendable {
         try await run {
             if self.loadedPath == path, self.context != nil { return }
             self.free()
+            AppDiagnostics.shared.record("speech.loading")
             let name = (path as NSString).lastPathComponent
             switch ModelFamily.detect(fileName: name) {
             case .whisper:
@@ -66,6 +67,7 @@ final class SpeechEngine: @unchecked Sendable {
                 self.context = .parakeet(ctx)
             }
             self.loadedPath = path
+            AppDiagnostics.shared.record("speech.loaded")
         }
     }
 
@@ -84,6 +86,8 @@ final class SpeechEngine: @unchecked Sendable {
     ///   - prompt: Optional vocabulary (Whisper only), improving the spelling of names.
     func transcribe(_ samples: [Float], language: String, prompt: String?) async throws -> String {
         try await run {
+            AppDiagnostics.shared.record("speech.transcribing")
+            defer { AppDiagnostics.shared.record("speech.inference_returned") }
             switch self.context {
             case .whisper(let ctx):
                 return try self.runWhisper(ctx, samples: samples, language: language, prompt: prompt)
@@ -150,6 +154,8 @@ final class SpeechEngine: @unchecked Sendable {
     // MARK: - Helpers
 
     private func free() {
+        guard context != nil else { return }
+        AppDiagnostics.shared.record("speech.unloading")
         switch context {
         case .whisper(let ctx): whisper_free(ctx)
         case .parakeet(let ctx): parakeet_free(ctx)
@@ -157,6 +163,7 @@ final class SpeechEngine: @unchecked Sendable {
         }
         context = nil
         loadedPath = nil
+        AppDiagnostics.shared.record("speech.unloaded")
     }
 
     private func run<T>(_ work: @escaping () throws -> T) async throws -> T {
