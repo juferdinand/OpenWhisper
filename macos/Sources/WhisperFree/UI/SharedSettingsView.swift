@@ -3,6 +3,10 @@ import AVFoundation
 import WebKit
 import WhisperFreeCore
 
+private final class SharedWebView: WKWebView {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 /// Hosts exactly the same compiled UI assets used by the Linux app.
 /// Audio, input capture, output, model storage, and signature verification remain native.
 @MainActor
@@ -18,7 +22,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
         root = Bundle.main.resourceURL!.appendingPathComponent("WebUI", isDirectory: true)
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
-        webView = WKWebView(frame: .zero, configuration: configuration)
+        webView = SharedWebView(frame: .zero, configuration: configuration)
         webView.underPageBackgroundColor = .clear
         super.init()
         webView.configuration.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "whisperfree")
@@ -67,7 +71,12 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                         for tab in SettingsTab.allCases {
                             send("navigate", value: tab.rawValue)
                             try await Task.sleep(nanoseconds: 300_000_000)
-                            let image = try await webView.takeSnapshot(with: nil)
+                            let image: NSImage = try await withCheckedThrowingContinuation { continuation in
+                                webView.takeSnapshot(with: nil) { image, error in
+                                    if let image { continuation.resume(returning: image) }
+                                    else { continuation.resume(throwing: error ?? UIError.message("Native UI snapshot failed")) }
+                                }
+                            }
                             guard let tiff = image.tiffRepresentation,
                                   let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else {
                                 throw UIError.message("Could not render native UI preview")
@@ -231,7 +240,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
             "clipboard_available": true, "shortcut_portal": true, "paste_portal": true,
             "shortcut": HotkeyService.shared.trigger?.display as Any? ?? NSNull(), "paste_ready": Permissions.accessibilityGranted,
             "gpu_available": false, "download": download as Any? ?? NSNull(), "progress": download.flatMap { models.progress[$0] } ?? 0,
-            "elapsed": Int(state.recordingStartedAt.map { Date().timeIntervalSince($0) } ?? 0), "level": state.levels.last ?? 0, "model_directory": models.directory.path,
+            "elapsed": Int(state.recordingStartedAt.map { Date().timeIntervalSince($0) } ?? 0), "level": Float(state.levels.last ?? 0), "model_directory": models.directory.path,
             "macos": ["microphone_allowed": Permissions.microphone == .authorized, "recording_shortcut": HotkeyService.shared.isRecording,
                       "shortcut_hint": HotkeyService.shared.recordingHint ?? "Press a key, shortcut, or mouse button. Escape cancels.",
                       "editor": TextInjector.appName(at: TextInjector.editorURL), "recommended": ModelManager.recommendations.map { $0.model.id },

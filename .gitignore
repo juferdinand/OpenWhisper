@@ -27,3 +27,5 @@ Package.resolved
 *.pfx
 *.pem
 *.key
+
+__pycache__/
