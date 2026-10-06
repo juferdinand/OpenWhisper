@@ -63,6 +63,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                     Array.from(document.fonts).some(font => font.family === 'WhisperFree Inter' && font.status === 'loaded')
                     """)
                 guard valid as? Bool == true else { throw UIError.message("Shared UI did not initialize correctly") }
+                fputs("Native WebKit UI is ready.\n", stderr)
                 if let directory = ProcessInfo.processInfo.environment["WF_UI_SNAPSHOT_DIR"] {
                     let folder = URL(fileURLWithPath: directory, isDirectory: true)
                     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -71,8 +72,19 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                         for tab in SettingsTab.allCases {
                             send("navigate", value: tab.rawValue)
                             try await Task.sleep(nanoseconds: 300_000_000)
+                            fputs("Rendering \(theme) \(tab.rawValue).\n", stderr)
+                            let configuration = WKSnapshotConfiguration()
+                            configuration.afterScreenUpdates = false
                             let image: NSImage = try await withCheckedThrowingContinuation { continuation in
-                                webView.takeSnapshot(with: nil) { image, error in
+                                var completed = false
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+                                    guard !completed else { return }
+                                    completed = true
+                                    continuation.resume(throwing: UIError.message("Native UI snapshot timed out"))
+                                }
+                                webView.takeSnapshot(with: configuration) { image, error in
+                                    guard !completed else { return }
+                                    completed = true
                                     if let image { continuation.resume(returning: image) }
                                     else { continuation.resume(throwing: error ?? UIError.message("Native UI snapshot failed")) }
                                 }

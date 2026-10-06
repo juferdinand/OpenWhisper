@@ -7,7 +7,7 @@ const catalog = JSON.parse(
   readFileSync(resolve("../shared/models.json"), "utf8"),
 ).models;
 
-async function start(page: Page, platform: "linux" | "macos") {
+async function start(page: Page, platform: "linux" | "macos", overlay = false) {
   await page.addInitScript(
     ({ platform, models }) => {
       const host = window as any;
@@ -114,13 +114,52 @@ async function start(page: Page, platform: "linux" | "macos") {
     },
     { platform, models: catalog },
   );
-  await page.goto(pathToFileURL(resolve("dist/index.html")).href);
+  await page.goto(
+    pathToFileURL(resolve("dist/index.html")).href +
+      (overlay ? "?overlay" : ""),
+  );
+  if (overlay) {
+    await expect(page.locator("#record")).toBeVisible();
+    return;
+  }
   await expect(
     page.getByRole("heading", { name: "Recording", exact: true }),
   ).toBeVisible();
 }
 
 for (const platform of ["linux", "macos"] as const) {
+  test(`${platform}: floating recorder shows a long-running timer and stop/cancel actions`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 340, height: 64 });
+    await start(page, platform, true);
+    await expect(page.locator("aside")).toHaveCount(0);
+    await page.evaluate(() => {
+      const w = window as any;
+      Object.assign(w.testState, {
+        status: "recording",
+        elapsed: 126,
+        level: 0.5,
+      });
+      w.publishState();
+    });
+    await expect(page.locator("#record-label")).toHaveText("Recording · 2:06");
+    await expect(
+      page.getByRole("button", { name: "Discard recording" }),
+    ).toBeInViewport();
+    await page.screenshot({
+      path: `test-results/${platform}-recording-overlay.png`,
+      omitBackground: true,
+    });
+    await page.locator("#record").click();
+    await page.getByRole("button", { name: "Discard recording" }).click();
+    expect(
+      await page.evaluate(() =>
+        (window as any).calls.map((c: any) => c.command),
+      ),
+    ).toEqual(expect.arrayContaining(["toggle_recording", "cancel_recording"]));
+  });
+
   test(`${platform}: signed-file-compatible bundle, shared navigation and branding`, async ({
     page,
   }) => {
