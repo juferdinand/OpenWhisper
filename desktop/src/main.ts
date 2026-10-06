@@ -76,7 +76,10 @@ let dirty = false;
 let portalBusy = false;
 let contentKey = "";
 const app = document.querySelector<HTMLDivElement>("#app")!;
-const overlay = new URLSearchParams(location.search).has("overlay");
+const overlay =
+  new URLSearchParams(location.search).has("overlay") ||
+  (window as Window & { __WHISPERFREE_OVERLAY__?: boolean })
+    .__WHISPERFREE_OVERLAY__ === true;
 document.documentElement.classList.toggle("overlay", overlay);
 const esc = (text: string) =>
   text.replace(
@@ -689,7 +692,7 @@ function render() {
 function shortcutButton() {
   if (isMac() && state.macos!.recording_shortcut)
     return `<span class="secondary">${esc(state.macos!.shortcut_hint)}</span> <button data-command="cancel_shortcut">Cancel</button>`;
-  return `<button data-portal="enable_shortcut" ${!state.shortcut_portal || (!isMac() && !!state.shortcut) || portalBusy ? "disabled" : ""}>${state.shortcut ? esc(state.shortcut) : "Set trigger …"}</button>`;
+  return `<button data-portal="enable_shortcut" ${!state.shortcut_portal || portalBusy ? "disabled" : ""}>${state.shortcut ? esc(state.shortcut) : "Set trigger …"}</button>`;
 }
 function snippetRow(s?: Snippet) {
   return `<div class="snippet-row" data-id="${esc(s?.id ?? crypto.randomUUID())}"><input class="switch" type="checkbox" name="enabled" aria-label="Enable snippet" ${!s || s.enabled ? "checked" : ""}><input name="trigger" aria-label="When I say" placeholder="When I say …" value="${esc(s?.trigger ?? "")}" maxlength="128"><span>→</span><textarea name="expansion" aria-label="Insert" placeholder="… insert" rows="2">${esc(s?.expansion ?? "")}</textarea><button type="button" data-remove aria-label="Remove snippet">×</button></div>`;

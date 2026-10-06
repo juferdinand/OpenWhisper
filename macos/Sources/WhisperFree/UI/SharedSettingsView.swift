@@ -27,19 +27,19 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
         root = Bundle.main.resourceURL!.appendingPathComponent("WebUI", isDirectory: true)
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
+        if overlay {
+            // WKWebView's macOS transparency setting, also used by Wry/Tauri.
+            configuration.setValue(false, forKey: "drawsBackground")
+            configuration.userContentController.addUserScript(WKUserScript(
+                source: "window.__WHISPERFREE_OVERLAY__ = true;",
+                injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
         webView = SharedWebView(frame: .zero, configuration: configuration)
-        if overlay { webView.underPageBackgroundColor = .clear }
         super.init()
         webView.configuration.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "whisperfree")
         webView.navigationDelegate = self
         let index = root.appendingPathComponent("index.html")
-        if overlay {
-            var location = URLComponents(url: index, resolvingAgainstBaseURL: false)!
-            location.query = "overlay"
-            webView.loadFileURL(location.url!, allowingReadAccessTo: root)
-        } else {
-            webView.loadFileURL(index, allowingReadAccessTo: root)
-        }
+        webView.loadFileURL(index, allowingReadAccessTo: root)
         if testing { fputs("Native WebKit load requested.\n", stderr) }
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.publish() }

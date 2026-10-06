@@ -9,8 +9,9 @@ const catalog = JSON.parse(
 
 async function start(page: Page, platform: "linux" | "macos", overlay = false) {
   await page.addInitScript(
-    ({ platform, models }) => {
+    ({ platform, models, overlay }) => {
       const host = window as any;
+      host.__WHISPERFREE_OVERLAY__ = platform === "macos" && overlay;
       host.calls = [];
       const state: any = {
         platform,
@@ -112,11 +113,11 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false) {
           unregisterCallback: (id: number) => callbacks.delete(id),
         };
     },
-    { platform, models: catalog },
+    { platform, models: catalog, overlay },
   );
   await page.goto(
     pathToFileURL(resolve("dist/index.html")).href +
-      (overlay ? "?overlay" : ""),
+      (overlay && platform === "linux" ? "?overlay" : ""),
   );
   if (overlay) {
     await expect(page.locator("#record")).toBeVisible();
