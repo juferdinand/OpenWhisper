@@ -23,13 +23,19 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         webView = SharedWebView(frame: .zero, configuration: configuration)
-        webView.underPageBackgroundColor = .clear
+        if overlay { webView.underPageBackgroundColor = .clear }
         super.init()
         webView.configuration.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "whisperfree")
         webView.navigationDelegate = self
-        var location = URLComponents(url: root.appendingPathComponent("index.html"), resolvingAgainstBaseURL: false)!
-        if overlay { location.query = "overlay" }
-        webView.loadFileURL(location.url!, allowingReadAccessTo: root)
+        let index = root.appendingPathComponent("index.html")
+        if overlay {
+            var location = URLComponents(url: index, resolvingAgainstBaseURL: false)!
+            location.query = "overlay"
+            webView.loadFileURL(location.url!, allowingReadAccessTo: root)
+        } else {
+            webView.loadFileURL(index, allowingReadAccessTo: root)
+        }
+        if CommandLine.arguments.contains("--ui-smoke-test") { fputs("Native WebKit load requested.\n", stderr) }
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.publish() }
         }
@@ -42,9 +48,15 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if CommandLine.arguments.contains("--ui-smoke-test") { fputs("Native WebKit navigation finished.\n", stderr) }
         send("navigate", value: requestedTab.rawValue)
         publish(force: true)
         if CommandLine.arguments.contains("--ui-smoke-test") { smokeTest() }
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        fputs("Could not load the bundled interface: \(error.localizedDescription)\n", stderr)
+        if CommandLine.arguments.contains("--ui-smoke-test") { exit(1) }
     }
 
     private func smokeTest() {
