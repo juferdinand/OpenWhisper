@@ -1,0 +1,10 @@
+{
+  "productName": "io.github.whisperfree",
+  "bundle": {
+    "linux": {
+      "deb": {
+        "desktopTemplate": "resources/desktop-entry.hbs"
+      }
+    }
+  }
+}

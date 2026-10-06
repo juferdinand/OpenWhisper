@@ -55,10 +55,11 @@ jobs:
       - name: Build development packages
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
-        run: npm run tauri build -- --bundles deb,appimage
+        run: npm run bundle:linux
       - name: Verify and checksum packages
         run: |
           dpkg-deb --info target/release/bundle/deb/*.deb
+          dpkg-deb --contents target/release/bundle/deb/*.deb | grep 'usr/share/applications/io.github.whisperfree.desktop'
           cd target/release/bundle
           sha256sum deb/*.deb appimage/*.AppImage > SHA256SUMS
       - name: Smoke test the shared UI in native WebKitGTK
