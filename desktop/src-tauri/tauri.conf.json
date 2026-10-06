@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "WhisperFree",
+  "version": "0.1.2",
+  "identifier": "io.github.whisperfree",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "enableGTKAppId": true,
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "WhisperFree",
+        "width": 960,
+        "height": 680,
+        "minWidth": 800,
+        "minHeight": 560
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "deb",
+      "appimage"
+    ],
+    "category": "Utility",
+    "shortDescription": "Free, local dictation for Linux",
+    "longDescription": "Private, local dictation with Whisper and Parakeet. No account or subscription.",
+    "icon": [
+      "icons/icon.png"
+    ],
+    "resources": {
+      "../../LICENSE": "LICENSE",
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "../public/fonts/LICENSE.txt": "Inter-LICENSE.txt"
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libasound2",
+          "libgtk-layer-shell0",
+          "wl-clipboard",
+          "xclip"
+        ]
+      }
+    }
+  }
+}

@@ -1,19 +1,25 @@
 # WhisperFree
 
-**Press. Speak. Keep writing. Local dictation for macOS.**
+**Press. Speak. Keep writing. Local dictation for macOS and Linux.**
 
 [![CI](https://github.com/juferdinand/WhisperFree/actions/workflows/ci.yml/badge.svg)](https://github.com/juferdinand/WhisperFree/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black.svg)](#requirements)
 
-WhisperFree is a native menu bar app that turns speech into text locally on your Mac.
-Press <kbd>⌥</kbd> + <kbd>Space</kbd>, speak, then press the shortcut again:
+WhisperFree turns speech into text locally on your computer, with a shared custom interface
+and native audio and desktop integration. On macOS,
+press <kbd>⌥</kbd> + <kbd>Space</kbd>, speak, then press the shortcut again:
 your text is pasted into the active text field. No account, API key, or subscription.
 
 > **App language:** The interface is in English. Dictation supports multiple languages.
 
 [Installation](#installation) · [Features](#features) · [Privacy](#privacy) ·
 [Contributing](#contributing) · [Report an issue](https://github.com/juferdinand/WhisperFree/issues)
+
+![WhisperFree's shared dark interface, rendered in native macOS WebKit](docs/images/shared-desktop.png)
+
+Both desktop apps load the same layout, original logo, and bundled font. Native window borders,
+permission dialogs, and available OS integrations vary by platform.
 
 ## Project status
 
@@ -22,33 +28,63 @@ WhisperFree is in early development. Download the packaged macOS app from
 
 | Platform | Status |
 | --- | --- |
-| macOS 14+ | Native Swift app; universal package for Apple Silicon and Intel |
-| Linux and Windows | Planned, not implemented yet — see the [platform plan](docs/PLATFORMS.md) |
+| macOS 14+ | Native Swift services; universal package for Apple Silicon and Intel |
+| Linux x86_64 | Development preview with AppImage / `.deb` CI artifacts; CachyOS with KDE Plasma / Wayland is the primary test system |
+| Windows | Planned, not implemented yet — see the [platform plan](docs/PLATFORMS.md) |
+
+### Linux compatibility
+
+There is no supported public Linux release yet. A source-build preview is available in `desktop/`.
+Distribution targets below are **not claims of completed end-to-end testing**. On Linux, desktop environment, Wayland/X11, audio services, and portal support
+determine which features work. See the [Linux implementation and test plan](docs/LINUX.md).
+
+| Distribution/session | Status | Feature coverage / limits |
+| --- | --- | --- |
+| CachyOS x86_64, KDE Plasma 6, Wayland, PipeWire | Primary test system; native UI, floating recorder, both CPU engines, clipboard, and AppImage launch checked | See the detailed [validation evidence](docs/LINUX.md#validation-status); real microphone and broader desktop checks remain |
+| Arch Linux and derivatives, KDE Wayland | Targeted; untested | Same integration path, subject to installed portal backend |
+| Ubuntu LTS / Debian, GNOME Wayland | Targeted; untested | Local dictation and clipboard; shortcuts/pasting depend on portal support |
+| Fedora, GNOME or KDE Wayland | Targeted; untested | Local dictation and clipboard; shortcuts/pasting depend on portal support |
+| X11 desktops | Experimental; untested | Record button and `xclip`; shortcuts/pasting require available portals. Native X11 shortcut fallback is not implemented. |
+| Sway / Hyprland and other Wayland compositors | Experimental target; untested | Capability-dependent; no blanket compatibility claim |
+| Linux ARM64 or 32-bit | Outside the initial release scope | No packages or support claim |
+
+Microphone recording, hotkeys, and automatic pasting must pass an end-to-end test on a desktop
+before it is listed as tested. Clipboard output is the fallback for unavailable
+or denied input permissions. See [Linux build and setup](docs/LINUX.md#build-from-source) and
+the [feature and validation checklist](docs/LINUX.md#validation-status).
 
 ## Features
+
+The following describes the macOS app. Linux preview coverage and differences are documented
+in [docs/LINUX.md](docs/LINUX.md).
 
 - **System-wide dictation:** Paste text into the active text field, copy it to the clipboard, or open it in a text editor.
 - **Your preferred trigger:** Configurable keyboard shortcuts, individual modifier keys, Fn, or extra mouse buttons. Toggle recording or use push-to-talk.
 - **Local speech recognition:** OpenAI Whisper and NVIDIA Parakeet through [whisper.cpp](https://github.com/ggml-org/whisper.cpp), with Metal support on Apple Silicon.
 - **Model management:** Download, switch, delete, or import compatible custom ggml models. The app suggests models based on your hardware and system language.
 - **Vocabulary and snippets:** Correct custom terms and replace spoken phrases with saved text, such as “my link” with a URL.
-- **Floating overlay:** Recording level, timer, and processing status; draggable without taking focus away from your text field.
+- **Floating overlay:** A shared recording level, timer, stop/cancel controls, and processing status. It stays above your work without taking keyboard focus. Linux requires a compatible compositor; see the support matrix.
+- **No fixed recording limit:** Recording continues until you stop or cancel it. Audio stays in memory, so longer recordings use more RAM.
 - **Everyday settings:** Launch at login, optional sound cues, clipboard restoration, and a local text history you can disable.
 
 ## Requirements
 
+For Linux, see [dependencies and supported environments](docs/LINUX.md#build-from-source).
+The packaged macOS app requires:
+
 - A Mac running **macOS 14 or later**.
 - A microphone and enough disk space for your chosen speech model; download sizes are shown in the app.
-- To build from source: current **Xcode Command Line Tools** or Xcode with its Swift toolchain.
+- To build from source: current **Xcode Command Line Tools** or Xcode with its Swift toolchain,
+  plus **Node.js 22+ and npm** for the shared settings UI.
 - Internet access to download the app and a speech model, or dependencies for a source build. Dictation works offline after setup.
 
 ## Installation
 
-### Download the app
+### Download the macOS app
 
 1. Download and open [**WhisperFree-macOS.dmg**](https://github.com/juferdinand/WhisperFree/releases/latest/download/WhisperFree-macOS.dmg).
 2. Drag **WhisperFree.app** onto the **Applications** folder in the window.
-3. Eject the WhisperFree volume, open the app from **Applications**, and follow [Your first dictation](#your-first-dictation).
+3. Eject the WhisperFree volume, open the app from **Applications**, and follow [Your first dictation](#your-first-dictation-macos).
 
 A [ZIP download](https://github.com/juferdinand/WhisperFree/releases/latest/download/WhisperFree-macOS.zip) is also available.
 
@@ -65,7 +101,7 @@ Each release includes `SHA256SUMS`. To verify the DMG download, place that file 
 grep '  WhisperFree-macOS[.]dmg$' SHA256SUMS | shasum -a 256 -c -
 ```
 
-### Build from source
+### Build macOS from source
 
 Install the Command Line Tools first if needed:
 
@@ -88,7 +124,14 @@ checksum. You can then drag the resulting `WhisperFree.app` into `/Applications`
 Alternatively, `make mac-install` builds the app, replaces an existing installation in
 `/Applications`, and launches it.
 
-## Your first dictation
+### Build the Linux preview
+
+See [Linux build instructions](docs/LINUX.md#build-from-source), then run `make linux` and
+`make linux-install`. The preview uses the same logo and the same six settings sections as macOS.
+Both apps now render the same custom UI assets, including the bundled font and original logo;
+permissions and feature availability are handled by their native backends.
+
+## Your first dictation (macOS)
 
 1. Open WhisperFree. You can also access setup through the menu bar icon.
 2. Download and select a model in **Settings → Models**.
@@ -114,8 +157,11 @@ the model, hardware, language, and recording.
 
 ## Privacy
 
-Speech recognition runs inside the app process on your Mac. WhisperFree does not upload audio
+Speech recognition runs inside the app process on your computer. WhisperFree does not upload audio
 recordings or transcripts for recognition and has no telemetry integration.
+
+The table below uses macOS paths. Linux storage paths and permissions are listed in
+[Linux data storage](docs/LINUX.md#data-storage).
 
 | Data or connection | Behavior |
 | --- | --- |
@@ -131,6 +177,9 @@ That app's storage and synchronization follow its own settings.
 
 ## Troubleshooting
 
+Linux: run `whisperfree-desktop --diagnose` and consult [Linux troubleshooting](docs/LINUX.md#troubleshooting).
+The table below applies to macOS.
+
 | Problem | What to check |
 | --- | --- |
 | Text is not pasted | Grant Accessibility access to WhisperFree and focus a text field. Alternatively, use clipboard mode and paste manually with `⌘V`. |
@@ -140,14 +189,16 @@ That app's storage and synchronization follow its own settings.
 | Permissions stop working after a local rebuild | A changing ad-hoc signature can require permissions to be granted again; a persistent local development certificate helps. See [Development](#development). |
 | “Updates are not configured in this build” | This is expected for normal source builds. Update the source code and build the app again. |
 
-Still stuck? [Open an issue](https://github.com/juferdinand/WhisperFree/issues/new) with your macOS
-version, Mac chip, WhisperFree version, selected model, and steps to reproduce the problem.
+Still stuck? [Open an issue](https://github.com/juferdinand/WhisperFree/issues/new) with your OS
+version, hardware, WhisperFree version, selected model, and steps to reproduce the problem.
+On Linux, include the distribution, desktop environment, and Wayland/X11 session type.
 Remove personal dictations and other confidential information from any logs you attach.
 
 ## Limitations and roadmap
 
 The current app transcribes after recording; a live text preview is not implemented yet.
-Linux and Windows apps, cloud synchronization, and LLM post-processing are also not available.
+Linux has an early source-build preview with incomplete desktop acceptance testing. Windows,
+cloud synchronization, and LLM post-processing are not implemented.
 Automatic pasting uses the clipboard and a simulated keyboard shortcut, so behavior can vary
 between target apps.
 
@@ -160,13 +211,19 @@ These are plans, not promised release dates.
 
 ```bash
 make test                      # Test text processing and the model catalog
-make mac                       # Build a local app bundle
+make mac                       # Build a local macOS app bundle
+make linux-test                # Check the Linux frontend, Rust code, and shared assets
+make linux                     # Build the Linux preview
+make linux-install             # Install the Linux build for the current user
 make -C macos app UNIVERSAL=1   # Build a universal bundle for Apple Silicon and Intel
 ```
 
 The [CI workflow](https://github.com/juferdinand/WhisperFree/actions/workflows/ci.yml) runs tests,
 builds universal DMG and ZIP packages, verifies the DMG, and retains both as downloadable Actions artifacts for 14 days.
-These development builds use ad-hoc signing and do not enable the in-app updater.
+The macOS development builds use ad-hoc signing and do not enable the in-app updater.
+Linux CI builds development `.deb` and AppImage artifacts on Ubuntu 22.04; packaging success
+alone does not certify every desktop. **Main pushes do not create a tag, change the version,
+or publish a release.** The public Release workflow still publishes macOS only.
 For normal installation, use the signed packages on [Releases](https://github.com/juferdinand/WhisperFree/releases/latest).
 Tests use shared cases from
 [`shared/test-vectors.json`](shared/test-vectors.json).
@@ -180,6 +237,7 @@ macos/
   Sources/WhisperFreeCore/   Text cleanup, vocabulary, snippets, and model catalog
   Tests/                    Tests using Swift Testing
   scripts/                  Build, dependencies, and signing
+desktop/                    Shared custom UI; Linux Rust backend and native speech bridge
 shared/                     Shared model catalog and test cases
 docs/                       Platform planning
 .github/workflows/          CI and manual release workflow

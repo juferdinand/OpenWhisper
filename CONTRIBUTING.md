@@ -9,7 +9,8 @@ and pull requests so the wider community can participate.
 Check the [existing issues](https://github.com/juferdinand/WhisperFree/issues) first.
 A useful bug report includes:
 
-- WhisperFree version or commit, macOS version, and Mac chip.
+- WhisperFree version or commit and hardware. Include the macOS version, or Linux distribution,
+  desktop, Wayland/X11 session, audio service, and portal backend.
 - Model, dictation language, output mode, and affected target app, if applicable.
 - Steps to reproduce, expected behavior, and actual behavior.
 - Relevant error messages without private dictations, tokens, or other confidential data.
@@ -19,7 +20,8 @@ Small fixes can be submitted directly as pull requests.
 
 ## Working locally
 
-You need macOS 14+ and a recent Swift toolchain from Xcode or the Command Line Tools.
+For macOS, use macOS 14+, a recent Swift toolchain from Xcode or the Command Line Tools,
+and Node.js 22+ with npm. For Linux, see [build dependencies](docs/LINUX.md#build-from-source).
 See the [README](README.md#installation) for installation and first launch.
 
 1. Fork the repository and clone your fork.
@@ -34,12 +36,16 @@ make mac
 
 For documentation-only changes, check content, links, and formatting.
 Changes to recording, permissions, hotkeys, or text insertion also need manual testing
-on a Mac; the core tests do not cover all of this system integration.
+on the affected operating system; core tests do not cover all system integration.
+Linux checks: `make linux-test`. Shared UI checks: in `desktop/`, run `npm ci`,
+`npm run build`, `npx playwright install chromium`, and `npm run test:ui`.
 
 ## Structure and tests
 
 - `macos/Sources/WhisperFreeCore/` contains testable text processing, the model catalog, and update validation.
 - `macos/Sources/WhisperFree/` contains the interface and macOS integration.
+- `desktop/src/` is the single custom settings UI used by both macOS and Linux.
+- `desktop/src-tauri/` is the Linux backend; `SharedSettingsView.swift` is the Mac bridge.
 - `shared/models.json` is the shared source for models and recommendations.
 - `shared/test-vectors.json` contains text cleanup, vocabulary, and snippet tests. Add an appropriate case when fixing a processing bug.
 
