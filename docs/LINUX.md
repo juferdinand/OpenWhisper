@@ -254,7 +254,7 @@ On KDE Wayland, direct mouse capture supports Back, Forward, and other extra but
 Middle requires Plasma 6.3+. `kreadconfig6`, `kwriteconfig6`, and KWin's `buttonsrebind` plugin
 must be available. The selected button is reserved for dictation while the app runs. Existing
 KDE remappings are rejected rather than overwritten. WhisperFree registers a free internal
-key chord and temporarily maps the chosen mouse button to it using KDE's configuration API.
+function key (F19 or F24) and temporarily maps the chosen mouse button to it using KDE's configuration API.
 A helper restores the mapping on normal exit or when the app crashes. Later user edits are
 preserved. If the helper itself is forcibly killed (SIGKILL, including an entire process group),
 its recovery file restores the mapping on the next app start; until then, remove that button's

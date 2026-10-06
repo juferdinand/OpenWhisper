@@ -304,6 +304,30 @@ try:
     process = helper({"kind": "key", "key": 0x01000037})
     edges(process, inputs.key, 66)
     close(process)
+    process = helper({"kind": "mouse", "button": 8})
+    inputs.button(275, True)
+    assert receive(process) == {"event": "pressed"}
+    close(process)
+    time.sleep(0.3)
+    inputs.button(275, False)
+    process = helper({"kind": "key", "key": 0x01000037})
+    edges(process, inputs.key, 66)
+    close(process)
+    process = helper({"kind": "mouse", "button": 8})
+    edges(process, inputs.button, 275)
+    close(process)
+    print(
+        "PASS: held-button exit leaves no stuck modifiers and the mouse can reconnect",
+        flush=True,
+    )
+    accel("doRegister", "(as)", (action,))
+    accel("setShortcutKeys", "(asa(ai)u)", (action, [([0x01000042],)], 6))
+    process = helper({"kind": "mouse", "button": 8})
+    assert mapping("ExtraButton1", read=True) == "Key,F24"
+    edges(process, inputs.button, 275)
+    close(process)
+    accel("unregister", "(ss)", (action[0], action[1]))
+    print("PASS: occupied F19 uses the free F24 fallback", flush=True)
     inputs.close()
     print(
         "PASS: keyboard conflicts rejected without taking another application’s binding",

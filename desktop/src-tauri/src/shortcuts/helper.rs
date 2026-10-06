@@ -70,7 +70,7 @@ async fn session() -> Result<(), String> {
     kde::recover(&proxy, &paths.config).await?;
     let candidates = match trigger {
         Trigger::Key { key } => vec![(key, None)],
-        Trigger::Mouse { .. } => kde::mouse_chords()
+        Trigger::Mouse { .. } => kde::mouse_keys()
             .into_iter()
             .map(|(key, name)| (key, Some(format!("Key,{name}"))))
             .collect(),

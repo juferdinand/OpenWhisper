@@ -227,9 +227,9 @@ pub async fn recover(proxy: &Proxy<'_>, config: &Path) -> Result<(), String> {
     uuid::Uuid::parse_str(id).map_err(|_| "The trigger recovery identity is invalid.")?;
     if lease.original.as_ref().is_some_and(|v| !v.is_empty())
         || lease.assigned.as_ref().is_some_and(|v| {
-            !mouse_chords()
-                .iter()
-                .any(|(_, chord)| v == &format!("Key,{chord}"))
+            !mouse_keys().iter().any(|(_, key)| v == &format!("Key,{key}"))
+                // Recover leases created by the earlier development backend as well.
+                && !(9..=12).any(|n| v == &format!("Key,Ctrl+Shift+Meta+F{n}"))
         })
     {
         return Err("The trigger recovery mapping is invalid.".into());
@@ -242,14 +242,11 @@ pub async fn recover(proxy: &Proxy<'_>, config: &Path) -> Result<(), String> {
     lease.release(proxy, config).await
 }
 
-pub fn mouse_chords() -> Vec<(i32, String)> {
-    (9..=12)
-        .rev()
-        .map(|n| {
-            (
-                0x16000000 | (0x01000030 + n - 1),
-                format!("Ctrl+Shift+Meta+F{n}"),
-            )
-        })
+pub fn mouse_keys() -> Vec<(i32, String)> {
+    // KWin can leave synthetic modifiers down if its rebind device is removed while held.
+    // F19/F24 have unmodified keys in the standard evdev map and avoid that failure mode.
+    [19, 24]
+        .into_iter()
+        .map(|n| (0x01000030 + n - 1, format!("F{n}")))
         .collect()
 }
