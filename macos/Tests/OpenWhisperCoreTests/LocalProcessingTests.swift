@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import Testing
 @testable import OpenWhisperCore
 
@@ -12,34 +13,85 @@ private func enabledProfile() -> LocalProcessingProfile {
     return profile
 }
 
+/// Poll on a utility queue so fixture pipes never block Swift's cooperative executor.
+private func readOwnedProcessingLine(_ handle: FileHandle, timeoutNanoseconds: UInt64 = 5_000_000_000) async throws -> Data {
+    try await withCheckedThrowingContinuation { continuation in
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+                var line = Data()
+                while line.count < 100000 {
+                    let now = DispatchTime.now().uptimeNanoseconds
+                    guard now < deadline else { throw LocalProcessingError.message("Owned fixture pipe read timed out") }
+                    var descriptor = pollfd(fd: handle.fileDescriptor, events: Int16(POLLIN), revents: 0)
+                    let ready = Darwin.poll(&descriptor, 1, Int32((deadline - now + 999999) / 1000000))
+                    if ready < 0 && errno == EINTR { continue }
+                    guard ready > 0 else { throw LocalProcessingError.message("Owned fixture pipe was unavailable or timed out") }
+                    var byte: UInt8 = 0
+                    guard Darwin.read(handle.fileDescriptor, &byte, 1) == 1 else {
+                        throw LocalProcessingError.message("Owned fixture exited before completing its response")
+                    }
+                    if byte == 10 { continuation.resume(returning: line); return }
+                    line.append(byte)
+                }
+                throw LocalProcessingError.message("Owned fixture response exceeded its limit")
+            } catch { continuation.resume(throwing: error) }
+        }
+    }
+}
+
 private final class OwnedProcessingServer {
     let process = Process()
     let output = Pipe()
-    let endpoint: String
-    init(provider: String = "lm_studio", status: Int = 200, delay: Double = 0, bodyDelay: Double = 0, response: String = "valid") throws {
+    private(set) var endpoint = ""
+    init(provider: String = "lm_studio", status: Int = 200, delay: Double = 0, bodyDelay: Double = 0, response: String = "valid") async throws {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["python3", processingSharedDirectory.appendingPathComponent("tests/local-processing-server.py").path,
                              "--provider", provider, "--status", String(status), "--delay", String(delay), "--body-delay", String(bodyDelay), "--response", response]
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
-        try process.run()
-        var line = Data()
-        while let byte = try output.fileHandleForReading.read(upToCount: 1), !byte.isEmpty, byte[0] != 10 { line.append(byte) }
-        guard let port = String(data: line, encoding: .utf8), Int(port) != nil else { throw LocalProcessingError.message("Owned fixture could not start") }
-        endpoint = "http://127.0.0.1:\(port)" + (provider == "lm_studio" ? "/v1" : "")
+        do {
+            try process.run()
+            try? output.fileHandleForWriting.close()
+            let line = try await readOwnedProcessingLine(output.fileHandleForReading)
+            guard let port = String(data: line, encoding: .utf8), Int(port) != nil else { throw LocalProcessingError.message("Owned fixture could not start") }
+            endpoint = "http://127.0.0.1:\(port)" + (provider == "lm_studio" ? "/v1" : "")
+        } catch {
+            if process.isRunning { process.terminate() }
+            try? output.fileHandleForReading.close()
+            throw error
+        }
     }
-    func capturedRequest() throws -> [String: Any] {
-        var line = Data()
-        while let byte = try output.fileHandleForReading.read(upToCount: 1), !byte.isEmpty, byte[0] != 10 { line.append(byte) }
+    func capturedRequest() async throws -> [String: Any] {
+        let line = try await readOwnedProcessingLine(output.fileHandleForReading)
         return try #require(JSONSerialization.jsonObject(with: line) as? [String: Any])
     }
     deinit {
         if process.isRunning { process.terminate() }
-        output.fileHandleForReading.closeFile()
+        try? output.fileHandleForReading.close()
     }
 }
 
 struct LocalProcessingTests {
+    @Test func ownedFixturePipeEOFAndDeadlineFailExplicitly() async throws {
+        let ended = Pipe()
+        try ended.fileHandleForWriting.close()
+        defer { try? ended.fileHandleForReading.close() }
+        do {
+            _ = try await readOwnedProcessingLine(ended.fileHandleForReading)
+            Issue.record("Expected explicit fixture EOF")
+        } catch { #expect(error.localizedDescription.contains("exited")) }
+        let silent = Pipe()
+        defer {
+            try? silent.fileHandleForWriting.close()
+            try? silent.fileHandleForReading.close()
+        }
+        do {
+            _ = try await readOwnedProcessingLine(silent.fileHandleForReading, timeoutNanoseconds: 100_000_000)
+            Issue.record("Expected explicit fixture deadline")
+        } catch { #expect(error.localizedDescription.contains("timed out")) }
+    }
+
     @Test func sharedEndpointAndOutputContractsMatch() throws {
         let schema = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: processingSharedDirectory.appendingPathComponent("local-processing.schema.json"))) as? [String: Any])
         let properties = try #require(schema["properties"] as? [String: [String: Any]])
@@ -82,10 +134,10 @@ struct LocalProcessingTests {
 
     @Test func bothAdaptersUseOwnedHTTPServersAndPreserveOriginalInput() async throws {
         for provider in ["lm_studio", "ollama"] {
-            let server = try OwnedProcessingServer(provider: provider)
+            let server = try await OwnedProcessingServer(provider: provider)
             var profile = enabledProfile(); profile.provider = provider; profile.endpoint = server.endpoint; profile.instruction = "Synthetic instruction"
             #expect(try await LocalProcessingService().preview(requestID: UUID().uuidString, profile: profile, text: "Synthetic German: Wünsche.") == "A structured fixture plan.")
-            let capture = try server.capturedRequest(), body = try #require(capture["body"] as? [String: Any])
+            let capture = try await server.capturedRequest(), body = try #require(capture["body"] as? [String: Any])
             #expect(capture["path"] as? String == (provider == "lm_studio" ? "/v1/chat/completions" : "/api/chat"))
             #expect(capture["authorization"] is NSNull)
             #expect(body["model"] as? String == "owned-fixture")
@@ -98,7 +150,7 @@ struct LocalProcessingTests {
 
     @Test func failuresRejectRedirectsAndBoundRepliesWithoutExposingServerDetails() async throws {
         for (status, response) in [(302, "valid"), (401, "valid"), (500, "valid"), (200, "invalid"), (200, "oversized")] {
-            let server = try OwnedProcessingServer(status: status, response: response)
+            let server = try await OwnedProcessingServer(status: status, response: response)
             var profile = enabledProfile(); profile.endpoint = server.endpoint
             do {
                 _ = try await LocalProcessingService().preview(requestID: UUID().uuidString, profile: profile, text: "Original")
@@ -111,17 +163,17 @@ struct LocalProcessingTests {
     }
 
     @Test func timeoutAndCancellationKeepOriginalInputAndAllowAnotherPreview() async throws {
-        let timedServer = try OwnedProcessingServer(delay: 2)
+        let timedServer = try await OwnedProcessingServer(delay: 2)
         var timed = enabledProfile(); timed.endpoint = timedServer.endpoint; timed.timeout_seconds = 1
         do {
             _ = try await LocalProcessingService().preview(requestID: "timeout", profile: timed, text: "Original")
             Issue.record("Expected a timeout")
         } catch { #expect(error.localizedDescription.contains("timed out")) }
-        let server = try OwnedProcessingServer(delay: 3)
+        let server = try await OwnedProcessingServer(delay: 3)
         var profile = enabledProfile(); profile.endpoint = server.endpoint
         let service = LocalProcessingService()
         let running = Task { try await service.preview(requestID: "owned-request", profile: profile, text: "Original") }
-        _ = try server.capturedRequest()
+        _ = try await server.capturedRequest()
         await service.cancel(requestID: "different-request")
         do {
             _ = try await service.preview(requestID: "another", profile: profile, text: "Original")
@@ -136,7 +188,7 @@ struct LocalProcessingTests {
 
     @Test func responseBoundsAndTimeoutApplyWhileReadingTheBody() async throws {
         for (response, delay, expected) in [("chunked-oversized", 0.0, "exceeded"), ("valid", 2.0, "timed out")] {
-            let server = try OwnedProcessingServer(bodyDelay: delay, response: response)
+            let server = try await OwnedProcessingServer(bodyDelay: delay, response: response)
             var profile = enabledProfile(); profile.endpoint = server.endpoint; profile.timeout_seconds = 1
             do {
                 _ = try await LocalProcessingService().preview(requestID: UUID().uuidString, profile: profile, text: "Synthetic original")

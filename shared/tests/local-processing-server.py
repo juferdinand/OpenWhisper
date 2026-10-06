@@ -17,6 +17,10 @@ args = parser.parse_args()
 
 
 class Handler(BaseHTTPRequestHandler):
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(5)
+
     def log_message(self, *_):
         pass
 
@@ -51,7 +55,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(f"{len(body):x}\r\n".encode() + body + b"\r\n0\r\n\r\n")
             else:
                 self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
             pass
 
 

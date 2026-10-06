@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Darwin
 import OpenWhisperCore
 
 /// Bundled-app ATS evidence using fresh synthetic fixture processes, never a user's model server.
@@ -19,7 +20,7 @@ enum LocalProcessingSmokeTest {
                 }
                 for host in ["127.0.0.1", "::1"] {
                     for provider in ["lm_studio", "ollama"] {
-                        let server = try Server(fixture: fixture, host: host, provider: provider)
+                        let server = try await Server(fixture: fixture, host: host, provider: provider)
                         var profile = LocalProcessingProfile()
                         profile.enabled = true
                         profile.model = "owned-fixture"
@@ -29,7 +30,7 @@ enum LocalProcessingSmokeTest {
                         profile.timeout_seconds = 3
                         let result = try await LocalProcessingService().preview(
                             requestID: UUID().uuidString, profile: profile, text: "Synthetic German: Wünsche.")
-                        let request = try server.capturedRequest()
+                        let request = try await server.capturedRequest()
                         guard result == "A structured fixture plan.",
                               request["path"] as? String == (provider == "lm_studio" ? "/v1/chat/completions" : "/api/chat"),
                               request["authorization"] is NSNull,
@@ -54,23 +55,30 @@ enum LocalProcessingSmokeTest {
     private final class Server {
         let process = Process()
         let output = Pipe()
-        let endpoint: String
+        private(set) var endpoint = ""
 
-        init(fixture: String, host: String, provider: String) throws {
+        init(fixture: String, host: String, provider: String) async throws {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = ["python3", fixture, "--provider", provider, "--host", host]
             process.standardOutput = output
             process.standardError = FileHandle.nullDevice
-            try process.run()
-            let port = try Self.readLine(output.fileHandleForReading)
-            guard let number = Int(port), (1...65535).contains(number) else {
-                throw LocalProcessingError.message("The owned server could not start")
+            do {
+                try process.run()
+                try? output.fileHandleForWriting.close()
+                let port = try await Self.readLine(output.fileHandleForReading)
+                guard let number = Int(port), (1...65535).contains(number) else {
+                    throw LocalProcessingError.message("The owned server could not start")
+                }
+                endpoint = "http://\(host == "::1" ? "[::1]" : host):\(number)" + (provider == "lm_studio" ? "/v1" : "")
+            } catch {
+                if process.isRunning { process.terminate() }
+                try? output.fileHandleForReading.close()
+                throw error
             }
-            endpoint = "http://\(host == "::1" ? "[::1]" : host):\(number)" + (provider == "lm_studio" ? "/v1" : "")
         }
 
-        func capturedRequest() throws -> [String: Any] {
-            let line = try Self.readLine(output.fileHandleForReading)
+        func capturedRequest() async throws -> [String: Any] {
+            let line = try await Self.readLine(output.fileHandleForReading)
             guard let data = line.data(using: .utf8),
                   let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 throw LocalProcessingError.message("The owned server did not capture the request")
@@ -78,18 +86,38 @@ enum LocalProcessingSmokeTest {
             return value
         }
 
-        private static func readLine(_ handle: FileHandle) throws -> String {
-            var line = Data()
-            while let byte = try handle.read(upToCount: 1), !byte.isEmpty, byte[0] != 10 {
-                guard line.count < 100000 else { throw LocalProcessingError.message("The owned fixture exceeded its limit") }
-                line.append(byte)
+        private static func readLine(_ handle: FileHandle) async throws -> String {
+            try await withCheckedThrowingContinuation { continuation in
+                DispatchQueue.global(qos: .utility).async {
+                    do {
+                        let deadline = DispatchTime.now().uptimeNanoseconds + 5_000_000_000
+                        var line = Data()
+                        while line.count < 100000 {
+                            let now = DispatchTime.now().uptimeNanoseconds
+                            guard now < deadline else { throw LocalProcessingError.message("The owned fixture pipe read timed out") }
+                            var descriptor = pollfd(fd: handle.fileDescriptor, events: Int16(POLLIN), revents: 0)
+                            let ready = Darwin.poll(&descriptor, 1, Int32((deadline - now + 999999) / 1000000))
+                            if ready < 0 && errno == EINTR { continue }
+                            guard ready > 0 else { throw LocalProcessingError.message("The owned fixture pipe was unavailable or timed out") }
+                            var byte: UInt8 = 0
+                            guard Darwin.read(handle.fileDescriptor, &byte, 1) == 1 else {
+                                throw LocalProcessingError.message("The owned fixture exited before completing its response")
+                            }
+                            if byte == 10 {
+                                continuation.resume(returning: String(data: line, encoding: .utf8) ?? "")
+                                return
+                            }
+                            line.append(byte)
+                        }
+                        throw LocalProcessingError.message("The owned fixture exceeded its limit")
+                    } catch { continuation.resume(throwing: error) }
+                }
             }
-            return String(data: line, encoding: .utf8) ?? ""
         }
 
         deinit {
             if process.isRunning { process.terminate() }
-            output.fileHandleForReading.closeFile()
+            try? output.fileHandleForReading.close()
         }
     }
 }
