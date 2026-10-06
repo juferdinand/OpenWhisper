@@ -159,7 +159,7 @@ python3 desktop/scripts/test-session.py
 ```
 
 The session test needs Python PyGObject/AT-SPI, `pactl`, `paplay`, `gdbus`, and `wl-paste`.
-It uses isolated temporary settings/model paths and a private virtual audio monitor, never
+It checks launcher reactivation, then uses isolated temporary settings/model paths and a private virtual audio monitor, never
 the physical microphone. The default 126-second capture checks the former two-minute cutoff;
 it also checks floating stop/cancel, silence, fixture transcription, and clipboard output.
 It replaces the clipboard with the public upstream speech fixture. Temporary logs remain at the

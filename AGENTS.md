@@ -83,6 +83,9 @@ For documentation-only changes, check content, links, and formatting.
 - **Linux app identity:** install and launch `io.github.whisperfree.desktop` so GTK, KDE's taskbar,
   and portals agree on the application identity. Starting from a terminal can associate portal
   permissions with that terminal. Preserve the package-specific bundler config and desktop template.
+  Keep the main window's `create: false` and create it in the one-shot setup hook: GTK activation
+  emits another Ready event in Tao, and automatic window creation would crash on a duplicate label.
+  Native UI and session tests cover reactivation.
 - **Wayland overlay:** initialize layer-shell before Wry realizes the GTK window. Keep keyboard
   focus disabled. A missing compositor protocol must leave the main recording control usable.
 - **macOS WebKit:** use the original bundle file URL and a document-start flag for overlay mode.

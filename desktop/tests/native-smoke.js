@@ -37,6 +37,9 @@
       )
     )
       throw new Error("Bundled branding failed to load");
+    await invoke("reactivate");
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await invoke("get_state");
     await invoke("complete", { error: null });
   } catch (error) {
     await invoke("complete", { error: String(error) });

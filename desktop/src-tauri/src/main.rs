@@ -249,7 +249,8 @@ fn main() {
             disable_paste,
             models::download_model,
             models::cancel_download,
-            smoke::complete
+            smoke::complete,
+            smoke::reactivate
         ])
         .on_page_load(|webview, payload| {
             if smoke::enabled()
@@ -260,6 +261,9 @@ fn main() {
             }
         })
         .setup(|app| {
+            // GTK launcher activation emits Ready again in Tao. Create the configured window
+            // only in this one-shot setup hook, so reactivation cannot create a duplicate label.
+            tauri::WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?.build()?;
             if let Some(window) = app.get_webview_window("main") {
                 use gtk::prelude::*;
                 let native = window.gtk_window()?;
