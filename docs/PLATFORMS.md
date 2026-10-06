@@ -3,7 +3,7 @@
 | Platform | Implementation | Status |
 |---|---|---|
 | macOS 14+ | Native Swift services + shared UI in WKWebView | Public DMG and ZIP releases |
-| Linux x86_64 | Shared UI in Tauri 2 + Rust and C++ speech services | Source / AppImage / `.deb` preview; see [validation status](LINUX.md#validation-status) |
+| Linux x86_64 | Shared UI in Tauri 2 + Rust and C++ speech services | Source / AppImage / `.deb` releases; see [validation status](LINUX.md#validation-status) |
 | Windows | Not implemented | Future work |
 
 Both implementations use `shared/models.json`, the same pinned whisper.cpp release, and
@@ -23,7 +23,7 @@ and platform-specific permission dialogs are controlled by the operating system.
 
 ## OS integration
 
-| Feature | macOS | Linux preview |
+| Feature | macOS | Linux |
 |---|---|---|
 | Microphone | AVAudioEngine | CPAL / ALSA compatibility, with Rubato conversion to 16 kHz mono |
 | Global trigger | CGEvent tap and Carbon fallback | GlobalShortcuts portal; no direct X11 fallback yet |
@@ -47,7 +47,7 @@ availability alone is not a successful permission or insertion test. See the [su
 4. Validate the floating recording indicator on more compositors, GPU builds, and signed Linux updates.
 5. Implement Windows-specific audio, shortcuts, insertion, packaging, and update verification.
 
-Public Linux previews require desktop acceptance of the release packages. The manual Release
+Public Linux releases require desktop acceptance of the release packages. The manual Release
 workflow builds macOS and Linux in parallel, then creates the version commit/tag and uploads both
 platforms with combined checksums only after both builds pass. It prepares a complete draft by default
 for desktop acceptance before publication. See [Linux release policy](LINUX.md#packaging-and-release-policy).

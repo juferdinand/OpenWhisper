@@ -203,11 +203,18 @@ async fn install(runtime: Arc<Runtime>) -> Result<(), String> {
         })
         .await
         .map_err(|e| e.to_string())??;
+        runtime
+            .app
+            .state::<Arc<crate::relaunch::Relaunch>>()
+            .request()?;
         Ok::<_, String>(())
     }
     .await;
     match result {
-        Ok(()) => runtime.app.restart(),
+        Ok(()) => {
+            runtime.app.exit(0);
+            Ok(())
+        }
         Err(error) => {
             failed(&runtime, error.clone());
             Err(error)

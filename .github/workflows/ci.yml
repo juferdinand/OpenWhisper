@@ -15,7 +15,7 @@ jobs:
   linux:
     uses: ./.github/workflows/linux-build.yml
     with:
-      artifact_name: WhisperFree-Linux-preview-${{ github.sha }}
+      artifact_name: WhisperFree-Linux-development-${{ github.sha }}
   macos:
     runs-on: macos-15
     timeout-minutes: 30

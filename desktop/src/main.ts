@@ -430,6 +430,9 @@ function render() {
       section(
         t("Recording"),
         row(t("Trigger"), shortcutButton()) +
+          (!isMac()
+            ? `<p class="secondary">${esc(t("Your desktop controls which keyboard shortcuts are allowed. Mouse buttons cannot be assigned directly here."))}</p>`
+            : "") +
           row(
             t("Mode"),
             `<select data-pref="hold_to_record" aria-label="${esc(t("Recording mode"))}">${option("false", t("Toggle"), String(p.hold_to_record))}${option("true", t("Push to talk"), String(p.hold_to_record))}</select>`,
@@ -453,7 +456,7 @@ function render() {
             : ""),
         isMac()
           ? ""
-          : t("Start and stop sounds are not available in this Linux preview."),
+          : t("Start and stop sounds are not yet available on Linux."),
       ) +
       section(
         t("Permissions"),
@@ -486,7 +489,7 @@ function render() {
             : ""),
         isMac()
           ? ""
-          : t("Automatic pasting requires keyboard permission. Clipboard restoration and text editor output are not available in this preview."),
+          : t("Automatic pasting requires keyboard permission. Clipboard restoration and text editor output are not yet available on Linux."),
       ) +
       section(
         t("Appearance & system"),
@@ -590,7 +593,7 @@ function render() {
           : "") + `<button id="show-models">${esc(t("Show in file manager"))}</button>`,
         isMac()
           ? t("All models run locally using whisper.cpp. Download once from Hugging Face or import a compatible ggml file.")
-          : t("All models run locally using whisper.cpp. Download once from Hugging Face; downloads are checked against its SHA-256 metadata. Custom model import is not available in this preview."),
+          : t("All models run locally using whisper.cpp. Download once from Hugging Face; downloads are checked against its SHA-256 metadata. Custom model import is not yet available on Linux."),
       );
     content
       .querySelectorAll<HTMLButtonElement>("[data-delete]")
@@ -713,7 +716,7 @@ function render() {
         "",
         `<div class="about-brand"><img src="./app-icon.png" width="88" height="88" alt="${esc(t("WhisperFree app icon"))}"><div><span class="page-eyebrow">${esc(t("LESS TYPING. MORE YOU."))}</span><h1>WhisperFree</h1><p class="version-badge">Version ` +
           esc(state.version) +
-          (isMac() ? "" : " · " + t("Linux preview")) +
+          (isMac() ? "" : " · " + t("Linux")) +
           `</p></div></div><p class="about-intro">${esc(t("A little more freedom for your voice."))}</p><p class="secondary">${esc(t("Turn your thoughts into text, right on your computer."))}</p><div class="about-values"><span>${esc(t("On-device recognition"))}</span><span>${esc(t("No subscription"))}</span><span>${esc(t("Open source · MIT"))}</span></div><p class="engine-credit">${esc(t("Powered by whisper.cpp, OpenAI Whisper, and NVIDIA Parakeet."))}</p>`,
       ) +
       section(

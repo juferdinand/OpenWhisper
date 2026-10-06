@@ -1,7 +1,7 @@
 # Linux implementation and support
 
-The Linux app in `desktop/` is an early preview, available as source, release-preview downloads,
-and CI AppImage / `.deb` artifacts.
+The Linux app in `desktop/` is available as source and public AppImage / `.deb` releases.
+CI also provides development packages.
 A working build does not by itself establish support for
 global shortcuts, text insertion, microphone devices, or every desktop environment.
 
@@ -33,7 +33,7 @@ as macOS. Tauri hosts these assets on Linux; WKWebView hosts them on macOS.
 Actual features depend on the desktop and its portal backend, not just the distribution name.
 The app must report detected capabilities and any fallback it uses.
 
-## Implemented preview
+## Implemented features
 
 - Tauri 2 with the shared English custom interface and a Rust backend. macOS renders the same
   UI assets with a native Swift bridge while preserving its existing services.
@@ -50,17 +50,28 @@ The app must report detected capabilities and any fallback it uses.
 - For automatic pasting on Wayland, request keyboard control through the RemoteDesktop portal.
   Request keyboard access only; do not request screen capture. Clipboard output remains available
   if permission is denied or the backend is unsupported. Do not require root or input-group access.
-- Tray controls remain available when the settings window is closed. The preview uses an
+- Tray controls remain available when the settings window is closed. The Linux app uses an
   in-window recording control and the same floating recording UI as macOS. KDE and other
   layer-shell Wayland compositors use `gtk-layer-shell` with keyboard focus disabled; X11 uses
   a non-focusable floating window. Unsupported compositors keep the in-window control.
 - Store configuration and models in the user's XDG directories. Do not migrate or delete existing
   files without a documented migration. Avoid logging dictated text or private audio.
-- Public Linux preview packages remain a manual action after desktop acceptance,
+- Public Linux packages remain a manual action after desktop acceptance,
   with package checksums and accurate support notes. Release builds use a separate persistent Linux
   signing key, verified with the embedded public key and signed package version before installation.
 
 ## Validation status
+
+The update restart correction was checked on 2026-10-06 in isolated X11 sessions on CachyOS.
+An unmodified public 0.2.1 AppImage installed the public 0.2.2 package but failed to relaunch under
+a transient systemd user service with the default `ExitType=main` / `KillMode=control-group`.
+An isolated build of the corrected source, carrying test version 0.2.1, then installed that same
+signed public 0.2.2 package and relaunched successfully, both directly and under that service.
+The installed file matched the public package byte for byte; German UI, completed setup, model
+storage, snippets, and history fixtures survived. No real microphone or user data was used.
+Unit tests also check that process replacement preserves the PID and literal arguments. The
+native WebKitGTK smoke test passes with the event loop returning before process replacement.
+These checks do not replace Debian installation acceptance or a physical Wayland shortcut test.
 
 Verified on the primary host:
 
@@ -229,7 +240,14 @@ test with a virtual source proves the capture/inference/output path, not physica
    This requests keyboard control only. No screen capture is requested.
 6. Focus a text field in another app and try the shortcut. With clipboard output, paste manually.
 
-Portal setup is session-scoped in this preview; enable it again after restarting the app.
+Portal setup is currently session-scoped; enable it again after restarting the app.
+The desktop's shortcut dialog decides which keys and combinations it accepts. WhisperFree suggests
+Ctrl+Alt+Space but does not require Ctrl. Single letters, modifier-only keys, reserved shortcuts,
+and special keys depend on the desktop's recorder and shortcut backend. Mouse buttons are not
+captured directly by the Linux app. If your mouse or desktop supports mapping a button to an
+accepted keyboard shortcut, that mapping can be used as a workaround. The macOS event-tap
+recorder supports additional trigger types; Linux does not yet have an equivalent input backend.
+
 If your desktop lacks a portal, keep using the Record button and clipboard output. No root,
 `input` group membership, `evdev`, or `uinput` access is required. The app never disables Wayland
 security controls. Linux custom model import, clipboard restoration, text
@@ -254,6 +272,9 @@ See [release signing](SIGNING.md#linux-update-signatures) for key continuity.
 Use the sidebar to choose English or German independently of dictation language. Setup stays hidden
 once completed and existing settings migrate as completed. Permissions and triggers are in General.
 Updating the app preserves settings, models, snippets, and history; it does not rerun onboarding.
+The Linux restart replaces the current process after native event-loop cleanup, keeping its PID
+and any supervising AppImage parent alive. Spawning a child and exiting instead can cause a
+systemd desktop service to stop the new process along with the old one.
 
 ## Data storage
 
@@ -300,7 +321,7 @@ review them before posting diagnostics publicly.
 
 The GTK 3 dependency chain includes an open `glib` advisory. See the
 [security policy](../SECURITY.md#known-linux-dependency-advisory) for the affected code, review scope,
-and upstream constraint. Preview publication does not mean the dependency graph is free of advisories.
+and upstream constraint. Release publication does not mean the dependency graph is free of advisories.
 
 ## Packaging and release policy
 
@@ -311,14 +332,21 @@ in parallel. CI and Release call the same reusable Linux build workflow. After b
 a publication job creates the version commit/tag, verifies both artifact checksum files, and uploads
 all packages with combined checksums. There is no separate CI dispatch or manual Linux attachment.
 The complete release is a draft by default so its AppImage can receive desktop acceptance before
-publication. Public preview downloads use the stable asset names
+publication. Public downloads use the stable asset names
 `WhisperFree-Linux-x86_64.AppImage` and `WhisperFree-Linux-amd64.deb`; their internal version still
 matches the tag. `SHA256SUMS` covers both Linux packages, signatures, update feed, and the macOS DMG/ZIP.
-Publication as a preview does not promote untested distributions to supported status.
+Publishing Linux packages does not establish support for untested distributions.
+
+Both platforms currently share a version and public release. A platform-only fix can ship in the
+next joint patch release; the other platform still receives the same version and shared UI.
+Linux-only releases are technically possible, but require platform-aware update discovery first:
+the macOS updater currently expects its ZIP in GitHub's latest release. Publishing a Linux-only
+latest release would make that check fail. Keep both platform assets until the feeds are separated.
 
 ## References
 
 - [Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/)
 - [GlobalShortcuts portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.GlobalShortcuts.html)
+- [KDE shortcut dialog](https://github.com/KDE/xdg-desktop-portal-kde/blob/master/src/GlobalShortcutsDialog.qml) and [key recorder patterns](https://api.kde.org/qml-org-kde-kquickcontrols-keysequenceitem.html)
 - [RemoteDesktop portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.RemoteDesktop.html)
 - [Pinned whisper.cpp source](https://github.com/ggml-org/whisper.cpp/tree/927cfce34f31707e17f2bff35c349632fb9e2c3a)

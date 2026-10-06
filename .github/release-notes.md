@@ -33,18 +33,18 @@ grep '  WhisperFree-macOS[.]dmg$' SHA256SUMS | shasum -a 256 -c -
 The app interface supports English and German. Read the [README](https://github.com/juferdinand/WhisperFree#readme)
 for setup and permissions. Dictation still supports multiple languages.
 
-## Linux preview
+## Linux download and installation
 
-Linux is an **early preview**, not a promise of support for every distribution or desktop.
+Linux packages are available for x86_64. Desktop integration depends on the installed portal backend.
 The primary tested environment is **CachyOS x86_64, KDE Plasma 6, Wayland, and PipeWire**.
 
 - **AppImage:** download `WhisperFree-Linux-x86_64.AppImage`, make it executable, and run it. If FUSE is unavailable, use `APPIMAGE_EXTRACT_AND_RUN=1 ./WhisperFree-Linux-x86_64.AppImage`.
 - **Debian/Ubuntu package:** download `WhisperFree-Linux-amd64.deb` and install it with `sudo apt install ./WhisperFree-Linux-amd64.deb`. The package is built on Ubuntu 22.04; desktop acceptance on Debian/Ubuntu is still pending.
 - Wayland clipboard output requires `wl-clipboard`. Global shortcuts and automatic pasting require compatible desktop portals; keyboard access is requested only when enabled.
 - The floating indicator requires `gtk-layer-shell` and a compatible Wayland compositor. GNOME does not provide layer-shell; the main-window control remains available.
-- Enable the trigger and optional keyboard permission in General after launching. Portal setup is session-scoped in this preview.
+- Enable the trigger and optional keyboard permission in General after launching. Portal setup is currently session-scoped.
 - Vulkan recognition requires a Vulkan loader and compatible graphics driver. Whisper Tiny and Parakeet v3 q4 were tested on an NVIDIA RTX 3060; AMD/Intel GPUs and other drivers still need hardware acceptance. CPU recognition remains available without a compatible GPU.
-- Custom model import, clipboard restoration, editor output, and sounds are not included in the Linux preview.
+- Custom model import, clipboard restoration, editor output, and sounds are not yet available on Linux.
 
 Linux updates use a separate persistent signing key and signed version. Verify the first download's origin and `SHA256SUMS`. The `.sig` files and `latest.json` are used by the updater.
 AppImages must be in a writable permanent location; Debian updates request system administrator

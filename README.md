@@ -23,18 +23,18 @@ permission dialogs, and available OS integrations vary by platform.
 
 ## Project status
 
-WhisperFree is in early development. Download the packaged macOS app from
+WhisperFree is in early development. Download the packaged macOS or Linux app from
 [GitHub Releases](https://github.com/juferdinand/WhisperFree/releases/latest), or build it from source.
 
 | Platform | Status |
 | --- | --- |
 | macOS 14+ | Native Swift services; universal package for Apple Silicon and Intel |
-| Linux x86_64 | Preview AppImage / `.deb` downloads; CachyOS with KDE Plasma / Wayland is the primary test system |
+| Linux x86_64 | AppImage / `.deb` releases; CachyOS with KDE Plasma / Wayland is the primary test system |
 | Windows | Planned, not implemented yet — see the [platform plan](docs/PLATFORMS.md) |
 
 ### Linux compatibility
 
-Linux downloads are an **early preview**. Source is available in `desktop/`.
+Linux x86_64 releases are available as AppImage and `.deb` packages. Source is in `desktop/`.
 Distribution targets below are **not claims of completed end-to-end testing**. On Linux, desktop environment, Wayland/X11, audio services, and portal support
 determine which features work. See the [Linux implementation and test plan](docs/LINUX.md).
 
@@ -55,7 +55,7 @@ the [feature and validation checklist](docs/LINUX.md#validation-status).
 
 ## Features
 
-The following describes the macOS app. Linux preview coverage and differences are documented
+The following describes the macOS app. Linux feature coverage and differences are documented
 in [docs/LINUX.md](docs/LINUX.md).
 
 - **System-wide dictation:** Paste text into the active text field, copy it to the clipboard, or open it in a text editor.
@@ -124,7 +124,7 @@ checksum. You can then drag the resulting `WhisperFree.app` into `/Applications`
 Alternatively, `make mac-install` builds the app, replaces an existing installation in
 `/Applications`, and launches it.
 
-### Install the Linux preview
+### Install the Linux app
 
 Download [**WhisperFree-Linux-x86_64.AppImage**](https://github.com/juferdinand/WhisperFree/releases/latest/download/WhisperFree-Linux-x86_64.AppImage)
 from the release page, then run:
@@ -141,10 +141,10 @@ Verify downloads with the release's `SHA256SUMS`. Linux updates use their own pe
 Consult the [runtime dependencies and desktop support notes](docs/LINUX.md) before installation;
 building the Debian package does not establish tested Debian/Ubuntu desktop support.
 
-### Build the Linux preview
+### Build the Linux app
 
 See [Linux build instructions](docs/LINUX.md#build-from-source), then run `make linux` and
-`make linux-install`. The preview uses the same logo and the same settings navigation as macOS.
+`make linux-install`. The Linux app uses the same logo and the same settings navigation as macOS.
 Both apps now render the same custom UI assets, including the bundled font and original logo;
 permissions and feature availability are handled by their native backends.
 
@@ -154,6 +154,10 @@ Use **About → Check now** to look for a new release on either platform. Automa
 are enabled by default and can be switched off there. Downloads and installation start only when
 you choose **Download & install**. The app verifies the update and restarts; settings, models,
 snippets, and saved history are retained. Finish recordings and model downloads before installing.
+
+Linux 0.2.1 / 0.2.2 can close after installation when started by a systemd service. If this happens,
+open WhisperFree manually; the updated package is already installed. The restart correction in
+the current source takes effect for updates initiated by a build containing that correction.
 
 - **macOS:** release builds verify the downloaded ZIP's app against the current signing identity.
 - **Linux AppImage:** release builds replace the writable AppImage in place, using a signed,
@@ -257,7 +261,7 @@ Remove personal dictations and other confidential information from any logs you 
 ## Limitations and roadmap
 
 The current app transcribes after recording; a live text preview is not implemented yet.
-Linux has an early packaged preview with incomplete desktop acceptance testing. Windows,
+Linux has packaged releases; acceptance testing across additional desktops is still pending. Windows,
 cloud synchronization, and LLM post-processing are not implemented.
 Automatic pasting uses the clipboard and a simulated keyboard shortcut, so behavior can vary
 between target apps.
@@ -273,7 +277,7 @@ These are plans, not promised release dates.
 make test                      # Test text processing and the model catalog
 make mac                       # Build a local macOS app bundle
 make linux-test                # Check the Linux frontend, Rust code, and shared assets
-make linux                     # Build the Linux preview
+make linux                     # Build the Linux app
 make linux-install             # Install the Linux build for the current user
 make -C macos app UNIVERSAL=1   # Build a universal bundle for Apple Silicon and Intel
 ```

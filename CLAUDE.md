@@ -92,6 +92,10 @@ For documentation-only changes, check content, links, and formatting.
   Keep the main window's `create: false` and create it in the one-shot setup hook: GTK activation
   emits another Ready event in Tao, and automatic window creation would crash on a duplicate label.
   Native UI and session tests cover reactivation.
+- **Linux update restart:** keep the supervised process alive with an in-place `exec` after
+  native event-loop cleanup. Do not use Tauri's spawn-and-exit restart: systemd desktop services
+  may kill the replacement with the old process. Capture the permanent executable before updating,
+  since a Debian replacement can make `current_exe()` point to a deleted inode.
 - **Wayland overlay:** initialize layer-shell before Wry realizes the GTK window. Keep keyboard
   focus disabled. A missing compositor protocol must leave the main recording control usable.
 - **macOS WebKit:** use the original bundle file URL and a document-start flag for overlay mode.

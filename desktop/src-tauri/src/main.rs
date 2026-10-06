@@ -3,6 +3,7 @@ mod autostart;
 mod integration;
 mod models;
 mod overlay;
+mod relaunch;
 mod settings;
 mod smoke;
 mod updates;
@@ -284,7 +285,7 @@ fn main() {
         );
         return;
     }
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             get_state,
@@ -495,17 +496,25 @@ fn main() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("Could not start WhisperFree")
-        .run(|app, event| {
-            if matches!(event, tauri::RunEvent::Exit) {
-                if let Some(state) = app.try_state::<Arc<Runtime>>() {
-                    if let Some(mut child) = state.clipboard.lock().unwrap().take() {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                    }
+        .expect("Could not start WhisperFree");
+    // Capture the permanent executable before an update replaces it. For .deb installs,
+    // current_exe() would otherwise refer to the old, deleted inode after dpkg finishes.
+    let relaunch = Arc::new(relaunch::Relaunch::new(
+        tauri::process::current_binary(&app.env()).map_err(|e| e.to_string()),
+        app.env().args_os.into_iter().skip(1).collect(),
+    ));
+    app.manage(relaunch.clone());
+    let exit_code = app.run_return(|app, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            if let Some(state) = app.try_state::<Arc<Runtime>>() {
+                if let Some(mut child) = state.clipboard.lock().unwrap().take() {
+                    let _ = child.kill();
+                    let _ = child.wait();
                 }
             }
-        });
+        }
+    });
+    std::process::exit(relaunch.finish(exit_code));
 }
 
 fn localize_tray(runtime: &Runtime, locale: &str) {
