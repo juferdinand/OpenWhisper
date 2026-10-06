@@ -37,7 +37,9 @@ jobs:
 
       - name: Test
         timeout-minutes: 5
-        run: make test
+        run: |
+          python3 ../shared/tests/check-local-processing-fixture.py
+          make test
 
       - name: Build package (Universal, ad-hoc signed)
         run: make release UNIVERSAL=1

@@ -18,17 +18,24 @@ private func readOwnedProcessingLine(_ handle: FileHandle, timeoutNanoseconds: U
     try await withCheckedThrowingContinuation { continuation in
         DispatchQueue.global(qos: .utility).async {
             do {
+                let descriptorNumber = handle.fileDescriptor
+                guard descriptorNumber >= 0, Darwin.fcntl(descriptorNumber, F_GETFD) >= 0 else {
+                    throw LocalProcessingError.message("Owned fixture pipe descriptor is invalid (fd=\(descriptorNumber), errno=\(errno))")
+                }
                 let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
                 var line = Data()
                 while line.count < 100000 {
                     let now = DispatchTime.now().uptimeNanoseconds
                     guard now < deadline else { throw LocalProcessingError.message("Owned fixture pipe read timed out") }
-                    var descriptor = pollfd(fd: handle.fileDescriptor, events: Int16(POLLIN), revents: 0)
+                    var descriptor = pollfd(fd: descriptorNumber, events: Int16(POLLIN), revents: 0)
                     let ready = Darwin.poll(&descriptor, 1, Int32((deadline - now + 999999) / 1000000))
                     if ready < 0 && errno == EINTR { continue }
-                    guard ready > 0 else { throw LocalProcessingError.message("Owned fixture pipe was unavailable or timed out") }
+                    guard ready >= 0 else { throw LocalProcessingError.message("Owned fixture pipe poll failed (fd=\(descriptorNumber), errno=\(errno))") }
+                    guard ready > 0 else { throw LocalProcessingError.message("Owned fixture pipe read timed out (fd=\(descriptorNumber), bytes=\(line.count))") }
                     var byte: UInt8 = 0
-                    guard Darwin.read(handle.fileDescriptor, &byte, 1) == 1 else {
+                    let count = Darwin.read(descriptorNumber, &byte, 1)
+                    if count < 0 && errno == EINTR { continue }
+                    guard count == 1 else {
                         throw LocalProcessingError.message("Owned fixture exited before completing its response")
                     }
                     if byte == 10 { continuation.resume(returning: line); return }
@@ -40,39 +47,82 @@ private func readOwnedProcessingLine(_ handle: FileHandle, timeoutNanoseconds: U
     }
 }
 
+/// Only synthetic fixture stderr is collected, and never its captured request or response body.
+private func ownedProcessingFailure(_ error: any Error, phase: String, fixture: URL,
+                                    process: Process, started: Bool, errorOutput: Pipe) -> LocalProcessingError {
+    var bytes = [UInt8](repeating: 0, count: 4096)
+    var descriptor = pollfd(fd: errorOutput.fileHandleForReading.fileDescriptor, events: Int16(POLLIN), revents: 0)
+    let count = Darwin.poll(&descriptor, 1, 0) > 0
+        ? Darwin.read(descriptor.fd, &bytes, bytes.count) : 0
+    let detail = count > 0 ? String(reflecting: String(decoding: bytes.prefix(count), as: UTF8.self)) : "<empty>"
+    let status = !started ? "not launched" : (process.isRunning ? "running" : "exited \(process.terminationStatus)")
+    return .message("Owned fixture \(phase) failed: \(error.localizedDescription); process=\(status); fixture=\(fixture.path); stderr=\(detail)")
+}
+
 private final class OwnedProcessingServer {
     let process = Process()
     let output = Pipe()
+    let errorOutput = Pipe()
+    private let fixture = processingSharedDirectory.appendingPathComponent("tests/local-processing-server.py")
     private(set) var endpoint = ""
     init(provider: String = "lm_studio", status: Int = 200, delay: Double = 0, bodyDelay: Double = 0, response: String = "valid") async throws {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["python3", processingSharedDirectory.appendingPathComponent("tests/local-processing-server.py").path,
+        process.arguments = ["python3", fixture.path,
                              "--provider", provider, "--status", String(status), "--delay", String(delay), "--body-delay", String(bodyDelay), "--response", response]
         process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
+        process.standardError = errorOutput
+        process.standardInput = FileHandle.nullDevice
+        var started = false
         do {
+            guard FileManager.default.fileExists(atPath: fixture.path) else {
+                throw LocalProcessingError.message("Owned fixture script is missing")
+            }
             try process.run()
-            try? output.fileHandleForWriting.close()
+            started = true
+            // Process owns closing parent writers when standardOutput/standardError are Pipe objects.
             let line = try await readOwnedProcessingLine(output.fileHandleForReading)
             guard let port = String(data: line, encoding: .utf8), Int(port) != nil else { throw LocalProcessingError.message("Owned fixture could not start") }
             endpoint = "http://127.0.0.1:\(port)" + (provider == "lm_studio" ? "/v1" : "")
         } catch {
+            let failure = ownedProcessingFailure(error, phase: "startup", fixture: fixture, process: process,
+                                                 started: started, errorOutput: errorOutput)
             if process.isRunning { process.terminate() }
             try? output.fileHandleForReading.close()
-            throw error
+            try? errorOutput.fileHandleForReading.close()
+            throw failure
         }
     }
     func capturedRequest() async throws -> [String: Any] {
-        let line = try await readOwnedProcessingLine(output.fileHandleForReading)
-        return try #require(JSONSerialization.jsonObject(with: line) as? [String: Any])
+        do {
+            let line = try await readOwnedProcessingLine(output.fileHandleForReading)
+            return try #require(JSONSerialization.jsonObject(with: line) as? [String: Any])
+        } catch {
+            throw ownedProcessingFailure(error, phase: "request capture", fixture: fixture, process: process,
+                                         started: true, errorOutput: errorOutput)
+        }
     }
     deinit {
         if process.isRunning { process.terminate() }
         try? output.fileHandleForReading.close()
+        try? errorOutput.fileHandleForReading.close()
     }
 }
 
 struct LocalProcessingTests {
+    @Test func ownedFixtureProcessPipeYieldsACompleteLine() async throws {
+        let process = Process(), output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/printf")
+        process.arguments = ["owned-pipe-probe\\n"]
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        defer {
+            if process.isRunning { process.terminate() }
+            try? output.fileHandleForReading.close()
+        }
+        try process.run()
+        #expect(try await readOwnedProcessingLine(output.fileHandleForReading) == Data("owned-pipe-probe".utf8))
+    }
+
     @Test func ownedFixturePipeEOFAndDeadlineFailExplicitly() async throws {
         let ended = Pipe()
         try ended.fileHandleForWriting.close()

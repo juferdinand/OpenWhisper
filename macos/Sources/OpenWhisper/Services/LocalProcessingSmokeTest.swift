@@ -55,52 +55,85 @@ enum LocalProcessingSmokeTest {
     private final class Server {
         let process = Process()
         let output = Pipe()
+        let errorOutput = Pipe()
+        private let fixture: String
         private(set) var endpoint = ""
 
         init(fixture: String, host: String, provider: String) async throws {
+            self.fixture = fixture
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = ["python3", fixture, "--provider", provider, "--host", host]
             process.standardOutput = output
-            process.standardError = FileHandle.nullDevice
+            process.standardError = errorOutput
+            process.standardInput = FileHandle.nullDevice
+            var started = false
             do {
+                guard FileManager.default.fileExists(atPath: fixture) else {
+                    throw LocalProcessingError.message("The owned fixture script is missing")
+                }
                 try process.run()
-                try? output.fileHandleForWriting.close()
+                started = true
+                // Process owns closing parent writers when its standard streams are Pipe objects.
                 let port = try await Self.readLine(output.fileHandleForReading)
                 guard let number = Int(port), (1...65535).contains(number) else {
                     throw LocalProcessingError.message("The owned server could not start")
                 }
                 endpoint = "http://\(host == "::1" ? "[::1]" : host):\(number)" + (provider == "lm_studio" ? "/v1" : "")
             } catch {
+                let failure = diagnostic(error, phase: "startup", started: started)
                 if process.isRunning { process.terminate() }
                 try? output.fileHandleForReading.close()
-                throw error
+                try? errorOutput.fileHandleForReading.close()
+                throw failure
             }
         }
 
         func capturedRequest() async throws -> [String: Any] {
-            let line = try await Self.readLine(output.fileHandleForReading)
-            guard let data = line.data(using: .utf8),
-                  let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                throw LocalProcessingError.message("The owned server did not capture the request")
+            do {
+                let line = try await Self.readLine(output.fileHandleForReading)
+                guard let data = line.data(using: .utf8),
+                      let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    throw LocalProcessingError.message("The owned server did not capture the request")
+                }
+                return value
+            } catch {
+                throw diagnostic(error, phase: "request capture", started: true)
             }
-            return value
+        }
+
+        /// Bounded synthetic stderr only; captured requests and response bodies stay out of diagnostics.
+        private func diagnostic(_ error: any Error, phase: String, started: Bool) -> LocalProcessingError {
+            var bytes = [UInt8](repeating: 0, count: 4096)
+            var descriptor = pollfd(fd: errorOutput.fileHandleForReading.fileDescriptor, events: Int16(POLLIN), revents: 0)
+            let count = Darwin.poll(&descriptor, 1, 0) > 0
+                ? Darwin.read(descriptor.fd, &bytes, bytes.count) : 0
+            let detail = count > 0 ? String(reflecting: String(decoding: bytes.prefix(count), as: UTF8.self)) : "<empty>"
+            let status = !started ? "not launched" : (process.isRunning ? "running" : "exited \(process.terminationStatus)")
+            return .message("Owned fixture \(phase) failed: \(error.localizedDescription); process=\(status); fixture=\(fixture); stderr=\(detail)")
         }
 
         private static func readLine(_ handle: FileHandle) async throws -> String {
             try await withCheckedThrowingContinuation { continuation in
                 DispatchQueue.global(qos: .utility).async {
                     do {
+                        let descriptorNumber = handle.fileDescriptor
+                        guard descriptorNumber >= 0, Darwin.fcntl(descriptorNumber, F_GETFD) >= 0 else {
+                            throw LocalProcessingError.message("The owned fixture pipe descriptor is invalid (fd=\(descriptorNumber), errno=\(errno))")
+                        }
                         let deadline = DispatchTime.now().uptimeNanoseconds + 5_000_000_000
                         var line = Data()
                         while line.count < 100000 {
                             let now = DispatchTime.now().uptimeNanoseconds
                             guard now < deadline else { throw LocalProcessingError.message("The owned fixture pipe read timed out") }
-                            var descriptor = pollfd(fd: handle.fileDescriptor, events: Int16(POLLIN), revents: 0)
+                            var descriptor = pollfd(fd: descriptorNumber, events: Int16(POLLIN), revents: 0)
                             let ready = Darwin.poll(&descriptor, 1, Int32((deadline - now + 999999) / 1000000))
                             if ready < 0 && errno == EINTR { continue }
-                            guard ready > 0 else { throw LocalProcessingError.message("The owned fixture pipe was unavailable or timed out") }
+                            guard ready >= 0 else { throw LocalProcessingError.message("The owned fixture pipe poll failed (fd=\(descriptorNumber), errno=\(errno))") }
+                            guard ready > 0 else { throw LocalProcessingError.message("The owned fixture pipe read timed out (fd=\(descriptorNumber), bytes=\(line.count))") }
                             var byte: UInt8 = 0
-                            guard Darwin.read(handle.fileDescriptor, &byte, 1) == 1 else {
+                            let count = Darwin.read(descriptorNumber, &byte, 1)
+                            if count < 0 && errno == EINTR { continue }
+                            guard count == 1 else {
                                 throw LocalProcessingError.message("The owned fixture exited before completing its response")
                             }
                             if byte == 10 {
@@ -118,6 +151,7 @@ enum LocalProcessingSmokeTest {
         deinit {
             if process.isRunning { process.terminate() }
             try? output.fileHandleForReading.close()
+            try? errorOutput.fileHandleForReading.close()
         }
     }
 }
