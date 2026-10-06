@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 
 export default defineConfig({
   base: "./",
-  build: { rollupOptions: { output: { format: "iife" } } },
+  build: {
+    target: ["chrome107", "edge107", "firefox104", "safari16"],
+    rolldownOptions: { output: { format: "iife" } },
+  },
   plugins: [
     {
       name: "local-webview-assets",

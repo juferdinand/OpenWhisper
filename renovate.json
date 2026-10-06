@@ -1,16 +1,30 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
   "timezone": "Europe/Berlin",
-  "schedule": ["* 6-9 * * 1"],
+  "schedule": [
+    "* 6-9 * * 1"
+  ],
   "automerge": false,
   "prConcurrentLimit": 5,
-  "enabledManagers": ["github-actions", "custom.regex", "cargo", "npm"],
+  "enabledManagers": [
+    "github-actions",
+    "custom.regex",
+    "cargo",
+    "npm"
+  ],
   "customManagers": [
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^macos/scripts/fetch-whisper\\.sh$/"],
-      "matchStrings": ["VERSION=\"(?<currentValue>b[0-9]+)\""],
+      "managerFilePatterns": [
+        "/^macos/scripts/fetch-whisper\\.sh$/"
+      ],
+      "matchStrings": [
+        "VERSION=\"(?<currentValue>b[0-9]+)\""
+      ],
       "depNameTemplate": "ggml-org/whisper.cpp",
       "datasourceTemplate": "github-releases",
       "versioningTemplate": "regex:^b(?<major>[0-9]+)$"
@@ -18,15 +32,50 @@
   ],
   "packageRules": [
     {
-      "matchManagers": ["github-actions"],
+      "matchManagers": [
+        "github-actions"
+      ],
       "groupName": "GitHub Actions"
     },
     {
-      "matchPackageNames": ["ggml-org/whisper.cpp"],
+      "matchPackageNames": [
+        "ggml-org/whisper.cpp"
+      ],
       "dependencyDashboardApproval": true,
       "prBodyNotes": [
         "Review the upstream release and both platform APIs. Update the XCFramework SHA256 in macos/scripts/fetch-whisper.sh and the matching tag, commit and source archive SHA256 in desktop/native/whisper-source.json. CI must pass on macOS and Linux; checksum verification must remain enabled."
       ]
+    },
+    {
+      "description": "GTK must match Tauri/Wry GTK 3 types. Revisit this range with the host dependency chain; the known glib advisory remains tracked in SECURITY.md.",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchPackageNames": [
+        "gtk"
+      ],
+      "allowedVersions": "<0.19"
+    },
+    {
+      "description": "Keep the Ubuntu 22.04 packaging baseline and macOS 15 universal-build environment until a separate runner migration is validated.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchPackageNames": [
+        "ubuntu"
+      ],
+      "allowedVersions": "22.04"
+    },
+    {
+      "description": "Keep the existing macOS universal-build environment until a separate runner migration is validated.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchPackageNames": [
+        "macos"
+      ],
+      "allowedVersions": "15"
     }
-  ]
+  ],
+  "dependencyDashboardAutoclose": true
 }
