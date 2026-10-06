@@ -64,6 +64,6 @@ struct AudioCaptureSessionTests {
         let samples = session.finish()
         #expect(samples.count >= 121 * 16_000)
         #expect(samples.count <= 122 * 16_000 + 64)
-        #expect(samples.allSatisfy(\.isFinite))
+        #expect(samples.allSatisfy { $0.isFinite })
     }
 }
