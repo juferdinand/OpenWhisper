@@ -330,7 +330,13 @@ function render() {
     state.overlay_available,
     state.gpu_supported, state.gpu_available, state.gpu_device, state.gpu_fallback,
     portalBusy,
-  ]);
+  ], (_key, value) => {
+    // Native bridge replies and state events may serialize dictionaries in different orders.
+    // Compare their values so unchanged controls retain focus and their click targets.
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)))
+      : value;
+  });
   if (contentKey === nextKey) return;
   contentKey = nextKey;
   document.querySelector("#page-title")!.textContent = t(tabs.find(

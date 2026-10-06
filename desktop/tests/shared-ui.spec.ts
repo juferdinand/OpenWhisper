@@ -119,7 +119,11 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false, f
         host.webkit = {
           messageHandlers: {
             whisperfree: {
-              postMessage: ({ command, args }: any) => invoke(command, args),
+              // WKScriptMessage replies need not preserve the dictionary order used by events.
+              postMessage: async ({ command, args }: any) => JSON.parse(JSON.stringify(
+                await invoke(command, args), (_, value) => value && typeof value === "object" && !Array.isArray(value)
+                  ? Object.fromEntries(Object.entries(value).reverse()) : value,
+              )),
             },
           },
         };
@@ -425,6 +429,8 @@ for (const platform of ["linux", "macos"] as const) {
     await expect.poll(() => page.evaluate(() => (window as any).testState.preferences.show_idle_overlay)).toBe(true);
     await expect(login).toBeChecked();
     await expect(overlay).toBeChecked();
+    // Native hosts publish another snapshot after completing the command reply.
+    await page.evaluate(() => (window as any).publishState());
     expect(await page.evaluate(() => (window as any).originalLoginSwitch.isConnected)).toBe(true);
     const after = await login.boundingBox();
     expect(after!.y).toBeCloseTo(before!.y, 0);

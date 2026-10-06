@@ -199,7 +199,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                 checked: document.querySelector('[data-pref=show_idle_overlay]').checked,
                 notice: document.querySelector('#notice').textContent})
             """)
-        fputs("Native switch state: overlay=\(initialOverlay)->\(UserDefaults.standard.bool(forKey: Prefs.showIdleOverlay)), login=\(initialLogin)->\(LaunchAtLogin.isEnabled), \(switchDetails)\n", stderr)
+        fputs("Native switch state: overlay=\(initialOverlay)->\(UserDefaults.standard.bool(forKey: Prefs.showIdleOverlay)), login=\(initialLogin)->\(LaunchAtLogin.isEnabled), \(String(describing: switchDetails))\n", stderr)
         guard UserDefaults.standard.bool(forKey: Prefs.showIdleOverlay) != initialOverlay,
               LaunchAtLogin.isEnabled == initialLogin,
               (try await webView.evaluateJavaScript("window.__originalSwitch.isConnected && Math.abs(document.querySelector('[data-pref=show_idle_overlay]').getBoundingClientRect().y - window.__switchY) < 1")) as? Bool == true else {
