@@ -86,6 +86,18 @@ Verified on the primary host:
 - macOS CI builds the universal app and verifies both settings and the non-activating recording
   panel in real WKWebView. This does not replace microphone/permission testing on a physical Mac.
 
+Release 0.2.1 additionally passed its native UI/onboarding/language checks and virtual-source
+recognition, floating controls, silence, and clipboard tests in an isolated X11 session on CachyOS.
+The regular KDE desktop was locked during final verification, so this does not replace a fresh
+KDE/Wayland permission check or physical microphone testing. The same source passed a 126-second
+recording in that isolated session.
+
+An updater-enabled test build carrying version 0.2.0 fetched the **public 0.2.1** release, verified it,
+replaced its AppImage with the exact published SHA-256, and restarted successfully. German interface
+language, dictation language, completed setup, snippets, history, and model storage survived; a second
+check correctly reported the current version. This test build contained the new updater code: the
+original public Linux 0.2.0 release still requires a manual first upgrade to 0.2.1.
+
 Still required before calling a distribution fully supported:
 
 - Actual microphone speech and device disconnect checks (virtual-source cancellation and silence pass).

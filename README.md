@@ -158,7 +158,7 @@ snippets, and saved history are retained. Finish recordings and model downloads 
 - **macOS:** release builds verify the downloaded ZIP's app against the current signing identity.
 - **Linux AppImage:** release builds replace the writable AppImage in place, using a signed,
   version-bound package. Keep the file in a permanent folder owned by your user. From a source checkout,
-  `desktop/scripts/install-local.sh --appimage /path/to/WhisperFree-Linux-x86_64.AppImage`
+  `bash desktop/scripts/install-local.sh --appimage /path/to/WhisperFree-Linux-x86_64.AppImage`
   installs a release for the current user with the correct desktop identity.
 - **Linux Debian package:** verified updates use the system administrator authorization dialog
   (`pkexec` and `dpkg`). Cancelling the dialog cancels installation; the app never asks for your password.
