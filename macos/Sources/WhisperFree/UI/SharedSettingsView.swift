@@ -192,6 +192,14 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
             idle.closest('label').click();
             """)
         try await Task.sleep(nanoseconds: 500_000_000)
+        let switchDetails = try await webView.evaluateJavaScript("""
+            JSON.stringify({connected: window.__originalSwitch.isConnected,
+                beforeY: window.__switchY,
+                afterY: document.querySelector('[data-pref=show_idle_overlay]').getBoundingClientRect().y,
+                checked: document.querySelector('[data-pref=show_idle_overlay]').checked,
+                notice: document.querySelector('#notice').textContent})
+            """)
+        fputs("Native switch state: overlay=\(initialOverlay)->\(UserDefaults.standard.bool(forKey: Prefs.showIdleOverlay)), login=\(initialLogin)->\(LaunchAtLogin.isEnabled), \(switchDetails)\n", stderr)
         guard UserDefaults.standard.bool(forKey: Prefs.showIdleOverlay) != initialOverlay,
               LaunchAtLogin.isEnabled == initialLogin,
               (try await webView.evaluateJavaScript("window.__originalSwitch.isConnected && Math.abs(document.querySelector('[data-pref=show_idle_overlay]').getBoundingClientRect().y - window.__switchY) < 1")) as? Bool == true else {
