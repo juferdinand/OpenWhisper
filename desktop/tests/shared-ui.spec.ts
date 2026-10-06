@@ -380,6 +380,9 @@ for (const platform of ["linux", "macos"] as const) {
     await page.getByRole("button", { name: "About", exact: true }).click();
     await page.getByRole("button", { name: "Check now", exact: true }).click();
     await expect(page.getByText("Version 0.2.2 is available.")).toBeVisible();
+    await page.evaluate(() => { const w = window as any; w.testState.status = "transcribing"; w.publishState(); });
+    await expect(page.getByRole("button", { name: "Download & install", exact: true })).toBeDisabled();
+    await page.evaluate(() => { const w = window as any; w.testState.status = "idle"; w.publishState(); });
     await page.getByRole("button", { name: "Download & install", exact: true }).click();
     await expect(page.getByRole("button", { name: "Start dictation", exact: true })).toBeDisabled();
     await expect(page.getByText("Downloading update: 0%")).toBeVisible();

@@ -101,7 +101,6 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
                         Err(ref e) => e.clone(),
                     };
                     runtime.update(|s| {
-                        s.status = "done".into();
                         s.transcript = text.clone();
                         if s.preferences.keep_history {
                             s.history.insert(0, text);
@@ -132,6 +131,8 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
                             state.update(|s| s.message = message);
                         });
                     }
+                    // Keep update installation blocked until clipboard, history, and paste finish.
+                    runtime.update(|s| s.status = "done".into());
                 }
                 Err(error) => runtime.error(error),
             }
