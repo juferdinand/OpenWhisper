@@ -44,9 +44,11 @@ The app must report detected capabilities and any fallback it uses.
 - Captures the selected microphone locally and converts audio to 16 kHz mono. Keeps recordings in
   memory. Includes error handling, a silence threshold and cancellation before transcription, with
   no fixed recording duration limit. Stop or cancel explicitly when finished. Audio is held in RAM, so longer recordings use more memory. Microphone acceptance testing is still required.
-- Uses the GlobalShortcuts portal when available. Offers toggle and hold-to-record when release
-  events are available. Unassigned shortcuts remain visibly unconfigured. With portal version 2,
-  clicking the trigger opens the desktop's shortcut configuration; changes are reflected in the app.
+- KDE Plasma 6 supports direct keyboard capture, including single keys without Ctrl. On KDE
+  Wayland, extra mouse buttons are supported; the middle button requires Plasma 6.3+. Saved
+  bindings reconnect at startup. Other desktops use the GlobalShortcuts portal. Toggle and
+  push-to-talk are supported; modifier-only KDE triggers use toggle mode. These direct bindings
+  are a source change after 0.2.2 and are not included in the published 0.2.2 packages.
 - For automatic pasting on Wayland, request keyboard control through the RemoteDesktop portal.
   Request keyboard access only; do not request screen capture. Clipboard output remains available
   if permission is denied or the backend is unsupported. Do not require root or input-group access.
@@ -235,20 +237,37 @@ test with a virtual source proves the capture/inference/output path, not physica
 1. In **Models**, download a model and select **Use**.
 2. In **General**, select the system default microphone and your usual language.
 3. Click the recording control, speak, and click again. Inspect the result in **History**.
-4. In **General**, use **Set trigger …** to request a desktop-managed shortcut.
+4. In **General**, click **Set trigger …**, then press and release a key or supported mouse button
+   on KDE Plasma 6. Other desktops open their shortcut portal dialog.
 5. For automatic insertion, choose **Allow** keyboard access and **Paste at the cursor**.
    This requests keyboard control only. No screen capture is requested.
 6. Focus a text field in another app and try the shortcut. With clipboard output, paste manually.
 
-Portal setup is currently session-scoped; enable it again after restarting the app.
-The desktop's shortcut dialog decides which keys and combinations it accepts. WhisperFree suggests
-Ctrl+Alt+Space but does not require Ctrl. Single letters, modifier-only keys, reserved shortcuts,
-and special keys depend on the desktop's recorder and shortcut backend. Mouse buttons are not
-captured directly by the Linux app. If your mouse or desktop supports mapping a button to an
-accepted keyboard shortcut, that mapping can be used as a workaround. The macOS event-tap
-recorder supports additional trigger types; Linux does not yet have an equivalent input backend.
+On KDE Plasma 6, direct keyboard triggers do not require Ctrl or another modifier. A function
+key such as F8 avoids reserving a letter used in normal typing. A single modifier (Ctrl, Alt,
+Shift, or Super) activates on release and uses toggle mode; left/right variants are not
+independently assignable. Reserved desktop shortcuts are rejected. Fn, DPI/profile buttons,
+and vendor-specific mouse buttons work only if the hardware exposes them as supported input
+events. Primary left/right clicks and scrolling are intentionally excluded.
 
-If your desktop lacks a portal, keep using the Record button and clipboard output. No root,
+On KDE Wayland, direct mouse capture supports Back, Forward, and other extra buttons;
+Middle requires Plasma 6.3+. `kreadconfig6`, `kwriteconfig6`, and KWin's `buttonsrebind` plugin
+must be available. The selected button is reserved for dictation while the app runs. Existing
+KDE remappings are rejected rather than overwritten. WhisperFree registers a free internal
+key chord and temporarily maps the chosen mouse button to it using KDE's configuration API.
+A helper restores the mapping on normal exit or when the app crashes. Later user edits are
+preserved. If the helper itself is forcibly killed (SIGKILL, including an entire process group),
+its recovery file restores the mapping on the next app start; until then, remove that button's
+mapping in KDE System Settings if necessary. **Remove trigger** also restores the normal binding.
+No root, input-device access, or additional permission prompt is required for these KDE bindings.
+
+**Desktop shortcut dialog** selects the portal alternative on KDE. Other desktops use it by
+default; their recorder determines the accepted keys. Portal setup remains session-scoped and
+must be enabled again after restart. WhisperFree suggests Ctrl+Alt+Space but does not require
+Ctrl. Direct mouse capture on GNOME, Sway, Hyprland, and X11 is not implemented.
+
+If your desktop has neither native shortcut support nor a shortcut portal, keep using the Record
+button and clipboard output. No root,
 `input` group membership, `evdev`, or `uinput` access is required. The app never disables Wayland
 security controls. Linux custom model import, clipboard restoration, text
 editor output and start/stop sounds are not implemented yet. The floating indicator
@@ -308,8 +327,12 @@ review them before posting diagnostics publicly.
 - **No microphone signal:** choose **System default**, then select the intended input in your
   desktop’s audio settings. On PipeWire systems, check that ALSA compatibility is installed.
   ALSA’s device list can include compatibility endpoints that are not physical microphones.
-- **No global shortcut:** check the GlobalShortcuts capability in **General**. The initial
-  preferred combination is Ctrl+Alt+Space; the desktop chooses and manages the actual binding.
+- **No global shortcut:** on KDE Plasma 6, set the trigger in **General**. Other desktops require
+  the GlobalShortcuts portal; its initial suggestion is Ctrl+Alt+Space. Check for desktop conflicts.
+- **Mouse button unavailable:** direct capture requires KDE Wayland and its configuration utilities.
+  Buttons already remapped in KDE are rejected; hardware-only DPI/profile switches may not emit
+  usable input events. After forcibly killing both app and helper, start WhisperFree again to
+  recover its temporary mouse mapping.
 - **No pasted text:** enable keyboard access in **General**, select paste output, and focus a text
   field. Targets with a different paste binding (including many terminals) may require manual paste.
 - **Clipboard unavailable:** install `wl-clipboard` on Wayland or `xclip` on X11. You can also
@@ -350,3 +373,21 @@ latest release would make that check fail. Keep both platform assets until the f
 - [KDE shortcut dialog](https://github.com/KDE/xdg-desktop-portal-kde/blob/master/src/GlobalShortcutsDialog.qml) and [key recorder patterns](https://api.kde.org/qml-org-kde-kquickcontrols-keysequenceitem.html)
 - [RemoteDesktop portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.RemoteDesktop.html)
 - [Pinned whisper.cpp source](https://github.com/ggml-org/whisper.cpp/tree/927cfce34f31707e17f2bff35c349632fb9e2c3a)
+
+## Native KDE trigger regression test
+
+After building with `make linux`, run:
+
+```bash
+python3 desktop/scripts/test-kde-triggers.py --binary desktop/target/release/whisperfree-desktop
+```
+
+This optional desktop test requires Plasma 6.3+, Xvfb, libei, Python PyGObject, and the KDE
+configuration utilities. It creates a private D-Bus session, nested KWin, and disposable XDG
+settings. Synthetic events are sent only to that owned compositor. It checks single keys,
+modifier release behavior, middle/extra mouse buttons, conflicting shortcuts, EOF/SIGTERM cleanup,
+SIGKILL recovery, and preservation of existing or later user mappings. It never opens a microphone.
+The test passed with Plasma 6.7.5 on the primary host; it does not establish physical-device or
+other-desktop coverage. The native GTK capture path was also exercised in an isolated Wayland session: key/mouse capture,
+Escape cancellation, virtual-source toggle/push-to-talk recording, app-crash cleanup, saved binding restoration,
+and trigger removal. Physical-device checks remain outstanding.

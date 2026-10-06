@@ -895,3 +895,5 @@ html.overlay,
 }
 
 .row.approval > span:first-child { flex-shrink: 1; }
+
+.trigger-controls { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }

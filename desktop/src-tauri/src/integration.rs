@@ -19,7 +19,7 @@ pub struct PasteSession {
 
 pub struct ShortcutHandle {
     _task: tauri::async_runtime::JoinHandle<()>,
-    configure: tokio::sync::mpsc::UnboundedSender<()>,
+    configure: tokio::sync::mpsc::UnboundedSender<bool>,
 }
 
 fn shortcut_description(
@@ -181,7 +181,7 @@ pub async fn enable_shortcut(runtime: Arc<Runtime>) -> Result<(), String> {
     if let Some(handle) = task.as_ref() {
         return handle
             .configure
-            .send(())
+            .send(true)
             .map_err(|_| "Shortcut session ended. Restart the app to reconnect.".into());
     }
     let proxy = GlobalShortcuts::new()
@@ -242,8 +242,8 @@ pub async fn enable_shortcut(runtime: Arc<Runtime>) -> Result<(), String> {
         loop {
             tokio::select! {
                 request = requests.recv() => match request {
-                    Some(()) => configure_shortcut(&proxy, &session, &state).await,
-                    None => break,
+                    Some(true) => configure_shortcut(&proxy, &session, &state).await,
+                    Some(false) | None => break,
                 },
                 signal = changed.next() => match signal {
                     Some(s) if s.session_handle().as_str() == session_path => update_shortcut(&state, shortcut_description(s.shortcuts())),
@@ -276,4 +276,12 @@ pub async fn enable_shortcut(runtime: Arc<Runtime>) -> Result<(), String> {
         configure,
     });
     Ok(())
+}
+
+pub async fn disable_shortcut(runtime: &Runtime) {
+    let task = runtime.shortcut_task.lock().await.take();
+    if let Some(task) = task {
+        let _ = task.configure.send(false);
+        let _ = task._task.await;
+    }
 }

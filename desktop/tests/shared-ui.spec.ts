@@ -105,10 +105,18 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false, f
         if (command === "save_settings" || command === "save_preferences" || command === "complete_setup") await host.saveTestPreferences(state.preferences);
         if (command === "check_updates") Object.assign(state.updates, { status: "available", version: "0.2.2" });
         if (command === "install_update") state.updates.status = "downloading";
-        if (command === "enable_shortcut")
-          state.macos.recording_shortcut = true;
-        if (command === "cancel_shortcut")
+        if (command === "enable_shortcut") {
+          if (platform === "macos") state.macos.recording_shortcut = true;
+          else if (state.native_shortcuts) state.recording_shortcut = true;
+        }
+        if (command === "cancel_shortcut") {
           state.macos.recording_shortcut = false;
+          state.recording_shortcut = false;
+        }
+        if (command === "clear_shortcut") {
+          state.preferences.native_trigger = null;
+          state.shortcut = null;
+        }
         if (command === "clear_history") state.history = [];
         publish();
         return command === "save_preferences" ? JSON.parse(JSON.stringify(state)) : null;
@@ -484,4 +492,50 @@ test("macOS shows pending login approval without changing the idle overlay", asy
   expect(await page.locator("main").evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true);
   await page.getByRole("checkbox", { name: "Launch at login", exact: true }).uncheck();
   await expect(page.getByRole("checkbox", { name: "Show overlay when idle", exact: true })).not.toBeChecked();
+});
+
+
+test("Linux: native trigger capture blocks recording, cancels, and shows saved mouse bindings", async ({ page }) => {
+  await start(page, "linux");
+  await page.evaluate(() => {
+    const w = window as any;
+    Object.assign(w.testState, { native_shortcuts: true, native_mouse: true, native_middle_mouse: true });
+    w.publishState();
+  });
+  await page.getByRole("button", { name: "General", exact: true }).click();
+  await expect(page.getByText("Choose a single key, shortcut, or mouse button.", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Set trigger …", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Press and release" })).toBeVisible();
+  await expect(page.locator("#record")).toBeDisabled();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page.locator("#record")).toBeEnabled();
+  await page.evaluate(() => {
+    const w = window as any;
+    w.testState.preferences.native_trigger = { kind: "mouse", button: 8 };
+    w.testState.shortcut = "Mouse back button";
+    w.publishState();
+  });
+  await expect(page.getByRole("button", { name: "Mouse back button", exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Recording mode" })).toBeEnabled();
+  await page.setViewportSize({ width: 800, height: 560 });
+  await page.evaluate(() => { const w = window as any; w.testState.preferences.ui_language = "de"; w.publishState(); });
+  await expect(page.getByRole("button", { name: "Zurück-Maustaste", exact: true })).toBeVisible();
+  expect(await page.locator("main").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await page.screenshot({ path: "test-results/linux-native-triggers-german.png" });
+  await page.evaluate(() => { const w = window as any; w.testState.preferences.ui_language = "en"; w.publishState(); });
+  await page.getByRole("button", { name: "Remove trigger", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Set trigger …", exact: true })).toBeVisible();
+});
+
+test("Linux: modifier-only triggers explain toggle mode and disable push to talk", async ({ page }) => {
+  await start(page, "linux");
+  await page.evaluate(() => {
+    const w = window as any;
+    Object.assign(w.testState, { native_shortcuts: true, shortcut: "Ctrl" });
+    w.testState.preferences.native_trigger = { kind: "key", key: 0x01000021 };
+    w.publishState();
+  });
+  await page.getByRole("button", { name: "General", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "Recording mode" })).toBeDisabled();
+  await expect(page.getByText("Modifier-only triggers use toggle mode.", { exact: false })).toBeVisible();
 });

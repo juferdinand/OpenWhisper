@@ -49,7 +49,7 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
             // Reserve recording under the same lock used by the installer before opening audio.
             {
                 let mut state = runtime.state.lock().unwrap();
-                if state.updates.installing() {
+                if state.updates.installing() || state.recording_shortcut {
                     continue;
                 }
                 state.status = "recording".into();

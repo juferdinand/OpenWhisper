@@ -20,6 +20,7 @@ pub struct Preferences {
     pub snippets: Vec<Snippet>,
     pub output: String,
     pub hold_to_record: bool,
+    pub native_trigger: Option<crate::shortcuts::Trigger>,
     pub gpu: bool,
     pub gpu_configured: bool,
     pub keep_history: bool,
@@ -39,6 +40,7 @@ impl Default for Preferences {
             snippets: vec![],
             output: "clipboard".into(),
             hold_to_record: false,
+            native_trigger: None,
             gpu: true,
             gpu_configured: true,
             keep_history: true,
@@ -49,6 +51,12 @@ impl Default for Preferences {
 }
 impl Preferences {
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(trigger) = &self.native_trigger {
+            trigger.validate()?;
+            if self.hold_to_record && trigger.modifier_only() {
+                return Err("Modifier-only triggers use toggle mode. Use a regular key or mouse button for push to talk.".into());
+            }
+        }
         if !["en", "de"].contains(&self.ui_language.as_str()) {
             return Err("Unknown interface language".into());
         }

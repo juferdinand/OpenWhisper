@@ -5,6 +5,7 @@ mod models;
 mod overlay;
 mod relaunch;
 mod settings;
+mod shortcuts;
 mod smoke;
 mod updates;
 mod worker;
@@ -37,6 +38,10 @@ struct Snapshot {
     shortcut_portal: bool,
     paste_portal: bool,
     shortcut: Option<String>,
+    native_shortcuts: bool,
+    native_mouse: bool,
+    native_middle_mouse: bool,
+    recording_shortcut: bool,
     paste_ready: bool,
     gpu_available: bool,
     gpu_supported: bool,
@@ -60,6 +65,7 @@ enum WorkerCommand {
 struct Runtime {
     autostart: autostart::Autostart,
     updater: updates::Service,
+    triggers: shortcuts::Service,
     tray_items: Mutex<Vec<tauri::menu::MenuItem<tauri::Wry>>>,
     state: Mutex<Snapshot>,
     app: tauri::AppHandle,
@@ -137,7 +143,7 @@ fn save_preferences(
         let mut value = serde_json::to_value(current).map_err(|e| e.to_string())?;
         for (key, change) in changes {
             if !value.as_object().unwrap().contains_key(&key)
-                || ["setup_completed", "gpu_configured"].contains(&key.as_str())
+                || ["setup_completed", "gpu_configured", "native_trigger"].contains(&key.as_str())
             {
                 return Err("Unknown or read-only preference".into());
             }
@@ -155,6 +161,7 @@ fn update_preferences(
     state.preferences.launch_at_login = runtime.autostart.enabled()?;
     let mut preferences = change(&state.preferences)?;
     preferences.setup_completed |= state.preferences.setup_completed;
+    preferences.native_trigger = state.preferences.native_trigger.clone();
     runtime.paths.save(&preferences)?;
     if preferences.launch_at_login != state.preferences.launch_at_login {
         if let Err(error) = runtime.autostart.set(preferences.launch_at_login) {
@@ -238,7 +245,11 @@ fn show_models_folder(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), Str
 }
 #[tauri::command]
 async fn enable_shortcut(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
-    integration::enable_shortcut(runtime.inner().clone()).await
+    if runtime.state.lock().unwrap().native_shortcuts {
+        shortcuts::begin_capture(runtime.inner().clone()).await
+    } else {
+        integration::enable_shortcut(runtime.inner().clone()).await
+    }
 }
 #[tauri::command]
 async fn enable_paste(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
@@ -251,6 +262,9 @@ async fn disable_paste(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), St
 }
 
 fn main() {
+    if std::env::args().any(|arg| arg == "--linux-trigger-helper") {
+        std::process::exit(shortcuts::helper::run());
+    }
     let _smoke_environment = smoke::Environment::prepare();
     gtk::glib::set_prgname(Some("io.github.whisperfree"));
     gtk::glib::set_application_name("WhisperFree");
@@ -303,6 +317,9 @@ fn main() {
             copy_history,
             show_models_folder,
             enable_shortcut,
+            shortcuts::cancel_shortcut,
+            shortcuts::clear_shortcut,
+            shortcuts::desktop_shortcut,
             enable_paste,
             disable_paste,
             models::download_model,
@@ -368,6 +385,7 @@ fn main() {
             let state = Arc::new(Runtime {
                 autostart,
                 updater: updates::Service::default(),
+                triggers: shortcuts::Service::default(),
                 tray_items: Mutex::new(vec![]),
                 state: Mutex::new(Snapshot {
                     updates: updates::Snapshot::new(app.handle()),
@@ -397,6 +415,10 @@ fn main() {
                     shortcut_portal: false,
                     paste_portal: false,
                     shortcut: None,
+                    native_shortcuts: false,
+                    native_mouse: false,
+                    native_middle_mouse: false,
+                    recording_shortcut: false,
                     paste_ready: false,
                     gpu_available: false,
                     gpu_supported: cfg!(feature = "vulkan"),
@@ -419,6 +441,8 @@ fn main() {
             });
             app.manage(state.clone());
             updates::start(state.clone());
+            shortcuts::install_capture(state.clone())?;
+            tauri::async_runtime::spawn(shortcuts::initialize(state.clone()));
             let worker = state.clone();
             std::thread::Builder::new()
                 .name("speech-worker".into())
@@ -507,6 +531,7 @@ fn main() {
     let exit_code = app.run_return(|app, event| {
         if matches!(event, tauri::RunEvent::Exit) {
             if let Some(state) = app.try_state::<Arc<Runtime>>() {
+                tauri::async_runtime::block_on(shortcuts::shutdown(&state));
                 if let Some(mut child) = state.clipboard.lock().unwrap().take() {
                     let _ = child.kill();
                     let _ = child.wait();

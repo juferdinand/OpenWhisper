@@ -35,7 +35,7 @@ or subscription. The project is open source under the MIT License.
   (`test-vectors.json`).
 - `desktop/src/`: shared custom settings and recording UI for macOS and Linux. Keep one layout, icon set,
   font, and navigation structure. `bridge.ts` selects Tauri IPC or the native WebKit reply handler.
-- `desktop/src-tauri/`: Linux Rust backend (CPAL audio, portals, clipboard, downloads, and history).
+- `desktop/src-tauri/`: Linux Rust backend (CPAL audio, KDE native triggers, portals, clipboard, downloads, and history).
 - `desktop/crates/core/`: text processing against the same shared fixtures as Swift.
 - `desktop/crates/speech/` and `desktop/native/`: pinned whisper.cpp / Parakeet C++ bridge.
   Speech contexts stay on one worker thread. Packages include Vulkan with a portable CPU fallback;
@@ -118,6 +118,13 @@ For documentation-only changes, check content, links, and formatting.
   framework paths needed for a Command Line Tools-only setup.
 - **Keyboard shortcuts:** the previous KeyboardShortcuts dependency required preview macros
   unavailable in the Command Line Tools-only setup. Use the existing `HotkeyService`.
+- **Linux KDE triggers:** `shortcuts/` captures GTK input only during explicit trigger setup.
+  KGlobalAccel handles keys; KWin button rebindings handle extra mouse buttons on Wayland
+  (middle button: Plasma 6.3+). The same executable's `--linux-trigger-helper` owns the temporary
+  binding, restores it on EOF/SIGTERM, and journals recovery after SIGKILL. Preserve conflicts
+  and later user edits. Never use root, raw input devices, or unattended real-desktop input tests.
+  Run `desktop/scripts/test-kde-triggers.py --binary <binary>` for owned nested-KWin regression
+  coverage. Modifier-only triggers are toggle-only because KDE emits their edges on release.
 - **Shortcut capture:** SwiftUI can take first-responder status away from an NSView recorder.
   Capture shortcuts through the event tap instead of a text field.
 - **Mouse events:** reading `NSEvent.keyCode` for a mouse event raises an exception.

@@ -8,6 +8,7 @@ interface Snippet {
   expansion: string;
   enabled: boolean;
 }
+type NativeTrigger = { kind: "key"; key: number } | { kind: "mouse"; button: number };
 interface Preferences {
   ui_language: UILanguage;
   setup_completed: boolean;
@@ -18,6 +19,7 @@ interface Preferences {
   snippets: Snippet[];
   output: string;
   hold_to_record: boolean;
+  native_trigger?: NativeTrigger | null;
   gpu: boolean;
   keep_history: boolean;
   restore_clipboard?: boolean;
@@ -70,6 +72,10 @@ interface State {
   shortcut_portal: boolean;
   paste_portal: boolean;
   shortcut: string | null;
+  native_shortcuts?: boolean;
+  native_mouse?: boolean;
+  native_middle_mouse?: boolean;
+  recording_shortcut?: boolean;
   paste_ready: boolean;
   gpu_available: boolean;
   gpu_supported?: boolean;
@@ -268,7 +274,7 @@ function recordControl() {
       .addEventListener("click", () => void command("cancel_recording"));
   }
   const button = document.querySelector<HTMLButtonElement>("#record")!;
-  button.disabled = busy || ["downloading", "installing"].includes(state.updates.status);
+  button.disabled = busy || !!state.recording_shortcut || ["downloading", "installing"].includes(state.updates.status);
   button.classList.toggle("recording", recording);
   button.title = t(state.message);
   document.querySelector("#record-symbol")!.innerHTML = symbol(
@@ -302,6 +308,10 @@ function render() {
     .querySelectorAll<HTMLButtonElement>("[data-tab]")
     .forEach((b) => b.classList.toggle("selected", b.dataset.tab === tab));
   syncPreferenceControls();
+  const triggerBusy = portalBusy || ["recording", "transcribing"].includes(state.status) || ["downloading", "installing"].includes(state.updates.status);
+  document.querySelectorAll<HTMLButtonElement>('[data-portal="enable_shortcut"], [data-portal="clear_shortcut"], [data-portal="desktop_shortcut"]').forEach(button => {
+    button.disabled = triggerBusy || (button.dataset.portal === "enable_shortcut" && !state.native_shortcuts && !state.shortcut_portal);
+  });
   if (dirty) {
     contentKey = "";
     return;
@@ -320,6 +330,7 @@ function render() {
     state.shortcut_portal,
     state.paste_portal,
     state.shortcut,
+    state.native_shortcuts, state.native_mouse, state.native_middle_mouse, state.recording_shortcut, state.preferences.native_trigger,
     state.paste_ready,
     state.download,
     Math.round(state.progress * 100),
@@ -418,7 +429,7 @@ function render() {
           step(
             6,
             t("Set a trigger and try it"),
-            isMac()
+            isMac() || state.native_mouse
               ? t("Choose a key, shortcut, or mouse button. Place the cursor in a text field, press the trigger, speak, then press it again.")
               : t("Choose a shortcut in your desktop’s dialog. Place the cursor in a text field, press the trigger, speak, then press it again."),
             !!state.shortcut,
@@ -431,12 +442,13 @@ function render() {
         t("Recording"),
         row(t("Trigger"), shortcutButton()) +
           (!isMac()
-            ? `<p class="secondary">${esc(t("Your desktop controls which keyboard shortcuts are allowed. Mouse buttons cannot be assigned directly here."))}</p>`
+            ? `<p class="secondary">${esc(triggerHelp())}</p>`
             : "") +
           row(
             t("Mode"),
-            `<select data-pref="hold_to_record" aria-label="${esc(t("Recording mode"))}">${option("false", t("Toggle"), String(p.hold_to_record))}${option("true", t("Push to talk"), String(p.hold_to_record))}</select>`,
+            `<select data-pref="hold_to_record" aria-label="${esc(t("Recording mode"))}" ${modifierOnlyTrigger() ? "disabled" : ""}>${option("false", t("Toggle"), String(p.hold_to_record))}${option("true", t("Push to talk"), String(p.hold_to_record))}</select>`,
           ) +
+          (modifierOnlyTrigger() ? `<p class="secondary">${esc(t("Modifier-only triggers use toggle mode. Use a regular key or mouse button for push to talk."))}</p>` : "") +
           row(t("Language"), languages()) +
           (p.model.startsWith("parakeet")
             ? `<p class="secondary">${esc(t("The active Parakeet model detects the language automatically. This selection only applies to Whisper models."))}</p>`
@@ -794,10 +806,35 @@ function updateStatus() {
   }
 }
 
+function modifierOnlyTrigger() {
+  const trigger = state.preferences.native_trigger;
+  return !isMac() && !!state.native_shortcuts && trigger?.kind === "key" && (trigger.key & 0x01ffffff) >= 0x01000020 && (trigger.key & 0x01ffffff) <= 0x01000023;
+}
+function triggerLabel() {
+  const trigger = state.preferences.native_trigger;
+  if (!isMac() && state.native_shortcuts && trigger?.kind === "mouse") {
+    if (trigger.button === 2) return t("Middle mouse button");
+    if (trigger.button === 8) return t("Mouse back button");
+    if (trigger.button === 9) return t("Mouse forward button");
+    return t("Mouse button {number}", { number: String(trigger.button - 4) });
+  }
+  return state.shortcut ?? t("Set trigger …");
+}
+function triggerHelp() {
+  if (state.native_mouse) return t("Choose a single key, shortcut, or mouse button. The selected trigger is reserved for dictation while WhisperFree is running.");
+  if (state.native_shortcuts) return t("Choose a single key or shortcut. Direct mouse triggers require KDE Plasma 6 on Wayland.");
+  return t("Your desktop controls which shortcuts are allowed. Direct mouse triggers currently require KDE Plasma 6 on Wayland.");
+}
+
 function shortcutButton() {
   if (isMac() && state.macos!.recording_shortcut)
     return `<span class="secondary">${esc(t(state.macos!.shortcut_hint))}</span> <button data-command="cancel_shortcut">${esc(t("Cancel"))}</button>`;
-  return `<button data-portal="enable_shortcut" ${!state.shortcut_portal || portalBusy ? "disabled" : ""}>${state.shortcut ? esc(state.shortcut) : t("Set trigger …")}</button>`;
+  if (!isMac() && state.recording_shortcut)
+    return `<span class="secondary" role="status">${esc(t("Press and release a key or mouse button. Escape cancels."))}</span> <button data-command="cancel_shortcut">${esc(t("Cancel"))}</button>`;
+  const busy = portalBusy || ["recording", "transcribing"].includes(state.status) || ["downloading", "installing"].includes(state.updates.status);
+  const select = `<button data-portal="enable_shortcut" ${(!state.shortcut_portal && !state.native_shortcuts) || busy ? "disabled" : ""}>${state.shortcut ? esc(triggerLabel()) : t("Set trigger …")}</button>`;
+  if (isMac()) return select;
+  return `<div class="trigger-controls">${select}${state.shortcut || state.preferences.native_trigger ? ` <button data-portal="clear_shortcut" ${busy ? "disabled" : ""}>${esc(t("Remove trigger"))}</button>` : ""}${state.native_shortcuts && state.shortcut_portal ? ` <button class="quiet" data-portal="desktop_shortcut" ${busy ? "disabled" : ""}>${esc(t("Desktop shortcut dialog"))}</button>` : ""}</div>`;
 }
 function snippetRow(s?: Snippet) {
   return `<div class="snippet-row" data-id="${esc(s?.id ?? crypto.randomUUID())}"><input class="switch" type="checkbox" name="enabled" aria-label="${esc(t("Enable snippet"))}" ${!s || s.enabled ? "checked" : ""}><input name="trigger" aria-label="${esc(t("When I say"))}" placeholder="${esc(t("When I say …"))}" value="${esc(s?.trigger ?? "")}" maxlength="128"><span>→</span><textarea name="expansion" aria-label="${esc(t("Insert"))}" placeholder="${esc(t("… insert"))}" rows="2">${esc(s?.expansion ?? "")}</textarea><button type="button" data-remove aria-label="${esc(t("Remove snippet"))}">×</button></div>`;

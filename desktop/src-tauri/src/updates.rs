@@ -157,7 +157,9 @@ async fn install(runtime: Arc<Runtime>) -> Result<(), String> {
         .ok_or("Check for an update first")?;
     {
         let mut state = runtime.state.lock().unwrap();
-        if matches!(state.status.as_str(), "recording" | "transcribing") || state.download.is_some()
+        if matches!(state.status.as_str(), "recording" | "transcribing")
+            || state.recording_shortcut
+            || state.download.is_some()
         {
             return Err("Finish dictation and model downloads before installing an update".into());
         }

@@ -26,7 +26,7 @@ and platform-specific permission dialogs are controlled by the operating system.
 | Feature | macOS | Linux |
 |---|---|---|
 | Microphone | AVAudioEngine | CPAL / ALSA compatibility, with Rubato conversion to 16 kHz mono |
-| Global trigger | CGEvent tap and Carbon fallback | GlobalShortcuts portal; no direct X11 fallback yet |
+| Global trigger | CGEvent tap and Carbon fallback | KDE Plasma 6 native key capture; KDE Wayland mouse buttons; GlobalShortcuts portal fallback |
 | Automatic insertion | Clipboard and CGEvent | Clipboard and keyboard-only RemoteDesktop portal session |
 | Clipboard helper | NSPasteboard | `wl-copy` on Wayland, `xclip` on X11 |
 | Background operation | Menu bar app | AppIndicator tray when the desktop displays it |

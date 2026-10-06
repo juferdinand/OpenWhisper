@@ -35,6 +35,10 @@ WhisperFree is in early development. Download the packaged macOS or Linux app fr
 ### Linux compatibility
 
 Linux x86_64 releases are available as AppImage and `.deb` packages. Source is in `desktop/`.
+The current source adds single-key triggers on KDE Plasma 6 and direct extra mouse buttons on
+KDE Wayland (middle button: Plasma 6.3+), with saved bindings and no root access. Other desktops
+retain portal-based shortcuts. This change is not included in the published 0.2.2 packages yet.
+See [trigger setup and limitations](docs/LINUX.md#first-use).
 Distribution targets below are **not claims of completed end-to-end testing**. On Linux, desktop environment, Wayland/X11, audio services, and portal support
 determine which features work. See the [Linux implementation and test plan](docs/LINUX.md).
 
@@ -44,7 +48,7 @@ determine which features work. See the [Linux implementation and test plan](docs
 | Arch Linux and derivatives, KDE Wayland | Targeted; untested | Same integration path, subject to installed portal backend |
 | Ubuntu LTS / Debian, GNOME Wayland | Targeted; untested | Local dictation and clipboard; shortcuts/pasting depend on portal support |
 | Fedora, GNOME or KDE Wayland | Targeted; untested | Local dictation and clipboard; shortcuts/pasting depend on portal support |
-| X11 desktops | Experimental; untested | Record button and `xclip`; shortcuts/pasting require available portals. Native X11 shortcut fallback is not implemented. |
+| X11 desktops | Experimental; untested | Record button and `xclip`; KDE Plasma 6 has native key bindings; other desktops need a shortcut portal. Direct mouse capture on X11 is not implemented. |
 | Sway / Hyprland and other Wayland compositors | Experimental target; untested | Capability-dependent; no blanket compatibility claim |
 | Linux ARM64 or 32-bit | Outside the initial release scope | No packages or support claim |
 
