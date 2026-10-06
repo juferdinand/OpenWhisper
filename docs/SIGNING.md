@@ -98,7 +98,7 @@ Apple documents [membership fees](https://developer.apple.com/programs/enroll/) 
 ## Linux update signatures
 
 Starting with 0.2.1, Linux releases use a persistent Minisign/Ed25519 identity managed by Tauri.
-The public key is embedded in `desktop/src-tauri/tauri.conf.json`. The encrypted private key and
+The public key is embedded in `linux/src-tauri/tauri.conf.json`. The encrypted private key and
 password are configured as `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 in GitHub Actions. Protected local backups are under the ignored `.local/linux-update-signing/`.
 Never commit, print, upload as an artifact, or casually replace these secrets.

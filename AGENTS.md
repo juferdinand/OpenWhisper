@@ -33,14 +33,17 @@ or subscription. The project is open source under the MIT License.
     pinned to `b5130`, including the Parakeet API.
 - `shared/`: authoritative cross-platform model catalog (`models.json`) and test cases
   (`test-vectors.json`).
-- `desktop/src/`: shared custom settings and recording UI for macOS and Linux. Keep one layout, icon set,
+- `shared/ui/src/`: shared custom settings and recording UI for macOS and Linux. Keep one layout, icon set,
   font, and navigation structure. `bridge.ts` selects Tauri IPC or the native WebKit reply handler.
-- `desktop/src-tauri/`: Linux Rust backend (CPAL audio, KDE native triggers, portals, clipboard, downloads, and history).
-- `desktop/crates/core/`: text processing against the same shared fixtures as Swift.
-- `desktop/crates/speech/` and `desktop/native/`: pinned whisper.cpp / Parakeet C++ bridge.
+- `linux/src-tauri/`: Linux Rust backend (CPAL audio, downloads, and history).
+  `src/desktops/kde/` owns KGlobalAccel, KWin leases, and direct trigger capture.
+  `src/desktops/shared/` owns common portals, clipboard, session helpers, and overlay fallbacks.
+  GNOME, X11, and wlroots integration boundaries record their acceptance gaps alongside these modules.
+- `linux/crates/core/`: text processing against the same shared fixtures as Swift.
+- `linux/crates/speech/` and `linux/native/`: pinned whisper.cpp / Parakeet C++ bridge.
   Speech contexts stay on one worker thread. Packages include Vulkan with a portable CPU fallback;
   detect real devices at runtime and preserve a manual CPU choice. Khronos headers are checksum-pinned.
-- `desktop/public/app-icon.png` and `src-tauri/icons/icon.png`: exact 256px PNG from the existing
+- `shared/ui/public/app-icon.png` and `src-tauri/icons/icon.png`: exact 256px PNG from the existing
   Mac ICNS. Do not redesign one platform's logo independently. Inter is bundled with its license.
 - `docs/LINUX.md`: build dependencies, support matrix, validation evidence, and remaining tests.
 - `docs/PLATFORMS.md`: architecture and remaining platform work. Windows is not implemented.
@@ -52,7 +55,7 @@ or subscription. The project is open source under the MIT License.
 make linux-test                   # Check Linux frontend, Rust tests, Clippy, and shared assets
 make linux                        # Build Linux with Vulkan and CPU fallback
 make linux-install                # Install the local Linux build for this user
-cd desktop && npm run test:ui      # Shared UI tests (install Playwright Chromium first)
+cd shared/ui && npm run test:ui      # Shared UI tests (install Playwright Chromium first)
 make test                         # Run Swift tests against shared/test-vectors.json
 make mac                          # Build macos/build/OpenWhisper.app
 make mac-install                  # Replace the app in /Applications and launch it
@@ -71,7 +74,7 @@ Run `make test` for Swift logic changes and build the Mac app for application ch
 Mac builds now also require Node.js/npm to build the shared UI.
 Run `make linux-test` for Linux changes and shared UI tests for UI changes.
 The macOS app supports `--ui-smoke-test` and `--overlay-smoke-test` for native WebKit checks in CI.
-`desktop/scripts/test-session.py` exercises Linux capture through a private virtual audio source,
+`linux/scripts/test-session.py` exercises Linux capture through a private virtual audio source,
 including a recording beyond two minutes, floating controls, recognition, and clipboard output.
 Its optional `--portals` mode also checks KDE shortcut binding and pasting into an owned test field.
 See `docs/LINUX.md` for dependencies and permission details. Never use the real microphone for unattended tests.
@@ -127,12 +130,12 @@ For documentation-only changes, check content, links, and formatting.
   framework paths needed for a Command Line Tools-only setup.
 - **Keyboard shortcuts:** the previous KeyboardShortcuts dependency required preview macros
   unavailable in the Command Line Tools-only setup. Use the existing `HotkeyService`.
-- **Linux KDE triggers:** `shortcuts/` captures GTK input only during explicit trigger setup.
+- **Linux KDE triggers:** `desktops/kde/capture.rs` captures GTK input only during explicit trigger setup.
   KGlobalAccel handles keys; KWin button rebindings handle extra mouse buttons on Wayland
   (middle button: Plasma 6.3+). The same executable's `--linux-trigger-helper` owns the temporary
   binding, restores it on EOF/SIGTERM, and journals recovery after SIGKILL. Preserve conflicts
   and later user edits. Never use root, raw input devices, or unattended real-desktop input tests.
-  Run `desktop/scripts/test-kde-triggers.py --binary <binary>` for owned nested-KWin regression
+  Run `linux/scripts/test-kde-triggers.py --binary <binary>` for owned nested-KWin regression
   coverage. Modifier-only triggers are toggle-only because KDE emits their edges on release.
 - **Shortcut capture:** SwiftUI can take first-responder status away from an NSView recorder.
   Capture shortcuts through the event tap instead of a text field.
@@ -177,7 +180,7 @@ for key continuity and a future Developer ID migration; changing identities requ
 - Linux CI builds on Ubuntu 22.04, checks both host UI adapters, and uploads development
   packages. A main push never changes versions, tags, or public releases. Linux public releases
   require separate desktop acceptance; do not present intended distro support as tested.
-- The manual version step uses `desktop/scripts/set-version.py` to synchronize all manifests.
+- The manual version step uses `linux/scripts/set-version.py` to synchronize all manifests.
 - CI repeats weekly. See `SECURITY.md` for the security policy.
 - Renovate tracks Cargo, npm, Actions, and whisper.cpp versions; keep SHA pins and auto-merge disabled.
   A whisper.cpp update also needs a reviewed SHA-256 change; never bypass checksum verification.

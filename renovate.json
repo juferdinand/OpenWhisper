@@ -43,7 +43,7 @@
       ],
       "dependencyDashboardApproval": true,
       "prBodyNotes": [
-        "Review the upstream release and both platform APIs. Update the XCFramework SHA256 in macos/scripts/fetch-whisper.sh and the matching tag, commit and source archive SHA256 in desktop/native/whisper-source.json. CI must pass on macOS and Linux; checksum verification must remain enabled."
+        "Review the upstream release and both platform APIs. Update the XCFramework SHA256 in macos/scripts/fetch-whisper.sh and the matching tag, commit and source archive SHA256 in linux/native/whisper-source.json. CI must pass on macOS and Linux; checksum verification must remain enabled."
       ]
     },
     {

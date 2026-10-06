@@ -22,10 +22,10 @@ and workflow contracts; conversation mode depends on cancellation and structured
 ## Linux desktop acceptance
 
 KDE support is implemented through available KWin/KGlobalAccel services and optional KWin mouse
-rebinding capabilities. [`kde::capabilities`](../desktop/src-tauri/src/shortcuts/kde.rs) checks
+rebinding capabilities. [`kde::capabilities`](../linux/src-tauri/src/desktops/kde/bindings.rs) checks
 services, Plasma version, plugin availability, and utilities; it does not check for CachyOS.
 Compatibility beyond the primary host is therefore a plausible implementation path, while
-successful desktop/package testing remains outstanding.
+successful linux/package testing remains outstanding.
 
 | Test track | Initial environments | Features to establish |
 | --- | --- | --- |
@@ -41,19 +41,22 @@ test `.deb` installation separately on Debian-family systems. A package build or
 cannot substitute for an actual graphical session.
 
 The [acceptance report format](LINUX.md#acceptance-evidence) requires release/checksum,
-distribution, desktop/session, portals, package type, hardware, and a result for each feature.
+distribution, linux/session, portals, package type, hardware, and a result for each feature.
 Agents can run fixture, isolated compositor, and private virtual-source tests. Physical
 microphone, permission dialogs, device events, and actual logout/login checks require an
 explicitly supervised tester. Untested checks stay open.
 
 ## Platform structure and Electron
 
-`desktop/src/` is shared UI used by macOS and Linux. `desktop/src-tauri/` is currently the Linux
-host, and `desktop/crates/` plus `desktop/native/` contain its Rust/C++ services. The
-[platform architecture](PLATFORMS.md#source-ownership) maps these responsibilities explicitly.
-A later layout change can place Linux host code under `linux/` while keeping UI assets shared;
-it must update Tauri configuration, Swift asset builds, scripts, tests, CI, and licensing paths
-together. Renaming all of `desktop/` to `linux/` would mislabel the macOS UI too.
+`shared/ui/` owns the settings and recording interface used by macOS and Linux.
+`linux/` owns the Linux Rust host, packages, native build dependencies, and host tests.
+Within the host, `desktops/kde/` owns direct trigger capture, KGlobalAccel and KWin recovery;
+`desktops/shared/` owns desktop-independent portals, clipboard, session helpers and overlays.
+GNOME, X11 and wlroots boundaries document the shared paths they use and the acceptance
+work still required. They do not claim a separate completed native adapter.
+The [platform architecture](PLATFORMS.md#source-ownership) maps these paths explicitly.
+Both hosts build the same UI assets; configuration, tests, release tooling and license
+packaging follow the shared location.
 
 Electron is a viable alternative host, but changing the UI runtime would not establish global
 input or paste support on every desktop. Electron itself uses the GlobalShortcuts portal on

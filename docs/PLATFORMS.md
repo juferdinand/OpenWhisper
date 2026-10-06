@@ -14,9 +14,9 @@ retries failed sections with smaller windows and CPU fallback, and supports reco
 
 Both platforms share General, Models, Snippets, History, and About, with Setup shown only until
 first-run completion. The shared English/German language choice also applies to native menus.
-Its app icon is extracted unchanged from the existing Mac ICNS. `desktop/scripts/check-assets.py`
+Its app icon is extracted unchanged from the existing Mac ICNS. `linux/scripts/check-assets.py`
 checks branding, section order, project version, and speech source tag agreement. Both apps load the same compiled HTML/CSS/JavaScript and bundled Inter font.
-`desktop/src/bridge.ts` adapts Tauri IPC and the native WebKit reply handler. Mac recording,
+`shared/ui/src/bridge.ts` adapts Tauri IPC and the native WebKit reply handler. Mac recording,
 hotkeys, output, storage, and signed updates remain native Swift services. The shared floating
 recording UI is hosted in a non-activating NSPanel on macOS and a non-focusable native window
 on Linux. Neither backend imposes a recording-duration cutoff. No local
@@ -65,17 +65,18 @@ for desktop acceptance before publication. See [Linux release policy](LINUX.md#p
 | Source | Responsibility | Host ownership |
 | --- | --- | --- |
 | `shared/` | Model catalog, speech fixtures, English/German strings | Both hosts |
-| `desktop/src/`, `desktop/public/` | Settings and floating recording UI, icon, font | Both hosts; macOS Makefile builds these assets too |
-| `desktop/src/bridge.ts` | Tauri/native WebKit IPC adaptation | Both hosts |
+| `shared/ui/src/`, `shared/ui/public/` | Settings and floating recording UI, icon, font | Both hosts; macOS Makefile builds these assets too |
+| `shared/ui/src/bridge.ts` | Tauri/native WebKit IPC adaptation | Both hosts |
 | `macos/Sources/` | Audio, triggers, output, windows, storage, signed updates | macOS |
-| `desktop/src-tauri/src/` | Audio, worker/recovery, windows, storage, signed updates | Linux host |
-| `desktop/src-tauri/src/shortcuts/kde.rs` | KGlobalAccel/KWin capability detection and mouse leases | KDE adapter |
-| `desktop/src-tauri/src/integration.rs` | Shortcut and keyboard portals, clipboard helpers | Common Linux integration; capabilities vary by desktop |
-| `desktop/src-tauri/src/overlay.rs` | Layer-shell or X11 overlay with in-window fallback | Common Linux window integration |
-| `desktop/crates/`, `desktop/native/` | Rust processing/speech wrappers and pinned C++ sources | Linux build today; speech engines and fixtures shared with macOS |
+| `linux/src-tauri/src/` | Audio, worker/recovery, windows, storage, signed updates | Linux host |
+| `linux/src-tauri/src/desktops/kde/` | KGlobalAccel/KWin capability detection and mouse leases | KDE adapter |
+| `linux/src-tauri/src/desktops/shared/portals.rs` | Shortcut and keyboard portals | Common Linux integration; capabilities vary by desktop |
+| `linux/src-tauri/src/desktops/shared/overlay.rs` | Layer-shell or X11 overlay with in-window fallback | Common Linux window integration |
+| `linux/src-tauri/src/desktops/shared/clipboard.rs` | Wayland/X11 clipboard helpers | Common Linux integration |
+| `linux/crates/`, `linux/native/` | Rust processing/speech wrappers and pinned C++ sources | Linux build today; speech engines and fixtures shared with macOS |
 
 GNOME, X11, Sway, and Hyprland currently have no separate complete host implementations. They
 use common Linux paths where their services are available. Future adapters should implement
 small capability-specific boundaries for triggers, insertion, and overlays. Keep one settings
 layout and common recording/recovery logic. The [architecture roadmap](ROADMAP.md#platform-structure-and-electron)
-explains why a wholesale `desktop/` to `linux/` rename or an Electron migration is not required.
+records the implemented source split and the remaining desktop validation work.
