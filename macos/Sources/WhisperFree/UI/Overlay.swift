@@ -53,10 +53,11 @@ final class OverlayController {
             .receive(on: RunLoop.main)
             .sink { [weak self] phase, _ in self?.update(for: phase) }
             .store(in: &cancellables)
+        if CommandLine.arguments.contains("--overlay-smoke-test") { panel.orderFrontRegardless() }
     }
 
     private func update(for phase: Phase) {
-        let showIdle = UserDefaults.standard.bool(forKey: Prefs.showIdleOverlay)
+        let showIdle = UserDefaults.standard.bool(forKey: Prefs.showIdleOverlay) || CommandLine.arguments.contains("--overlay-smoke-test")
         if phase != .idle || showIdle {
             if !panel.isVisible { panel.orderFrontRegardless() }
         } else if panel.isVisible {

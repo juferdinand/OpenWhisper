@@ -119,7 +119,9 @@ jobs:
         timeout-minutes: 2
         env:
           WF_UI_SNAPSHOT_DIR: ${{ github.workspace }}/macos/build/ui-previews
-        run: build/WhisperFree.app/Contents/MacOS/WhisperFree --ui-smoke-test
+        run: |
+          build/WhisperFree.app/Contents/MacOS/WhisperFree --ui-smoke-test
+          build/WhisperFree.app/Contents/MacOS/WhisperFree --overlay-smoke-test
 
       - name: Upload native macOS UI previews
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

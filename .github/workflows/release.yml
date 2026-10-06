@@ -125,7 +125,9 @@ jobs:
       - name: Smoke test shared UI
         timeout-minutes: 2
         working-directory: macos
-        run: build/WhisperFree.app/Contents/MacOS/WhisperFree --ui-smoke-test
+        run: |
+          build/WhisperFree.app/Contents/MacOS/WhisperFree --ui-smoke-test
+          build/WhisperFree.app/Contents/MacOS/WhisperFree --overlay-smoke-test
 
       - name: Push and publish release
         env:

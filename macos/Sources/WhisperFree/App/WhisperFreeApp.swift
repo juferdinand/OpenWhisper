@@ -33,13 +33,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let state = AppState.shared
         state.openSettings = { [weak self] tab in self?.showSettings(tab) }
 
-        if CommandLine.arguments.contains("--ui-smoke-test") {
+        if CommandLine.arguments.contains("--ui-smoke-test") || CommandLine.arguments.contains("--overlay-smoke-test") {
             fputs("Starting native WebKit smoke test.\n", stderr)
             DispatchQueue.main.asyncAfter(deadline: .now() + 40) {
                 fputs("Native WebKit smoke test did not finish within 40 seconds.\n", stderr)
                 exit(1)
             }
-            showSettings(.about)
+            if CommandLine.arguments.contains("--overlay-smoke-test") {
+                overlay = OverlayController(state: state)
+            } else {
+                showSettings(.about)
+            }
             return
         }
 

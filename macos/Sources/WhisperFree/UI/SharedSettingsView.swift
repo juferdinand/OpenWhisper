@@ -16,8 +16,13 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
     private var timer: Timer?
     private var requestedTab: SettingsTab
     private var lastSnapshot: Data?
+    private let isOverlay: Bool
+    private var testing: Bool {
+        CommandLine.arguments.contains("--ui-smoke-test") || CommandLine.arguments.contains("--overlay-smoke-test")
+    }
 
     init(tab: SettingsTab, overlay: Bool = false) {
+        isOverlay = overlay
         requestedTab = tab
         root = Bundle.main.resourceURL!.appendingPathComponent("WebUI", isDirectory: true)
         let configuration = WKWebViewConfiguration()
@@ -35,7 +40,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
         } else {
             webView.loadFileURL(index, allowingReadAccessTo: root)
         }
-        if CommandLine.arguments.contains("--ui-smoke-test") { fputs("Native WebKit load requested.\n", stderr) }
+        if testing { fputs("Native WebKit load requested.\n", stderr) }
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.publish() }
         }
@@ -48,15 +53,15 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        if CommandLine.arguments.contains("--ui-smoke-test") { fputs("Native WebKit navigation finished.\n", stderr) }
+        if testing { fputs("Native WebKit navigation finished.\n", stderr) }
         send("navigate", value: requestedTab.rawValue)
         publish(force: true)
-        if CommandLine.arguments.contains("--ui-smoke-test") { smokeTest() }
+        if testing { smokeTest() }
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         fputs("Could not load the bundled interface: \(error.localizedDescription)\n", stderr)
-        if CommandLine.arguments.contains("--ui-smoke-test") { exit(1) }
+        if testing { exit(1) }
     }
 
     private func smokeTest() {
@@ -65,6 +70,27 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                 for _ in 0..<100 {
                     if (try await webView.evaluateJavaScript("document.documentElement.dataset.ready === 'true'")) as? Bool == true { break }
                     try await Task.sleep(nanoseconds: 100_000_000)
+                }
+                if isOverlay {
+                    let valid = try await webView.evaluateJavaScript("""
+                        document.documentElement.dataset.ready === 'true' &&
+                        document.documentElement.classList.contains('overlay') &&
+                        document.querySelectorAll('nav').length === 0 &&
+                        document.querySelector('#record-label')?.textContent === 'Start dictation' &&
+                        document.documentElement.scrollWidth === 340 &&
+                        Array.from(document.fonts).some(font => font.family === 'WhisperFree Inter' && font.status === 'loaded')
+                        """)
+                    guard valid as? Bool == true, webView.window?.canBecomeKey == false else {
+                        throw UIError.message("Shared recording overlay did not initialize correctly")
+                    }
+                    if let directory = ProcessInfo.processInfo.environment["WF_UI_SNAPSHOT_DIR"] {
+                        let folder = URL(fileURLWithPath: directory, isDirectory: true)
+                        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                        try await saveSnapshot(to: folder.appendingPathComponent("macos-overlay.png"))
+                    }
+                    print("Shared overlay smoke test passed: native bridge, non-activating panel, recording control, and font.")
+                    NSApplication.shared.terminate(nil)
+                    return
                 }
                 send("navigate", value: "about")
                 try await Task.sleep(nanoseconds: 500_000_000)
@@ -85,27 +111,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                             send("navigate", value: tab.rawValue)
                             try await Task.sleep(nanoseconds: 300_000_000)
                             fputs("Rendering \(theme) \(tab.rawValue).\n", stderr)
-                            let configuration = WKSnapshotConfiguration()
-                            configuration.afterScreenUpdates = false
-                            let image: NSImage = try await withCheckedThrowingContinuation { continuation in
-                                var completed = false
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
-                                    guard !completed else { return }
-                                    completed = true
-                                    continuation.resume(throwing: UIError.message("Native UI snapshot timed out"))
-                                }
-                                webView.takeSnapshot(with: configuration) { image, error in
-                                    guard !completed else { return }
-                                    completed = true
-                                    if let image { continuation.resume(returning: image) }
-                                    else { continuation.resume(throwing: error ?? UIError.message("Native UI snapshot failed")) }
-                                }
-                            }
-                            guard let tiff = image.tiffRepresentation,
-                                  let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else {
-                                throw UIError.message("Could not render native UI preview")
-                            }
-                            try png.write(to: folder.appendingPathComponent("macos-\(theme)-\(tab.rawValue).png"))
+                            try await saveSnapshot(to: folder.appendingPathComponent("macos-\(theme)-\(tab.rawValue).png"))
                         }
                     }
                 }
@@ -116,6 +122,30 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                 exit(1)
             }
         }
+    }
+
+    private func saveSnapshot(to file: URL) async throws {
+        let configuration = WKSnapshotConfiguration()
+        configuration.afterScreenUpdates = false
+        let image: NSImage = try await withCheckedThrowingContinuation { continuation in
+            var completed = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+                guard !completed else { return }
+                completed = true
+                continuation.resume(throwing: UIError.message("Native UI snapshot timed out"))
+            }
+            webView.takeSnapshot(with: configuration) { image, error in
+                guard !completed else { return }
+                completed = true
+                if let image { continuation.resume(returning: image) }
+                else { continuation.resume(throwing: error ?? UIError.message("Native UI snapshot failed")) }
+            }
+        }
+        guard let tiff = image.tiffRepresentation,
+              let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else {
+            throw UIError.message("Could not render native UI preview")
+        }
+        try png.write(to: file)
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
