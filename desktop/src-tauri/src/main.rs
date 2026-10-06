@@ -7,6 +7,7 @@ mod relaunch;
 mod settings;
 mod shortcuts;
 mod smoke;
+mod transcription;
 mod updates;
 mod worker;
 
@@ -47,6 +48,7 @@ struct Snapshot {
     gpu_supported: bool,
     gpu_device: Option<String>,
     gpu_fallback: bool,
+    recovery_available: bool,
     overlay_available: bool,
     download: Option<String>,
     progress: f64,
@@ -60,6 +62,8 @@ enum WorkerCommand {
     Cancel,
     ShortcutPressed,
     ShortcutReleased,
+    Retry,
+    DiscardRecovery,
 }
 
 struct Runtime {
@@ -125,6 +129,20 @@ fn cancel_recording(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), Strin
     runtime
         .commands
         .send(WorkerCommand::Cancel)
+        .map_err(|_| "Speech worker stopped".into())
+}
+#[tauri::command]
+fn retry_transcription(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
+    runtime
+        .commands
+        .send(WorkerCommand::Retry)
+        .map_err(|_| "Speech worker stopped".into())
+}
+#[tauri::command]
+fn discard_recovery(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
+    runtime
+        .commands
+        .send(WorkerCommand::DiscardRecovery)
         .map_err(|_| "Speech worker stopped".into())
 }
 #[tauri::command]
@@ -262,6 +280,22 @@ async fn disable_paste(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), St
 }
 
 fn main() {
+    let arguments: Vec<String> = std::env::args().collect();
+    if arguments
+        .get(1)
+        .is_some_and(|a| a == "--transcription-smoke-test")
+    {
+        let result = transcription::smoke_test(&arguments);
+        if let Err(error) = result.as_ref() {
+            eprintln!("Transcription check failed: {error}");
+        }
+        std::process::exit(if result.is_ok() { 0 } else { 1 });
+    }
+    if std::env::args().any(|arg| arg == "--linux-speech-helper") {
+        let result = transcription::helper();
+        // The parent reports errors; private inference data never goes to logs.
+        std::process::exit(if result.is_ok() { 0 } else { 1 });
+    }
     if std::env::args().any(|arg| arg == "--linux-trigger-helper") {
         std::process::exit(shortcuts::helper::run());
     }
@@ -305,6 +339,8 @@ fn main() {
             get_state,
             toggle_recording,
             cancel_recording,
+            retry_transcription,
+            discard_recovery,
             save_settings,
             save_preferences,
             complete_setup,
@@ -424,6 +460,7 @@ fn main() {
                     gpu_supported: cfg!(feature = "vulkan"),
                     gpu_device: None,
                     gpu_fallback: false,
+                    recovery_available: false,
                     overlay_available,
                     download: None,
                     progress: 0.0,

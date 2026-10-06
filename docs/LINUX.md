@@ -44,6 +44,17 @@ The app must report detected capabilities and any fallback it uses.
 - Captures the selected microphone locally and converts audio to 16 kHz mono. Keeps recordings in
   memory. Includes error handling, a silence threshold and cancellation before transcription, with
   no fixed recording duration limit. Stop or cancel explicitly when finished. Audio is held in RAM, so longer recordings use more memory. Microphone acceptance testing is still required.
+- Version 0.2.4 isolates recognition in a speech helper process. Both model families use windows
+  of at most 30 seconds, preferably split at pauses. Failed windows are retried at progressively
+  smaller sizes down to one second, then on CPU if GPU was selected. Successful windows are not
+  repeated during automatic retries. This bounds inference memory without limiting capture duration.
+  Stopped recordings are atomically saved as private WAV files under `$XDG_CONFIG_HOME/whisperfree/recovery/`
+  (normally `~/.config/whisperfree/recovery/`) before native inference. RF64 supports large backups.
+  Successful clipboard delivery removes audio and the temporary transcript; failed recordings remain
+  available through **Retry transcription** / **Discard saved recording**, including after restart.
+  Capture still uses RAM; this does not protect audio before Stop, or promise success when neither
+  backend has enough memory to load the model. Disk-write failures retain the stopped samples in RAM
+  for retry while the app remains open.
 - KDE Plasma 6 supports direct keyboard capture, including single keys without Ctrl. On KDE
   Wayland, extra mouse buttons are supported; the middle button requires Plasma 6.3+. Saved
   bindings reconnect at startup. Other desktops use the GlobalShortcuts portal. Toggle and
@@ -74,6 +85,15 @@ storage, snippets, and history fixtures survived. No real microphone or user dat
 Unit tests also check that process replacement preserves the PID and literal arguments. The
 native WebKitGTK smoke test passes with the event loop returning before process replacement.
 These checks do not replace Debian installation acceptance or a physical Wayland shortcut test.
+
+The 0.2.4 long-recording correction was checked on 2026-10-06 on the primary host.
+Seven minutes of the public JFK fixture completed with Whisper Tiny and Parakeet v3 q4 on
+both CPU and NVIDIA RTX 3060 Vulkan, including text from the end of the recording. Killing an
+owned speech helper with SIGKILL during inference left the parent alive and automatic retry
+completed the full recording. Native WebKitGTK checks in a private X11 session also verified
+that an inference failure preserves a WAV and that restart/retry recovers it, saves history,
+and removes the temporary audio after clipboard delivery. Rust tests cover shrinking windows,
+CPU choice, exact sample coverage, process death/watchdogs, backup permissions, and RF64 headers.
 
 Verified on the primary host:
 
@@ -231,6 +251,21 @@ systemd-run --user --wait --pipe --collect --unit=app-io.github.whisperfree \
 
 Do not start a second instance while the test owns WhisperFree's application ID. A recording
 test with a virtual source proves the capture/inference/output path, not physical microphone quality.
+
+### Long-recording and process-failure regression
+
+After a Vulkan-enabled build, run the explicit file-based regression with downloaded models:
+
+```bash
+python3 desktop/scripts/test-long-recognition.py \
+  --tiny /path/to/ggml-tiny.bin \
+  --parakeet /path/to/ggml-parakeet-tdt-0.6b-v3-q4_0.bin --gpu
+```
+
+This creates seven minutes of the public upstream speech fixture, transcribes it with both
+families on CPU and GPU, checks the complete repeated text, and kills an owned speech helper
+with SIGKILL to verify automatic recovery. Omit `--gpu` on CPU-only hosts. It uses private
+temporary files and never opens the microphone, desktop, clipboard, or application data.
 
 ## First use
 

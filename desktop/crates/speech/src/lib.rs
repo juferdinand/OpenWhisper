@@ -4,6 +4,8 @@ use std::{
     ptr::NonNull,
 };
 
+pub mod chunks;
+
 extern "C" {
     fn wf_speech_gpu_name() -> *const c_char;
     fn wf_speech_create() -> *mut c_void;
@@ -68,25 +70,48 @@ impl SpeechEngine {
         language: &str,
         vocabulary: &str,
     ) -> Result<String, String> {
-        let count = i32::try_from(samples.len()).map_err(|_| "Recording is too long")?;
+        if samples.is_empty() || samples.iter().any(|s| !s.is_finite()) {
+            return Err("Invalid audio samples".into());
+        }
         let language = CString::new(language).map_err(|_| "Invalid language")?;
         let prompt = CString::new(vocabulary).map_err(|_| "Invalid vocabulary")?;
-        let text = unsafe {
-            wf_speech_transcribe(
-                self.0.as_ptr(),
-                samples.as_ptr(),
-                count,
-                language.as_ptr(),
-                prompt.as_ptr(),
-            )
-        };
-        if text.is_null() {
-            Err(self.error())
-        } else {
-            Ok(unsafe { CStr::from_ptr(text) }
+        let mut result = String::new();
+        let mut start = 0;
+        while start < samples.len() {
+            let range = chunks::next_chunk(samples, start, chunks::MAX_CHUNK_SAMPLES);
+            let mut padded = Vec::new();
+            let chunk = if range.len() < chunks::MIN_CHUNK_SAMPLES {
+                padded.extend_from_slice(&samples[range.clone()]);
+                padded.resize(chunks::MIN_CHUNK_SAMPLES, 0.0);
+                &padded
+            } else {
+                &samples[range.clone()]
+            };
+            let text = unsafe {
+                wf_speech_transcribe(
+                    self.0.as_ptr(),
+                    chunk.as_ptr(),
+                    chunk.len() as i32,
+                    language.as_ptr(),
+                    prompt.as_ptr(),
+                )
+            };
+            if text.is_null() {
+                return Err(self.error());
+            }
+            let text = unsafe { CStr::from_ptr(text) }
                 .to_string_lossy()
-                .into_owned())
+                .trim()
+                .to_owned();
+            if !text.is_empty() {
+                if !result.is_empty() {
+                    result.push(' ');
+                }
+                result.push_str(&text);
+            }
+            start = range.end;
         }
+        Ok(result)
     }
 }
 impl Drop for SpeechEngine {

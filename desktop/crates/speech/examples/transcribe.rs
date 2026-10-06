@@ -20,7 +20,7 @@ fn main() -> Result<(), String> {
         .iter()
         .map(|b| f32::from_le_bytes(*b))
         .collect();
-    if audio.is_empty() || audio.len() > 16000 * 120 || audio.iter().any(|v| !v.is_finite()) {
+    if audio.is_empty() || audio.iter().any(|v| !v.is_finite()) {
         return Err("Invalid audio".into());
     }
     let mut engine = SpeechEngine::new()?;

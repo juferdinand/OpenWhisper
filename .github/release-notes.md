@@ -1,13 +1,12 @@
-## What's new in 0.2.3
+## What's new in 0.2.4
 
-- Add direct single-key and keyboard-shortcut capture on KDE Plasma 6. Keys such as **F8** no longer need Ctrl or another modifier. Single modifiers use toggle mode because KDE activates them on release.
-- Add direct **Back, Forward, and extra mouse-button triggers on KDE Wayland**, plus the middle button on Plasma 6.3+. Use **General → Set trigger …**, then press and release the desired key or button. Normal keys and mouse buttons support both toggle and push-to-talk.
-- Save native trigger bindings and reconnect them at startup. Reject conflicting desktop shortcuts and existing mouse remappings, preserve later user edits, and restore the normal mouse mapping on exit or an app crash. Recovery after forcibly killing the helper runs on the next start. Internal mouse bindings avoid stuck modifiers when exiting while a button is held.
-- Fix Linux update relaunches under systemd desktop supervision by replacing the running process after native cleanup. This fix applies to updates initiated from 0.2.3 onward.
+- Fix Linux crashes when transcribing long Parakeet recordings. Recognition now uses bounded sections for both model families instead of building a GPU graph for the entire recording.
+- Isolate Linux recognition in a separate process. Failed sections are retried with progressively smaller windows on GPU and CPU; a manual CPU choice is preserved. Already recognized sections are retained through automatic retries.
+- Save a private local WAV before recognition. If recognition cannot finish or the app exits unexpectedly, **Retry transcription** and **Discard saved recording** remain available after restart. Temporary audio is deleted after successful clipboard delivery. Nothing is sent to a server.
 - Keep the shared English/German interface, existing GPU/CPU selection, saved models and settings, and recording without a fixed time limit. macOS and Linux continue to share one release version.
 
 **Updating from Linux 0.2.1 or 0.2.2:** use **About → Check now**. The older updater may still
-close after installing 0.2.3 when launched by a systemd service. If that happens, open WhisperFree
+close after installing 0.2.4 when launched by a systemd service. If that happens, open WhisperFree
 once from your application launcher; the new package is already installed. Original Linux 0.2.0
 and source/CI builds need a manual installation of a signed release to obtain the updater.
 
@@ -49,10 +48,10 @@ The primary tested environment is **CachyOS x86_64, KDE Plasma 6, Wayland, and P
 Linux updates use a separate persistent signing key and signed version. Verify the first download's origin and `SHA256SUMS`. The `.sig` files and `latest.json` are used by the updater.
 AppImages must be in a writable permanent location; Debian updates request system administrator
 authorization. Debian/Ubuntu update installation still needs desktop acceptance.
-Read the [Linux support and validation notes](https://github.com/juferdinand/WhisperFree/blob/v0.2.3/docs/LINUX.md)
+Read the [Linux support and validation notes](https://github.com/juferdinand/WhisperFree/blob/v0.2.4/docs/LINUX.md)
 for dependencies, tested behavior, and remaining checks. Physical microphone quality, physical hold/toggle shortcut events,
 XWayland insertion, and other distributions still need broader acceptance testing.
 
 Known dependency risk: the Linux GTK 3 stack includes `glib 0.18.5`, affected by
 [RUSTSEC-2024-0429](https://rustsec.org/advisories/RUSTSEC-2024-0429.html). The alert remains open;
-see the [scope and source review](https://github.com/juferdinand/WhisperFree/blob/v0.2.3/SECURITY.md#known-linux-dependency-advisory).
+see the [scope and source review](https://github.com/juferdinand/WhisperFree/blob/v0.2.4/SECURITY.md#known-linux-dependency-advisory).

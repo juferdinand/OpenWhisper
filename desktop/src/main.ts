@@ -81,6 +81,7 @@ interface State {
   gpu_supported?: boolean;
   gpu_device?: string | null;
   gpu_fallback?: boolean;
+  recovery_available?: boolean;
   overlay_available?: boolean;
   download: string | null;
   progress: number;
@@ -257,21 +258,22 @@ app.addEventListener("click", (event) => {
 
 function recordControl() {
   const recording = state.status === "recording",
-    busy = state.status === "transcribing";
+    busy = state.status === "transcribing",
+    recovery = !!state.recovery_available && !recording && !busy;
   const text = recording
     ? t("Recording · {time}", { time: `${Math.floor(state.elapsed / 60)}:${String(state.elapsed % 60).padStart(2, "0")}` })
     : busy
       ? t("Transcribing …")
-      : t("Start dictation");
+      : recovery ? t("Retry transcription") : t("Start dictation");
   const controls = document.querySelector<HTMLDivElement>("#record-control")!;
   if (!controls.childElementCount) {
     controls.innerHTML = `<div class="record-status"><div class="audio-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div><strong id="status-title"></strong><span id="status" role="status"></span></div></div><div class="record-actions"><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-label"></span></button></div>`;
     document
       .querySelector("#record")!
-      .addEventListener("click", () => void command("toggle_recording"));
+      .addEventListener("click", () => void command(state.recovery_available ? "retry_transcription" : "toggle_recording"));
     document
       .querySelector("#cancel")!
-      .addEventListener("click", () => void command("cancel_recording"));
+      .addEventListener("click", () => void command(state.recovery_available && state.status !== "recording" ? "discard_recovery" : "cancel_recording"));
   }
   const button = document.querySelector<HTMLButtonElement>("#record")!;
   button.disabled = busy || !!state.recording_shortcut || ["downloading", "installing"].includes(state.updates.status);
@@ -293,7 +295,10 @@ function recordControl() {
         ? t("Something needs attention")
         : t("Ready when you are");
   document.querySelector("#record-label")!.textContent = text;
-  document.querySelector<HTMLElement>("#cancel")!.hidden = !recording;
+  const cancel = document.querySelector<HTMLButtonElement>("#cancel")!;
+  cancel.hidden = !recording && !recovery;
+  cancel.setAttribute("aria-label", t(recovery ? "Discard saved recording" : "Discard recording"));
+  cancel.textContent = t(recovery ? "Discard" : "Cancel");
   document.querySelector("#status")!.textContent = t(state.message);
 }
 
@@ -735,7 +740,7 @@ function render() {
         t("Updates"),
         state.updates.configured
           ? toggle(t("Automatically check for updates (once a day)"), "auto_check_updates", !!p.auto_check_updates) +
-            row(updateStatus(), `<button data-command="${state.updates.status === "available" ? "install_update" : "check_updates"}" ${["checking", "downloading", "installing"].includes(state.updates.status) || (state.updates.status === "available" && (["recording", "transcribing"].includes(state.status) || !!state.download)) ? "disabled" : ""}>${state.updates.status === "available" ? t("Download & install") : t("Check now")}</button>`)
+            row(updateStatus(), `<button data-command="${state.updates.status === "available" ? "install_update" : "check_updates"}" ${["checking", "downloading", "installing"].includes(state.updates.status) || (state.updates.status === "available" && (["recording", "transcribing"].includes(state.status) || !!state.download || !!state.recovery_available)) ? "disabled" : ""}>${state.updates.status === "available" ? t("Download & install") : t("Check now")}</button>`)
           : `<p class="secondary">${esc(t("Updates are not configured in this build."))}</p>`,
         state.updates.package === "deb"
           ? t("Updates are verified before installation. Your system asks for administrator permission. WhisperFree restarts afterward.")

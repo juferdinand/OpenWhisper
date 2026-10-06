@@ -291,5 +291,9 @@
   "Could not read KDE's mouse settings: {error}": "Die KDE-Mauseinstellungen konnten nicht gelesen werden: {error}",
   "Could not update KDE's mouse settings: {error}": "Die KDE-Mauseinstellungen konnten nicht gespeichert werden: {error}",
   "Could not start the trigger helper: {error}": "Die Auslöser-Verbindung konnte nicht gestartet werden: {error}",
-  "Could not release the keyboard trigger: {error}": "Der Tastatur-Auslöser konnte nicht freigegeben werden: {error}"
+  "Could not release the keyboard trigger: {error}": "Der Tastatur-Auslöser konnte nicht freigegeben werden: {error}",
+  "Retry transcription": "Erneut transkribieren",
+  "Discard saved recording": "Gesicherte Aufnahme verwerfen",
+  "An unfinished recording is saved. Retry transcription or discard it.": "Eine nicht abgeschlossene Aufnahme ist gesichert. Versuche die Transkription erneut oder verwirf sie.",
+  "{error}. Your recording is retained. Retry transcription or discard it.": "{error}. Deine Aufnahme bleibt erhalten. Versuche die Transkription erneut oder verwirf sie."
 }

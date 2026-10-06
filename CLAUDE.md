@@ -83,6 +83,10 @@ For documentation-only changes, check content, links, and formatting.
 - **Recording duration:** the user explicitly requires no fixed time limit. Do not reintroduce
   an automatic cutoff or truncate the audio buffer. Record until explicit stop/cancel; explain
   that recordings stay in RAM and grow with duration.
+- **Linux inference recovery:** keep native inference in the disposable speech helper. Bound
+  individual inference windows, retry failed windows at smaller sizes on GPU/CPU, and preserve
+  the manual CPU choice. Save stopped audio privately before inference; keep failed WAV backups
+  across restarts until successful delivery or explicit discard. Never log helper requests or replies.
 - **Settings:** persist edited fields as patches against the current host state, and keep switch DOM
   nodes stable while saving. Login-item pending approval is distinct from disabled on macOS.
   Linux autostart must point to the installed AppImage, never its extraction directory.

@@ -8,7 +8,9 @@
 
 Both implementations use `shared/models.json`, the same pinned whisper.cpp release, and
 `shared/test-vectors.json`. The Rust core passes the same cleanup, vocabulary, and snippet cases
-as Swift. The Linux C++ bridge exposes both Whisper and Parakeet; contexts belong to one worker.
+as Swift. The Linux C++ bridge exposes both Whisper and Parakeet; contexts stay on one thread
+in a disposable speech helper process. The Rust worker saves stopped audio before inference,
+retries failed sections with smaller windows and CPU fallback, and supports recovery after restart.
 
 Both platforms share General, Models, Snippets, History, and About, with Setup shown only until
 first-run completion. The shared English/German language choice also applies to native menus.

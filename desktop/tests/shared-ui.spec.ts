@@ -7,6 +7,39 @@ const catalog = JSON.parse(
   readFileSync(resolve("../shared/models.json"), "utf8"),
 ).models;
 
+test("saved Linux recordings can be retried or discarded without starting capture", async ({ page }) => {
+  await start(page, "linux");
+  await page.evaluate(() => {
+    const host = window as any;
+    host.testState.status = "error";
+    host.testState.recovery_available = true;
+    host.testState.message = "An unfinished recording is saved. Retry transcription or discard it.";
+    host.publishState();
+  });
+  await expect(page.getByRole("button", { name: "Start dictation", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Retry transcription", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).calls.at(-1).command)).toBe("retry_transcription");
+  await page.getByRole("button", { name: "Discard saved recording", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).calls.at(-1).command)).toBe("discard_recovery");
+  await page.evaluate(() => {
+    const host = window as any;
+    host.testState.preferences.ui_language = "de";
+    host.publishState();
+  });
+  await expect(page.getByRole("button", { name: "Erneut transkribieren", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Gesicherte Aufnahme verwerfen", exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 800, height: 560 });
+  await expect(page.getByRole("button", { name: "Erneut transkribieren", exact: true })).toBeInViewport();
+  await page.screenshot({ path: "test-results/linux-recovery.png" });
+  await page.evaluate(() => {
+    const host = window as any;
+    host.testState.updates.status = "available";
+    host.publishState();
+  });
+  await page.getByRole("button", { name: "Über", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Laden & installieren", exact: true })).toBeDisabled();
+});
+
 async function start(page: Page, platform: "linux" | "macos", overlay = false, fresh = false) {
   let savedPreferences: unknown = null;
   await page.exposeBinding("loadTestPreferences", () => savedPreferences);

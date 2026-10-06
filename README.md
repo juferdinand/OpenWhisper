@@ -37,7 +37,8 @@ WhisperFree is in early development. Download the packaged macOS or Linux app fr
 Linux x86_64 releases are available as AppImage and `.deb` packages. Source is in `desktop/`.
 Version 0.2.3 adds single-key triggers on KDE Plasma 6 and direct extra mouse buttons on
 KDE Wayland (middle button: Plasma 6.3+), with saved bindings and no root access. Other desktops
-retain portal-based shortcuts.
+retain portal-based shortcuts. Version 0.2.4 adds isolated, adaptive recognition and local recovery
+for stopped Linux recordings.
 See [trigger setup and limitations](docs/LINUX.md#first-use).
 Distribution targets below are **not claims of completed end-to-end testing**. On Linux, desktop environment, Wayland/X11, audio services, and portal support
 determine which features work. See the [Linux implementation and test plan](docs/LINUX.md).
@@ -69,6 +70,7 @@ in [docs/LINUX.md](docs/LINUX.md).
 - **Vocabulary and snippets:** Correct custom terms and replace spoken phrases with saved text, such as “my link” with a URL.
 - **Floating overlay:** A shared recording level, timer, stop/cancel controls, and processing status. It stays above your work without taking keyboard focus. Linux requires a compatible compositor; see the support matrix.
 - **No fixed recording limit:** Recording continues until you stop or cancel it. Audio stays in memory, so longer recordings use more RAM.
+- **Linux recording recovery:** Stopped recordings are privately backed up before recognition. Inference runs in a separate process, uses bounded sections, and retries failed sections with smaller windows and CPU fallback. After a failure or app restart, use **Retry transcription** or **Discard saved recording**. Successful clipboard delivery removes the temporary audio; unfinished WAV files remain in the XDG configuration directory under `whisperfree/recovery/`.
 - **Everyday settings:** Launch at login, optional sound cues, clipboard restoration, and a local text history you can disable.
 
 ## Requirements

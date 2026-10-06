@@ -158,6 +158,7 @@ async fn install(runtime: Arc<Runtime>) -> Result<(), String> {
     {
         let mut state = runtime.state.lock().unwrap();
         if matches!(state.status.as_str(), "recording" | "transcribing")
+            || state.recovery_available
             || state.recording_shortcut
             || state.download.is_some()
         {

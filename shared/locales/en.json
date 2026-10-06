@@ -291,5 +291,9 @@
   "Could not read KDE's mouse settings: {error}": "Could not read KDE's mouse settings: {error}",
   "Could not update KDE's mouse settings: {error}": "Could not update KDE's mouse settings: {error}",
   "Could not start the trigger helper: {error}": "Could not start the trigger helper: {error}",
-  "Could not release the keyboard trigger: {error}": "Could not release the keyboard trigger: {error}"
+  "Could not release the keyboard trigger: {error}": "Could not release the keyboard trigger: {error}",
+  "Retry transcription": "Retry transcription",
+  "Discard saved recording": "Discard saved recording",
+  "An unfinished recording is saved. Retry transcription or discard it.": "An unfinished recording is saved. Retry transcription or discard it.",
+  "{error}. Your recording is retained. Retry transcription or discard it.": "{error}. Your recording is retained. Retry transcription or discard it."
 }
