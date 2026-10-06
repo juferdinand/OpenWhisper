@@ -1,5 +1,5 @@
 [package]
-name = "whisperfree-desktop"
+name = "openwhisper-desktop"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,15 +7,15 @@ license.workspace = true
 [features]
 default = []
 custom-protocol = ["tauri/custom-protocol"]
-vulkan = ["whisperfree-speech/vulkan"]
+vulkan = ["openwhisper-speech/vulkan"]
 release-updater = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-whisperfree-core = { path = "../crates/core" }
-whisperfree-speech = { path = "../crates/speech" }
+openwhisper-core = { path = "../crates/core" }
+openwhisper-speech = { path = "../crates/speech" }
 tauri = { version = "2", features = ["tray-icon", "image-png", "unstable"] }
 gtk = "0.18"
 libloading = "0.8"

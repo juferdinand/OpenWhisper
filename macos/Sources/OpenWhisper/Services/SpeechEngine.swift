@@ -1,6 +1,6 @@
 import Foundation
 import whisper
-import WhisperFreeCore
+import OpenWhisperCore
 
 enum SpeechEngineError: LocalizedError {
     case modelLoadFailed(String)
@@ -25,7 +25,7 @@ final class SpeechEngine: @unchecked Sendable {
         case parakeet(OpaquePointer)
     }
 
-    private let queue = DispatchQueue(label: "whisperfree.speech", qos: .userInitiated, autoreleaseFrequency: .workItem)
+    private let queue = DispatchQueue(label: "openwhisper.speech", qos: .userInitiated, autoreleaseFrequency: .workItem)
     private var context: Context?
     private var loadedPath: String?
 

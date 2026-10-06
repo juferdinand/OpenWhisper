@@ -1,7 +1,7 @@
 import AppKit
 import os
 import Security
-import WhisperFreeCore
+import OpenWhisperCore
 
 private let updateLog = Logger(subsystem: "io.github.whisperfree", category: "update")
 
@@ -128,7 +128,7 @@ final class UpdateService: ObservableObject {
             if let error {
                 result = .failure(error)
             } else if let tempURL, (response as? HTTPURLResponse)?.statusCode == 200 {
-                let kept = FileManager.default.temporaryDirectory.appendingPathComponent("WhisperFree-update-\(UUID().uuidString).zip")
+                let kept = FileManager.default.temporaryDirectory.appendingPathComponent("OpenWhisper-update-\(UUID().uuidString).zip")
                 result = Result { try FileManager.default.moveItem(at: tempURL, to: kept); return kept }
             } else {
                 result = .failure(UpdateError.message("Download failed"))

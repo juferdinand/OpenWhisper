@@ -15,7 +15,7 @@ jobs:
   linux:
     uses: ./.github/workflows/linux-build.yml
     with:
-      artifact_name: WhisperFree-Linux-development-${{ github.sha }}
+      artifact_name: OpenWhisper-Linux-development-${{ github.sha }}
   macos:
     runs-on: macos-15
     timeout-minutes: 30
@@ -44,21 +44,21 @@ jobs:
 
       - name: Verify installation image
         run: |
-          bash scripts/test-signing-requirement.sh build/WhisperFree.app
-          bash scripts/verify-dmg.sh build/WhisperFree-macOS.dmg build/WhisperFree.app
+          bash scripts/test-signing-requirement.sh build/OpenWhisper.app
+          bash scripts/verify-dmg.sh build/OpenWhisper-macOS.dmg build/OpenWhisper.app
 
       - name: Smoke test the shared UI in native WebKit
         timeout-minutes: 2
         env:
           WF_UI_SNAPSHOT_DIR: ${{ github.workspace }}/macos/build/ui-previews
         run: |
-          build/WhisperFree.app/Contents/MacOS/WhisperFree --ui-smoke-test
-          build/WhisperFree.app/Contents/MacOS/WhisperFree --overlay-smoke-test
+          build/OpenWhisper.app/Contents/MacOS/OpenWhisper --ui-smoke-test
+          build/OpenWhisper.app/Contents/MacOS/OpenWhisper --overlay-smoke-test
 
       - name: Upload native macOS UI previews
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: WhisperFree-native-macOS-UI-${{ github.sha }}
+          name: OpenWhisper-native-macOS-UI-${{ github.sha }}
           path: macos/build/ui-previews/*.png
           if-no-files-found: error
           retention-days: 14
@@ -66,9 +66,9 @@ jobs:
       - name: Upload macOS package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: WhisperFree-macOS-${{ github.sha }}
+          name: OpenWhisper-macOS-${{ github.sha }}
           path: |
-            macos/build/WhisperFree-macOS.dmg
-            macos/build/WhisperFree-macOS.zip
+            macos/build/OpenWhisper-macOS.dmg
+            macos/build/OpenWhisper-macOS.zip
           if-no-files-found: error
           retention-days: 14

@@ -1,6 +1,6 @@
-# WhisperFree — Agent Instructions
+# OpenWhisper — Agent Instructions
 
-WhisperFree is a free, fully local dictation app, inspired by tools such as WhisperBar and Wispr Flow:
+OpenWhisper is a free, fully local dictation app, inspired by tools such as WhisperBar and Wispr Flow:
 press a trigger, speak, and insert the recognized text at the cursor. No cloud recognition, account,
 or subscription. The project is open source under the MIT License.
 
@@ -17,15 +17,15 @@ or subscription. The project is open source under the MIT License.
 
 - `macos/`: native Swift app, SwiftPM, Swift 5.10 language mode, macOS 14+.
   It can be built with the Xcode Command Line Tools without a full Xcode installation.
-  - `Sources/WhisperFreeCore/`: testable logic: `TranscriptCleaner`, `VocabularyCorrector`,
+  - `Sources/OpenWhisperCore/`: testable logic: `TranscriptCleaner`, `VocabularyCorrector`,
     `SnippetExpander`, and `ModelCatalog`.
-  - `Sources/WhisperFree/App/`: `AppState` state machine
+  - `Sources/OpenWhisper/App/`: `AppState` state machine
     (`idle → recording → transcribing → done/error`), preferences, app, and app delegate.
-  - `Sources/WhisperFree/Services/`: `SpeechEngine` (whisper.cpp C API for Whisper and NVIDIA Parakeet),
+  - `Sources/OpenWhisper/Services/`: `SpeechEngine` (whisper.cpp C API for Whisper and NVIDIA Parakeet),
     `AudioRecorder`, `HotkeyService` (CGEvent tap, Fn/modifier/mouse triggers, Carbon fallback,
     push-to-talk), `TextInjector` (paste, clipboard, or editor), `ModelManager`,
     `UpdateService` (GitHub Releases with signature verification), `Permissions`, and `SnippetStore`.
-  - `Sources/WhisperFree/UI/`: native non-activating `NSPanel` overlay and a dedicated
+  - `Sources/OpenWhisper/UI/`: native non-activating `NSPanel` overlay and a dedicated
     `NSWindow` hosting `SharedSettingsView` (WKWebView). The settings use the same compiled
     UI assets as Linux, including the floating recording controls. Only trusted bundle files
     can navigate or invoke the native bridge.
@@ -54,10 +54,10 @@ make linux                        # Build Linux with Vulkan and CPU fallback
 make linux-install                # Install the local Linux build for this user
 cd desktop && npm run test:ui      # Shared UI tests (install Playwright Chromium first)
 make test                         # Run Swift tests against shared/test-vectors.json
-make mac                          # Build macos/build/WhisperFree.app
+make mac                          # Build macos/build/OpenWhisper.app
 make mac-install                  # Replace the app in /Applications and launch it
 make -C macos app UNIVERSAL=1      # Build arm64 and x86_64, then combine with lipo
-make -C macos zip UNIVERSAL=1      # Build and package WhisperFree-macOS.zip
+make -C macos zip UNIVERSAL=1      # Build and package OpenWhisper-macOS.zip
 make -C macos dmg UNIVERSAL=1      # Build a drag-to-Applications installation image
 ```
 
@@ -79,6 +79,11 @@ Recording, permissions, hotkeys, and pasting also need manual testing on macOS.
 For documentation-only changes, check content, links, and formatting.
 
 ## Known pitfalls
+
+- **Persistent identities:** keep `io.github.whisperfree`, the Debian package identity, existing data
+  directories, and signing keys stable. Public branding and new package names use OpenWhisper.
+  Never relabel old release binaries. Preserve strict source/signature validation when
+  configuring the repository and expected asset names.
 
 - **Recording duration:** the user explicitly requires no fixed time limit. Do not reintroduce
   an automatic cutoff or truncate the audio buffer. Record until explicit stop/cancel; explain
@@ -113,7 +118,7 @@ For documentation-only changes, check content, links, and formatting.
   A self-signed certificate does not provide Apple notarization.
 - **macOS capture:** each recording owns its converter and synchronized sample buffer. Never
   reset a converter concurrently with the tap callback or reuse an engine after a device change.
-  `WhisperFreeAudio` catches AVAudioEngine Objective-C exceptions before they cross Swift.
+  `OpenWhisperAudio` catches AVAudioEngine Objective-C exceptions before they cross Swift.
   Synthetic capture tests must never open the microphone. Lifecycle diagnostics are bounded and
   local; never log audio, transcripts, vocabulary, clipboard content, or device names.
 - **Metal shutdown:** ggml-metal can crash during process exit while a context remains loaded.
@@ -139,7 +144,7 @@ For documentation-only changes, check content, links, and formatting.
 
 ## CI and releases
 
-Repository: https://github.com/juferdinand/WhisperFree (public).
+Repository: https://github.com/juferdinand/OpenWhisper (public).
 
 Signing decision (2026-10-05): use persistent self-signing for the initial public releases to avoid
 the annual Apple Developer Program fee during early development. Clearly document that the app

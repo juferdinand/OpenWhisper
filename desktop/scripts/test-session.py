@@ -8,7 +8,7 @@ from gi.repository import Atspi
 
 root = pathlib.Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser(description="Exercise the native Linux UI with an isolated virtual microphone and public speech fixture.")
-parser.add_argument("--binary", type=pathlib.Path, default=root/"desktop/target/release/whisperfree-desktop")
+parser.add_argument("--binary", type=pathlib.Path, default=root/"desktop/target/release/openwhisper-desktop")
 parser.add_argument("--model", type=pathlib.Path, default=root/"desktop/target/speech-smoke/ggml-tiny.bin")
 parser.add_argument("--model-id", choices=["tiny", "parakeet-v3-q4"], default="tiny")
 parser.add_argument("--duration", type=int, default=126, help="Seconds for the recording-duration check (126 tests the former two-minute cutoff)")
@@ -20,9 +20,9 @@ if not args.model.is_file() or not args.binary.is_file():
 for command in ["pactl", "paplay", "wl-paste", "gdbus"] + (["qdbus6"] if args.portals else []):
     if not shutil.which(command): parser.error(f"Missing test dependency: {command}")
 owned = subprocess.check_output(["gdbus", "call", "--session", "--dest", "org.freedesktop.DBus", "--object-path", "/org/freedesktop/DBus", "--method", "org.freedesktop.DBus.NameHasOwner", "io.github.whisperfree"], text=True)
-if "true" in owned: parser.error("Quit WhisperFree before running this isolated session test.")
-work = pathlib.Path(tempfile.mkdtemp(prefix='whisperfree-desktop-test-'))
-sink = 'whisperfree_test_' + str(os.getpid())
+if "true" in owned: parser.error("Quit OpenWhisper before running this isolated session test.")
+work = pathlib.Path(tempfile.mkdtemp(prefix='openwhisper-desktop-test-'))
+sink = 'openwhisper_test_' + str(os.getpid())
 module = subprocess.check_output(['pactl','load-module','module-null-sink',f'sink_name={sink}','rate=48000'], text=True).strip()
 process = None
 target_process = None
@@ -44,7 +44,7 @@ def app():
         except ProcessLookupError: pass
     return None
 
-def button(prefix, frame='WhisperFree'):
+def button(prefix, frame='OpenWhisper'):
     node = app()
     if node:
         for child in descendants(node):
@@ -53,7 +53,7 @@ def button(prefix, frame='WhisperFree'):
                     if item.get_role_name() == 'button' and item.get_name().startswith(prefix): return item
     return None
 
-def wait_button(prefix, seconds=20, frame='WhisperFree'):
+def wait_button(prefix, seconds=20, frame='OpenWhisper'):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         if process.poll() is not None: raise RuntimeError('App exited')
@@ -89,7 +89,7 @@ try:
     print('PASS: launcher reactivation preserves the existing app and UI', flush=True)
     click(wait_button('Start dictation'))
     wait_button('Recording')
-    indicator = wait_button('Recording', frame='WhisperFree Recording')
+    indicator = wait_button('Recording', frame='OpenWhisper Recording')
     assert not indicator.get_state_set().contains(Atspi.StateType.FOCUSED), 'Overlay stole keyboard focus'
     print('PASS: native record control starts CPAL capture and floating overlay appears', flush=True)
     started = time.monotonic()
@@ -100,7 +100,7 @@ try:
         if elapsed in [30, 60, 90, 120]: print(f'Recording duration check: {elapsed}s', flush=True)
     assert button('Recording'), 'Recording stopped before the explicit cancel action'
     print(f'PASS: recording remains active after {args.duration} seconds', flush=True)
-    click(wait_button('Discard recording', frame='WhisperFree Recording'))
+    click(wait_button('Discard recording', frame='OpenWhisper Recording'))
     wait_button('Start dictation')
     print('PASS: floating Cancel discards the recording', flush=True)
     if args.portals:
@@ -124,7 +124,7 @@ try:
         target_script.write_text('''import gi, pathlib, sys
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk
-window=Gtk.Window(title="WhisperFree Typing Test")
+window=Gtk.Window(title="OpenWhisper Typing Test")
 window.set_default_size(600,220)
 view=Gtk.TextView()
 window.add(view)
@@ -137,16 +137,16 @@ Gtk.main()
         target_process = subprocess.Popen(['python3', str(target_script), str(work/'pasted.txt')])
         time.sleep(1)
         focus = work/'focus.js'
-        focus.write_text('for (const w of workspace.windowList()) { if (w.caption === "WhisperFree Typing Test") workspace.activeWindow = w; }')
-        script_id = subprocess.check_output(['qdbus6','org.kde.KWin','/Scripting','org.kde.kwin.Scripting.loadScript',str(focus),'whisperfree-typing-test'],text=True).strip()
+        focus.write_text('for (const w of workspace.windowList()) { if (w.caption === "OpenWhisper Typing Test") workspace.activeWindow = w; }')
+        script_id = subprocess.check_output(['qdbus6','org.kde.KWin','/Scripting','org.kde.kwin.Scripting.loadScript',str(focus),'openwhisper-typing-test'],text=True).strip()
         assert script_id.isdigit()
         subprocess.run(['qdbus6','org.kde.KWin',f'/Scripting/Script{script_id}','org.kde.kwin.Script.run'],check=True)
-        subprocess.run(['qdbus6','org.kde.KWin','/Scripting','org.kde.kwin.Scripting.unloadScript','whisperfree-typing-test'],check=True,stdout=subprocess.DEVNULL)
+        subprocess.run(['qdbus6','org.kde.KWin','/Scripting','org.kde.kwin.Scripting.unloadScript','openwhisper-typing-test'],check=True,stdout=subprocess.DEVNULL)
     click(wait_button('Start dictation'))
     wait_button('Recording')
     subprocess.run(['paplay', '--device', sink, str(root/'desktop/vendor/whisper.cpp/samples/jfk.wav')], check=True)
     time.sleep(.4)
-    click(wait_button('Recording', frame='WhisperFree Recording'))
+    click(wait_button('Recording', frame='OpenWhisper Recording'))
     wait_button('Start dictation', seconds=90)
     history = json.loads((config/'history.json').read_text())
     assert history and 'country' in history[0].lower(), 'Known speech fixture not recognized'

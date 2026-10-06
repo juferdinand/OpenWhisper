@@ -1,4 +1,4 @@
-APP := build/WhisperFree.app
+APP := build/OpenWhisper.app
 CLT_DEV := /Library/Developer/CommandLineTools/Library/Developer
 # Command Line Tools-only installations need explicit swift-testing linker paths.
 ifeq ($(shell xcode-select -p 2>/dev/null),/Library/Developer/CommandLineTools)
@@ -20,9 +20,9 @@ run: app
 	open $(APP)
 
 install: app
-	rm -rf /Applications/WhisperFree.app
+	rm -rf /Applications/OpenWhisper.app
 	cp -R $(APP) /Applications/
-	open /Applications/WhisperFree.app
+	open /Applications/OpenWhisper.app
 
 test:
 	scripts/fetch-whisper.sh
@@ -30,13 +30,13 @@ test:
 	swift test --no-parallel $(TEST_FLAGS)
 
 zip: app
-	cd build && rm -f WhisperFree-macOS.zip && ditto -c -k --keepParent WhisperFree.app WhisperFree-macOS.zip
-	@echo "✓ build/WhisperFree-macOS.zip"
+	cd build && rm -f OpenWhisper-macOS.zip && ditto -c -k --keepParent OpenWhisper.app OpenWhisper-macOS.zip
+	@echo "✓ build/OpenWhisper-macOS.zip"
 
 dmg: app
 	bash scripts/build-dmg.sh
 
-# Local: make release UPDATE_REPO=user/WhisperFree; normally handled by .github/workflows/release.yml
+# Local: make release UPDATE_REPO=user/OpenWhisper; normally handled by .github/workflows/release.yml
 release: zip dmg
 
 clean:

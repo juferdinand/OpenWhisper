@@ -45,7 +45,7 @@ impl Relaunch {
     pub fn finish(&self, exit_code: i32) -> i32 {
         if let Some(mut command) = self.pending.lock().unwrap().take() {
             let error = command.exec();
-            eprintln!("The update is installed, but WhisperFree could not restart: {error}. Open the app manually.");
+            eprintln!("The update is installed, but OpenWhisper could not restart: {error}. Open the app manually.");
             return 1;
         }
         exit_code
@@ -59,10 +59,10 @@ mod tests {
     #[test]
     fn relaunch_preserves_pid_and_arguments() {
         let path =
-            std::env::temp_dir().join(format!("whisperfree-relaunch-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("openwhisper-relaunch-{}", uuid::Uuid::new_v4()));
         let mut child = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "relaunch::tests::exec_fixture", "--nocapture"])
-            .env("WHISPERFREE_RELAUNCH_TEST_OUTPUT", &path)
+            .env("OPENWHISPER_RELAUNCH_TEST_OUTPUT", &path)
             .spawn()
             .unwrap();
         let pid = child.id();
@@ -76,7 +76,7 @@ mod tests {
 
     #[test]
     fn exec_fixture() {
-        let Some(output) = std::env::var_os("WHISPERFREE_RELAUNCH_TEST_OUTPUT") else {
+        let Some(output) = std::env::var_os("OPENWHISPER_RELAUNCH_TEST_OUTPUT") else {
             return;
         };
         let relaunch = Relaunch::new(

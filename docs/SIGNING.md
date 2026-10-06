@@ -4,7 +4,7 @@ The macOS and Linux release identities are separate.
 
 ## Current decision
 
-As of 2026-10-05, WhisperFree uses a persistent, self-signed code-signing certificate for its
+As of 2026-10-05, OpenWhisper uses a persistent, self-signed code-signing certificate for its
 initial public releases. This keeps early open-source releases independent of a paid Apple
 Developer Program membership while the project is being developed and tested.
 
@@ -112,7 +112,7 @@ Regression tests exercise modified packages, foreign keys, malformed signatures,
 versions, and version replay. Ordinary CI does not receive the release key or enable installation.
 
 AppImage installation replaces the file in place using Tauri's installer. Debian installation checks
-package metadata, then asks the system authentication agent to run `dpkg`; WhisperFree does not
+package metadata, then asks the system authentication agent to run `dpkg`; OpenWhisper does not
 collect administrator passwords. Both paths restart after successful installation. A signature verifies
 origin relative to the embedded key and integrity, not the absence of vulnerabilities. The first download
 still depends on trusting the official release source. Losing or changing this key requires an explicit

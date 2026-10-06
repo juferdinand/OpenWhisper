@@ -52,7 +52,7 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     with:
       version: ${{ inputs.version }}
-      artifact_name: WhisperFree-Linux-v${{ inputs.version }}
+      artifact_name: OpenWhisper-Linux-v${{ inputs.version }}
       retention_days: 30
 
   macos:
@@ -114,25 +114,25 @@ jobs:
       - name: Verify signatures
         working-directory: macos
         run: |
-          codesign --verify --deep --strict --verbose=2 build/WhisperFree.app
-          codesign -dr - build/WhisperFree.app
-          bash scripts/test-release-signature.sh build/WhisperFree.app
-          lipo build/WhisperFree.app/Contents/MacOS/WhisperFree -verify_arch arm64 x86_64
+          codesign --verify --deep --strict --verbose=2 build/OpenWhisper.app
+          codesign -dr - build/OpenWhisper.app
+          bash scripts/test-release-signature.sh build/OpenWhisper.app
+          lipo build/OpenWhisper.app/Contents/MacOS/OpenWhisper -verify_arch arm64 x86_64
           # Use the updater's extraction tool: signatures must survive the ZIP round trip.
           mkdir "$RUNNER_TEMP/release-verification"
-          /usr/bin/tar -xf build/WhisperFree-macOS.zip -C "$RUNNER_TEMP/release-verification" --no-same-owner
-          codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/release-verification/WhisperFree.app"
-          bash scripts/verify-dmg.sh build/WhisperFree-macOS.dmg build/WhisperFree.app
+          /usr/bin/tar -xf build/OpenWhisper-macOS.zip -C "$RUNNER_TEMP/release-verification" --no-same-owner
+          codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/release-verification/OpenWhisper.app"
+          bash scripts/verify-dmg.sh build/OpenWhisper-macOS.dmg build/OpenWhisper.app
           cd build
-          shasum -a 256 WhisperFree-macOS.dmg WhisperFree-macOS.zip > SHA256SUMS
+          shasum -a 256 OpenWhisper-macOS.dmg OpenWhisper-macOS.zip > SHA256SUMS
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: WhisperFree-macOS-v${{ inputs.version }}
+          name: OpenWhisper-macOS-v${{ inputs.version }}
           path: |
-            macos/build/WhisperFree-macOS.dmg
-            macos/build/WhisperFree-macOS.zip
+            macos/build/OpenWhisper-macOS.dmg
+            macos/build/OpenWhisper-macOS.zip
             macos/build/SHA256SUMS
           if-no-files-found: error
           retention-days: 30
@@ -141,8 +141,8 @@ jobs:
         timeout-minutes: 2
         working-directory: macos
         run: |
-          build/WhisperFree.app/Contents/MacOS/WhisperFree --ui-smoke-test
-          build/WhisperFree.app/Contents/MacOS/WhisperFree --overlay-smoke-test
+          build/OpenWhisper.app/Contents/MacOS/OpenWhisper --ui-smoke-test
+          build/OpenWhisper.app/Contents/MacOS/OpenWhisper --overlay-smoke-test
 
       - name: Clean up keychain
         if: always()
@@ -161,21 +161,21 @@ jobs:
           fetch-depth: 0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: WhisperFree-macOS-v${{ inputs.version }}
+          name: OpenWhisper-macOS-v${{ inputs.version }}
           path: .release/macos
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: WhisperFree-Linux-v${{ inputs.version }}
+          name: OpenWhisper-Linux-v${{ inputs.version }}
           path: .release/linux
       - name: Verify packages and combine checksums
         run: |
           (cd .release/macos && sha256sum -c SHA256SUMS)
           (cd .release/linux && sha256sum -c SHA256SUMS)
           mkdir -p .release/assets
-          cp .release/macos/WhisperFree-macOS.dmg .release/macos/WhisperFree-macOS.zip .release/assets/
-          cp .release/linux/WhisperFree-Linux-x86_64.AppImage .release/linux/WhisperFree-Linux-x86_64.AppImage.sig .release/linux/WhisperFree-Linux-amd64.deb .release/linux/WhisperFree-Linux-amd64.deb.sig .release/linux/latest.json .release/assets/
+          cp .release/macos/OpenWhisper-macOS.dmg .release/macos/OpenWhisper-macOS.zip .release/assets/
+          cp .release/linux/OpenWhisper-Linux-x86_64.AppImage .release/linux/OpenWhisper-Linux-x86_64.AppImage.sig .release/linux/OpenWhisper-Linux-amd64.deb .release/linux/OpenWhisper-Linux-amd64.deb.sig .release/linux/latest.json .release/assets/
           cd .release/assets
-          sha256sum WhisperFree-macOS.dmg WhisperFree-macOS.zip WhisperFree-Linux-x86_64.AppImage WhisperFree-Linux-x86_64.AppImage.sig WhisperFree-Linux-amd64.deb WhisperFree-Linux-amd64.deb.sig latest.json > SHA256SUMS
+          sha256sum OpenWhisper-macOS.dmg OpenWhisper-macOS.zip OpenWhisper-Linux-x86_64.AppImage OpenWhisper-Linux-x86_64.AppImage.sig OpenWhisper-Linux-amd64.deb OpenWhisper-Linux-amd64.deb.sig latest.json > SHA256SUMS
           sha256sum -c SHA256SUMS
       - name: Set version, commit, and tag
         run: |
@@ -196,8 +196,8 @@ jobs:
           git push --atomic origin HEAD:refs/heads/main "refs/tags/v$VERSION"
           EXTRA_ARGS=()
           if [[ "$RELEASE_DRAFT" == "true" ]]; then EXTRA_ARGS+=(--draft); fi
-          gh release create "v$VERSION" .release/assets/WhisperFree-macOS.dmg .release/assets/WhisperFree-macOS.zip .release/assets/WhisperFree-Linux-x86_64.AppImage .release/assets/WhisperFree-Linux-amd64.deb .release/assets/WhisperFree-Linux-x86_64.AppImage.sig .release/assets/WhisperFree-Linux-amd64.deb.sig .release/assets/latest.json .release/assets/SHA256SUMS \
-            --title "WhisperFree $VERSION" \
+          gh release create "v$VERSION" .release/assets/OpenWhisper-macOS.dmg .release/assets/OpenWhisper-macOS.zip .release/assets/OpenWhisper-Linux-x86_64.AppImage .release/assets/OpenWhisper-Linux-amd64.deb .release/assets/OpenWhisper-Linux-x86_64.AppImage.sig .release/assets/OpenWhisper-Linux-amd64.deb.sig .release/assets/latest.json .release/assets/SHA256SUMS \
+            --title "OpenWhisper $VERSION" \
             --verify-tag \
             --notes-file .github/release-notes.md \
             --generate-notes "${EXTRA_ARGS[@]}"

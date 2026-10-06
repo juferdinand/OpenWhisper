@@ -1,6 +1,6 @@
 import AppKit
 import os
-import WhisperFreeCore
+import OpenWhisperCore
 
 private let stateLog = Logger(subsystem: "io.github.whisperfree", category: "state")
 

@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Please [report security vulnerabilities privately through GitHub](https://github.com/juferdinand/WhisperFree/security/advisories/new).
+Please [report security vulnerabilities privately through GitHub](https://github.com/juferdinand/OpenWhisper/security/advisories/new).
 Include the affected version, reproduction steps, and the expected impact. Do not publish signing
 keys, credentials, recordings, or exploit details in a public issue while a fix is being coordinated.
 
@@ -45,7 +45,7 @@ The Linux preview locks `glib 0.18.5` through Tauri 2 / GTK 3. It is affected by
 The upstream fix is in `glib >=0.20`, outside GTK 3's current dependency range; see the
 [Tauri upstream issue](https://github.com/tauri-apps/tauri/issues/12048).
 
-Review on 2026-10-06 found no calls to `array_iter_str` or uses of `VariantStrIter` in WhisperFree
+Review on 2026-10-06 found no calls to `array_iter_str` or uses of `VariantStrIter` in OpenWhisper
 or the locally resolved dependency sources outside glib's own implementation, documentation,
 and tests. This source search is limited evidence, not a proof that the vulnerability is unreachable.
 The GitHub alert remains open and is not suppressed. The preview retains this known dependency

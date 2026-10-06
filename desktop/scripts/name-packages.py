@@ -6,6 +6,6 @@ for folder, suffix in [("deb", ".deb"), ("appimage", ".AppImage")]:
     packages = list((bundle / folder).glob(f"io.github.whisperfree_*{suffix}"))
     assert len(packages) == 1, f"Expected one {suffix} package, found {len(packages)}"
     package = packages[0]
-    target = package.with_name(package.name.replace("io.github.whisperfree_", "WhisperFree_", 1))
+    target = package.with_name(package.name.replace("io.github.whisperfree_", "OpenWhisper_", 1))
     package.replace(target)
     print(target.name)

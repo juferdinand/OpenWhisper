@@ -17,7 +17,7 @@ if marker.exists() and marker.read_text() == encoded:
     print(prefix)
     raise SystemExit(0)
 for name, pin in pins.items():
-    with tempfile.TemporaryDirectory(prefix="whisperfree-vulkan-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="openwhisper-vulkan-") as temporary:
         folder = Path(temporary)
         archive = folder / "source.tar.gz"
         url = f'https://codeload.github.com/KhronosGroup/{name}/tar.gz/{pin["revision"]}'

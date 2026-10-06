@@ -2,7 +2,7 @@ import Foundation
 
 /// Strict validation of metadata from the release API and downloaded bundle.
 public enum UpdatePolicy {
-    public static let assetName = "WhisperFree-macOS.zip"
+    public static let assetName = "OpenWhisper-macOS.zip"
 
     public static func isValidRepository(_ value: String) -> Bool {
         value.range(of: #"^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$"#, options: .regularExpression) == value.startIndex..<value.endIndex

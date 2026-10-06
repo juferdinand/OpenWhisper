@@ -13,7 +13,7 @@ import time
 
 root = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--binary", type=Path, default=root / "desktop/target/release/whisperfree-desktop")
+parser.add_argument("--binary", type=Path, default=root / "desktop/target/release/openwhisper-desktop")
 parser.add_argument("--tiny", type=Path, required=True)
 parser.add_argument("--parakeet", type=Path, required=True)
 parser.add_argument("--gpu", action="store_true", help="Also verify GPU inference on this host")
@@ -22,7 +22,7 @@ for path in [args.binary, args.tiny, args.parakeet]:
     if not path.is_file():
         parser.error(f"Missing file: {path}")
 
-with tempfile.TemporaryDirectory(prefix="whisperfree-long-recognition-") as directory:
+with tempfile.TemporaryDirectory(prefix="openwhisper-long-recognition-") as directory:
     work = Path(directory)
     fixture = work / "jfk.f32"
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-i",

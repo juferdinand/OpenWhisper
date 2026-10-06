@@ -1,5 +1,5 @@
 #import "AudioTestSupport.h"
-#import "WhisperFreeAudio.h"
+#import "OpenWhisperAudio.h"
 
 // Duck-typed stand-ins exercise AVAudioEngine's exception boundary without input hardware.
 @interface FailingInput : NSObject

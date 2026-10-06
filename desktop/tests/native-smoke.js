@@ -42,7 +42,7 @@
       icon.naturalWidth !== 256 ||
       !Array.from(document.fonts).some(
         (font) =>
-          font.family === "WhisperFree Inter" && font.status === "loaded",
+          font.family === "OpenWhisper Inter" && font.status === "loaded",
       )
     )
       throw new Error("Bundled branding failed to load");

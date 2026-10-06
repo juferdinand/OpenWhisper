@@ -20,7 +20,7 @@ if compiler.is_file() and marker.is_file() and marker.read_text() == encoded:
     print(compiler)
     raise SystemExit(0)
 
-with tempfile.TemporaryDirectory(prefix="whisperfree-shaderc-") as temporary:
+with tempfile.TemporaryDirectory(prefix="openwhisper-shaderc-") as temporary:
     folder = Path(temporary)
     source = folder / "source"
     for name, pin in pins.items():

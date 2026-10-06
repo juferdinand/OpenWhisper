@@ -47,7 +47,7 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false, f
   await page.addInitScript(
     ({ platform, models, overlay, fresh }) => {
       const host = window as any;
-      host.__WHISPERFREE_OVERLAY__ = platform === "macos" && overlay;
+      host.__OPENWHISPER_OVERLAY__ = platform === "macos" && overlay;
       host.calls = [];
       const state: any = {
         platform,
@@ -109,7 +109,7 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false, f
       const publish = () => {
         const snapshot = JSON.parse(JSON.stringify(state));
         window.dispatchEvent(
-          new CustomEvent("whisperfree:state", { detail: snapshot }),
+          new CustomEvent("openwhisper:state", { detail: snapshot }),
         );
         callbacks.get(stateListener)?.({
           event: "state",
@@ -159,7 +159,7 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false, f
       if (platform === "macos")
         host.webkit = {
           messageHandlers: {
-            whisperfree: {
+            openwhisper: {
               // WKScriptMessage replies need not preserve the dictionary order used by events.
               postMessage: async ({ command, args }: any) => JSON.parse(JSON.stringify(
                 await invoke(command, args), (_, value) => value && typeof value === "object" && !Array.isArray(value)
@@ -241,7 +241,7 @@ for (const platform of ["linux", "macos"] as const) {
     ]);
     await page.getByRole("button", { name: "About", exact: true }).click();
     await expect(
-      page.getByRole("heading", { name: "WhisperFree", exact: true }),
+      page.getByRole("heading", { name: "OpenWhisper", exact: true }),
     ).toBeVisible();
     expect(
       await page
@@ -256,7 +256,7 @@ for (const platform of ["linux", "macos"] as const) {
       await page.evaluate(() =>
         Array.from(document.fonts).some(
           (font) =>
-            font.family === "WhisperFree Inter" && font.status === "loaded",
+            font.family === "OpenWhisper Inter" && font.status === "loaded",
         ),
       ),
     ).toBe(true);
@@ -521,7 +521,7 @@ test("macOS shows pending login approval without changing the idle overlay", asy
     w.publishState();
   });
   await expect(page.getByRole("checkbox", { name: "Launch at login", exact: true })).toBeChecked();
-  await expect(page.getByText("Allow WhisperFree in System Settings to finish enabling launch at login.")).toBeVisible();
+  await expect(page.getByText("Allow OpenWhisper in System Settings to finish enabling launch at login.")).toBeVisible();
   expect(await page.locator("main").evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true);
   await page.getByRole("checkbox", { name: "Launch at login", exact: true }).uncheck();
   await expect(page.getByRole("checkbox", { name: "Show overlay when idle", exact: true })).not.toBeChecked();

@@ -5146,7 +5146,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "whisperfree-core"
+name = "openwhisper-core"
 version = "0.2.4"
 dependencies = [
  "base64 0.22.1",
@@ -5159,7 +5159,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "whisperfree-desktop"
+name = "openwhisper-desktop"
 version = "0.2.4"
 dependencies = [
  "ashpd",
@@ -5178,13 +5178,13 @@ dependencies = [
  "tauri-plugin-updater",
  "tokio",
  "uuid",
- "whisperfree-core",
- "whisperfree-speech",
+ "openwhisper-core",
+ "openwhisper-speech",
  "zbus",
 ]
 
 [[package]]
-name = "whisperfree-speech"
+name = "openwhisper-speech"
 version = "0.2.4"
 dependencies = [
  "cc",

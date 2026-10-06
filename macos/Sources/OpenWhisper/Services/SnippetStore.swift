@@ -1,5 +1,5 @@
 import Foundation
-import WhisperFreeCore
+import OpenWhisperCore
 
 /// Stores snippets as JSON under ~/Library/Application Support/WhisperFree.
 @MainActor

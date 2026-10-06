@@ -71,7 +71,7 @@ jobs:
           cargo fmt --all --check
           cargo test --locked --workspace
           cargo clippy --locked --workspace --all-targets -- -D warnings
-          cargo build --locked -p whisperfree-core --example verify-update
+          cargo build --locked -p openwhisper-core --example verify-update
           python3 scripts/test-update-signatures.py
           bash scripts/test-recognition.sh
       - name: Build Linux packages
@@ -99,9 +99,9 @@ jobs:
       - name: Smoke test the shared UI in native WebKitGTK
         timeout-minutes: 2
         env:
-          XDG_CONFIG_HOME: ${{ runner.temp }}/whisperfree-ui/config
-          XDG_DATA_HOME: ${{ runner.temp }}/whisperfree-ui/data
-        run: dbus-run-session -- xvfb-run -a target/release/whisperfree-desktop --ui-smoke-test
+          XDG_CONFIG_HOME: ${{ runner.temp }}/openwhisper-ui/config
+          XDG_DATA_HOME: ${{ runner.temp }}/openwhisper-ui/data
+        run: dbus-run-session -- xvfb-run -a target/release/openwhisper-desktop --ui-smoke-test
       - name: Upload Linux release packages
         if: inputs.version != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -124,6 +124,6 @@ jobs:
       - name: Upload shared UI previews
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: WhisperFree-shared-UI-${{ github.sha }}
+          name: OpenWhisper-shared-UI-${{ github.sha }}
           path: desktop/test-results/*.png
           retention-days: ${{ inputs.retention_days }}

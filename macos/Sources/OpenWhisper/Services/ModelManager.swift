@@ -1,6 +1,6 @@
 import AppKit
 import Foundation
-import WhisperFreeCore
+import OpenWhisperCore
 
 /// Chip and memory information for model recommendations.
 struct MacHardware {

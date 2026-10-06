@@ -1,7 +1,7 @@
 import AppKit
 import AVFoundation
 import WebKit
-import WhisperFreeCore
+import OpenWhisperCore
 
 private final class SharedWebView: WKWebView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -33,12 +33,12 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
             // WKWebView's macOS transparency setting, also used by Wry/Tauri.
             configuration.setValue(false, forKey: "drawsBackground")
             configuration.userContentController.addUserScript(WKUserScript(
-                source: "window.__WHISPERFREE_OVERLAY__ = true;",
+                source: "window.__OPENWHISPER_OVERLAY__ = true;",
                 injectionTime: .atDocumentStart, forMainFrameOnly: true))
         }
         webView = SharedWebView(frame: .zero, configuration: configuration)
         super.init()
-        webView.configuration.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "whisperfree")
+        webView.configuration.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "openwhisper")
         webView.navigationDelegate = self
         let index = root.appendingPathComponent("index.html")
         webView.loadFileURL(index, allowingReadAccessTo: root)
@@ -98,7 +98,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                         document.querySelectorAll('nav').length === 0 &&
                         document.querySelector('#record-label')?.textContent === 'Start dictation' &&
                         document.documentElement.scrollWidth === 340 &&
-                        Array.from(document.fonts).some(font => font.family === 'WhisperFree Inter' && font.status === 'loaded')
+                        Array.from(document.fonts).some(font => font.family === 'OpenWhisper Inter' && font.status === 'loaded')
                         """)
                     guard valid as? Bool == true, webView.window?.canBecomeKey == false else {
                         throw UIError.message("Shared recording overlay did not initialize correctly")
@@ -119,7 +119,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                     document.documentElement.dataset.ready === 'true' &&
                     document.querySelectorAll('nav button').length >= 5 &&
                     document.querySelector('.about-brand img')?.naturalWidth === 256 &&
-                    Array.from(document.fonts).some(font => font.family === 'WhisperFree Inter' && font.status === 'loaded')
+                    Array.from(document.fonts).some(font => font.family === 'OpenWhisper Inter' && font.status === 'loaded')
                     """)
                 guard valid as? Bool == true else { throw UIError.message("Shared UI did not initialize correctly") }
                 fputs("Native WebKit UI is ready.\n", stderr)
@@ -144,7 +144,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                       (try await webView.evaluateJavaScript("document.documentElement.lang")) as? String == "de" else {
                     throw UIError.message("Interface language did not persist or native translations are missing")
                 }
-                try await webView.evaluateJavaScript("void window.webkit.messageHandlers.whisperfree.postMessage({command: 'complete_setup', args: {}})")
+                try await webView.evaluateJavaScript("void window.webkit.messageHandlers.openwhisper.postMessage({command: 'complete_setup', args: {}})")
                 try await Task.sleep(nanoseconds: 500_000_000)
                 guard (try await webView.evaluateJavaScript("document.querySelectorAll('nav button').length")) as? Int == 5 else {
                     throw UIError.message("Completed setup is still visible")
@@ -427,7 +427,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
     }
 
     private func send(_ event: String, value: Any) {
-        guard let data = try? JSONSerialization.data(withJSONObject: ["event": "whisperfree:\(event)", "detail": value]),
+        guard let data = try? JSONSerialization.data(withJSONObject: ["event": "openwhisper:\(event)", "detail": value]),
               let json = String(data: data, encoding: .utf8) else { return }
         webView.evaluateJavaScript("{ const message = \(json); window.dispatchEvent(new CustomEvent(message.event, { detail: message.detail })); }")
     }

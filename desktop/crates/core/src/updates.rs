@@ -1,6 +1,6 @@
-pub const REPOSITORY: &str = "https://github.com/juferdinand/WhisperFree";
+pub const REPOSITORY: &str = "https://github.com/juferdinand/OpenWhisper";
 pub const ENDPOINT: &str =
-    "https://github.com/juferdinand/WhisperFree/releases/latest/download/latest.json";
+    "https://github.com/juferdinand/OpenWhisper/releases/latest/download/latest.json";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Package {
@@ -10,8 +10,8 @@ pub enum Package {
 impl Package {
     pub fn asset(self) -> &'static str {
         match self {
-            Self::AppImage => "WhisperFree-Linux-x86_64.AppImage",
-            Self::Debian => "WhisperFree-Linux-amd64.deb",
+            Self::AppImage => "OpenWhisper-Linux-x86_64.AppImage",
+            Self::Debian => "OpenWhisper-Linux-amd64.deb",
         }
     }
     pub fn target(self) -> &'static str {

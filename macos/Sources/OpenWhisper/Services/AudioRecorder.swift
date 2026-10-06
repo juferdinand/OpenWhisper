@@ -1,5 +1,5 @@
 import AVFoundation
-import WhisperFreeAudio
+import OpenWhisperAudio
 
 /// One capture owns its converter and samples. Late callbacks cannot reach a later recording.
 /// The lock covers conversion as well as collection, including the final buffer during stop.

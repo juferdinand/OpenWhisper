@@ -1,6 +1,7 @@
 //! Inference runs in a disposable process. Native aborts and allocation failures must
 //! never terminate capture/UI or destroy the only copy of a stopped recording.
 use crate::settings::Preferences;
+use openwhisper_speech::{chunks, SpeechEngine};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
@@ -12,7 +13,6 @@ use std::{
     thread::JoinHandle,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use whisperfree_speech::{chunks, SpeechEngine};
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "command")]
@@ -105,7 +105,7 @@ pub fn smoke_test(arguments: &[String]) -> Result<(), String> {
             "Usage: --transcription-smoke-test MODEL_ID MODEL_FILE PCM_F32LE cpu|gpu".into(),
         );
     }
-    let model = whisperfree_core::catalog()
+    let model = openwhisper_core::catalog()
         .into_iter()
         .find(|m| m.id == arguments[2])
         .ok_or("Unknown model")?;
@@ -263,7 +263,7 @@ impl Service {
         use_gpu: bool,
         mut fallback: impl FnMut(),
     ) -> Result<String, String> {
-        let parakeet = whisperfree_core::catalog()
+        let parakeet = openwhisper_core::catalog()
             .iter()
             .any(|m| m.id == preferences.model && m.family == "parakeet");
         adaptive(samples, use_gpu, |range, gpu| {
@@ -558,7 +558,7 @@ mod tests {
     #[test]
     fn backups_are_private_exact_and_survive_restart_until_explicit_removal() {
         let directory =
-            std::env::temp_dir().join(format!("whisperfree-audio-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("openwhisper-audio-{}", uuid::Uuid::new_v4()));
         let samples = vec![-0.25, 0.0, 0.75, 0.125];
         let saved = SavedRecording::save(&directory, &samples).unwrap();
         assert_eq!(
@@ -586,7 +586,7 @@ mod tests {
         assert_eq!(header.len() as u64, offset);
         assert_eq!(offset, 80);
         let directory =
-            std::env::temp_dir().join(format!("whisperfree-audio-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("openwhisper-audio-{}", uuid::Uuid::new_v4()));
         let saved = SavedRecording::save(&directory, &[0.1; 16]).unwrap();
         OpenOptions::new()
             .write(true)

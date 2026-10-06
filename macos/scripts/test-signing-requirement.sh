@@ -5,7 +5,7 @@ APP="${1:?Usage: test-signing-requirement.sh <ad-hoc.app>}"
 EXTRACT="$(dirname "$0")/extract-signing-requirement.swift"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-COPY="$TMP/WhisperFree.app"
+COPY="$TMP/OpenWhisper.app"
 
 swift "$EXTRACT" "$APP" "$TMP/requirement.bin"
 ditto "$APP" "$COPY"

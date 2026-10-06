@@ -1,6 +1,6 @@
 import ServiceManagement
 import Testing
-@testable import WhisperFree
+@testable import OpenWhisper
 
 private final class FakeLoginItem: LoginItemService {
     var status: SMAppService.Status = .notRegistered

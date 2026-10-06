@@ -1,5 +1,5 @@
 {
-  "$comment": "Shared model catalog for all WhisperFree platforms. Files are downloaded from https://huggingface.co/<repository>/resolve/main/<file>.",
+  "$comment": "Shared model catalog for all OpenWhisper platforms. Files are downloaded from https://huggingface.co/<repository>/resolve/main/<file>.",
   "models": [
     {
       "id": "parakeet-v3-q8",

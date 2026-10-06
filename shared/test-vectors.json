@@ -1,5 +1,5 @@
 {
-  "$comment": "Cross-platform tests for text processing after recognition. Every WhisperFree implementation (macOS/Swift, Desktop/Rust) must pass all cases. Preserve multilingual test inputs and expected results.",
+  "$comment": "Cross-platform tests for text processing after recognition. Every OpenWhisper implementation (macOS/Swift, Desktop/Rust) must pass all cases. Preserve multilingual test inputs and expected results.",
   "cleaner": [
     { "name": "removes non-speech markers", "input": " [BLANK_AUDIO] Hallo  Welt (Musik) ", "expected": "Hallo Welt" },
     { "name": "removes subtitle hallucinations", "input": "Untertitel im Auftrag des ZDF für funk, 2017", "expected": "" },

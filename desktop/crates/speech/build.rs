@@ -42,7 +42,7 @@ fn main() {
         .file(desktop.join("native/speech_bridge.cpp"))
         .include(source.join("include"))
         .include(source.join("ggml/include"))
-        .compile("whisperfree_bridge");
+        .compile("openwhisper_bridge");
     println!(
         "cargo:rustc-link-search=native={}",
         built.join("lib").display()

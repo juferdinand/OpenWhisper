@@ -3,11 +3,11 @@ use crate::{
     transcription::{SavedRecording, Service},
     Runtime, WorkerCommand,
 };
+use openwhisper_core::catalog;
 use std::{
     sync::{mpsc, Arc},
     time::{Duration, Instant},
 };
-use whisperfree_core::catalog;
 
 pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
     let mut engine = match Service::new() {
@@ -162,7 +162,7 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
                     use_gpu,
                     || runtime.update(|s| s.gpu_fallback = true),
                 )?;
-                let text = whisperfree_core::process(&raw, &prefs.vocabulary, &prefs.snippets);
+                let text = openwhisper_core::process(&raw, &prefs.vocabulary, &prefs.snippets);
                 if text.is_empty() {
                     return Err("No speech recognized".into());
                 }

@@ -19,7 +19,7 @@ while offset < len(icon):
 else:
     raise AssertionError("macOS 256px icon missing")
 
-swift = (root / "macos/Sources/WhisperFree/UI/SettingsWindow.swift").read_text()
+swift = (root / "macos/Sources/OpenWhisper/UI/SettingsWindow.swift").read_text()
 tabs = re.search(r"case (setup, general, models, snippets, history, about)", swift).group(1).split(", ")
 frontend = (root / "desktop/src/main.ts").read_text()
 positions = [re.search(r'\[\s*"' + tab + r'"\s*,', frontend).start() for tab in tabs]

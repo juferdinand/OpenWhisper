@@ -1,5 +1,5 @@
 import Foundation
-import WhisperFreeCore
+import OpenWhisperCore
 
 /// No audio, transcripts, vocabulary, clipboard contents, or device names are recorded.
 /// macOS crash reports remain the source of exception types and native stack traces.

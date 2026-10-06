@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @main
-struct WhisperFreeApp: App {
+struct OpenWhisperApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @ObservedObject private var state = AppState.shared
 

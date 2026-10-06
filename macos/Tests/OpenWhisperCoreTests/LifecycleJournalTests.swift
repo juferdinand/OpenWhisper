@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import WhisperFreeCore
+@testable import OpenWhisperCore
 
 struct LifecycleJournalTests {
     private func directory() throws -> URL {

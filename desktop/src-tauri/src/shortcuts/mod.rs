@@ -68,7 +68,7 @@ async fn stop_active(runtime: &Runtime) -> Result<(), String> {
 async fn start(runtime: &Arc<Runtime>, trigger: &Trigger) -> Result<(), String> {
     trigger.validate()?;
     if runtime.triggers.closing.load(Ordering::Relaxed) {
-        return Err("WhisperFree is closing.".into());
+        return Err("OpenWhisper is closing.".into());
     }
     let mut child = Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
         .arg("--linux-trigger-helper")
@@ -168,7 +168,7 @@ async fn start(runtime: &Arc<Runtime>, trigger: &Trigger) -> Result<(), String> 
     });
     runtime.update(|s| {
         s.shortcut = Some(trigger.label());
-        s.message = "Trigger enabled. It will reconnect when WhisperFree starts.".into();
+        s.message = "Trigger enabled. It will reconnect when OpenWhisper starts.".into();
     });
     Ok(())
 }
@@ -290,7 +290,7 @@ async fn finish_capture(runtime: Arc<Runtime>, trigger: Option<Trigger>) -> Resu
     runtime.update(|s| {
         s.recording_shortcut = false;
         s.message = if s.preferences.native_trigger.is_some() {
-            "Trigger enabled. It will reconnect when WhisperFree starts.".into()
+            "Trigger enabled. It will reconnect when OpenWhisper starts.".into()
         } else {
             "Ready to dictate".into()
         };

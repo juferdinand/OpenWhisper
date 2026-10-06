@@ -102,8 +102,8 @@ let pendingPreferences = 0;
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const overlay =
   new URLSearchParams(location.search).has("overlay") ||
-  (window as Window & { __WHISPERFREE_OVERLAY__?: boolean })
-    .__WHISPERFREE_OVERLAY__ === true;
+  (window as Window & { __OPENWHISPER_OVERLAY__?: boolean })
+    .__OPENWHISPER_OVERLAY__ === true;
 document.documentElement.classList.toggle("overlay", overlay);
 app.innerHTML = '<div id="notice" role="alert" hidden></div>';
 const esc = (text: string) =>
@@ -236,7 +236,7 @@ function renderShell() {
   if (shellKey === key) return;
   shellKey = key;
   contentKey = "";
-app.innerHTML = `<aside><div class="sidebar-brand"><img src="./app-icon.png" width="38" height="38" alt=""><div><strong>WhisperFree</strong><span>${esc(t("Make yourself heard."))}</span></div></div><div class="nav-caption">${esc(t("WORKSPACE"))}</div><nav aria-label="${esc(t("Settings"))}">${tabs.filter(([id]) => id !== "setup" || !state.preferences.setup_completed).map(([id, title, path]) => `<button data-tab="${id}">${symbol(path)}<span>${esc(t(title))}</span></button>`).join("")}</nav><div class="language-switch" role="group" aria-label="${esc(t("Interface language"))}"><button data-ui-language="en" aria-pressed="${state.preferences.ui_language === "en"}">${esc(t("English"))}</button><button data-ui-language="de" aria-pressed="${state.preferences.ui_language === "de"}">Deutsch</button></div><div class="sidebar-foot">${symbol("M12 3 4 6v6c0 4 4 7 8 9 4-2 8-5 8-9V6l-8-3m-4 9 3 3 5-6")}<div><strong>${esc(t("Private by design"))}</strong><span>${esc(t("Your voice stays here."))}</span></div></div></aside><main><header class="page-header"><div class="page-eyebrow">${esc(t("YOUR SPACE, YOUR PACE"))}</div><h1 id="page-title"></h1><p id="page-description"></p></header><div id="notice" role="alert" hidden></div><div id="content"></div></main><div id="record-control"></div>`;
+app.innerHTML = `<aside><div class="sidebar-brand"><img src="./app-icon.png" width="38" height="38" alt=""><div><strong>OpenWhisper</strong><span>${esc(t("Make yourself heard."))}</span></div></div><div class="nav-caption">${esc(t("WORKSPACE"))}</div><nav aria-label="${esc(t("Settings"))}">${tabs.filter(([id]) => id !== "setup" || !state.preferences.setup_completed).map(([id, title, path]) => `<button data-tab="${id}">${symbol(path)}<span>${esc(t(title))}</span></button>`).join("")}</nav><div class="language-switch" role="group" aria-label="${esc(t("Interface language"))}"><button data-ui-language="en" aria-pressed="${state.preferences.ui_language === "en"}">${esc(t("English"))}</button><button data-ui-language="de" aria-pressed="${state.preferences.ui_language === "de"}">Deutsch</button></div><div class="sidebar-foot">${symbol("M12 3 4 6v6c0 4 4 7 8 9 4-2 8-5 8-9V6l-8-3m-4 9 3 3 5-6")}<div><strong>${esc(t("Private by design"))}</strong><span>${esc(t("Your voice stays here."))}</span></div></div></aside><main><header class="page-header"><div class="page-eyebrow">${esc(t("YOUR SPACE, YOUR PACE"))}</div><h1 id="page-title"></h1><p id="page-description"></p></header><div id="notice" role="alert" hidden></div><div id="content"></div></main><div id="record-control"></div>`;
 if (overlay)
   app.innerHTML =
     '<div id="notice" role="alert" hidden></div><div id="record-control"></div>';
@@ -386,7 +386,7 @@ function render() {
     content.innerHTML =
       section(
         "",
-        `<p class="secondary">${esc(t("WhisperFree turns speech into text directly on this computer. No account, cloud, or subscription. Your recordings never leave your computer."))}</p>`,
+        `<p class="secondary">${esc(t("OpenWhisper turns speech into text directly on this computer. No account, cloud, or subscription. Your recordings never leave your computer."))}</p>`,
       ) +
       section(
         t("Get started in six steps"),
@@ -522,7 +522,7 @@ function render() {
                 )) +
           toggle(t("Launch at login"), "launch_at_login", !!p.launch_at_login) +
           (state.macos?.launch_at_login_pending
-            ? `<div class="row approval"><span>${esc(t("Allow WhisperFree in System Settings to finish enabling launch at login."))}</span><button data-command="open_login_settings">${esc(t("System Settings"))}</button></div>`
+            ? `<div class="row approval"><span>${esc(t("Allow OpenWhisper in System Settings to finish enabling launch at login."))}</span><button data-command="open_login_settings">${esc(t("System Settings"))}</button></div>`
             : "") +
           (isMac()
             ? row(t("System"), `<span class="secondary">${esc(state.desktop)} · macOS</span>`) +
@@ -731,7 +731,7 @@ function render() {
     content.innerHTML =
       section(
         "",
-        `<div class="about-brand"><img src="./app-icon.png" width="88" height="88" alt="${esc(t("WhisperFree app icon"))}"><div><span class="page-eyebrow">${esc(t("LESS TYPING. MORE YOU."))}</span><h1>WhisperFree</h1><p class="version-badge">Version ` +
+        `<div class="about-brand"><img src="./app-icon.png" width="88" height="88" alt="${esc(t("OpenWhisper app icon"))}"><div><span class="page-eyebrow">${esc(t("LESS TYPING. MORE YOU."))}</span><h1>OpenWhisper</h1><p class="version-badge">Version ` +
           esc(state.version) +
           (isMac() ? "" : " · " + t("Linux")) +
           `</p></div></div><p class="about-intro">${esc(t("A little more freedom for your voice."))}</p><p class="secondary">${esc(t("Turn your thoughts into text, right on your computer."))}</p><div class="about-values"><span>${esc(t("On-device recognition"))}</span><span>${esc(t("No subscription"))}</span><span>${esc(t("Open source · MIT"))}</span></div><p class="engine-credit">${esc(t("Powered by whisper.cpp, OpenAI Whisper, and NVIDIA Parakeet."))}</p>`,
@@ -743,8 +743,8 @@ function render() {
             row(updateStatus(), `<button data-command="${state.updates.status === "available" ? "install_update" : "check_updates"}" ${["checking", "downloading", "installing"].includes(state.updates.status) || (state.updates.status === "available" && (["recording", "transcribing"].includes(state.status) || !!state.download || !!state.recovery_available)) ? "disabled" : ""}>${state.updates.status === "available" ? t("Download & install") : t("Check now")}</button>`)
           : `<p class="secondary">${esc(t("Updates are not configured in this build."))}</p>`,
         state.updates.package === "deb"
-          ? t("Updates are verified before installation. Your system asks for administrator permission. WhisperFree restarts afterward.")
-          : t("Updates are verified before installation. WhisperFree restarts afterward; your settings and models are kept."),
+          ? t("Updates are verified before installation. Your system asks for administrator permission. OpenWhisper restarts afterward.")
+          : t("Updates are verified before installation. OpenWhisper restarts afterward; your settings and models are kept."),
       ) +
       (isMac()
         ? ""
@@ -826,7 +826,7 @@ function triggerLabel() {
   return state.shortcut ?? t("Set trigger …");
 }
 function triggerHelp() {
-  if (state.native_mouse) return t("Choose a single key, shortcut, or mouse button. The selected trigger is reserved for dictation while WhisperFree is running.");
+  if (state.native_mouse) return t("Choose a single key, shortcut, or mouse button. The selected trigger is reserved for dictation while OpenWhisper is running.");
   if (state.native_shortcuts) return t("Choose a single key or shortcut. Direct mouse triggers require KDE Plasma 6 on Wayland.");
   return t("Your desktop controls which shortcuts are allowed. Direct mouse triggers currently require KDE Plasma 6 on Wayland.");
 }

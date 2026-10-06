@@ -19,4 +19,4 @@ for name in ["desktop/package.json", "desktop/package-lock.json", "desktop/src-t
 path = root / "desktop/Cargo.toml"
 path.write_text(re.sub(r'(?m)^version = "[^"]+"', f'version = "{version}"', path.read_text(), count=1))
 path = root / "desktop/Cargo.lock"
-path.write_text(re.sub(r'(name = "whisperfree-(?:core|speech|desktop)"\nversion = ")[^"]+("\n)', rf'\g<1>{version}\2', path.read_text()))
+path.write_text(re.sub(r'(name = "openwhisper-(?:core|speech|desktop)"\nversion = ")[^"]+("\n)', rf'\g<1>{version}\2', path.read_text()))

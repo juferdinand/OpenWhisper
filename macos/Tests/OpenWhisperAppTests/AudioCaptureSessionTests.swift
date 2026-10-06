@@ -1,7 +1,7 @@
 import AVFoundation
 import Testing
 import AudioTestSupport
-@testable import WhisperFree
+@testable import OpenWhisper
 
 struct AudioCaptureSessionTests {
     @Test func nativeAudioExceptionsBecomeErrorsAndCleanupStillRuns() {

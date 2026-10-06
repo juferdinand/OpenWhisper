@@ -1,12 +1,12 @@
 @font-face {
-  font-family: "WhisperFree Inter";
+  font-family: "OpenWhisper Inter";
   src: url("/fonts/InterVariable.woff2") format("woff2");
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
 }
 :root {
-  font-family: "WhisperFree Inter", sans-serif;
+  font-family: "OpenWhisper Inter", sans-serif;
   font-size: 14px;
   color-scheme: light;
   --background: #f6f8f9;

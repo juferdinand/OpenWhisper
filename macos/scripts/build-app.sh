@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds build/WhisperFree.app (release) using Xcode Command Line Tools; full Xcode is optional.
+# Builds build/OpenWhisper.app (release) using Xcode Command Line Tools; full Xcode is optional.
 #
 #   SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh   # Release with Developer ID (+ Hardened Runtime)
 #   scripts/build-app.sh   # uses "WhisperFree Dev" (scripts/create-dev-cert.sh), otherwise ad-hoc signing
@@ -7,7 +7,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-APP_NAME="WhisperFree"
+APP_NAME="OpenWhisper"
 APP="build/${APP_NAME}.app"
 if [[ -n "${SIGN_IDENTITY:-}" ]]; then
   IDENTITY="$SIGN_IDENTITY"
@@ -61,7 +61,7 @@ cp -R Vendor/whisper.xcframework/macos-arm64_x86_64/whisper.framework "$APP/Cont
 echo "→ codesign (${IDENTITY})"
 SIGN_FLAGS=(--force --timestamp=none --sign "$IDENTITY")
 if [[ "$IDENTITY" == Developer\ ID* ]]; then
-  SIGN_FLAGS=(--force --options runtime --timestamp --sign "$IDENTITY" --entitlements Resources/WhisperFree.entitlements)
+  SIGN_FLAGS=(--force --options runtime --timestamp --sign "$IDENTITY" --entitlements Resources/OpenWhisper.entitlements)
 fi
 codesign "${SIGN_FLAGS[@]}" "$APP/Contents/Frameworks/whisper.framework"
 codesign "${SIGN_FLAGS[@]}" "$APP"

@@ -9,10 +9,10 @@ private let installerScript = URL(fileURLWithPath: #filePath)
 
 struct UpdateInstallerTests {
     @Test(arguments: [
-        "WhisperFree with spaces.app",
-        "WhisperFree$(touch injected).app",
-        "WhisperFree`touch injected`.app",
-        "WhisperFree\"; touch injected; #.app",
+        "OpenWhisper with spaces.app",
+        "OpenWhisper$(touch injected).app",
+        "OpenWhisper`touch injected`.app",
+        "OpenWhisper\"; touch injected; #.app",
     ])
     func treatsFileNamesAsData(_ appName: String) throws {
         let fixture = try InstallerFixture(appName: appName)
@@ -28,7 +28,7 @@ struct UpdateInstallerTests {
     }
 
     @Test func restoresOriginalIfReplacementFails() throws {
-        let fixture = try InstallerFixture(appName: "WhisperFree.app")
+        let fixture = try InstallerFixture(appName: "OpenWhisper.app")
         defer { fixture.cleanup() }
 
         let status = try fixture.install(failReplacement: true)
@@ -49,7 +49,7 @@ private struct InstallerFixture {
     let openLog: URL
 
     init(appName: String) throws {
-        root = FileManager.default.temporaryDirectory.appendingPathComponent("WhisperFree-installer-test-\(UUID().uuidString)")
+        root = FileManager.default.temporaryDirectory.appendingPathComponent("OpenWhisper-installer-test-\(UUID().uuidString)")
         current = root.appendingPathComponent("Applications").appendingPathComponent(appName)
         staging = root.appendingPathComponent("staging")
         updated = staging.appendingPathComponent(appName)

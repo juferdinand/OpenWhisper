@@ -2,30 +2,30 @@
 import PackageDescription
 
 let package = Package(
-    name: "WhisperFree",
+    name: "OpenWhisper",
     platforms: [.macOS(.v14)],
     targets: [
         // Prebuilt whisper.cpp XCFramework (Metal + Accelerate), downloaded by scripts/fetch-whisper.sh.
         .binaryTarget(name: "whisper", path: "Vendor/whisper.xcframework"),
 
         // Testable text processing, model catalog, and platform-specific update validation.
-        .target(name: "WhisperFreeCore", path: "Sources/WhisperFreeCore"),
+        .target(name: "OpenWhisperCore", path: "Sources/OpenWhisperCore"),
         // Input hardware changes can raise Objective-C exceptions in AVAudioEngine.
-        .target(name: "WhisperFreeAudio", path: "Sources/WhisperFreeAudio",
+        .target(name: "OpenWhisperAudio", path: "Sources/OpenWhisperAudio",
                 cSettings: [.unsafeFlags(["-fobjc-arc"])]),
 
         .executableTarget(
-            name: "WhisperFree",
-            dependencies: ["WhisperFreeCore", "WhisperFreeAudio", "whisper"],
-            path: "Sources/WhisperFree",
+            name: "OpenWhisper",
+            dependencies: ["OpenWhisperCore", "OpenWhisperAudio", "whisper"],
+            path: "Sources/OpenWhisper",
             linkerSettings: [
                 .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),
             ]
         ),
 
-        .testTarget(name: "WhisperFreeCoreTests", dependencies: ["WhisperFreeCore"], path: "Tests/WhisperFreeCoreTests"),
-        .target(name: "AudioTestSupport", dependencies: ["WhisperFreeAudio"], path: "Tests/AudioTestSupport",
+        .testTarget(name: "OpenWhisperCoreTests", dependencies: ["OpenWhisperCore"], path: "Tests/OpenWhisperCoreTests"),
+        .target(name: "AudioTestSupport", dependencies: ["OpenWhisperAudio"], path: "Tests/AudioTestSupport",
                 cSettings: [.unsafeFlags(["-fobjc-arc"])]),
-        .testTarget(name: "WhisperFreeAppTests", dependencies: ["WhisperFree", "AudioTestSupport"], path: "Tests/WhisperFreeAppTests"),
+        .testTarget(name: "OpenWhisperAppTests", dependencies: ["OpenWhisper", "AudioTestSupport"], path: "Tests/OpenWhisperAppTests"),
     ]
 )

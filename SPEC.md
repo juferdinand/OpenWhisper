@@ -1,46 +1,84 @@
-# WhisperFree specification
+# OpenWhisper specification
 
-## Goal
+OpenWhisper provides local dictation on macOS and Linux: start recording, speak, stop, and
+deliver the recognized text to the cursor or clipboard. Windows is not implemented.
+This specification describes the current implementation. Proposed integrations are tracked
+in the [roadmap](docs/ROADMAP.md); [README.md](README.md) is the documentation entry point.
 
-A lightweight macOS menu bar app for system-wide dictation. Users press a global shortcut,
-speak, and receive the recognized text at the cursor in the active app.
+## Guiding principles
 
-Guiding principles:
+1. **Local recognition**: Whisper and Parakeet run on the device without recognition servers or telemetry.
+2. **Free and open**: MIT License, no required account, subscription, or API key.
+3. **Common interface**: one English/German UI, with native services and explicit capability fallbacks.
+4. **User-controlled capture**: no fixed recording-duration limit; stop or cancel explicitly.
 
-1. **Local** — inference on the device, no recognition servers, no telemetry.
-2. **Free and open** — MIT License, no account or license key.
-3. **Small** — everyday essentials: shortcuts, snippets, and multiple languages.
+## Shared behavior
 
-## Features
+| Area | Current behavior |
+| --- | --- |
+| Interface | `desktop/src/` supplies the same compiled settings and recording UI to both hosts. English/German interface language is independent of dictation language; user text is never translated by the UI. |
+| Speech models | Both hosts use `shared/models.json` and the pinned whisper.cpp implementation for Whisper and NVIDIA Parakeet. Whisper supports fixed language or automatic detection; Parakeet detects language automatically and does not accept vocabulary prompts. |
+| Recording | Capture is converted to 16 kHz mono samples in RAM. No automatic duration cutoff or audio truncation. Longer recordings consume more RAM. Cancellation discards the active recording before inference. |
+| Text processing | Cleanup, vocabulary correction, and snippet expansion follow `shared/test-vectors.json`. Vocabulary correction runs after recognition for both model families. |
+| Output | Clipboard delivery and optional automatic insertion. Unavailable or denied input permissions leave clipboard output usable. macOS also supports text editor output. |
+| Preferences | Setup completion, language, model choice, snippets, and other settings persist locally. Edits are patches against current host state. First-run setup stays completed across upgrades. |
+| History | Optional local history of the last 20 dictations. History can be disabled or cleared. |
+| Updates | Explicit installation after version, source, archive/package, and signature checks. macOS and Linux packages share one project version. Source/CI builds do not enable in-app installation. |
 
-| Area | Behavior |
-|---|---|
-| Trigger | System-wide `CGEvent` tap with Accessibility permission: keyboard shortcut, individual modifier key (Fn, right ⌥, etc., distinguishing left and right), or mouse button 3 and above. Trigger capture also uses the tap, regardless of window focus. Trigger events are consumed. Without permission, Carbon `RegisterEventHotKey` provides a fallback for key combinations. Modes: toggle or hold (push-to-talk). Pressing another key while holding a modifier, such as ⌥E, discards the recording. |
-| Overlay | Non-activating, borderless `NSPanel` at `.statusBar` level, visible across Spaces and above full-screen apps. Shows a microphone, pulsing dot, waveform, timer, spinner, success, or error. Click to start or stop; drag to move (position is saved); ✕ discards a recording. |
-| Recording | `AVAudioEngine` input tap with `AVAudioConverter` to 16 kHz mono Float32 in memory. Recordings shorter than 0.3 seconds are ignored. Recordings without a meaningful audio level report no audio detected to reduce hallucinations during silence. |
-| Transcription | In-process whisper.cpp XCFramework. The context stays loaded; model loading starts when recording begins. Greedy decoding, no timestamps, optional `initial_prompt` from the vocabulary field. Fixed language or `auto` for Whisper; automatic detection for Parakeet. |
-| Post-processing | Removes non-speech markers such as `[BLANK_AUDIO]` and `(Music)`, known subtitle hallucinations, and extra whitespace; applies vocabulary corrections and snippets. |
-| Snippets | Trigger → expansion. Case-insensitive, spaces and hyphens interchangeable, whole words only. If the dictation consists only of the trigger, returns just the expansion. |
-| Output | Copies text to the clipboard, then simulates ⌘V through `CGEvent` (requires Accessibility access). Restores the previous clipboard after 0.5 seconds if its contents have not changed. Without permission, copies text and shows a notice. Optional output to a text editor. |
-| Models | Whisper and Parakeet catalog with downloads from Hugging Face, progress, cancellation, deletion, and import of custom ggml files. Stored in `~/Library/Application Support/WhisperFree/Models`. |
-| Settings | Setup checklist, General, Models, Snippets, History, and About. The interface is in English; dictation supports multiple languages. |
+## Native services
 
-## State machine
+| Area | macOS | Linux |
+| --- | --- | --- |
+| Host | Swift app with WKWebView | Tauri 2 with Rust services and WebKitGTK |
+| Audio | AVAudioEngine; converter and synchronized buffer owned by each recording | CPAL with sample conversion; synthetic tests use private virtual sources |
+| Recognition | In-process XCFramework; Metal/CPU | Disposable speech helper; Vulkan/CPU; bounded inference windows, adaptive retry, manual CPU choice retained |
+| Recovery | Capture is in memory; audio-device changes stop capture and process collected samples | Stopped audio is privately saved before inference. Failed recordings survive restarts until delivery or explicit discard; active capture before Stop remains in RAM |
+| Triggers | CGEvent tap: keyboard combinations, modifiers, Fn, extra mouse buttons; Carbon combination fallback | Plasma 6 KGlobalAccel keys; KWin mouse rebindings on Wayland; GlobalShortcuts portal fallback elsewhere |
+| Trigger limits | Advanced triggers require Accessibility; toggle and hold modes | Middle mouse requires Plasma 6.3+; modifier-only keys are toggle-only; direct mouse triggers outside KDE Wayland are not implemented |
+| Insertion | Clipboard and CGEvent paste with Accessibility permission; optional clipboard restoration | `wl-copy`/`xclip`; keyboard-only RemoteDesktop portal for automatic paste |
+| Floating control | Non-activating NSPanel | Non-focusable layer-shell on compatible Wayland compositors; floating window on X11; in-window fallback |
+| Background operation | Menu bar | Tray where AppIndicator is displayed; settings window remains a usable fallback |
+| Login | ServiceManagement, including pending system approval | Per-user XDG autostart using the permanent executable/AppImage path |
 
+Linux integration is selected through available desktop services and protocols, not a
+distribution name. The current KDE implementation can be used beyond CachyOS when its required
+Plasma 6 capabilities exist. That is an implementation path, not evidence of completed
+acceptance on those distributions. See [Linux validation](docs/LINUX.md#validation-status).
+
+## State and failure behavior
+
+```text
+idle -> recording -> transcribing -> done/error -> idle
+          |
+          +-- cancel -> idle
 ```
-idle ──start──► recording ──stop──► transcribing ──ok──► done(msg) ──1.2 s──► idle
-  ▲                 │                     └──error──► error(msg) ──2.5 s──► idle
-  └────cancel───────┘
-```
 
-## Out of scope for now
+State details and notices are host-specific. A Linux inference failure can retain a saved
+recording for explicit retry or discard. GPU fallback must preserve the captured audio and a
+deliberate CPU preference. Speech contexts stay on one worker thread, and helper requests,
+audio, transcripts, vocabulary, and clipboard contents must never be logged.
 
-Live streaming transcription, cloud sync, AI rewriting, command mode, and sandboxing/App Store distribution.
+## Validation boundaries
 
-## Future ideas
+CI checks processing logic, shared UI adapters, native webview smoke tests, packaging, and
+release verification. A passing CI run does not prove physical microphone quality, permission
+flows, global input handling, or insertion on every desktop. Each desktop/package combination
+needs the acceptance evidence described in [docs/LINUX.md](docs/LINUX.md#acceptance-checks).
 
-- Streaming preview during recording.
-- Automatic capitalization and spoken punctuation commands, such as “new line” and “period”.
-- Text insertion through AX selection ranges instead of ⌘V.
-- Optional local LLM post-processing, for example through Ollama.
-- Apple Developer ID signing and notarization for GitHub releases.
+## Planned extensions
+
+Obsidian output, optional local or explicitly configured cloud LLM processing, agent actions,
+spoken responses, streaming previews, Windows services, and Apple notarization are future work.
+Plain dictation must remain usable independently of optional integrations. Speech recognition
+remains local; any future remote text-processing or speech-output provider must be configured
+explicitly and disclosed separately. No roadmap item guarantees a release date.
+
+## Document history
+
+`SPEC.md` was included in the initial import, commit
+[`49978a7`](https://github.com/juferdinand/OpenWhisper/commit/49978a7348ce6dbe94712aa500375b13aac5cd41),
+on 2026-10-05, authored and committed as Justin Ferdinand (`juferdinand`). Commit
+[`7cfa0c0`](https://github.com/juferdinand/OpenWhisper/commit/7cfa0c0) translated it into English.
+Git records those identities, but does not establish whether the prose was written manually
+or with an assistant. The original macOS-focused specification predates the shared Linux UI;
+this revision reconciles it with the current implementation.

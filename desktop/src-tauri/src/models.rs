@@ -1,9 +1,9 @@
 use crate::Runtime;
+use openwhisper_core::{catalog, Model};
 use std::{
     sync::{atomic::Ordering, Arc},
     time::{Duration, Instant},
 };
-use whisperfree_core::{catalog, Model};
 
 #[tauri::command]
 pub fn cancel_download(runtime: tauri::State<'_, Arc<Runtime>>) {

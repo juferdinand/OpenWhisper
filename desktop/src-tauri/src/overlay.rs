@@ -30,7 +30,7 @@ pub fn create(app: &tauri::App) -> Result<bool, Box<dyn std::error::Error>> {
     };
     // Initialize layer-shell before adding the webview, which realizes its GTK window.
     let window = WindowBuilder::new(app, "overlay")
-        .title("WhisperFree Recording")
+        .title("OpenWhisper Recording")
         .inner_size(340., 64.)
         .resizable(false)
         .decorations(false)
@@ -87,7 +87,7 @@ pub fn update(app: &tauri::AppHandle, status: &str, show_idle: bool) {
     }
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_tooltip(Some(format!(
-            "WhisperFree — {}",
+            "OpenWhisper — {}",
             match status {
                 "recording" => "Recording · click to stop",
                 "transcribing" => "Transcribing locally",

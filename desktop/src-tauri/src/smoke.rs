@@ -12,7 +12,7 @@ impl Environment {
         if !enabled() {
             return None;
         }
-        let root = std::env::temp_dir().join(format!("whisperfree-smoke-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("openwhisper-smoke-{}", uuid::Uuid::new_v4()));
         for (variable, folder) in [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data")] {
             let path = root.join(folder);
             std::fs::create_dir_all(&path)

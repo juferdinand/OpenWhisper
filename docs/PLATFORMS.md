@@ -25,6 +25,10 @@ and platform-specific permission dialogs are controlled by the operating system.
 
 ## OS integration
 
+The Linux KDE adapter detects KWin/KGlobalAccel capabilities at runtime, independently of the
+distribution name. Other KDE distributions can use it when the required Plasma services exist;
+their installation and desktop acceptance are still separate tests.
+
 | Feature | macOS | Linux |
 |---|---|---|
 | Microphone | AVAudioEngine | CPAL / ALSA compatibility, with Rubato conversion to 16 kHz mono |
@@ -43,6 +47,8 @@ availability alone is not a successful permission or insertion test. See the [su
 
 ## Next validation stages
 
+The [roadmap](ROADMAP.md) tracks the desktop test work and optional application integrations.
+
 1. Complete microphone, permission, shortcut, and insertion tests on CachyOS / KDE Wayland.
 2. Verify packaging and installation on Ubuntu / Debian and Arch-family systems.
 3. Test GNOME, Fedora KDE, and X11 independently; add a native X11 fallback if needed.
@@ -53,3 +59,23 @@ Public Linux releases require desktop acceptance of the release packages. The ma
 workflow builds macOS and Linux in parallel, then creates the version commit/tag and uploads both
 platforms with combined checksums only after both builds pass. It prepares a complete draft by default
 for desktop acceptance before publication. See [Linux release policy](LINUX.md#packaging-and-release-policy).
+
+## Source ownership
+
+| Source | Responsibility | Host ownership |
+| --- | --- | --- |
+| `shared/` | Model catalog, speech fixtures, English/German strings | Both hosts |
+| `desktop/src/`, `desktop/public/` | Settings and floating recording UI, icon, font | Both hosts; macOS Makefile builds these assets too |
+| `desktop/src/bridge.ts` | Tauri/native WebKit IPC adaptation | Both hosts |
+| `macos/Sources/` | Audio, triggers, output, windows, storage, signed updates | macOS |
+| `desktop/src-tauri/src/` | Audio, worker/recovery, windows, storage, signed updates | Linux host |
+| `desktop/src-tauri/src/shortcuts/kde.rs` | KGlobalAccel/KWin capability detection and mouse leases | KDE adapter |
+| `desktop/src-tauri/src/integration.rs` | Shortcut and keyboard portals, clipboard helpers | Common Linux integration; capabilities vary by desktop |
+| `desktop/src-tauri/src/overlay.rs` | Layer-shell or X11 overlay with in-window fallback | Common Linux window integration |
+| `desktop/crates/`, `desktop/native/` | Rust processing/speech wrappers and pinned C++ sources | Linux build today; speech engines and fixtures shared with macOS |
+
+GNOME, X11, Sway, and Hyprland currently have no separate complete host implementations. They
+use common Linux paths where their services are available. Future adapters should implement
+small capability-specific boundaries for triggers, insertion, and overlays. Keep one settings
+layout and common recording/recovery logic. The [architecture roadmap](ROADMAP.md#platform-structure-and-electron)
+explains why a wholesale `desktop/` to `linux/` rename or an Electron migration is not required.

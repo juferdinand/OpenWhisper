@@ -4,7 +4,7 @@ public enum UpdateArchive {
     /// Use a fresh private directory and retain bsdtar's path traversal protections.
     public static func extract(_ zip: URL) throws -> URL {
         let manager = FileManager.default
-        let folder = manager.temporaryDirectory.appendingPathComponent("WhisperFree-stage-\(UUID().uuidString)")
+        let folder = manager.temporaryDirectory.appendingPathComponent("OpenWhisper-stage-\(UUID().uuidString)")
         try manager.createDirectory(at: folder, withIntermediateDirectories: false,
                                     attributes: [.posixPermissions: 0o700])
         do {
@@ -16,7 +16,7 @@ public enum UpdateArchive {
             try process.run()
             process.waitUntilExit()
             guard process.terminationStatus == 0 else { throw UpdateValidationError.invalidArchive }
-            let app = folder.appendingPathComponent("WhisperFree.app")
+            let app = folder.appendingPathComponent("OpenWhisper.app")
             let attributes = try manager.attributesOfItem(atPath: app.path)
             guard attributes[.type] as? FileAttributeType == .typeDirectory else {
                 throw UpdateValidationError.invalidArchive

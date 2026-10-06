@@ -28,7 +28,7 @@ MOUNTED=1
 [[ "$(readlink "$MOUNT/Applications")" == /Applications ]]
 [[ -f "$MOUNT/Install.txt" ]]
 swift "$(dirname "$0")/extract-signing-requirement.swift" "$APP" "$TMP/requirement.bin"
-codesign --verify --all-architectures --deep --strict -R "$TMP/requirement.bin" "$MOUNT/WhisperFree.app"
-cmp "$APP/Contents/MacOS/WhisperFree" "$MOUNT/WhisperFree.app/Contents/MacOS/WhisperFree"
-cmp "$APP/Contents/Info.plist" "$MOUNT/WhisperFree.app/Contents/Info.plist"
+codesign --verify --all-architectures --deep --strict -R "$TMP/requirement.bin" "$MOUNT/OpenWhisper.app"
+cmp "$APP/Contents/MacOS/OpenWhisper" "$MOUNT/OpenWhisper.app/Contents/MacOS/OpenWhisper"
+cmp "$APP/Contents/Info.plist" "$MOUNT/OpenWhisper.app/Contents/Info.plist"
 echo "✓ Verified DMG, Applications shortcut, and included app"

@@ -1,4 +1,4 @@
-#import "WhisperFreeAudio.h"
+#import "OpenWhisperAudio.h"
 
 static NSError *inputError(NSInteger code) {
     // Do not retain device names or exception reasons in diagnostics.

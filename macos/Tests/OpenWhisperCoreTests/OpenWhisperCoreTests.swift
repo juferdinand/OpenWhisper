@@ -1,10 +1,10 @@
 import Foundation
 import Testing
-@testable import WhisperFreeCore
+@testable import OpenWhisperCore
 
 /// Cross-platform test cases live in shared/; every implementation must pass them.
 private let sharedDirectory = URL(fileURLWithPath: #filePath)
-    .deletingLastPathComponent()  // WhisperFreeCoreTests
+    .deletingLastPathComponent()  // OpenWhisperCoreTests
     .deletingLastPathComponent()  // Tests
     .deletingLastPathComponent()  // macos
     .deletingLastPathComponent()  // Repository root

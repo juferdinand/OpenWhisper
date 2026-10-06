@@ -10,7 +10,7 @@ root = Path(__file__).resolve().parents[1]
 cli = root / "node_modules/.bin/tauri"
 verify = root / "target/debug/examples/verify-update"
 
-with tempfile.TemporaryDirectory(prefix="whisperfree-signature-test-") as tmp:
+with tempfile.TemporaryDirectory(prefix="openwhisper-signature-test-") as tmp:
     work = Path(tmp)
     for name in ["trusted", "foreign"]:
         result = subprocess.run([str(cli), "signer", "generate", "--ci", "-p", "", "-w", str(work / name)], capture_output=True)
@@ -21,7 +21,7 @@ with tempfile.TemporaryDirectory(prefix="whisperfree-signature-test-") as tmp:
         "pubkey": (work / "trusted.pub").read_text().strip(), "requireSignedVersion": True,
     }}}))
     artifact = work / "fixture.AppImage"
-    artifact.write_bytes(b"WhisperFree public update verification fixture\n")
+    artifact.write_bytes(b"OpenWhisper public update verification fixture\n")
     signature = Path(str(artifact) + ".sig")
 
     def sign(identity="trusted", version="0.2.1"):

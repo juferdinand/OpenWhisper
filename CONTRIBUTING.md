@@ -1,4 +1,4 @@
-# Contributing to WhisperFree
+# Contributing to OpenWhisper
 
 Contributions can include bug reports, documentation, tests, or code. The app interface,
 source comments, and project documentation are in English. Please use English for issues
@@ -6,10 +6,10 @@ and pull requests so the wider community can participate.
 
 ## Reporting bugs and discussing ideas
 
-Check the [existing issues](https://github.com/juferdinand/WhisperFree/issues) first.
+Check the [existing issues](https://github.com/juferdinand/OpenWhisper/issues) first.
 A useful bug report includes:
 
-- WhisperFree version or commit and hardware. Include the macOS version, or Linux distribution,
+- OpenWhisper version or commit and hardware. Include the macOS version, or Linux distribution,
   desktop, Wayland/X11 session, audio service, and portal backend.
 - Model, dictation language, output mode, and affected target app, if applicable.
 - Steps to reproduce, expected behavior, and actual behavior.
@@ -42,8 +42,8 @@ Linux checks: `make linux-test`. Shared UI checks: in `desktop/`, run `npm ci`,
 
 ## Structure and tests
 
-- `macos/Sources/WhisperFreeCore/` contains testable text processing, the model catalog, and update validation.
-- `macos/Sources/WhisperFree/` contains the interface and macOS integration.
+- `macos/Sources/OpenWhisperCore/` contains testable text processing, the model catalog, and update validation.
+- `macos/Sources/OpenWhisper/` contains the interface and macOS integration.
 - `desktop/src/` is the single custom settings UI used by both macOS and Linux.
 - `desktop/src-tauri/` is the Linux backend; `SharedSettingsView.swift` is the Mac bridge.
 - `shared/models.json` is the shared source for models and recommendations.

@@ -1,3 +1,4 @@
+use openwhisper_core::{catalog, Snippet};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -5,7 +6,6 @@ use std::{
     os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
 };
-use whisperfree_core::{catalog, Snippet};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -180,7 +180,7 @@ mod tests {
     use super::*;
     fn isolated() -> Paths {
         let config =
-            std::env::temp_dir().join(format!("whisperfree-settings-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("openwhisper-settings-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&config).unwrap();
         Paths {
             models: config.join("models"),

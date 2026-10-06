@@ -32,7 +32,7 @@ if not args.inside:
         "kwriteconfig6",
     ]:
         assert shutil.which(command), "Missing test dependency: " + command
-    with tempfile.TemporaryDirectory(prefix="whisperfree-trigger-test-") as directory:
+    with tempfile.TemporaryDirectory(prefix="openwhisper-trigger-test-") as directory:
         root = Path(directory)
         env = os.environ.copy()
         for key in [
@@ -108,7 +108,7 @@ kwin = subprocess.Popen(
         "--x11-display",
         os.environ["DISPLAY"],
         "--socket",
-        "whisperfree-test",
+        "openwhisper-test",
         "--no-lockscreen",
         "--no-kactivities",
         "--width",
@@ -119,7 +119,7 @@ kwin = subprocess.Popen(
     stdout=(root / "kwin.log").open("w"),
     stderr=subprocess.STDOUT,
 )
-env = os.environ | {"WAYLAND_DISPLAY": "whisperfree-test", "GDK_BACKEND": "wayland"}
+env = os.environ | {"WAYLAND_DISPLAY": "openwhisper-test", "GDK_BACKEND": "wayland"}
 lease = root / "config/whisperfree/native-trigger-lease.json"
 
 
@@ -209,7 +209,7 @@ try:
         ).unpack()[0]
         if (
             ready
-            and (Path(os.environ["XDG_RUNTIME_DIR"]) / "whisperfree-test").exists()
+            and (Path(os.environ["XDG_RUNTIME_DIR"]) / "openwhisper-test").exists()
         ):
             time.sleep(0.2)
             break
@@ -278,7 +278,7 @@ try:
     mapping("ExtraButton1")
     # Independent component: verify that another application's key is not stolen.
     action = [
-        "whisperfree-test-conflict",
+        "openwhisper-test-conflict",
         "_k_session:test",
         "Owned test",
         "Conflict test",

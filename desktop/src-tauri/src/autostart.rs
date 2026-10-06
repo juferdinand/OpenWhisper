@@ -75,10 +75,10 @@ impl Autostart {
             } else {
                 ""
             };
-            format!("[Desktop Entry]\nType=Application\nName=WhisperFree\nComment=Free, local dictation\nExec={prefix}{argument}\nIcon=io.github.whisperfree\nStartupWMClass=io.github.whisperfree\nTerminal=false\n")
+            format!("[Desktop Entry]\nType=Application\nName=OpenWhisper\nComment=Free, local dictation\nExec={prefix}{argument}\nIcon=io.github.whisperfree\nStartupWMClass=io.github.whisperfree\nTerminal=false\n")
         } else {
             // A user override also disables a potential system-wide entry with the same ID.
-            "[Desktop Entry]\nType=Application\nName=WhisperFree\nHidden=true\n".into()
+            "[Desktop Entry]\nType=Application\nName=OpenWhisper\nHidden=true\n".into()
         };
         fs::create_dir_all(
             self.entry
@@ -116,9 +116,9 @@ mod tests {
     #[test]
     fn enable_disable_and_restart_use_the_installed_appimage() {
         let root =
-            std::env::temp_dir().join(format!("whisperfree-autostart-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("openwhisper-autostart-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&root).unwrap();
-        let image = root.join("Whisper Free.AppImage");
+        let image = root.join("Open Whisper.AppImage");
         fs::write(&image, "test").unwrap();
         let entry = root.join("autostart/io.github.whisperfree.desktop");
         let autostart = Autostart {

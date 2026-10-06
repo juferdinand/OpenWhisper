@@ -32,6 +32,11 @@ as macOS. Tauri hosts these assets on Linux; WKWebView hosts them on macOS.
 
 Actual features depend on the desktop and its portal backend, not just the distribution name.
 The app must report detected capabilities and any fallback it uses.
+Native KDE integration checks KWin, KGlobalAccel, Plasma version, the button-rebinding plugin,
+and available utilities. It is not restricted to CachyOS. Other KDE distributions with those
+capabilities can use the same adapter, but remain untested until their own acceptance report
+is complete. The [roadmap](ROADMAP.md#linux-desktop-acceptance) tracks KDE, GNOME, X11, and
+other Wayland sessions independently.
 
 ## Implemented features
 
@@ -153,6 +158,10 @@ Still required before calling a distribution fully supported:
 
 ## Build from source
 
+For packaged installation from a terminal, see
+[README terminal installation](../README.md#install-from-the-linux-terminal). A source build is
+not required to install a release `.deb` or AppImage.
+
 Initial scope: x86_64 Linux with GTK 3, WebKitGTK 4.1, an ALSA-compatible microphone service,
 and a graphical desktop session. PipeWire through its ALSA compatibility layer is the primary
 path. The source build was checked with Rust 1.99.0 and Node 26; CI uses Rust 1.99.0 and Node 22.
@@ -187,7 +196,7 @@ make linux-install
 
 The local installer needs no root access. It places the executable and licenses under
 `~/.local/lib/whisperfree`, and an application launcher and the original Mac icon under
-`$XDG_DATA_HOME` (default `~/.local/share`). Open WhisperFree from your application launcher.
+`$XDG_DATA_HOME` (default `~/.local/share`). Open OpenWhisper from your application launcher.
 `make linux-run` runs the build directly. Builds made on a rolling distribution are not portable
 binaries for older distributions; the CI package baseline is Ubuntu 22.04.
 
@@ -249,7 +258,7 @@ systemd-run --user --wait --pipe --collect --unit=app-io.github.whisperfree \
   python3 "$PWD/desktop/scripts/test-session.py" --portals
 ```
 
-Do not start a second instance while the test owns WhisperFree's application ID. A recording
+Do not start a second instance while the test owns OpenWhisper's application ID. A recording
 test with a virtual source proves the capture/inference/output path, not physical microphone quality.
 
 ### Long-recording and process-failure regression
@@ -288,7 +297,7 @@ events. Primary left/right clicks and scrolling are intentionally excluded.
 On KDE Wayland, direct mouse capture supports Back, Forward, and other extra buttons;
 Middle requires Plasma 6.3+. `kreadconfig6`, `kwriteconfig6`, and KWin's `buttonsrebind` plugin
 must be available. The selected button is reserved for dictation while the app runs. Existing
-KDE remappings are rejected rather than overwritten. WhisperFree registers a free internal
+KDE remappings are rejected rather than overwritten. OpenWhisper registers a free internal
 function key (F19 or F24) and temporarily maps the chosen mouse button to it using KDE's configuration API.
 A helper restores the mapping on normal exit or when the app crashes. Later user edits are
 preserved. If the helper itself is forcibly killed (SIGKILL, including an entire process group),
@@ -298,7 +307,7 @@ No root, input-device access, or additional permission prompt is required for th
 
 **Desktop shortcut dialog** selects the portal alternative on KDE. Other desktops use it by
 default; their recorder determines the accepted keys. Portal setup remains session-scoped and
-must be enabled again after restart. WhisperFree suggests Ctrl+Alt+Space but does not require
+must be enabled again after restart. OpenWhisper suggests Ctrl+Alt+Space but does not require
 Ctrl. Direct mouse capture on GNOME, Sway, Hyprland, and X11 is not implemented.
 
 If your desktop has neither native shortcut support nor a shortcut portal, keep using the Record
@@ -337,7 +346,9 @@ systemd desktop service to stop the new process along with the old one.
 - Optional last 20 transcripts: `$XDG_CONFIG_HOME/whisperfree/history.json`.
   History is enabled by default, as on macOS. Turning it off clears saved history.
 - Configuration defaults to `~/.config/whisperfree`. App-created directories use mode 0700;
-  settings, history, and model downloads use mode 0600. Audio remains in memory.
+  settings, history, and model downloads use mode 0600. Active capture remains in memory;
+  stopped audio is privately saved under the configuration directory's `recovery/` folder.
+  Unfinished recordings survive restart until successful clipboard delivery or explicit discard.
 - Model downloads use HTTPS, validate the server’s SHA-256 and file size, and rename completed
   files atomically. The hash verifies transfer integrity; it does not independently authenticate
   the model publisher. Interrupted downloads do not replace an installed model.
@@ -349,13 +360,13 @@ If launch at login was enabled, also remove `~/.config/autostart/io.github.whisp
 
 ## Troubleshooting
 
-Run `~/.local/lib/whisperfree/whisperfree-desktop --diagnose` to report the session, input devices,
+Run `~/.local/lib/whisperfree/openwhisper-desktop --diagnose` to report the session, input devices,
 portal versions, clipboard helper, and whether Vulkan was compiled in. It does not record audio
 or print your settings, transcripts, or model contents. Device names can still be identifying;
 review them before posting diagnostics publicly.
 
 - **NVIDIA + Wayland startup failure:** WebKitGTK can fail with `Error 71 (Protocol error)`.
-  On hosts with the NVIDIA kernel driver and a Wayland session, WhisperFree sets
+  On hosts with the NVIDIA kernel driver and a Wayland session, OpenWhisper sets
   `WEBKIT_DISABLE_DMABUF_RENDERER=1` before GTK starts unless the user already set it.
   This changes UI rendering, not speech inference. It fixed startup on the primary host.
   See the [upstream WebKit report](https://bugs.webkit.org/show_bug.cgi?id=324551).
@@ -366,7 +377,7 @@ review them before posting diagnostics publicly.
   the GlobalShortcuts portal; its initial suggestion is Ctrl+Alt+Space. Check for desktop conflicts.
 - **Mouse button unavailable:** direct capture requires KDE Wayland and its configuration utilities.
   Buttons already remapped in KDE are rejected; hardware-only DPI/profile switches may not emit
-  usable input events. After forcibly killing both app and helper, start WhisperFree again to
+  usable input events. After forcibly killing both app and helper, start OpenWhisper again to
   recover its temporary mouse mapping.
 - **No pasted text:** enable keyboard access in **General**, select paste output, and focus a text
   field. Targets with a different paste binding (including many terminals) may require manual paste.
@@ -391,7 +402,7 @@ a publication job creates the version commit/tag, verifies both artifact checksu
 all packages with combined checksums. There is no separate CI dispatch or manual Linux attachment.
 The complete release is a draft by default so its AppImage can receive desktop acceptance before
 publication. Public downloads use the stable asset names
-`WhisperFree-Linux-x86_64.AppImage` and `WhisperFree-Linux-amd64.deb`; their internal version still
+`OpenWhisper-Linux-x86_64.AppImage` and `OpenWhisper-Linux-amd64.deb`; their internal version still
 matches the tag. `SHA256SUMS` covers both Linux packages, signatures, update feed, and the macOS DMG/ZIP.
 Publishing Linux packages does not establish support for untested distributions.
 
@@ -414,7 +425,7 @@ latest release would make that check fail. Keep both platform assets until the f
 After building with `make linux`, run:
 
 ```bash
-python3 desktop/scripts/test-kde-triggers.py --binary desktop/target/release/whisperfree-desktop
+python3 desktop/scripts/test-kde-triggers.py --binary desktop/target/release/openwhisper-desktop
 ```
 
 This optional desktop test requires Plasma 6.3+, Xvfb, libei, Python PyGObject, and the KDE
@@ -426,3 +437,29 @@ The test passed with Plasma 6.7.5 on the primary host; it does not establish phy
 other-desktop coverage. The native GTK capture path was also exercised in an isolated Wayland session: key/mouse capture,
 Escape cancellation, virtual-source toggle/push-to-talk recording, app-crash cleanup, saved binding restoration,
 and trigger removal. Physical-device checks remain outstanding.
+
+## Acceptance evidence
+
+Use one report per distribution, desktop/session, and package combination. Record the release
+tag/commit and package SHA-256, OS release, desktop/compositor and version, Wayland/X11,
+portal/backend versions, audio service, GPU/driver, and AppImage or Debian installation method.
+Do not infer a passing result from a missing feature, a package build, or another distribution.
+
+| Check | Result | Evidence and limits |
+| --- | --- | --- |
+| Install, launch from desktop entry, reactivation | PASS / FAIL / SKIP / MANUAL REQUIRED | Commands, exact package, isolated or physical session |
+| Native UI, English/German, saved setup and settings | PASS / FAIL / SKIP / MANUAL REQUIRED | State survives restart/upgrade |
+| Fixture recognition, CPU, optional GPU | PASS / FAIL / SKIP / MANUAL REQUIRED | Model/checksum, device/driver, full recognized fixture |
+| Virtual-source long capture, stop/cancel, silence | PASS / FAIL / SKIP / MANUAL REQUIRED | Private test source; never an unattended real microphone |
+| Physical microphone and device disconnect | PASS / FAIL / SKIP / MANUAL REQUIRED | Supervised tester and device type; no private audio attached |
+| Toggle/hold keys, permitted mouse triggers, conflicts | PASS / FAIL / SKIP / MANUAL REQUIRED | Physical events or owned nested compositor clearly identified |
+| Permission allow/deny, clipboard, native/XWayland insertion | PASS / FAIL / SKIP / MANUAL REQUIRED | Owned target fields and observed fallback |
+| Overlay focus, tray or main-window fallback | PASS / FAIL / SKIP / MANUAL REQUIRED | Desktop behavior; protocol availability alone is insufficient |
+| Login, signed update/restart, uninstall | PASS / FAIL / SKIP / MANUAL REQUIRED | Supervised session; settings/models preserved |
+
+Agents may execute existing fixture, private virtual-source, and owned nested-compositor
+tests. Physical input and permission/login flows need an explicitly supervised tester.
+Use a disposable account/session or VM for installation and desktop changes. Attach only
+sanitized evidence; never attach private dictations, recordings, keys, or clipboard content.
+An unsupported feature can pass its fallback check while its full-feature check remains skipped.
+Only promote the support matrix for the features and environments actually demonstrated.

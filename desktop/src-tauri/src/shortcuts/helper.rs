@@ -91,7 +91,7 @@ async fn session() -> Result<(), String> {
     )?;
     let lease = kde::Lease::new(trigger, mapping, &paths.config)?;
     let result = async {
-        let action = vec![lease.component.as_str(), kde::ACTION, "WhisperFree", "Start or stop dictation"];
+        let action = vec![lease.component.as_str(), kde::ACTION, "OpenWhisper", "Start or stop dictation"];
         let _: () = proxy.call("doRegister", &(&action,)).await.map_err(|e| e.to_string())?;
         let path: zbus::zvariant::OwnedObjectPath = proxy.call("getComponent", &(&lease.component,)).await.map_err(|e| e.to_string())?;
         let component = zbus::Proxy::new(&connection, "org.kde.kglobalaccel", path, "org.kde.kglobalaccel.Component").await.map_err(|e| e.to_string())?;

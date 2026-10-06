@@ -11,6 +11,7 @@ mod transcription;
 mod updates;
 mod worker;
 
+use openwhisper_core::{catalog, Model};
 use serde::Serialize;
 use settings::{Paths, Preferences};
 use std::{
@@ -18,7 +19,6 @@ use std::{
     sync::{atomic::AtomicBool, mpsc, Arc, Mutex},
 };
 use tauri::{Emitter, Manager};
-use whisperfree_core::{catalog, Model};
 
 #[derive(Clone, Serialize)]
 struct Snapshot {
@@ -301,7 +301,7 @@ fn main() {
     }
     let _smoke_environment = smoke::Environment::prepare();
     gtk::glib::set_prgname(Some("io.github.whisperfree"));
-    gtk::glib::set_application_name("WhisperFree");
+    gtk::glib::set_application_name("OpenWhisper");
     // WebKitGTK's DMABUF path can disconnect NVIDIA clients from KWin (WebKit bug 324551).
     // Set this before GTK or any worker starts; leave an explicit user override intact.
     if integration::wayland()
@@ -499,7 +499,7 @@ fn main() {
             let show = tauri::menu::MenuItem::with_id(
                 app,
                 "show",
-                "Open WhisperFree",
+                "Open OpenWhisper",
                 true,
                 None::<&str>,
             )?;
@@ -514,7 +514,7 @@ fn main() {
             let menu = tauri::menu::Menu::with_items(app, &[&show, &record, &quit])?;
             let tray = tauri::tray::TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("WhisperFree — local dictation")
+                .tooltip("OpenWhisper — local dictation")
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
@@ -557,7 +557,7 @@ fn main() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("Could not start WhisperFree");
+        .expect("Could not start OpenWhisper");
     // Capture the permanent executable before an update replaces it. For .deb installs,
     // current_exe() would otherwise refer to the old, deleted inode after dpkg finishes.
     let relaunch = Arc::new(relaunch::Relaunch::new(
@@ -587,7 +587,7 @@ fn localize_tray(runtime: &Runtime, locale: &str) {
             .expect("Valid translations")
     });
     for (item, label) in runtime.tray_items.lock().unwrap().iter().zip([
-        "Open WhisperFree",
+        "Open OpenWhisper",
         "Start / stop dictation",
         "Quit",
     ]) {

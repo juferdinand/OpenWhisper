@@ -1,6 +1,6 @@
 //! Explicit smoke test using 16 kHz mono f32le audio; never records a microphone.
+use openwhisper_speech::SpeechEngine;
 use std::{env, path::Path, time::Instant};
-use whisperfree_speech::SpeechEngine;
 
 fn main() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();

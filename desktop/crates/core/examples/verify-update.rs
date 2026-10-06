@@ -22,7 +22,7 @@ fn verify() -> Result<(), Box<dyn std::error::Error>> {
     if config["plugins"]["updater"]["requireSignedVersion"] != true {
         return Err("Signed update versions must be required".into());
     }
-    whisperfree_core::updates::verify_artifact(
+    openwhisper_core::updates::verify_artifact(
         &fs::read(&args[1])?,
         &fs::read_to_string(&args[2])?,
         public,

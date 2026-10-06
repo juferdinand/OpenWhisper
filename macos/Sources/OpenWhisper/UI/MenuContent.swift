@@ -37,7 +37,7 @@ struct MenuContent: View {
         Divider()
         Button(NativeStrings.text("Settings …")) { openSettings() }
             .keyboardShortcut(",")
-        Button(NativeStrings.text("Quit WhisperFree")) { NSApp.terminate(nil) }
+        Button(NativeStrings.text("Quit OpenWhisper")) { NSApp.terminate(nil) }
             .keyboardShortcut("q")
     }
 

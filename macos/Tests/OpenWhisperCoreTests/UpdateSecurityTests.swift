@@ -1,24 +1,24 @@
 import Foundation
 import Security
 import Testing
-@testable import WhisperFreeCore
+@testable import OpenWhisperCore
 
 struct UpdatePolicyTests {
     @Test func acceptsOnlyTheConfiguredReleaseAsset() throws {
         let version = try UpdatePolicy.validateRelease(repository: "owner/repo", tag: "v1.2.3",
             assetName: UpdatePolicy.assetName,
-            assetURL: URL(string: "https://github.com/owner/repo/releases/download/v1.2.3/WhisperFree-macOS.zip")!,
+            assetURL: URL(string: "https://github.com/owner/repo/releases/download/v1.2.3/OpenWhisper-macOS.zip")!,
             pageURL: URL(string: "https://github.com/owner/repo/releases/tag/v1.2.3")!)
         #expect(version == "1.2.3")
     }
 
     @Test(arguments: [
-        "http://github.com/owner/repo/releases/download/v1.2.3/WhisperFree-macOS.zip",
-        "https://github.com.attacker.test/owner/repo/releases/download/v1.2.3/WhisperFree-macOS.zip",
-        "https://github.com/other/repo/releases/download/v1.2.3/WhisperFree-macOS.zip",
-        "https://github.com/owner/repo/releases/download/v1.2.2/WhisperFree-macOS.zip",
+        "http://github.com/owner/repo/releases/download/v1.2.3/OpenWhisper-macOS.zip",
+        "https://github.com.attacker.test/owner/repo/releases/download/v1.2.3/OpenWhisper-macOS.zip",
+        "https://github.com/other/repo/releases/download/v1.2.3/OpenWhisper-macOS.zip",
+        "https://github.com/owner/repo/releases/download/v1.2.2/OpenWhisper-macOS.zip",
         "https://github.com/owner/repo/releases/download/v1.2.3/another.zip",
-        "https://github.com/owner/repo/releases/download/v1.2.3/WhisperFree-macOS.zip?redirect=elsewhere",
+        "https://github.com/owner/repo/releases/download/v1.2.3/OpenWhisper-macOS.zip?redirect=elsewhere",
     ])
     func rejectsUnexpectedSource(_ source: String) {
         #expect(throws: (any Error).self) {
@@ -47,10 +47,10 @@ struct UpdatePolicyTests {
         defer { fixture.cleanup() }
         let app = try fixture.makeApp()
         try UpdatePolicy.validateBundle(at: app, expectedVersion: "1.2.3", currentVersion: "1.2.2",
-                                        bundleIdentifier: "test.whisperfree.update")
-        for (version, current, identifier) in [("1.2.4", "1.2.2", "test.whisperfree.update"),
-                                             ("1.2.3", "1.2.3", "test.whisperfree.update"),
-                                             ("1.2.3", "2.0.0", "test.whisperfree.update"),
+                                        bundleIdentifier: "test.openwhisper.update")
+        for (version, current, identifier) in [("1.2.4", "1.2.2", "test.openwhisper.update"),
+                                             ("1.2.3", "1.2.3", "test.openwhisper.update"),
+                                             ("1.2.3", "2.0.0", "test.openwhisper.update"),
                                              ("1.2.3", "1.2.2", "another.app")] {
             #expect(throws: (any Error).self) {
                 try UpdatePolicy.validateBundle(at: app, expectedVersion: version, currentVersion: current,
@@ -68,7 +68,7 @@ struct UpdateSignatureTests {
         try fixture.sign(app)
         let requirement = try fixture.requirement(app)
         try UpdateSignatureVerifier.verify(app, requirement: requirement)
-        let other = try fixture.makeApp(name: "Other.app", identifier: "test.whisperfree.other")
+        let other = try fixture.makeApp(name: "Other.app", identifier: "test.openwhisper.other")
         try fixture.sign(other)
         #expect(throws: (any Error).self) { try UpdateSignatureVerifier.verify(other, requirement: requirement) }
     }
@@ -142,9 +142,9 @@ struct UpdateArchiveTests {
                 link('escape', outside)
                 z.writestr('escape/marker', 'bad')
             elif mode == 'external-symlink':
-                link('WhisperFree.app/Contents/Resources/escape', outside)
+                link('OpenWhisper.app/Contents/Resources/escape', outside)
             elif mode == 'app-symlink':
-                link('WhisperFree.app', outside)
+                link('OpenWhisper.app', outside)
             else:
                 z.writestr('Other.app/Contents/Info.plist', 'bad')
         """, zip.path, mode, outside.path])
@@ -154,13 +154,13 @@ struct UpdateArchiveTests {
 }
 
 private struct SecurityFixture {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent("WhisperFree-security-\(UUID().uuidString)")
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("OpenWhisper-security-\(UUID().uuidString)")
 
     init() throws {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
     }
 
-    func makeApp(name: String = "WhisperFree.app", identifier: String = "test.whisperfree.update") throws -> URL {
+    func makeApp(name: String = "OpenWhisper.app", identifier: String = "test.openwhisper.update") throws -> URL {
         let app = root.appendingPathComponent(name)
         for path in ["Contents/MacOS", "Contents/Resources"] {
             try FileManager.default.createDirectory(at: app.appendingPathComponent(path), withIntermediateDirectories: true)

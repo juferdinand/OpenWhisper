@@ -46,7 +46,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 backing: .buffered,
                 defer: false
             )
-            window.title = "WhisperFree"
+            window.title = "OpenWhisper"
             window.contentMinSize = NSSize(width: 800, height: 560)
             window.contentView = view.webView
             window.isReleasedWhenClosed = false

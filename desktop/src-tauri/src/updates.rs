@@ -1,4 +1,5 @@
 use crate::{settings::private_write, Runtime};
+use openwhisper_core::updates::{self as policy, Package};
 use serde::Serialize;
 use std::{
     sync::{Arc, Mutex},
@@ -9,7 +10,6 @@ use tauri::{
     Manager,
 };
 use tauri_plugin_updater::{Update, UpdaterExt};
-use whisperfree_core::updates::{self as policy, Package};
 
 #[derive(Clone, Serialize)]
 pub struct Snapshot {
