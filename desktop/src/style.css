@@ -893,3 +893,5 @@ html.overlay,
   min-width: 0;
   flex: 1;
 }
+
+.row.approval > span:first-child { flex-shrink: 1; }

@@ -5,6 +5,7 @@ use std::{
 };
 
 extern "C" {
+    fn wf_speech_gpu_name() -> *const c_char;
     fn wf_speech_create() -> *mut c_void;
     fn wf_speech_destroy(context: *mut c_void);
     fn wf_speech_error(context: *mut c_void) -> *const c_char;
@@ -21,6 +22,19 @@ extern "C" {
 /// Confined to the speech worker thread; contexts must never be used concurrently.
 pub struct SpeechEngine(NonNull<c_void>);
 impl SpeechEngine {
+    /// Called on the owning worker thread; backend discovery can initialize Vulkan.
+    pub fn gpu_name(&self) -> Option<String> {
+        let name = unsafe { wf_speech_gpu_name() };
+        if name.is_null() {
+            None
+        } else {
+            Some(
+                unsafe { CStr::from_ptr(name) }
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+        }
+    }
     pub fn new() -> Result<Self, String> {
         NonNull::new(unsafe { wf_speech_create() })
             .map(Self)

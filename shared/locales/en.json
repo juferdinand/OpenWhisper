@@ -247,5 +247,14 @@
   "Transcript ready; history could not be saved: {error}": "Transcript ready; history could not be saved: {error}",
   "Could not monitor the shortcut session: {error}. Enable it again in Settings.": "Could not monitor the shortcut session: {error}. Enable it again in Settings.",
   "Open your desktop's shortcut settings to change the trigger. The portal could not open them: {error}": "Open your desktop's shortcut settings to change the trigger. The portal could not open them: {error}",
-  "Microphone unavailable or changed. Check your input device and try again.": "Microphone unavailable or changed. Check your input device and try again."
+  "Microphone unavailable or changed. Check your input device and try again.": "Microphone unavailable or changed. Check your input device and try again.",
+  "Allow WhisperFree in System Settings to finish enabling launch at login.": "Allow WhisperFree in System Settings to finish enabling launch at login.",
+  "Metal GPU acceleration (CPU fallback)": "Metal GPU acceleration (CPU fallback)",
+  "System": "System",
+  "There is no fixed recording limit. Stop or cancel when you are finished.": "There is no fixed recording limit. Stop or cancel when you are finished.",
+  "Use GPU acceleration when available": "Use GPU acceleration when available",
+  "GPU support is not included in this build. Install a current Linux package.": "GPU support is not included in this build. Install a current Linux package.",
+  "The GPU could not complete recognition. The recording was processed on the CPU.": "The GPU could not complete recognition. The recording was processed on the CPU.",
+  "No compatible GPU detected. CPU recognition remains available. Check your Vulkan driver and restart the app.": "No compatible GPU detected. CPU recognition remains available. Check your Vulkan driver and restart the app.",
+  "Vulkan acceleration is available. Recoverable GPU errors fall back to the CPU.": "Vulkan acceleration is available. Recoverable GPU errors fall back to the CPU."
 }

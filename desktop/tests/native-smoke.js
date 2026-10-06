@@ -15,6 +15,15 @@
       document.documentElement.dataset.ready !== "true"
     )
       throw new Error("Native state did not reach the UI");
+    // The smoke-test process runs with isolated XDG directories, never the user's autostart.
+    const first = await invoke("save_preferences", { changes: { launch_at_login: true } });
+    if (!first.preferences.launch_at_login || first.preferences.show_idle_overlay !== state.preferences.show_idle_overlay)
+      throw new Error("Launch at login changed the idle overlay");
+    const second = await invoke("save_preferences", { changes: { show_idle_overlay: true } });
+    if (!second.preferences.launch_at_login || !second.preferences.show_idle_overlay)
+      throw new Error("Preference patches overwrote another setting");
+    const third = await invoke("save_preferences", { changes: { launch_at_login: false, show_idle_overlay: state.preferences.show_idle_overlay } });
+    if (third.preferences.launch_at_login) throw new Error("Launch at login could not be disabled");
     const tabs = Array.from(document.querySelectorAll("nav button"));
     if (tabs.length !== (state.preferences.setup_completed ? 5 : 6)) throw new Error("Missing navigation");
     for (const tab of tabs) {

@@ -53,6 +53,7 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false, f
         shortcut: null,
         paste_ready: false,
         gpu_available: false,
+        overlay_available: true,
         download: null,
         progress: 0,
         elapsed: 0,
@@ -94,9 +95,14 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false, f
           if (saved) state.preferences = saved;
           return JSON.parse(JSON.stringify(state));
         }
+        if (command === "save_preferences") {
+          if (host.saveDelay) await new Promise(resolve => setTimeout(resolve, host.saveDelay));
+          if (host.rejectSave) throw new Error("Could not save settings");
+          Object.assign(state.preferences, args.changes);
+        }
         if (command === "save_settings") state.preferences = args.preferences;
         if (command === "complete_setup") state.preferences.setup_completed = true;
-        if (command === "save_settings" || command === "complete_setup") await host.saveTestPreferences(state.preferences);
+        if (command === "save_settings" || command === "save_preferences" || command === "complete_setup") await host.saveTestPreferences(state.preferences);
         if (command === "check_updates") Object.assign(state.updates, { status: "available", version: "0.2.2" });
         if (command === "install_update") state.updates.status = "downloading";
         if (command === "enable_shortcut")
@@ -105,7 +111,7 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false, f
           state.macos.recording_shortcut = false;
         if (command === "clear_history") state.history = [];
         publish();
-        return null;
+        return command === "save_preferences" ? JSON.parse(JSON.stringify(state)) : null;
       };
       host.testState = state;
       host.publishState = publish;
@@ -402,3 +408,74 @@ for (const platform of ["linux", "macos"] as const) {
     await page.screenshot({ path: `test-results/${platform}-german.png` });
   });
 }
+
+for (const platform of ["linux", "macos"] as const) {
+  test(`${platform}: login and idle overlay switches remain independent through delayed saves and restart`, async ({ page }) => {
+    await start(page, platform);
+    await page.setViewportSize({ width: 800, height: 560 });
+    const login = page.getByRole("checkbox", { name: "Launch at login", exact: true });
+    const overlay = page.getByRole("checkbox", { name: "Show overlay when idle", exact: true });
+    await login.scrollIntoViewIfNeeded();
+    const before = await login.boundingBox();
+    await login.evaluate((input) => { (window as any).originalLoginSwitch = input; });
+    await page.evaluate(() => { (window as any).saveDelay = 200; });
+    await login.click();
+    await overlay.click();
+    await expect.poll(() => page.evaluate(() => (window as any).testState.preferences.launch_at_login)).toBe(true);
+    await expect.poll(() => page.evaluate(() => (window as any).testState.preferences.show_idle_overlay)).toBe(true);
+    await expect(login).toBeChecked();
+    await expect(overlay).toBeChecked();
+    expect(await page.evaluate(() => (window as any).originalLoginSwitch.isConnected)).toBe(true);
+    const after = await login.boundingBox();
+    expect(after!.y).toBeCloseTo(before!.y, 0);
+    await login.click();
+    await expect.poll(() => page.evaluate(() => (window as any).testState.preferences.launch_at_login)).toBe(false);
+    await expect(overlay).toBeChecked();
+    await page.reload();
+    await expect(login).not.toBeChecked();
+    await expect(overlay).toBeChecked();
+    const changes = await page.evaluate(() => (window as any).calls.filter((c: any) => c.command === "save_preferences"));
+    expect(changes.every((c: any) => Object.keys(c.args.changes).length === 1)).toBe(true);
+  });
+  test(`${platform}: failed saves restore a switch without changing the neighboring setting`, async ({ page }) => {
+    await start(page, platform);
+    await page.evaluate(() => { (window as any).rejectSave = true; });
+    const login = page.getByRole("checkbox", { name: "Launch at login", exact: true });
+    await login.click();
+    await expect(page.getByRole("alert")).toContainText("Could not save settings");
+    await expect(login).not.toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "Show overlay when idle", exact: true })).not.toBeChecked();
+  });
+}
+
+test("Linux exposes the detected GPU and keeps the CPU choice independent of autostart", async ({ page }) => {
+  await start(page, "linux");
+  await page.evaluate(() => {
+    const w = window as any;
+    Object.assign(w.testState, { gpu_supported: true, gpu_available: true, gpu_device: "NVIDIA GeForce RTX 3060" });
+    w.publishState();
+  });
+  const gpu = page.getByRole("checkbox", { name: "Use GPU acceleration when available" });
+  await gpu.check();
+  await expect(page.getByText("GPU · NVIDIA GeForce RTX 3060", { exact: true })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: "Launch at login", exact: true })).not.toBeChecked();
+  await page.reload();
+  await expect(gpu).toBeChecked();
+  await expect(page.getByText("No compatible GPU detected.", { exact: false })).not.toBeVisible();
+});
+
+test("macOS shows pending login approval without changing the idle overlay", async ({ page }) => {
+  await start(page, "macos");
+  await page.setViewportSize({ width: 800, height: 560 });
+  await page.evaluate(() => {
+    const w = window as any;
+    w.testState.preferences.launch_at_login = true;
+    w.testState.macos.launch_at_login_pending = true;
+    w.publishState();
+  });
+  await expect(page.getByRole("checkbox", { name: "Launch at login", exact: true })).toBeChecked();
+  await expect(page.getByText("Allow WhisperFree in System Settings to finish enabling launch at login.")).toBeVisible();
+  expect(await page.locator("main").evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true);
+  await page.getByRole("checkbox", { name: "Launch at login", exact: true }).uncheck();
+  await expect(page.getByRole("checkbox", { name: "Show overlay when idle", exact: true })).not.toBeChecked();
+});

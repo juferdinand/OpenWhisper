@@ -41,7 +41,8 @@
     "resources": {
       "../../LICENSE": "LICENSE",
       "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
-      "../public/fonts/LICENSE.txt": "Inter-LICENSE.txt"
+      "../public/fonts/LICENSE.txt": "Inter-LICENSE.txt",
+      "../licenses/": "licenses/"
     },
     "linux": {
       "deb": {
@@ -52,7 +53,8 @@
           "libgtk-layer-shell0",
           "wl-clipboard",
           "xclip",
-          "pkexec"
+          "pkexec",
+          "libvulkan1"
         ]
       }
     }

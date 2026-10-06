@@ -39,8 +39,8 @@ The app must report detected capabilities and any fallback it uses.
   UI assets with a native Swift bridge while preserving its existing services.
 - Text cleanup, vocabulary correction, and snippets pass the existing shared test vectors.
 - Uses the shared model catalog and the same pinned whisper.cpp source for Whisper and Parakeet.
-  Model contexts stay loaded and inference is serialized. CPU support is the baseline; GPU acceleration
-  is optional and must be tested separately.
+  Model contexts stay loaded and inference is serialized. New builds include Vulkan GPU acceleration
+  with a portable CPU fallback. Hardware coverage is listed below; 0.2.1 packages remain CPU-only.
 - Captures the selected microphone locally and converts audio to 16 kHz mono. Keeps recordings in
   memory. Includes error handling, a silence threshold and cancellation before transcription, with
   no fixed recording duration limit. Stop or cancel explicitly when finished. Audio is held in RAM, so longer recordings use more memory. Microphone acceptance testing is still required.
@@ -104,7 +104,7 @@ Still required before calling a distribution fully supported:
 - Permission denial, physical toggle / hold shortcut events, and session restart.
 - Automatic insertion into XWayland apps and applications with nonstandard paste bindings.
 - Installer, relaunch, tray behavior, and uninstall on each target distribution.
-- GPU builds and non-CachyOS desktop combinations.
+- AMD/Intel GPU validation and non-CachyOS desktop combinations.
 
 ## Acceptance checks
 
@@ -128,13 +128,13 @@ Install Rust/Cargo, Node.js/npm, Python 3, a C++ compiler, CMake, pkg-config, an
 CachyOS / Arch build and runtime dependencies:
 
 ```bash
-sudo pacman -S --needed rust nodejs npm base-devel cmake python curl webkit2gtk-4.1 gtk3 libappindicator-gtk3 alsa-lib pipewire-alsa gtk-layer-shell wl-clipboard xclip
+sudo pacman -S --needed rust nodejs npm base-devel cmake python curl webkit2gtk-4.1 gtk3 libappindicator-gtk3 alsa-lib pipewire-alsa gtk-layer-shell wl-clipboard xclip vulkan-icd-loader shaderc
 ```
 
 Ubuntu 22.04+ / Debian build dependencies (desktop validation is still pending):
 
 ```bash
-sudo apt install build-essential cmake pkg-config python3 curl libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libgtk-layer-shell0 patchelf wl-clipboard xclip
+sudo apt install build-essential cmake pkg-config python3 curl libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libgtk-layer-shell0 libvulkan-dev glslc patchelf wl-clipboard xclip
 ```
 
 Install a current Rust toolchain and Node.js separately if the distribution packages are too old.
@@ -159,8 +159,29 @@ binaries for older distributions; the CI package baseline is Ubuntu 22.04.
 For development: run `bash desktop/scripts/fetch-native.sh`, then `npm ci` and
 `npm run tauri dev` inside `desktop/`. For the known-audio smoke test, install `ffmpeg` and run
 `bash desktop/scripts/test-recognition.sh`; this downloads the checksum-pinned Whisper Tiny model.
-An optional `--features vulkan` build is experimental and needs Vulkan headers, a shader compiler,
-and a working Vulkan driver. The default CPU build does not require a GPU.
+New packages and `make linux` include Vulkan. Install a Vulkan loader and a graphics driver with
+Vulkan support (NVIDIA's driver, or the appropriate Mesa driver for AMD/Intel). Build dependencies
+also include `glslc` and the Vulkan loader development library. The build script downloads
+checksum-pinned Khronos headers into `desktop/vendor/vulkan`; it does not install system packages.
+Use `make linux LINUX_FEATURES=custom-protocol` for a CPU-only development build.
+
+In **General → Appearance & system**, **Use GPU acceleration when available** is on by default.
+The detected GPU is shown there. Existing CPU-only installations migrate to automatic GPU use;
+a deliberate CPU choice in the new version is preserved. No detected GPU uses the CPU, and
+recoverable GPU loading/inference errors retry the same captured audio on the CPU. A defective
+driver that terminates the process cannot be recovered in-process.
+
+On 2026-10-06, Whisper Tiny and Parakeet v3 q4 both recognized the public JFK fixture twice using
+the **Vulkan0 backend on an NVIDIA RTX 3060 (12 GB, driver 615.71.09)**. The same Vulkan-enabled
+build also passed repeated Whisper recognition with Vulkan disabled. AMD and Intel GPUs and
+other drivers still need hardware acceptance. The first GPU inference can take longer while
+shaders compile; CPU work for audio conversion and other orchestration is still expected.
+
+**Launch at login** is available on both platforms in new builds after 0.2.1. On Linux it manages
+only this user's XDG autostart file. AppImages use their persistent installed path, not a temporary
+extraction path. Moving an AppImage requires turning this setting off and on at its new location.
+No administrator access is needed. Automatic launch after a full desktop logout/login still needs
+manual acceptance; creation, disabling, path escaping, and native IPC are covered by tests.
 
 ### Native desktop acceptance test
 
@@ -205,7 +226,7 @@ Portal setup is session-scoped in this preview; enable it again after restarting
 If your desktop lacks a portal, keep using the Record button and clipboard output. No root,
 `input` group membership, `evdev`, or `uinput` access is required. The app never disables Wayland
 security controls. Linux custom model import, clipboard restoration, text
-editor output, start/stop sounds, and autostart are not implemented yet. The floating indicator
+editor output and start/stop sounds are not implemented yet. The floating indicator
 requires `gtk-layer-shell` on a Wayland compositor supporting layer-shell; GNOME does not
 provide that protocol. Its availability is shown in General.
 
@@ -241,7 +262,8 @@ Updating the app preserves settings, models, snippets, and history; it does not 
 
 Uninstall the local build by removing the app’s executable directory, desktop entry, and icon
 listed above. Settings and models remain until you deliberately delete their separate directories.
-There is no service or launch-at-login entry to remove.
+If launch at login was enabled, also remove `~/.config/autostart/io.github.whisperfree.desktop`
+(or the corresponding file below `$XDG_CONFIG_HOME`). Disabling it writes a `Hidden=true` override.
 
 ## Troubleshooting
 

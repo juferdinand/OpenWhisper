@@ -21,8 +21,10 @@ pub struct Preferences {
     pub output: String,
     pub hold_to_record: bool,
     pub gpu: bool,
+    pub gpu_configured: bool,
     pub keep_history: bool,
     pub show_idle_overlay: bool,
+    pub launch_at_login: bool,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -37,9 +39,11 @@ impl Default for Preferences {
             snippets: vec![],
             output: "clipboard".into(),
             hold_to_record: false,
-            gpu: false,
+            gpu: true,
+            gpu_configured: true,
             keep_history: true,
             show_idle_overlay: false,
+            launch_at_login: false,
         }
     }
 }
@@ -107,9 +111,16 @@ impl Paths {
         // Existing installations must not return to onboarding after an update.
         if value.get("setup_completed").is_none() {
             prefs.setup_completed = true;
-            self.save(&prefs)?;
+        }
+        // Public releases through 0.2.1 were CPU-only and exposed no GPU preference.
+        if value.get("gpu_configured").is_none() {
+            prefs.gpu = true;
+            prefs.gpu_configured = true;
         }
         prefs.validate()?;
+        if value.get("setup_completed").is_none() || value.get("gpu_configured").is_none() {
+            self.save(&prefs)?;
+        }
         Ok(prefs)
     }
     pub fn save(&self, prefs: &Preferences) -> Result<(), String> {
@@ -167,6 +178,22 @@ mod tests {
             models: config.join("models"),
             config,
         }
+    }
+    #[test]
+    fn cpu_only_installations_enable_gpu_but_a_new_cpu_choice_survives() {
+        let paths = isolated();
+        fs::write(
+            paths.config.join("settings.json"),
+            r#"{"gpu":false,"setup_completed":true}"#,
+        )
+        .unwrap();
+        let mut prefs = paths.load().unwrap();
+        assert!(prefs.gpu);
+        assert!(prefs.gpu_configured);
+        prefs.gpu = false;
+        paths.save(&prefs).unwrap();
+        assert!(!paths.load().unwrap().gpu);
+        fs::remove_dir_all(paths.config).unwrap();
     }
     #[test]
     fn fresh_setup_and_language_survive_restarts() {

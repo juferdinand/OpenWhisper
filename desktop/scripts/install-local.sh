@@ -19,6 +19,8 @@ install -Dm755 "$BINARY" "$TARGET"
 install -Dm644 "$ROOT/../LICENSE" "$DEST/LICENSE"
 install -Dm644 "$ROOT/THIRD_PARTY_NOTICES.md" "$DEST/THIRD_PARTY_NOTICES.md"
 install -Dm644 "$ROOT/public/fonts/LICENSE.txt" "$DEST/Inter-LICENSE.txt"
+install -d "$DEST/licenses"
+install -m644 "$ROOT"/licenses/* "$DEST/licenses/"
 install -Dm644 "$ROOT/src-tauri/icons/icon.png" "$DATA/icons/hicolor/256x256/apps/io.github.whisperfree.png"
 python3 - "$TARGET" "$DATA/applications/io.github.whisperfree.desktop" "$APPIMAGE_MODE" <<'PY'
 from pathlib import Path

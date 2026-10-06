@@ -38,7 +38,8 @@ or subscription. The project is open source under the MIT License.
 - `desktop/src-tauri/`: Linux Rust backend (CPAL audio, portals, clipboard, downloads, and history).
 - `desktop/crates/core/`: text processing against the same shared fixtures as Swift.
 - `desktop/crates/speech/` and `desktop/native/`: pinned whisper.cpp / Parakeet C++ bridge.
-  Speech contexts stay on one worker thread. CPU is the baseline; Vulkan is experimental.
+  Speech contexts stay on one worker thread. Packages include Vulkan with a portable CPU fallback;
+  detect real devices at runtime and preserve a manual CPU choice. Khronos headers are checksum-pinned.
 - `desktop/public/app-icon.png` and `src-tauri/icons/icon.png`: exact 256px PNG from the existing
   Mac ICNS. Do not redesign one platform's logo independently. Inter is bundled with its license.
 - `docs/LINUX.md`: build dependencies, support matrix, validation evidence, and remaining tests.
@@ -49,7 +50,7 @@ or subscription. The project is open source under the MIT License.
 
 ```bash
 make linux-test                   # Check Linux frontend, Rust tests, Clippy, and shared assets
-make linux                        # Build the Linux CPU preview
+make linux                        # Build Linux with Vulkan and CPU fallback
 make linux-install                # Install the local Linux build for this user
 cd desktop && npm run test:ui      # Shared UI tests (install Playwright Chromium first)
 make test                         # Run Swift tests against shared/test-vectors.json
@@ -82,6 +83,9 @@ For documentation-only changes, check content, links, and formatting.
 - **Recording duration:** the user explicitly requires no fixed time limit. Do not reintroduce
   an automatic cutoff or truncate the audio buffer. Record until explicit stop/cancel; explain
   that recordings stay in RAM and grow with duration.
+- **Settings:** persist edited fields as patches against the current host state, and keep switch DOM
+  nodes stable while saving. Login-item pending approval is distinct from disabled on macOS.
+  Linux autostart must point to the installed AppImage, never its extraction directory.
 - **Linux app identity:** install and launch `io.github.whisperfree.desktop` so GTK, KDE's taskbar,
   and portals agree on the application identity. Starting from a terminal can associate portal
   permissions with that terminal. Preserve the package-specific bundler config and desktop template.

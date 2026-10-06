@@ -170,6 +170,13 @@ controls and native menus. The choice is saved independently of the speech-recog
 Project documentation remains in English. Setup appears on a fresh installation until you choose
 **Finish setup**, then disappears. Existing installations migrate without reopening onboarding.
 
+New builds after 0.2.1 add Linux Vulkan GPU recognition and **General → Launch at login** on both
+platforms. Compatible GPUs are used by default, with CPU fallback; a manual CPU choice is retained.
+Whisper Tiny and Parakeet v3 q4 have been checked on an NVIDIA RTX 3060. Other GPUs need separate
+validation; see [Linux GPU and autostart details](docs/LINUX.md#build-from-source). The published
+0.2.1 Linux packages are CPU-only. On macOS, Metal acceleration is already enabled; pending login-item
+approval is shown separately and can be cancelled from the app.
+
 ## Your first dictation (macOS)
 
 1. Open WhisperFree and follow the first-run setup. Click **Finish setup** when ready; it stays hidden after restarts and updates. Permissions and shortcuts remain available in **General**.

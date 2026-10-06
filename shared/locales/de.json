@@ -247,5 +247,14 @@
   "Transcript ready; history could not be saved: {error}": "Transkript bereit; der Verlauf konnte nicht gespeichert werden: {error}",
   "Could not monitor the shortcut session: {error}. Enable it again in Settings.": "Die Tastenkürzel-Sitzung konnte nicht überwacht werden: {error}. Aktiviere sie erneut in den Einstellungen.",
   "Open your desktop's shortcut settings to change the trigger. The portal could not open them: {error}": "Öffne die Tastenkürzel-Einstellungen deines Desktops, um den Auslöser zu ändern. Das Portal konnte sie nicht öffnen: {error}",
-  "Microphone unavailable or changed. Check your input device and try again.": "Mikrofon nicht verfügbar oder geändert. Prüfe dein Eingabegerät und versuche es erneut."
+  "Microphone unavailable or changed. Check your input device and try again.": "Mikrofon nicht verfügbar oder geändert. Prüfe dein Eingabegerät und versuche es erneut.",
+  "Allow WhisperFree in System Settings to finish enabling launch at login.": "Erlaube WhisperFree in den Systemeinstellungen, um den Start bei Anmeldung zu aktivieren.",
+  "Metal GPU acceleration (CPU fallback)": "Metal-GPU-Beschleunigung (CPU als Rückfalloption)",
+  "System": "System",
+  "There is no fixed recording limit. Stop or cancel when you are finished.": "Es gibt kein festes Aufnahmelimit. Stoppe oder verwirf die Aufnahme, wenn du fertig bist.",
+  "Use GPU acceleration when available": "GPU-Beschleunigung verwenden, wenn verfügbar",
+  "GPU support is not included in this build. Install a current Linux package.": "Dieser Build enthält keine GPU-Unterstützung. Installiere ein aktuelles Linux-Paket.",
+  "The GPU could not complete recognition. The recording was processed on the CPU.": "Die GPU konnte die Erkennung nicht abschließen. Die Aufnahme wurde mit der CPU verarbeitet.",
+  "No compatible GPU detected. CPU recognition remains available. Check your Vulkan driver and restart the app.": "Keine kompatible GPU erkannt. Die CPU-Erkennung bleibt verfügbar. Prüfe deinen Vulkan-Treiber und starte die App neu.",
+  "Vulkan acceleration is available. Recoverable GPU errors fall back to the CPU.": "Vulkan-Beschleunigung ist verfügbar. Bei behebbaren GPU-Fehlern übernimmt die CPU."
 }

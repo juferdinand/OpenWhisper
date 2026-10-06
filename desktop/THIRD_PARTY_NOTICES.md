@@ -41,3 +41,11 @@ Source: https://github.com/rsms/inter/tree/v4.1
 
 The unmodified Inter Variable font is bundled in public/fonts/InterVariable.woff2.
 Its full SIL Open Font License is included in public/fonts/LICENSE.txt.
+
+## Vulkan and SPIR-V headers
+
+Vulkan builds use pinned Khronos Vulkan-Headers and SPIRV-Headers from
+https://github.com/KhronosGroup/Vulkan-Headers and https://github.com/KhronosGroup/SPIRV-Headers.
+The exact revisions and checksums are in native/vulkan-headers.json. Upstream MIT, Apache-2.0,
+and CC-BY-4.0 notices are included in licenses/ and packaged with the app. The distribution's
+Vulkan loader and graphics driver retain their own licenses; no proprietary GPU driver is bundled.

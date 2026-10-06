@@ -1,4 +1,5 @@
 mod audio;
+mod autostart;
 mod integration;
 mod models;
 mod overlay;
@@ -37,6 +38,9 @@ struct Snapshot {
     shortcut: Option<String>,
     paste_ready: bool,
     gpu_available: bool,
+    gpu_supported: bool,
+    gpu_device: Option<String>,
+    gpu_fallback: bool,
     overlay_available: bool,
     download: Option<String>,
     progress: f64,
@@ -53,6 +57,7 @@ enum WorkerCommand {
 }
 
 struct Runtime {
+    autostart: autostart::Autostart,
     updater: updates::Service,
     tray_items: Mutex<Vec<tauri::menu::MenuItem<tauri::Wry>>>,
     state: Mutex<Snapshot>,
@@ -95,7 +100,11 @@ impl Runtime {
 
 #[tauri::command]
 fn get_state(runtime: tauri::State<'_, Arc<Runtime>>) -> Snapshot {
-    runtime.state.lock().unwrap().clone()
+    let mut state = runtime.state.lock().unwrap();
+    if let Ok(enabled) = runtime.autostart.enabled() {
+        state.preferences.launch_at_login = enabled;
+    }
+    state.clone()
 }
 #[tauri::command]
 fn toggle_recording(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
@@ -114,16 +123,46 @@ fn cancel_recording(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), Strin
 #[tauri::command]
 fn save_settings(
     runtime: tauri::State<'_, Arc<Runtime>>,
-    mut preferences: Preferences,
-) -> Result<(), String> {
-    // Serialize history removal with the worker's writes when opting out.
+    preferences: Preferences,
+) -> Result<Snapshot, String> {
+    update_preferences(&runtime, |_| Ok(preferences))
+}
+#[tauri::command]
+fn save_preferences(
+    runtime: tauri::State<'_, Arc<Runtime>>,
+    changes: serde_json::Map<String, serde_json::Value>,
+) -> Result<Snapshot, String> {
+    update_preferences(&runtime, |current| {
+        let mut value = serde_json::to_value(current).map_err(|e| e.to_string())?;
+        for (key, change) in changes {
+            if !value.as_object().unwrap().contains_key(&key)
+                || ["setup_completed", "gpu_configured"].contains(&key.as_str())
+            {
+                return Err("Unknown or read-only preference".into());
+            }
+            value[&key] = change;
+        }
+        serde_json::from_value(value).map_err(|e| e.to_string())
+    })
+}
+fn update_preferences(
+    runtime: &Runtime,
+    change: impl FnOnce(&Preferences) -> Result<Preferences, String>,
+) -> Result<Snapshot, String> {
+    // Merge against the current state under the same lock used for saving and history writes.
     let mut state = runtime.state.lock().unwrap();
+    state.preferences.launch_at_login = runtime.autostart.enabled()?;
+    let mut preferences = change(&state.preferences)?;
     preferences.setup_completed |= state.preferences.setup_completed;
     runtime.paths.save(&preferences)?;
-    if !preferences.keep_history {
-        runtime.paths.save_history(&[])?;
+    if preferences.launch_at_login != state.preferences.launch_at_login {
+        if let Err(error) = runtime.autostart.set(preferences.launch_at_login) {
+            runtime.paths.save(&state.preferences)?;
+            return Err(error);
+        }
     }
     if !preferences.keep_history {
+        runtime.paths.save_history(&[])?;
         state.history.clear();
     }
     state.preferences = preferences;
@@ -135,15 +174,15 @@ fn save_settings(
         &snapshot.status,
         snapshot.preferences.show_idle_overlay,
     );
-    localize_tray(&runtime, &snapshot.preferences.ui_language);
-    let _ = runtime.app.emit("state", snapshot);
-    Ok(())
+    localize_tray(runtime, &snapshot.preferences.ui_language);
+    let _ = runtime.app.emit("state", snapshot.clone());
+    Ok(snapshot)
 }
 #[tauri::command]
 fn complete_setup(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
     let mut preferences = runtime.state.lock().unwrap().preferences.clone();
     preferences.setup_completed = true;
-    save_settings(runtime, preferences)
+    save_settings(runtime, preferences).map(|_| ())
 }
 #[tauri::command]
 fn refresh_microphones(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
@@ -251,6 +290,7 @@ fn main() {
             toggle_recording,
             cancel_recording,
             save_settings,
+            save_preferences,
             complete_setup,
             updates::check_updates,
             updates::install_update,
@@ -306,10 +346,12 @@ fn main() {
                 false
             });
             let paths = Paths::new()?;
-            let (preferences, message) = match paths.load() {
+            let autostart = autostart::Autostart::new(app.handle())?;
+            let (mut preferences, message) = match paths.load() {
                 Ok(p) => (p, "Choose a model, then make yourself heard.".into()),
                 Err(e) => (Preferences::default(), e),
             };
+            preferences.launch_at_login = autostart.enabled().unwrap_or(false);
             let installed = catalog()
                 .into_iter()
                 .filter(|m| paths.models.join(&m.file).is_file())
@@ -322,6 +364,7 @@ fn main() {
             };
             let (commands, receiver) = mpsc::channel();
             let state = Arc::new(Runtime {
+                autostart,
                 updater: updates::Service::default(),
                 tray_items: Mutex::new(vec![]),
                 state: Mutex::new(Snapshot {
@@ -353,7 +396,10 @@ fn main() {
                     paste_portal: false,
                     shortcut: None,
                     paste_ready: false,
-                    gpu_available: cfg!(feature = "vulkan"),
+                    gpu_available: false,
+                    gpu_supported: cfg!(feature = "vulkan"),
+                    gpu_device: None,
+                    gpu_fallback: false,
                     overlay_available,
                     download: None,
                     progress: 0.0,

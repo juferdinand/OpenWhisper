@@ -40,6 +40,7 @@ interface MacState {
   editor: string;
   recommended: string[];
   updates_configured: boolean;
+  launch_at_login_pending?: boolean;
 }
 interface UpdateState {
   configured: boolean;
@@ -71,6 +72,9 @@ interface State {
   shortcut: string | null;
   paste_ready: boolean;
   gpu_available: boolean;
+  gpu_supported?: boolean;
+  gpu_device?: string | null;
+  gpu_fallback?: boolean;
   overlay_available?: boolean;
   download: string | null;
   progress: number;
@@ -85,6 +89,9 @@ let dirty = false;
 let portalBusy = false;
 let contentKey = "";
 let shellKey = "";
+let renderedTab: Tab | undefined;
+let preferenceQueue = Promise.resolve();
+let pendingPreferences = 0;
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const overlay =
   new URLSearchParams(location.search).has("overlay") ||
@@ -124,8 +131,8 @@ const section = (title: string, body: string, note = "") =>
   `<section>${title ? `<h2>${title}</h2>` : ""}<div class="group">${body}</div>${note ? `<p class="section-note">${note}</p>` : ""}</section>`;
 const row = (label: string, control: string) =>
   `<div class="row"><span>${label}</span><div class="control">${control}</div></div>`;
-const toggle = (label: string, name: string, checked: boolean) =>
-  `<label class="row"><span>${label}</span><input class="switch" type="checkbox" data-pref="${name}" ${checked ? "checked" : ""}></label>`;
+const toggle = (label: string, name: string, checked: boolean, disabled = false) =>
+  `<label class="row"><span>${label}</span><input class="switch" type="checkbox" data-pref="${name}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}></label>`;
 const languages = () =>
   `<select data-pref="language" aria-label="${esc(t("Language"))}">${[
     ["auto", t("Detect automatically")],
@@ -167,10 +174,44 @@ async function command(
     return false;
   }
 }
-async function preference(name: string, value: unknown) {
-  await command("save_settings", {
-    preferences: { ...state.preferences, [name]: value },
+// Send only the edited fields. Serializing writes also keeps delayed host replies in order.
+async function savePreferences(changes: Partial<Preferences>): Promise<boolean> {
+  pendingPreferences++;
+  const saved = preferenceQueue.then(async () => {
+    try {
+      state = await invoke<State>("save_preferences", { changes });
+      return true;
+    } catch (error) {
+      notice(String(error));
+      try { state = await invoke<State>("get_state"); } catch { /* Keep the last confirmed state. */ }
+      return false;
+    } finally {
+      pendingPreferences--;
+      if (!pendingPreferences) render();
+    }
   });
+  preferenceQueue = saved.then(() => {});
+  return saved;
+}
+async function preference(name: string, value: unknown) {
+  return savePreferences({ [name]: value });
+}
+function syncPreferenceControls() {
+  if (pendingPreferences) return;
+  document.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-pref]").forEach((input) => {
+    const value = state.preferences[input.dataset.pref as keyof Preferences];
+    if (input instanceof HTMLInputElement && input.type === "checkbox") input.checked = !!value;
+    else if (input instanceof HTMLInputElement && input.type === "radio") input.checked = input.value === value;
+    else input.value = String(value ?? "");
+  });
+  const vocabulary = document.querySelector<HTMLTextAreaElement>("#vocabulary");
+  if (vocabulary && !dirty) vocabulary.value = state.preferences.vocabulary;
+  const recognition = document.querySelector("#recognition-backend");
+  if (recognition) recognition.textContent = recognitionBackend();
+}
+function recognitionBackend() {
+  return state.gpu_available && state.preferences.gpu && !state.gpu_fallback
+    ? `GPU · ${state.gpu_device ?? "Vulkan"}` : "CPU";
 }
 
 const microphoneIcon =
@@ -260,14 +301,20 @@ function render() {
   document
     .querySelectorAll<HTMLButtonElement>("[data-tab]")
     .forEach((b) => b.classList.toggle("selected", b.dataset.tab === tab));
+  syncPreferenceControls();
   if (dirty) {
     contentKey = "";
     return;
   }
+  if (pendingPreferences) return;
   const nextKey = JSON.stringify([
     tab,
-    state.status,
-    state.preferences,
+    tab === "general" ? null : state.status,
+    // Checkbox changes must not replace the focused row or move its click target.
+    tab === "general"
+      ? { ui_language: state.preferences.ui_language, setup_completed: state.preferences.setup_completed,
+          model: state.preferences.model, output: state.preferences.output }
+      : state.preferences,
     state.installed,
     state.microphones,
     state.shortcut_portal,
@@ -280,6 +327,8 @@ function render() {
     state.transcript,
     state.macos,
     state.updates,
+    state.overlay_available,
+    state.gpu_supported, state.gpu_available, state.gpu_device, state.gpu_fallback,
     portalBusy,
   ]);
   if (contentKey === nextKey) return;
@@ -299,6 +348,9 @@ function render() {
       ),
     );
   const content = document.querySelector<HTMLDivElement>("#content")!;
+  const main = document.querySelector<HTMLElement>("main")!;
+  const scrollTop = renderedTab === tab ? main.scrollTop : 0;
+  renderedTab = tab;
   const p = state.preferences;
   if (tab === "setup") {
     const step = (
@@ -432,14 +484,7 @@ function render() {
       ) +
       section(
         t("Appearance & system"),
-        isMac()
-          ? toggle(
-              t("Show overlay when idle"),
-              "show_idle_overlay",
-              !!p.show_idle_overlay,
-            ) +
-              toggle(t("Launch at login"), "launch_at_login", !!p.launch_at_login)
-          : (state.overlay_available
+        (isMac() || state.overlay_available
               ? toggle(
                   t("Show overlay when idle"),
                   "show_idle_overlay",
@@ -449,7 +494,14 @@ function render() {
                   t("Floating recording indicator"),
                   `<span class="warning">${esc(t("Not supported by this desktop"))}</span>`,
                 )) +
-              row(
+          toggle(t("Launch at login"), "launch_at_login", !!p.launch_at_login) +
+          (state.macos?.launch_at_login_pending
+            ? `<div class="row approval"><span>${esc(t("Allow WhisperFree in System Settings to finish enabling launch at login."))}</span><button data-command="open_login_settings">${esc(t("System Settings"))}</button></div>`
+            : "") +
+          (isMac()
+            ? row(t("System"), `<span class="secondary">${esc(state.desktop)} · macOS</span>`) +
+              row(t("Recognition"), t("Metal GPU acceleration (CPU fallback)"))
+            : row(
                 t("Desktop"),
                 `<span class="secondary">${esc(state.desktop)} · ${esc(state.session)}</span>`,
               ) +
@@ -467,12 +519,18 @@ function render() {
                 t("Keyboard portal"),
                 state.paste_portal ? t("Available") : t("Unavailable"),
               ) +
-              (state.gpu_available
-                ? toggle(t("Use Vulkan acceleration (experimental)"), "gpu", p.gpu)
-                : row(t("Recognition"), "CPU")),
+              row(t("Recognition"), `<span id="recognition-backend">${esc(recognitionBackend())}</span>`) +
+              toggle(t("Use GPU acceleration when available"), "gpu", p.gpu, !state.gpu_supported) +
+              `<p class="secondary">${esc(t(!state.gpu_supported
+                ? "GPU support is not included in this build. Install a current Linux package."
+                : state.gpu_fallback
+                  ? "The GPU could not complete recognition. The recording was processed on the CPU."
+                  : !state.gpu_available
+                    ? "No compatible GPU detected. CPU recognition remains available. Check your Vulkan driver and restart the app."
+                    : "Vulkan acceleration is available. Recoverable GPU errors fall back to the CPU."))}</p>`),
         isMac()
           ? ""
-          : t("There is no fixed recording limit. Stop or cancel when you are finished. Launch at login is not yet available on Linux."),
+          : t("There is no fixed recording limit. Stop or cancel when you are finished."),
       );
     const vocabulary =
       document.querySelector<HTMLTextAreaElement>("#vocabulary")!;
@@ -485,9 +543,7 @@ function render() {
       .querySelector("#save-vocabulary")!
       .addEventListener("click", async () => {
         if (
-          await command("save_settings", {
-            preferences: { ...state.preferences, vocabulary: vocabulary.value },
-          })
+          await savePreferences({ vocabulary: vocabulary.value })
         ) {
           dirty = false;
           render();
@@ -592,9 +648,7 @@ function render() {
         enabled: r.querySelector<HTMLInputElement>("[name=enabled]")!.checked,
       }));
       if (
-        await command("save_settings", {
-          preferences: { ...state.preferences, snippets },
-        })
+        await savePreferences({ snippets })
       ) {
         dirty = false;
         render();
@@ -673,6 +727,7 @@ function render() {
             `<p>${esc(state.desktop)} · ${esc(state.session)}</p><p class="secondary">${esc(t("CachyOS with KDE Plasma on Wayland is the first test target. Other distributions and desktops require separate validation. See the README support matrix."))}</p>`,
           ));
   }
+  main.scrollTop = scrollTop;
   content
     .querySelectorAll<HTMLButtonElement>("[data-command]")
     .forEach((b) => (b.onclick = () => void command(b.dataset.command!)));

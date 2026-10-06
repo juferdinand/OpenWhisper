@@ -44,7 +44,7 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libgtk-layer-shell0 patchelf cmake ninja-build ffmpeg xvfb dbus-x11
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libgtk-layer-shell0 libvulkan-dev glslc patchelf cmake ninja-build ffmpeg xvfb dbus-x11
           rustup toolchain install 1.99.0 --profile minimal --component rustfmt,clippy
           rustup default 1.99.0
       - name: Cache native source and test model
@@ -82,6 +82,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: python3 scripts/prepare-linux-update.py
+      - name: Verify CPU fallback in the Vulkan build
+        env:
+          GGML_DISABLE_VULKAN: '1'
+        run: bash scripts/test-recognition.sh --release --features vulkan
       - name: Verify and checksum packages
         run: |
           dpkg-deb --info target/release/bundle/deb/*.deb

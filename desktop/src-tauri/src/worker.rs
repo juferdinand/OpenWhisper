@@ -13,6 +13,11 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
             return;
         }
     };
+    let gpu = engine.gpu_name();
+    runtime.update(|s| {
+        s.gpu_available = gpu.is_some();
+        s.gpu_device = gpu;
+    });
     let mut recording: Option<(audio::Capture, Instant, crate::Preferences)> = None;
     loop {
         let command = match commands.recv_timeout(Duration::from_millis(200)) {
@@ -76,12 +81,22 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
                     return Ok(String::new());
                 }
                 let model = catalog().into_iter().find(|m| m.id == prefs.model).unwrap();
-                engine.load(
-                    &runtime.paths.models.join(model.file),
-                    model.family == "parakeet",
-                    prefs.gpu,
-                )?;
-                let raw = engine.transcribe(&samples, &prefs.language, &prefs.vocabulary)?;
+                let path = runtime.paths.models.join(model.file);
+                let use_gpu = prefs.gpu && runtime.state.lock().unwrap().gpu_available;
+                runtime.update(|s| s.gpu_fallback = false);
+                let result = engine
+                    .load(&path, model.family == "parakeet", use_gpu)
+                    .and_then(|_| engine.transcribe(&samples, &prefs.language, &prefs.vocabulary));
+                let raw = match result {
+                    Ok(text) => text,
+                    Err(_) if use_gpu => {
+                        // Keep the captured audio and retry recoverable GPU errors on the CPU.
+                        runtime.update(|s| s.gpu_fallback = true);
+                        engine.load(&path, model.family == "parakeet", false)?;
+                        engine.transcribe(&samples, &prefs.language, &prefs.vocabulary)?
+                    }
+                    Err(error) => return Err(error),
+                };
                 Ok::<_, String>(whisperfree_core::process(
                     &raw,
                     &prefs.vocabulary,

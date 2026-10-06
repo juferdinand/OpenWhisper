@@ -123,6 +123,7 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
                     """)
                 guard valid as? Bool == true else { throw UIError.message("Shared UI did not initialize correctly") }
                 fputs("Native WebKit UI is ready.\n", stderr)
+                try await smokeTestSwitches()
                 if let directory = ProcessInfo.processInfo.environment["WF_UI_SNAPSHOT_DIR"] {
                     let folder = URL(fileURLWithPath: directory, isDirectory: true)
                     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -176,6 +177,34 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
             }
         }
         throw UIError.message("WebKit content recovery timed out")
+    }
+
+    private func smokeTestSwitches() async throws {
+        let initialOverlay = UserDefaults.standard.bool(forKey: Prefs.showIdleOverlay)
+        let initialLogin = LaunchAtLogin.isEnabled
+        send("navigate", value: "general")
+        try await Task.sleep(nanoseconds: 200_000_000)
+        try await webView.evaluateJavaScript("""
+            const idle = document.querySelector('[data-pref="show_idle_overlay"]');
+            idle.scrollIntoView({block: 'center'});
+            window.__switchY = idle.getBoundingClientRect().y;
+            window.__originalSwitch = idle;
+            idle.closest('label').click();
+            """)
+        try await Task.sleep(nanoseconds: 500_000_000)
+        guard UserDefaults.standard.bool(forKey: Prefs.showIdleOverlay) != initialOverlay,
+              LaunchAtLogin.isEnabled == initialLogin,
+              (try await webView.evaluateJavaScript("window.__originalSwitch.isConnected && Math.abs(document.querySelector('[data-pref=show_idle_overlay]').getBoundingClientRect().y - window.__switchY) < 1")) as? Bool == true else {
+            throw UIError.message("The idle overlay switch changed another setting or moved after saving")
+        }
+        try await webView.evaluateJavaScript("document.querySelector('[data-pref=show_idle_overlay]').closest('label').click()")
+        try await Task.sleep(nanoseconds: 500_000_000)
+        guard UserDefaults.standard.bool(forKey: Prefs.showIdleOverlay) == initialOverlay else {
+            throw UIError.message("The idle overlay switch could not be disabled again")
+        }
+        fputs("Native WebKit independent switch and scroll-position test passed.\n", stderr)
+        send("navigate", value: "about")
+        try await Task.sleep(nanoseconds: 200_000_000)
     }
 
     private func saveSnapshot(to file: URL) async throws {
@@ -233,6 +262,17 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
         case "toggle_recording": state.toggle()
         case "cancel_recording": state.cancel()
         case "complete_setup": UserDefaults.standard.set(true, forKey: Prefs.setupCompleted)
+        case "open_login_settings": LaunchAtLogin.openSettings()
+        case "save_preferences":
+            guard let changes = args["changes"] as? [String: Any],
+                  var values = snapshot()["preferences"] as? [String: Any],
+                  changes.keys.allSatisfy({ values[$0] != nil && $0 != "setup_completed" }) else {
+                throw UIError.message("Unknown or read-only preference")
+            }
+            values.merge(changes) { _, new in new }
+            let preferences = try JSONDecoder().decode(UISettings.self, from: JSONSerialization.data(withJSONObject: values))
+            try save(preferences)
+            return snapshot()
         case "save_settings":
             guard let value = args["preferences"] else { throw UIError.message("Settings are missing") }
             let preferences = try JSONDecoder().decode(UISettings.self, from: JSONSerialization.data(withJSONObject: value))
@@ -365,7 +405,8 @@ final class SharedSettingsView: NSObject, WKScriptMessageHandlerWithReply, WKNav
             "macos": ["microphone_allowed": Permissions.microphone == .authorized, "recording_shortcut": HotkeyService.shared.isRecording,
                       "shortcut_hint": HotkeyService.shared.recordingHint ?? "Press a key, shortcut, or mouse button. Escape cancels.",
                       "editor": TextInjector.appName(at: TextInjector.editorURL), "recommended": ModelManager.recommendations.map { $0.model.id },
-                      "updates_configured": UpdateService.shared.repository != nil],
+                      "updates_configured": UpdateService.shared.repository != nil,
+                      "launch_at_login_pending": LaunchAtLogin.requiresApproval],
         ]
     }
 

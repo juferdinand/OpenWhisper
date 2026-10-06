@@ -1,10 +1,12 @@
 # Entry point for all platforms. See each platform directory for details.
 .PHONY: mac mac-install linux linux-test linux-run linux-install test clean
+LINUX_FEATURES ?= custom-protocol,vulkan
 
 linux:
 	bash desktop/scripts/fetch-native.sh
+	python3 desktop/scripts/fetch-vulkan-headers.py
 	cd desktop && npm ci && npm run build
-	cargo build --locked --release --manifest-path desktop/Cargo.toml -p whisperfree-desktop --features custom-protocol
+	cargo build --locked --release --manifest-path desktop/Cargo.toml -p whisperfree-desktop --features $(LINUX_FEATURES)
 
 linux-test:
 	bash desktop/scripts/fetch-native.sh

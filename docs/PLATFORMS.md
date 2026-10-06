@@ -31,7 +31,8 @@ and platform-specific permission dialogs are controlled by the operating system.
 | Clipboard helper | NSPasteboard | `wl-copy` on Wayland, `xclip` on X11 |
 | Background operation | Menu bar app | AppIndicator tray when the desktop displays it |
 | Overlay | Shared floating UI in non-activating NSPanel | Shared floating UI; non-focusable layer-shell on compatible Wayland compositors, floating window on X11 |
-| GPU | Metal | Optional, unverified Vulkan build; CPU is the tested baseline |
+| GPU | Metal | Vulkan in new builds; RTX 3060 tested with both engines; CPU fallback |
+| Launch at login | ServiceManagement, including pending approval | Per-user XDG autostart in new builds |
 | Updates | Release ZIP with signing-identity verification | Signed, version-bound AppImage/Debian updates (0.2.1+) |
 
 Linux does not use unrestricted device input access, root helpers, or input-group membership.

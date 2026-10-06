@@ -17,12 +17,24 @@ fn main() {
         .define("GGML_OPENMP", "OFF")
         .define("GGML_BACKEND_DL", "OFF")
         .define("GGML_CCACHE", "OFF");
-    // A portable CPU baseline. GPU acceleration is an optional, separately tested build.
+    // Keep the CPU fallback portable even when GPU acceleration is included.
     for flag in ["SSE42", "AVX", "AVX2", "BMI2", "FMA", "F16C"] {
         config.define(format!("GGML_{flag}"), "OFF");
     }
     let vulkan = env::var_os("CARGO_FEATURE_VULKAN").is_some();
     config.define("GGML_VULKAN", if vulkan { "ON" } else { "OFF" });
+    if vulkan {
+        let headers = desktop.join("vendor/vulkan");
+        assert!(
+            headers.join(".source-pins").is_file(),
+            "Run python3 desktop/scripts/fetch-vulkan-headers.py first"
+        );
+        config.define("Vulkan_INCLUDE_DIR", headers.join("include"));
+        config.define(
+            "SPIRV-Headers_DIR",
+            headers.join("share/cmake/SPIRV-Headers"),
+        );
+    }
     let built = config.build();
     cc::Build::new()
         .cpp(true)
@@ -53,5 +65,9 @@ fn main() {
     println!(
         "cargo:rerun-if-changed={}",
         desktop.join("native/whisper-source.json").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        desktop.join("native/vulkan-headers.json").display()
     );
 }

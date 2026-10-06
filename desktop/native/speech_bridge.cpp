@@ -1,9 +1,28 @@
 #include "whisper.h"
 #include "parakeet.h"
+#include "ggml-backend.h"
 #include <algorithm>
 #include <exception>
 #include <string>
 #include <thread>
+#include <cstring>
+
+static int gpu_device(const char ** description = nullptr) {
+    int index = 0;
+    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+        auto device = ggml_backend_dev_get(i);
+        auto type = ggml_backend_dev_type(device);
+        if (type != GGML_BACKEND_DEVICE_TYPE_GPU && type != GGML_BACKEND_DEVICE_TYPE_IGPU) continue;
+        const char * name = ggml_backend_dev_description(device);
+        // Software Vulkan implementations are CPU renderers, not GPU acceleration.
+        if (!std::strstr(name, "llvmpipe") && !std::strstr(name, "lavapipe") && !std::strstr(name, "SwiftShader")) {
+            if (description) *description = name;
+            return index;
+        }
+        ++index;
+    }
+    return -1;
+}
 
 // The owning Rust worker serializes every call and copies returned strings before the next call.
 struct SpeechContext {
@@ -24,6 +43,13 @@ struct SpeechContext {
 };
 
 extern "C" {
+const char * wf_speech_gpu_name() noexcept {
+    try {
+        const char * name = nullptr;
+        gpu_device(&name);
+        return name;
+    } catch (...) { return nullptr; }
+}
 void * wf_speech_create() noexcept {
     try { return new SpeechContext(); } catch (...) { return nullptr; }
 }
@@ -32,16 +58,20 @@ const char * wf_speech_error(void * pointer) noexcept { return static_cast<Speec
 int wf_speech_load(void * pointer, const char * path, bool is_parakeet, bool gpu) noexcept {
     auto & ctx = *static_cast<SpeechContext *>(pointer);
     try {
+        const int device = gpu ? gpu_device() : -1;
+        gpu = gpu && device >= 0;
         if (ctx.path == path && ctx.gpu == gpu && (ctx.whisper || ctx.parakeet)) return 0;
         ctx.unload();
         ctx.error.clear();
         if (is_parakeet) {
             auto parameters = parakeet_context_default_params();
             parameters.use_gpu = gpu;
+            parameters.gpu_device = std::max(0, device);
             ctx.parakeet = parakeet_init_from_file_with_params(path, parameters);
         } else {
             auto parameters = whisper_context_default_params();
             parameters.use_gpu = gpu;
+            parameters.gpu_device = std::max(0, device);
             ctx.whisper = whisper_init_from_file_with_params(path, parameters);
         }
         if (!ctx.whisper && !ctx.parakeet) {

@@ -35,16 +35,30 @@ enum Permissions {
     }
 }
 
-enum LaunchAtLogin {
-    static var isEnabled: Bool {
-        SMAppService.mainApp.status == .enabled
-    }
+protocol LoginItemService {
+    var status: SMAppService.Status { get }
+    func register() throws
+    func unregister() throws
+}
+extension SMAppService: LoginItemService {}
 
-    static func set(_ enabled: Bool) throws {
-        if enabled {
-            try SMAppService.mainApp.register()
-        } else {
-            try SMAppService.mainApp.unregister()
-        }
+/// Registered-but-unapproved items must remain removable from the app.
+final class LoginItemController {
+    private let service: LoginItemService
+    init(service: LoginItemService) { self.service = service }
+    var isRequested: Bool { service.status == .enabled || service.status == .requiresApproval }
+    var requiresApproval: Bool { service.status == .requiresApproval }
+    func set(_ enabled: Bool) throws {
+        guard enabled != isRequested else { return }
+        if enabled { try service.register() }
+        else { try service.unregister() }
     }
+}
+
+enum LaunchAtLogin {
+    static let controller = LoginItemController(service: SMAppService.mainApp)
+    static var isEnabled: Bool { controller.isRequested }
+    static var requiresApproval: Bool { controller.requiresApproval }
+    static func set(_ enabled: Bool) throws { try controller.set(enabled) }
+    static func openSettings() { SMAppService.openSystemSettingsLoginItems() }
 }

@@ -13,7 +13,7 @@ if ! [[ -f "$MODEL" ]] || ! printf '%s  %s\n' "$HASH" "$MODEL" | sha256sum -c - 
 fi
 ffmpeg -hide_banner -loglevel error -y -i "$ROOT/vendor/whisper.cpp/samples/jfk.wav" \
   -f f32le -ar 16000 -ac 1 "$TEST/jfk.f32"
-cargo run --locked --manifest-path "$ROOT/Cargo.toml" -p whisperfree-speech --example transcribe -- \
-  "$MODEL" "$TEST/jfk.f32" whisper en > "$TEST/transcript.txt"
+cargo run --locked --manifest-path "$ROOT/Cargo.toml" -p whisperfree-speech --example transcribe "$@" -- \
+  "$MODEL" "$TEST/jfk.f32" whisper en gpu > "$TEST/transcript.txt"
 [[ "$(grep -ic 'country' "$TEST/transcript.txt")" -eq 2 ]] || { echo "Repeated recognition smoke test failed." >&2; exit 1; }
 echo "Whisper recognized the known fixture twice using one loaded context."
