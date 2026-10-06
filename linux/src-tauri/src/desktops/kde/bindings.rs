@@ -11,6 +11,12 @@ pub const COMPONENT_PREFIX: &str = "io.github.whisperfree.trigger.";
 pub const ACTION: &str = "_k_session:dictate";
 const ABSENT: &str = "__WHISPERFREE_ABSENT_0e71bf4c__";
 
+pub fn key_sequence(key: i32) -> (Vec<i32>,) {
+    // KGlobalAccel's QKeySequence decoder reads four entries, including unused zeros.
+    // Keep a Vec: a Rust [i32; 4] is serialized as a D-Bus structure, not an array.
+    (vec![key, 0, 0, 0],)
+}
+
 pub async fn accelerator(connection: &Connection) -> Result<Proxy<'_>, String> {
     Proxy::new(
         connection,
@@ -249,4 +255,54 @@ pub fn mouse_keys() -> Vec<(i32, String)> {
         .into_iter()
         .map(|n| (0x01000030 + n - 1, format!("F{n}")))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zbus::zvariant::{serialized::Context, to_bytes, Type, LE};
+
+    #[test]
+    fn key_sequence_matches_kglobalaccel_wire_contract() {
+        assert_eq!(<(Vec<i32>,)>::SIGNATURE, "(ai)");
+        for key in [0x01000037, 0x01000021, 0x04000056, 0x01000042, 0x01000047] {
+            let encoded = to_bytes(Context::new_dbus(LE, 0), &key_sequence(key)).unwrap();
+            let mut expected = 16u32.to_le_bytes().to_vec();
+            expected.extend_from_slice(&key.to_le_bytes());
+            expected.extend_from_slice(&[0; 12]);
+            assert_eq!(encoded.bytes(), expected);
+        }
+    }
+
+    #[test]
+    fn shortcut_requests_preserve_sequence_array_and_argument_signatures() {
+        let key = 0x01000037;
+        let availability = zbus::Message::method_call("/kglobalaccel", "globalShortcutAvailable")
+            .unwrap()
+            .build(&(key_sequence(key), ""))
+            .unwrap();
+        assert_eq!(
+            availability.body().signature().to_string_no_parens(),
+            "(ai)s"
+        );
+        let (sequence, component): ((Vec<i32>,), String) =
+            availability.body().deserialize().unwrap();
+        assert_eq!(sequence.0, vec![key, 0, 0, 0]);
+        assert!(component.is_empty());
+
+        let action = vec!["owned-test", ACTION, "OpenWhisper", "Dictation"];
+        let registration = zbus::Message::method_call("/kglobalaccel", "setShortcutKeys")
+            .unwrap()
+            .build(&(&action, vec![key_sequence(key)], 6u32))
+            .unwrap();
+        assert_eq!(
+            registration.body().signature().to_string_no_parens(),
+            "asa(ai)u"
+        );
+        let (received_action, sequences, flags): (Vec<String>, Vec<(Vec<i32>,)>, u32) =
+            registration.body().deserialize().unwrap();
+        assert_eq!(received_action, action);
+        assert_eq!(sequences, vec![(vec![key, 0, 0, 0],)]);
+        assert_eq!(flags, 6);
+    }
 }
