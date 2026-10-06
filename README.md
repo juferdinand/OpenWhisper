@@ -1,19 +1,25 @@
 # WhisperFree
 
-**Press. Speak. Keep writing. Local dictation for macOS.**
+**Press. Speak. Keep writing. Local dictation for macOS and Linux.**
 
 [![CI](https://github.com/juferdinand/WhisperFree/actions/workflows/ci.yml/badge.svg)](https://github.com/juferdinand/WhisperFree/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black.svg)](#requirements)
 
-WhisperFree is a native menu bar app that turns speech into text locally on your Mac.
-Press <kbd>⌥</kbd> + <kbd>Space</kbd>, speak, then press the shortcut again:
+WhisperFree turns speech into text locally on your computer, with a shared custom interface
+and native audio and desktop integration. On macOS,
+press <kbd>⌥</kbd> + <kbd>Space</kbd>, speak, then press the shortcut again:
 your text is pasted into the active text field. No account, API key, or subscription.
 
 > **App language:** The interface is in English. Dictation supports multiple languages.
 
 [Installation](#installation) · [Features](#features) · [Privacy](#privacy) ·
 [Contributing](#contributing) · [Report an issue](https://github.com/juferdinand/WhisperFree/issues)
+
+![WhisperFree's shared dark interface, rendered in native macOS WebKit](docs/images/shared-desktop.png)
+
+Both desktop apps load the same layout, original logo, and bundled font. Native window borders,
+permission dialogs, and available OS integrations vary by platform.
 
 ## Project status
 
@@ -23,7 +29,7 @@ WhisperFree is in early development. Download the packaged macOS app from
 | Platform | Status |
 | --- | --- |
 | macOS 14+ | Native Swift services; universal package for Apple Silicon and Intel |
-| Linux x86_64 | Source-build preview; CachyOS with KDE Plasma / Wayland is the primary test system |
+| Linux x86_64 | Development preview with AppImage / `.deb` CI artifacts; CachyOS with KDE Plasma / Wayland is the primary test system |
 | Windows | Planned, not implemented yet — see the [platform plan](docs/PLATFORMS.md) |
 
 ### Linux compatibility
@@ -34,7 +40,7 @@ determine which features work. See the [Linux implementation and test plan](docs
 
 | Distribution/session | Status | Feature coverage / limits |
 | --- | --- | --- |
-| CachyOS x86_64, KDE Plasma 6, Wayland, PipeWire | Primary target; native window and both CPU engines verified with known audio | Microphone / shortcut / insertion acceptance tests still pending |
+| CachyOS x86_64, KDE Plasma 6, Wayland, PipeWire | Primary test system; native UI, floating recorder, both CPU engines, clipboard, and AppImage launch checked | See the detailed [validation evidence](docs/LINUX.md#validation-status); real microphone and broader desktop checks remain |
 | Arch Linux and derivatives, KDE Wayland | Targeted; untested | Same integration path, subject to installed portal backend |
 | Ubuntu LTS / Debian, GNOME Wayland | Targeted; untested | Local dictation and clipboard; shortcuts/pasting depend on portal support |
 | Fedora, GNOME or KDE Wayland | Targeted; untested | Local dictation and clipboard; shortcuts/pasting depend on portal support |
@@ -58,6 +64,7 @@ in [docs/LINUX.md](docs/LINUX.md).
 - **Model management:** Download, switch, delete, or import compatible custom ggml models. The app suggests models based on your hardware and system language.
 - **Vocabulary and snippets:** Correct custom terms and replace spoken phrases with saved text, such as “my link” with a URL.
 - **Floating overlay:** A shared recording level, timer, stop/cancel controls, and processing status. It stays above your work without taking keyboard focus. Linux requires a compatible compositor; see the support matrix.
+- **No fixed recording limit:** Recording continues until you stop or cancel it. Audio stays in memory, so longer recordings use more RAM.
 - **Everyday settings:** Launch at login, optional sound cues, clipboard restoration, and a local text history you can disable.
 
 ## Requirements
@@ -182,8 +189,9 @@ The table below applies to macOS.
 | Permissions stop working after a local rebuild | A changing ad-hoc signature can require permissions to be granted again; a persistent local development certificate helps. See [Development](#development). |
 | “Updates are not configured in this build” | This is expected for normal source builds. Update the source code and build the app again. |
 
-Still stuck? [Open an issue](https://github.com/juferdinand/WhisperFree/issues/new) with your macOS
-version, Mac chip, WhisperFree version, selected model, and steps to reproduce the problem.
+Still stuck? [Open an issue](https://github.com/juferdinand/WhisperFree/issues/new) with your OS
+version, hardware, WhisperFree version, selected model, and steps to reproduce the problem.
+On Linux, include the distribution, desktop environment, and Wayland/X11 session type.
 Remove personal dictations and other confidential information from any logs you attach.
 
 ## Limitations and roadmap

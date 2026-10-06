@@ -25,12 +25,13 @@ or subscription. The project is open source under the MIT License.
     `UpdateService` (GitHub Releases with signature verification), `Permissions`, and `SnippetStore`.
   - `Sources/WhisperFree/UI/`: native non-activating `NSPanel` overlay and a dedicated
     `NSWindow` hosting `SharedSettingsView` (WKWebView). The settings use the same compiled
-    UI assets as Linux. Only trusted bundle files can navigate or invoke the native bridge.
+    UI assets as Linux, including the floating recording controls. Only trusted bundle files
+    can navigate or invoke the native bridge.
   - `Vendor/whisper.xcframework`: downloaded by `scripts/fetch-whisper.sh`;
     pinned to `b5130`, including the Parakeet API.
 - `shared/`: authoritative cross-platform model catalog (`models.json`) and test cases
   (`test-vectors.json`).
-- `desktop/src/`: shared custom settings UI for macOS and Linux. Keep one layout, icon set,
+- `desktop/src/`: shared custom settings and recording UI for macOS and Linux. Keep one layout, icon set,
   font, and navigation structure. `bridge.ts` selects Tauri IPC or the native WebKit reply handler.
 - `desktop/src-tauri/`: Linux Rust backend (CPAL audio, portals, clipboard, downloads, and history).
 - `desktop/crates/core/`: text processing against the same shared fixtures as Swift.
@@ -66,12 +67,27 @@ For live logs, use the absolute path because `log` may be a shell function in zs
 Run `make test` for Swift logic changes and build the Mac app for application changes.
 Mac builds now also require Node.js/npm to build the shared UI.
 Run `make linux-test` for Linux changes and shared UI tests for UI changes.
-The macOS app supports `--ui-smoke-test` for a native WebKit bundle/bridge check in CI.
+The macOS app supports `--ui-smoke-test` and `--overlay-smoke-test` for native WebKit checks in CI.
+`desktop/scripts/test-session.py` exercises Linux capture through a private virtual audio source,
+including a recording beyond two minutes, floating controls, recognition, and clipboard output.
+Its optional `--portals` mode also checks KDE shortcut binding and pasting into an owned test field.
+See `docs/LINUX.md` for dependencies and permission details. Never use the real microphone for unattended tests.
 Recording, permissions, hotkeys, and pasting also need manual testing on macOS.
 For documentation-only changes, check content, links, and formatting.
 
 ## Known pitfalls
 
+- **Recording duration:** the user explicitly requires no fixed time limit. Do not reintroduce
+  an automatic cutoff or truncate the audio buffer. Record until explicit stop/cancel; explain
+  that recordings stay in RAM and grow with duration.
+- **Linux app identity:** install and launch `io.github.whisperfree.desktop` so GTK, KDE's taskbar,
+  and portals agree on the application identity. Starting from a terminal can associate portal
+  permissions with that terminal. Preserve the package-specific bundler config and desktop template.
+- **Wayland overlay:** initialize layer-shell before Wry realizes the GTK window. Keep keyboard
+  focus disabled. A missing compositor protocol must leave the main recording control usable.
+- **macOS WebKit:** use the original bundle file URL and a document-start flag for overlay mode.
+  Applying `underPageBackgroundColor` before loading caused a startup hang in native CI. The
+  overlay uses WKWebView's `drawsBackground` configuration, also used by Wry, and transparent CSS.
 - **Signing and permissions:** an ad-hoc signature can cause macOS to discard Accessibility
   permission after a rebuild. `macos/scripts/create-dev-cert.sh` creates a local
   `WhisperFree Dev` certificate that the build detects automatically.

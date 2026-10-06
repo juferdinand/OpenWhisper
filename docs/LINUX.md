@@ -1,6 +1,7 @@
 # Linux implementation and support
 
-The Linux app in `desktop/` is an early source-build preview. A working build does not by itself establish support for
+The Linux app in `desktop/` is an early development preview, available as source and CI AppImage / `.deb` artifacts.
+A working build does not by itself establish support for
 global shortcuts, text insertion, microphone devices, or every desktop environment.
 
 ## First target
@@ -10,15 +11,17 @@ The development machine has a Ryzen 5 5600X, 64 GB of RAM, and an NVIDIA RTX 306
 On 2026-10-05, host inspection confirmed KDE Plasma 6.7.5, PipeWire 1.6.9, and version 2
 of both the GlobalShortcuts and RemoteDesktop portals. The native settings window launched
 on this machine, and Whisper Tiny / Parakeet v3 q4 each transcribed the pinned upstream JFK
-fixture twice with one loaded context. Microphone and cross-application tests remain separate.
-The settings use the same custom UI, six-section navigation, bundled font, and original icon
+fixture twice with one loaded context. On 2026-10-06, the full native capture pipeline was also exercised
+with a private virtual microphone, including a 126-second recording, cancellation, silence, and clipboard output.
+This avoids recording the real microphone during automated checks.
+The settings and floating recording control use the same custom UI, six-section navigation, bundled font, and original icon
 as macOS. Tauri hosts these assets on Linux; WKWebView hosts them on macOS.
 
 ## Compatibility targets
 
 | Distribution family | Desktop/session | Target | Current evidence |
 |---|---|---|---|
-| CachyOS | KDE Plasma 6 / Wayland | Primary acceptance system | Native window, audio device enumeration, portal interfaces, and CPU fixture recognition verified |
+| CachyOS | KDE Plasma 6 / Wayland | Primary acceptance system | Native UI, virtual-microphone capture beyond two minutes, floating stop/cancel, both CPU engines, clipboard, and AppImage launch verified |
 | Arch Linux and derivatives | KDE Plasma 6 / Wayland | Same integration path | Not yet tested |
 | Ubuntu LTS and Debian | GNOME / Wayland | Portal integration, clipboard fallback | Not yet tested |
 | Fedora | GNOME or KDE / Wayland | Portal integration, clipboard fallback | Not yet tested |
@@ -37,11 +40,12 @@ The app must report detected capabilities and any fallback it uses.
 - Uses the shared model catalog and the same pinned whisper.cpp source for Whisper and Parakeet.
   Model contexts stay loaded and inference is serialized. CPU support is the baseline; GPU acceleration
   is optional and must be tested separately.
-- Captures the selected microphone locally and convert audio to 16 kHz mono. Keep recordings in
+- Captures the selected microphone locally and converts audio to 16 kHz mono. Keeps recordings in
   memory. Includes error handling, a silence threshold and cancellation before transcription, with
   no fixed recording duration limit. Stop or cancel explicitly when finished. Audio is held in RAM, so longer recordings use more memory. Microphone acceptance testing is still required.
 - Uses the GlobalShortcuts portal when available. Offers toggle and hold-to-record when release
-  events are available. Provide clear setup and failure states rather than silently ignoring keys.
+  events are available. Unassigned shortcuts remain visibly unconfigured. With portal version 2,
+  clicking the trigger opens the desktop's shortcut configuration; changes are reflected in the app.
 - For automatic pasting on Wayland, request keyboard control through the RemoteDesktop portal.
   Request keyboard access only; do not request screen capture. Clipboard output remains available
   if permission is denied or the backend is unsupported. Do not require root or input-group access.
@@ -62,15 +66,30 @@ Verified on the primary host:
 - Shared multilingual processing vectors and 44.1 / 48 / 96 kHz resampling tests.
 - TypeScript production build, Rust build, and Clippy without warnings.
 - Native settings window on KDE Wayland with the NVIDIA compatibility workaround below.
+- Floating recording indicator over other windows, including its stop and cancel controls.
+- A 126-second uninterrupted CPAL recording through a private PipeWire/PulseAudio monitor source,
+  explicitly cancelled after passing the old two-minute cutoff.
+- Public speech fixture through native recording controls, CPAL, Whisper Tiny / Parakeet v3 q4,
+  history, and the Wayland clipboard. Silent input does not add a history entry.
+- Keyboard-only RemoteDesktop permission, GlobalShortcuts binding, and automatic insertion of
+  the recognized public fixture into an owned native GTK Wayland text field.
 - Real ALSA/PipeWire device enumeration and both version-2 portal interfaces.
 - Whisper Tiny and Parakeet v3 q4 recognize the known JFK fixture twice per loaded context.
 - The Linux PNG icon exactly matches the 256px image embedded in the macOS ICNS.
+- Local installer, GTK application identity, and KDE taskbar desktop-file association.
+- Ubuntu 22.04 CI `.deb` / AppImage builds, package checksums and launcher metadata; the downloaded
+  AppImage also passes the native WebKitGTK UI smoke test and virtual-source recording,
+  floating controls, Whisper recognition, silence, and clipboard checks on CachyOS.
+- Shared UI tests cover both native adapters, every section in light/dark themes, minimum window
+  size, original icon, bundled font, recording controls, and identical shared navigation rendering.
+- macOS CI builds the universal app and verifies both settings and the non-activating recording
+  panel in real WKWebView. This does not replace microphone/permission testing on a physical Mac.
 
 Still required before calling a distribution fully supported:
 
-- Actual microphone speech, cancellation, silence, and device disconnect checks.
-- Portal grant / denial, toggle / hold shortcut events, and session restart.
-- Clipboard and automatic insertion into both native Wayland and XWayland apps.
+- Actual microphone speech and device disconnect checks (virtual-source cancellation and silence pass).
+- Permission denial, physical toggle / hold shortcut events, and session restart.
+- Automatic insertion into XWayland apps and applications with nonstandard paste bindings.
 - Installer, relaunch, tray behavior, and uninstall on each target distribution.
 - GPU builds and non-CachyOS desktop combinations.
 
@@ -129,6 +148,35 @@ For development: run `bash desktop/scripts/fetch-native.sh`, then `npm ci` and
 `bash desktop/scripts/test-recognition.sh`; this downloads the checksum-pinned Whisper Tiny model.
 An optional `--features vulkan` build is experimental and needs Vulkan headers, a shader compiler,
 and a working Vulkan driver. The default CPU build does not require a GPU.
+
+### Native desktop acceptance test
+
+After building, quit the running app and run this inside the graphical KDE Wayland session:
+
+```bash
+bash desktop/scripts/test-recognition.sh
+python3 desktop/scripts/test-session.py
+```
+
+The session test needs Python PyGObject/AT-SPI, `pactl`, `paplay`, `gdbus`, and `wl-paste`.
+It uses isolated temporary settings/model paths and a private virtual audio monitor, never
+the physical microphone. The default 126-second capture checks the former two-minute cutoff;
+it also checks floating stop/cancel, silence, fixture transcription, and clipboard output.
+It replaces the clipboard with the public upstream speech fixture. Temporary logs remain at the
+printed path; the test app and virtual audio sink are stopped when the test exits.
+
+Use `--model /path/to/model.bin --model-id parakeet-v3-q4` to check Parakeet. Add `--portals`
+to request keyboard permission, bind the shortcut, and check insertion into a private GTK test
+field. This optional check requires `qdbus6`, KDE, and approval of any desktop permission dialogs;
+its shortcut binding can persist in KDE's settings. Launch it with the correct app identity:
+
+```bash
+systemd-run --user --wait --pipe --collect --unit=app-io.github.whisperfree \
+  python3 "$PWD/desktop/scripts/test-session.py" --portals
+```
+
+Do not start a second instance while the test owns WhisperFree's application ID. A recording
+test with a virtual source proves the capture/inference/output path, not physical microphone quality.
 
 ## First use
 

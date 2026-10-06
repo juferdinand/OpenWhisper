@@ -3,7 +3,7 @@
 | Platform | Implementation | Status |
 |---|---|---|
 | macOS 14+ | Native Swift services + shared UI in WKWebView | Public DMG and ZIP releases |
-| Linux x86_64 | Shared UI in Tauri 2 + Rust and C++ speech services | Source-build preview; see [validation status](LINUX.md#validation-status) |
+| Linux x86_64 | Shared UI in Tauri 2 + Rust and C++ speech services | Source / AppImage / `.deb` development preview; see [validation status](LINUX.md#validation-status) |
 | Windows | Not implemented | Future work |
 
 Both implementations use `shared/models.json`, the same pinned whisper.cpp release, and
@@ -14,7 +14,9 @@ The Linux settings follow the same Setup, General, Models, Snippets, History, an
 Its app icon is extracted unchanged from the existing Mac ICNS. `desktop/scripts/check-assets.py`
 checks branding, section order, project version, and speech source tag agreement. Both apps load the same compiled HTML/CSS/JavaScript and bundled Inter font.
 `desktop/src/bridge.ts` adapts Tauri IPC and the native WebKit reply handler. Mac recording,
-hotkeys, overlay, output, storage, and signed updates remain native Swift services. No local
+hotkeys, output, storage, and signed updates remain native Swift services. The shared floating
+recording UI is hosted in a non-activating NSPanel on macOS and a non-focusable native window
+on Linux. Neither backend imposes a recording-duration cutoff. No local
 HTTP server or remote content is used for the production settings UI. Native window decorations
 and platform-specific permission dialogs are controlled by the operating system.
 
@@ -27,7 +29,7 @@ and platform-specific permission dialogs are controlled by the operating system.
 | Automatic insertion | Clipboard and CGEvent | Clipboard and keyboard-only RemoteDesktop portal session |
 | Clipboard helper | NSPasteboard | `wl-copy` on Wayland, `xclip` on X11 |
 | Background operation | Menu bar app | AppIndicator tray when the desktop displays it |
-| Overlay | Non-activating NSPanel | Shared floating UI; non-focusable layer-shell on compatible Wayland compositors, floating window on X11 |
+| Overlay | Shared floating UI in non-activating NSPanel | Shared floating UI; non-focusable layer-shell on compatible Wayland compositors, floating window on X11 |
 | GPU | Metal | Optional, unverified Vulkan build; CPU is the tested baseline |
 | Updates | Release ZIP with signing-identity verification | No updater yet |
 
