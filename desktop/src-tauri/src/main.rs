@@ -250,6 +250,7 @@ async fn disable_paste(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), St
 }
 
 fn main() {
+    let _smoke_environment = smoke::Environment::prepare();
     gtk::glib::set_prgname(Some("io.github.whisperfree"));
     gtk::glib::set_application_name("WhisperFree");
     // WebKitGTK's DMABUF path can disconnect NVIDIA clients from KWin (WebKit bug 324551).

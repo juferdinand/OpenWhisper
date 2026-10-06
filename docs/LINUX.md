@@ -134,7 +134,9 @@ sudo pacman -S --needed rust nodejs npm base-devel cmake python curl webkit2gtk-
 Ubuntu 22.04+ / Debian build dependencies (desktop validation is still pending):
 
 ```bash
-sudo apt install build-essential cmake pkg-config python3 curl libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libgtk-layer-shell0 libvulkan-dev glslc patchelf wl-clipboard xclip
+sudo apt install build-essential cmake ninja-build pkg-config python3 curl libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libgtk-layer-shell0 libvulkan-dev patchelf wl-clipboard xclip
+python3 desktop/scripts/build-glslc.py
+export PATH="$PWD/desktop/vendor/shaderc/bin:$PATH"
 ```
 
 Install a current Rust toolchain and Node.js separately if the distribution packages are too old.
@@ -161,7 +163,10 @@ For development: run `bash desktop/scripts/fetch-native.sh`, then `npm ci` and
 `bash desktop/scripts/test-recognition.sh`; this downloads the checksum-pinned Whisper Tiny model.
 New packages and `make linux` include Vulkan. Install a Vulkan loader and a graphics driver with
 Vulkan support (NVIDIA's driver, or the appropriate Mesa driver for AMD/Intel). Build dependencies
-also include `glslc` and the Vulkan loader development library. The build script downloads
+also include `glslc` and the Vulkan loader development library. Ubuntu 22.04 does not package
+`glslc`; the commands above build it locally from checksum-pinned Shaderc sources and dependencies,
+without changing the runtime distribution baseline. A recent distribution-provided `glslc` can
+also be used. The build script downloads
 checksum-pinned Khronos headers into `desktop/vendor/vulkan`; it does not install system packages.
 Use `make linux LINUX_FEATURES=custom-protocol` for a CPU-only development build.
 

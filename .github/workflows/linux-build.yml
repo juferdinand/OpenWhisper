@@ -44,7 +44,7 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libgtk-layer-shell0 libvulkan-dev glslc patchelf cmake ninja-build ffmpeg xvfb dbus-x11
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libgtk-layer-shell0 libvulkan-dev patchelf cmake ninja-build ffmpeg xvfb dbus-x11
           rustup toolchain install 1.99.0 --profile minimal --component rustfmt,clippy
           rustup default 1.99.0
       - name: Cache native source and test model
@@ -53,7 +53,11 @@ jobs:
           path: |
             desktop/vendor
             desktop/target/speech-smoke
-          key: linux-speech-${{ hashFiles('desktop/native/whisper-source.json', 'desktop/scripts/test-recognition.sh') }}
+          key: linux-speech-${{ hashFiles('desktop/native/*-source.json', 'desktop/native/vulkan-headers.json', 'desktop/scripts/build-glslc.py', 'desktop/scripts/test-recognition.sh') }}
+      - name: Build the pinned Vulkan shader compiler
+        run: |
+          python3 scripts/build-glslc.py
+          echo "$PWD/vendor/shaderc/bin" >> "$GITHUB_PATH"
       - name: Prepare and verify frontend
         run: |
           bash scripts/fetch-native.sh
