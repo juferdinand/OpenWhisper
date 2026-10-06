@@ -48,7 +48,7 @@ The app must report detected capabilities and any fallback it uses.
   Wayland, extra mouse buttons are supported; the middle button requires Plasma 6.3+. Saved
   bindings reconnect at startup. Other desktops use the GlobalShortcuts portal. Toggle and
   push-to-talk are supported; modifier-only KDE triggers use toggle mode. These direct bindings
-  are a source change after 0.2.2 and are not included in the published 0.2.2 packages.
+  are available from 0.2.3; older packages keep the portal-only implementation.
 - For automatic pasting on Wayland, request keyboard control through the RemoteDesktop portal.
   Request keyboard access only; do not request screen capture. Clipboard output remains available
   if permission is denied or the backend is unsupported. Do not require root or input-group access.

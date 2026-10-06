@@ -1,15 +1,15 @@
-## What's new in 0.2.2
+## What's new in 0.2.3
 
-- Linux packages now include Vulkan GPU recognition for Whisper and Parakeet. Compatible GPUs are used by default, with a GPU/CPU preference and detected device shown in **General → Appearance & system**. Recoverable GPU errors retry the captured audio on the CPU.
-- Add Linux **Launch at login**, using the persistent installed AppImage path or installed executable. It can be enabled and disabled without administrator access.
-- Fix macOS settings switches changing position or overwriting neighboring preferences. Switches retain their controls while saving, and pending login-item approval remains visible and can be cancelled.
-- Show macOS hardware and Metal recognition information in the shared system section. Metal acceleration remains enabled where available.
-- Harden macOS recording against audio-device changes, concurrent callbacks, and native audio exceptions; recover settings and recording views after a WebKit content-process termination. Bounded local lifecycle diagnostics exclude dictated text and audio.
-- Preserve interface language, completed setup, models, and history across updates. Recording still has no fixed time limit.
+- Add direct single-key and keyboard-shortcut capture on KDE Plasma 6. Keys such as **F8** no longer need Ctrl or another modifier. Single modifiers use toggle mode because KDE activates them on release.
+- Add direct **Back, Forward, and extra mouse-button triggers on KDE Wayland**, plus the middle button on Plasma 6.3+. Use **General → Set trigger …**, then press and release the desired key or button. Normal keys and mouse buttons support both toggle and push-to-talk.
+- Save native trigger bindings and reconnect them at startup. Reject conflicting desktop shortcuts and existing mouse remappings, preserve later user edits, and restore the normal mouse mapping on exit or an app crash. Recovery after forcibly killing the helper runs on the next start. Internal mouse bindings avoid stuck modifiers when exiting while a button is held.
+- Fix Linux update relaunches under systemd desktop supervision by replacing the running process after native cleanup. This fix applies to updates initiated from 0.2.3 onward.
+- Keep the shared English/German interface, existing GPU/CPU selection, saved models and settings, and recording without a fixed time limit. macOS and Linux continue to share one release version.
 
-Update from 0.2.1 using **About → Check now**. Original Linux 0.2.0 installations need a manual
-upgrade to obtain the signed updater. Existing CPU-only installations enable GPU use when a
-compatible device is detected; a CPU choice made in a GPU-enabled build is preserved.
+**Updating from Linux 0.2.1 or 0.2.2:** use **About → Check now**. The older updater may still
+close after installing 0.2.3 when launched by a systemd service. If that happens, open WhisperFree
+once from your application launcher; the new package is already installed. Original Linux 0.2.0
+and source/CI builds need a manual installation of a signed release to obtain the updater.
 
 ## macOS download and installation
 
@@ -35,24 +35,24 @@ for setup and permissions. Dictation still supports multiple languages.
 
 ## Linux download and installation
 
-Linux packages are available for x86_64. Desktop integration depends on the installed portal backend.
+Linux packages are available for x86_64. Desktop integration depends on KDE native services or the installed portal backend.
 The primary tested environment is **CachyOS x86_64, KDE Plasma 6, Wayland, and PipeWire**.
 
 - **AppImage:** download `WhisperFree-Linux-x86_64.AppImage`, make it executable, and run it. If FUSE is unavailable, use `APPIMAGE_EXTRACT_AND_RUN=1 ./WhisperFree-Linux-x86_64.AppImage`.
 - **Debian/Ubuntu package:** download `WhisperFree-Linux-amd64.deb` and install it with `sudo apt install ./WhisperFree-Linux-amd64.deb`. The package is built on Ubuntu 22.04; desktop acceptance on Debian/Ubuntu is still pending.
-- Wayland clipboard output requires `wl-clipboard`. Global shortcuts and automatic pasting require compatible desktop portals; keyboard access is requested only when enabled.
+- Wayland clipboard output requires `wl-clipboard`. KDE Plasma 6 supports native keyboard triggers; KDE Wayland mouse triggers also require `kreadconfig6`, `kwriteconfig6`, and the `buttonsrebind` plugin. Other desktops use the GlobalShortcuts portal. Automatic pasting requires a compatible RemoteDesktop portal; keyboard access is requested only when enabled.
 - The floating indicator requires `gtk-layer-shell` and a compatible Wayland compositor. GNOME does not provide layer-shell; the main-window control remains available.
-- Enable the trigger and optional keyboard permission in General after launching. Portal setup is currently session-scoped.
+- Set the trigger and optional paste permission in General. KDE native triggers reconnect at startup; portal setup remains session-scoped. Primary left/right clicks and scrolling are excluded. Fn, DPI/profile, and vendor buttons work only if the hardware exposes supported input events. Direct mouse capture on other desktops and X11 is not implemented.
 - Vulkan recognition requires a Vulkan loader and compatible graphics driver. Whisper Tiny and Parakeet v3 q4 were tested on an NVIDIA RTX 3060; AMD/Intel GPUs and other drivers still need hardware acceptance. CPU recognition remains available without a compatible GPU.
 - Custom model import, clipboard restoration, editor output, and sounds are not yet available on Linux.
 
 Linux updates use a separate persistent signing key and signed version. Verify the first download's origin and `SHA256SUMS`. The `.sig` files and `latest.json` are used by the updater.
 AppImages must be in a writable permanent location; Debian updates request system administrator
 authorization. Debian/Ubuntu update installation still needs desktop acceptance.
-Read the [Linux support and validation notes](https://github.com/juferdinand/WhisperFree/blob/v0.2.2/docs/LINUX.md)
+Read the [Linux support and validation notes](https://github.com/juferdinand/WhisperFree/blob/v0.2.3/docs/LINUX.md)
 for dependencies, tested behavior, and remaining checks. Physical microphone quality, physical hold/toggle shortcut events,
 XWayland insertion, and other distributions still need broader acceptance testing.
 
 Known dependency risk: the Linux GTK 3 stack includes `glib 0.18.5`, affected by
 [RUSTSEC-2024-0429](https://rustsec.org/advisories/RUSTSEC-2024-0429.html). The alert remains open;
-see the [scope and source review](https://github.com/juferdinand/WhisperFree/blob/v0.2.2/SECURITY.md#known-linux-dependency-advisory).
+see the [scope and source review](https://github.com/juferdinand/WhisperFree/blob/v0.2.3/SECURITY.md#known-linux-dependency-advisory).

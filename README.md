@@ -35,9 +35,9 @@ WhisperFree is in early development. Download the packaged macOS or Linux app fr
 ### Linux compatibility
 
 Linux x86_64 releases are available as AppImage and `.deb` packages. Source is in `desktop/`.
-The current source adds single-key triggers on KDE Plasma 6 and direct extra mouse buttons on
+Version 0.2.3 adds single-key triggers on KDE Plasma 6 and direct extra mouse buttons on
 KDE Wayland (middle button: Plasma 6.3+), with saved bindings and no root access. Other desktops
-retain portal-based shortcuts. This change is not included in the published 0.2.2 packages yet.
+retain portal-based shortcuts.
 See [trigger setup and limitations](docs/LINUX.md#first-use).
 Distribution targets below are **not claims of completed end-to-end testing**. On Linux, desktop environment, Wayland/X11, audio services, and portal support
 determine which features work. See the [Linux implementation and test plan](docs/LINUX.md).
@@ -161,7 +161,7 @@ snippets, and saved history are retained. Finish recordings and model downloads 
 
 Linux 0.2.1 / 0.2.2 can close after installation when started by a systemd service. If this happens,
 open WhisperFree manually; the updated package is already installed. The restart correction in
-the current source takes effect for updates initiated by a build containing that correction.
+0.2.3 takes effect for updates initiated from 0.2.3 onward.
 
 - **macOS:** release builds verify the downloaded ZIP's app against the current signing identity.
 - **Linux AppImage:** release builds replace the writable AppImage in place, using a signed,
