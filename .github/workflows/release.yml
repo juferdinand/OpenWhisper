@@ -2,8 +2,8 @@ name: Release
 run-name: Release ${{ inputs.version }}
 
 # Start manually: Actions → Release → Run workflow → enter a version (e.g. 0.2.0).
-# Writes VERSION, commits, tags v<version>, builds a signed universal app, and
-# creates a draft by default. Published releases are discovered by installed macOS apps.
+# Builds and tests macOS and Linux, then commits VERSION, tags, and uploads all packages.
+# Creates a draft by default for desktop acceptance before publication.
 on:
   workflow_dispatch:
     inputs:
@@ -17,16 +17,43 @@ on:
         default: true
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
-  # Linux packages are accepted separately and attached before publishing the draft;
-  # see docs/PLATFORMS.md. Windows is not implemented.
+  validate:
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Validate version
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Releases must be started from the main branch"; exit 1
+          fi
+          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Version must use X.Y.Z format (received: $VERSION)"; exit 1
+          fi
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "::error::Tag v$VERSION already exists"; exit 1
+          fi
+
+  linux:
+    needs: validate
+    uses: ./.github/workflows/linux-build.yml
+    with:
+      version: ${{ inputs.version }}
+      artifact_name: WhisperFree-Linux-v${{ inputs.version }}
+      retention_days: 30
+
   macos:
+    needs: validate
     runs-on: macos-15
     timeout-minutes: 30
     env:
@@ -39,18 +66,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
-
-      - name: Validate version
-        run: |
-          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
-            echo "::error::Releases must be started from the main branch"; exit 1
-          fi
-          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "::error::Version must use X.Y.Z format (received: $VERSION)"; exit 1
-          fi
-          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
-            echo "::error::Tag v$VERSION already exists"; exit 1
-          fi
 
       # Download release dependencies fresh and verify SHA-256; no build cache.
       - name: Tests
@@ -84,17 +99,10 @@ jobs:
           fi
           echo "SIGN_IDENTITY=$SIGN_IDENTITY" >> "$GITHUB_ENV"
 
-      - name: Set version, commit, and tag
+      - name: Set release version
         run: |
           python3 desktop/scripts/set-version.py "$VERSION"
           python3 desktop/scripts/check-assets.py
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet -- VERSION desktop; then
-            git add VERSION desktop/Cargo.toml desktop/Cargo.lock desktop/package.json desktop/package-lock.json desktop/src-tauri/tauri.conf.json
-            git commit -m "Release v$VERSION"
-          fi
-          git tag "v$VERSION"
 
       - name: Build and sign universal app
         working-directory: macos
@@ -133,7 +141,52 @@ jobs:
           build/WhisperFree.app/Contents/MacOS/WhisperFree --ui-smoke-test
           build/WhisperFree.app/Contents/MacOS/WhisperFree --overlay-smoke-test
 
-      - name: Push and publish release
+      - name: Clean up keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+
+  publish:
+    needs: [macos, linux]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: WhisperFree-macOS-v${{ inputs.version }}
+          path: .release/macos
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: WhisperFree-Linux-v${{ inputs.version }}
+          path: .release/linux
+      - name: Verify packages and combine checksums
+        run: |
+          (cd .release/macos && sha256sum -c SHA256SUMS)
+          (cd .release/linux && sha256sum -c SHA256SUMS)
+          mkdir -p .release/assets
+          cp .release/macos/WhisperFree-macOS.dmg .release/macos/WhisperFree-macOS.zip .release/assets/
+          cp ".release/linux/appimage/WhisperFree_${VERSION}_amd64.AppImage" .release/assets/WhisperFree-Linux-x86_64.AppImage
+          cp ".release/linux/deb/WhisperFree_${VERSION}_amd64.deb" .release/assets/WhisperFree-Linux-amd64.deb
+          cd .release/assets
+          sha256sum WhisperFree-macOS.dmg WhisperFree-macOS.zip WhisperFree-Linux-x86_64.AppImage WhisperFree-Linux-amd64.deb > SHA256SUMS
+          sha256sum -c SHA256SUMS
+      - name: Set version, commit, and tag
+        run: |
+          python3 desktop/scripts/set-version.py "$VERSION"
+          python3 desktop/scripts/check-assets.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- VERSION desktop; then
+            git add VERSION desktop/Cargo.toml desktop/Cargo.lock desktop/package.json desktop/package-lock.json desktop/src-tauri/tauri.conf.json
+            git commit -m "Release v$VERSION"
+          fi
+          git tag "v$VERSION"
+      - name: Push and publish all platform packages
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_DRAFT: ${{ inputs.draft }}
@@ -141,12 +194,8 @@ jobs:
           git push --atomic origin HEAD:refs/heads/main "refs/tags/v$VERSION"
           EXTRA_ARGS=()
           if [[ "$RELEASE_DRAFT" == "true" ]]; then EXTRA_ARGS+=(--draft); fi
-          gh release create "v$VERSION" macos/build/WhisperFree-macOS.dmg macos/build/WhisperFree-macOS.zip macos/build/SHA256SUMS \
+          gh release create "v$VERSION" .release/assets/WhisperFree-macOS.dmg .release/assets/WhisperFree-macOS.zip .release/assets/WhisperFree-Linux-x86_64.AppImage .release/assets/WhisperFree-Linux-amd64.deb .release/assets/SHA256SUMS \
             --title "WhisperFree $VERSION" \
             --verify-tag \
             --notes-file .github/release-notes.md \
             --generate-notes "${EXTRA_ARGS[@]}"
-
-      - name: Clean up keychain
-        if: always()
-        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true

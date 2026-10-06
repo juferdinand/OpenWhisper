@@ -247,10 +247,12 @@ and upstream constraint. Preview publication does not mean the dependency graph 
 
 CI on `main` builds development `.deb` and AppImage packages and retains artifacts for 14 days.
 A main push does not change the version, create a tag, or publish a GitHub Release.
-The manual Release workflow synchronizes every platform's version and creates a draft containing
-signed macOS packages by default. Linux preview packages are built by manually running CI on that
-same version tag, then accepted separately on the primary desktop before they are attached and
-the draft is published. Public preview downloads use the stable asset names
+The manual Release workflow applies the requested version to both platform builds and runs them
+in parallel. CI and Release call the same reusable Linux build workflow. After both platforms pass,
+a publication job creates the version commit/tag, verifies both artifact checksum files, and uploads
+all packages with combined checksums. There is no separate CI dispatch or manual Linux attachment.
+The complete release is a draft by default so its AppImage can receive desktop acceptance before
+publication. Public preview downloads use the stable asset names
 `WhisperFree-Linux-x86_64.AppImage` and `WhisperFree-Linux-amd64.deb`; their internal version still
 matches the tag. `SHA256SUMS` covers both Linux packages and the macOS DMG/ZIP.
 Publication as a preview does not promote untested distributions to supported status.

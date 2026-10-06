@@ -240,9 +240,9 @@ builds universal DMG and ZIP packages, verifies the DMG, and retains both as dow
 The macOS development builds use ad-hoc signing and do not enable the in-app updater.
 Linux CI builds development `.deb` and AppImage artifacts on Ubuntu 22.04; packaging success
 alone does not certify every desktop. **Main pushes do not create a tag, change the version,
-or publish a release.** The manual Release workflow creates a draft by default with signed macOS
-packages. Maintainers add Linux preview packages after separate desktop acceptance, then publish
-the complete release. Download packages from [Releases](https://github.com/juferdinand/WhisperFree/releases/latest).
+or publish a release.** The manual Release workflow builds and tests macOS and Linux together.
+After both succeed, it creates the version commit/tag and uploads all four packages with combined
+checksums. It creates a draft by default for desktop acceptance before publication. Download packages from [Releases](https://github.com/juferdinand/WhisperFree/releases/latest).
 Tests use shared cases from
 [`shared/test-vectors.json`](shared/test-vectors.json).
 
@@ -275,13 +275,15 @@ The public release identity is already configured. Preserve it when preparing fu
 replacing it with a newly generated local certificate would break update signature compatibility.
 
 Then start the workflow under **Actions → Release → Run workflow**, supplying a new version
-in `X.Y.Z` format. It updates `VERSION`, creates a commit and tag, builds the universal bundle,
-and creates a draft with the DMG, ZIP, and `SHA256SUMS` by default. It also retains the packages as Actions artifacts.
-For a Linux preview, run CI manually on the new version tag, download its Linux artifacts, and
-complete the [desktop acceptance checks](docs/LINUX.md#native-desktop-acceptance-test) on the primary system.
-Attach the verified AppImage as `WhisperFree-Linux-x86_64.AppImage` and the Debian package as
-`WhisperFree-Linux-amd64.deb`, regenerate `SHA256SUMS` across all four downloaded packages,
-and update the release's platform notes. Publish the draft only after these checks pass.
+in `X.Y.Z` format. The workflow applies the same version to both platform builds, then runs the
+macOS and Linux tests and packaging in parallel. Only after both succeed does the publication job
+create the version commit/tag and upload the universal DMG/ZIP, `WhisperFree-Linux-x86_64.AppImage`,
+`WhisperFree-Linux-amd64.deb`, and a combined `SHA256SUMS`. No separate CI dispatch or manual asset
+upload is needed. Packages are also retained as Actions artifacts.
+The workflow creates a draft by default. Download its AppImage and complete the
+[desktop acceptance checks](docs/LINUX.md#native-desktop-acceptance-test) on the primary system,
+then update the platform notes and publish the draft. The `draft` input can be disabled when the
+required desktop acceptance is already complete for the release source.
 The DMG contains the signed app and an Applications shortcut. CI mounts it read-only and checks
 its integrity, the contained app's signature, and agreement with the original build.
 The update repository is embedded in the bundle during the build.

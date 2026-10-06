@@ -1,0 +1,97 @@
+name: Linux build
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Optional release version to apply before building
+        type: string
+        default: ''
+      artifact_name:
+        type: string
+        required: true
+      retention_days:
+        type: number
+        default: 14
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set release version
+        if: inputs.version != ''
+        env:
+          VERSION: ${{ inputs.version }}
+        run: python3 scripts/set-version.py "$VERSION"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libgtk-layer-shell0 patchelf cmake ninja-build ffmpeg xvfb dbus-x11
+          rustup toolchain install 1.99.0 --profile minimal --component rustfmt,clippy
+          rustup default 1.99.0
+      - name: Cache native source and test model
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            desktop/vendor
+            desktop/target/speech-smoke
+          key: linux-speech-${{ hashFiles('desktop/native/whisper-source.json', 'desktop/scripts/test-recognition.sh') }}
+      - name: Prepare and verify frontend
+        run: |
+          bash scripts/fetch-native.sh
+          python3 scripts/check-assets.py
+          npm ci
+          npm run build
+          npx playwright install --with-deps chromium
+          npm run test:ui
+      - name: Test Linux backend
+        run: |
+          cargo fmt --all --check
+          cargo test --locked --workspace
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          bash scripts/test-recognition.sh
+      - name: Build Linux packages
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: npm run bundle:linux
+      - name: Verify and checksum packages
+        run: |
+          dpkg-deb --info target/release/bundle/deb/*.deb
+          dpkg-deb --contents target/release/bundle/deb/*.deb | grep 'usr/share/applications/io.github.whisperfree.desktop'
+          cd target/release/bundle
+          sha256sum deb/*.deb appimage/*.AppImage > SHA256SUMS
+      - name: Smoke test the shared UI in native WebKitGTK
+        timeout-minutes: 2
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/whisperfree-ui/config
+          XDG_DATA_HOME: ${{ runner.temp }}/whisperfree-ui/data
+        run: dbus-run-session -- xvfb-run -a target/release/whisperfree-desktop --ui-smoke-test
+      - name: Upload Linux packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: |
+            desktop/target/release/bundle/deb/*.deb
+            desktop/target/release/bundle/appimage/*.AppImage
+            desktop/target/release/bundle/SHA256SUMS
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}
+      - name: Upload shared UI previews
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: WhisperFree-shared-UI-${{ github.sha }}
+          path: desktop/test-results/*.png
+          retention-days: ${{ inputs.retention_days }}

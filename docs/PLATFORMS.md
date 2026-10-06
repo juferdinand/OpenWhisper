@@ -45,6 +45,7 @@ availability alone is not a successful permission or insertion test. See the [su
 4. Validate the floating recording indicator on more compositors, GPU builds, and signed Linux updates.
 5. Implement Windows-specific audio, shortcuts, insertion, packaging, and update verification.
 
-Public Linux previews require separate desktop acceptance of packages built from the release tag.
-The manual Release workflow prepares signed macOS packages in a draft; maintainers attach accepted
-Linux packages and checksums before publication. See [Linux release policy](LINUX.md#packaging-and-release-policy).
+Public Linux previews require desktop acceptance of the release packages. The manual Release
+workflow builds macOS and Linux in parallel, then creates the version commit/tag and uploads both
+platforms with combined checksums only after both builds pass. It prepares a complete draft by default
+for desktop acceptance before publication. See [Linux release policy](LINUX.md#packaging-and-release-policy).

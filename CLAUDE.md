@@ -122,12 +122,14 @@ for key continuity and a future Developer ID migration; changing identities requ
 
 - CI runs tests, builds a universal app, verifies its DMG, and uploads the DMG and ZIP as Actions artifacts.
   CI builds use ad-hoc signing and do not enable the in-app updater.
-- The manual Release workflow runs from `main`, checks the requested `X.Y.Z` version,
-  tests, imports the persistent signing identity, builds, verifies, and publishes the DMG, ZIP,
-  and `SHA256SUMS` to a draft GitHub Release by default. The `draft` input controls publication.
-  For Linux previews, run CI on the new release tag, accept the resulting packages on the primary
-  desktop, attach them using the stable Linux asset names in README, and regenerate the combined
-  checksums before publishing the draft. Do not relabel packages from an older version.
+- The manual Release workflow runs from `main`, checks the requested `X.Y.Z` version, and builds
+  macOS and Linux in parallel with that version. macOS uses the persistent signing identity;
+  CI and Release share `.github/workflows/linux-build.yml` for Linux tests and packaging.
+  Only after both builds succeed does the publication job commit/tag the version, verify artifact
+  checksums, and upload DMG, ZIP, AppImage, Debian package, and combined `SHA256SUMS`.
+  It creates a complete draft by default for Linux desktop acceptance. The `draft` input controls
+  publication. No separate CI dispatch or manual Linux attachment is needed. Do not relabel
+  packages from an older version.
 - `WFUpdateRepository` is set through `UPDATE_REPO` during release builds.
 - The DMG is the primary installation download. The in-app updater still consumes the ZIP asset.
   Verify the mounted DMG and its contained app with `macos/scripts/verify-dmg.sh` before publication.
