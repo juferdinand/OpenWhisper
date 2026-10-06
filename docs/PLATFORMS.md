@@ -3,7 +3,7 @@
 | Platform | Implementation | Status |
 |---|---|---|
 | macOS 14+ | Native Swift services + shared UI in WKWebView | Public DMG and ZIP releases |
-| Linux x86_64 | Shared UI in Tauri 2 + Rust and C++ speech services | Source / AppImage / `.deb` development preview; see [validation status](LINUX.md#validation-status) |
+| Linux x86_64 | Shared UI in Tauri 2 + Rust and C++ speech services | Source / AppImage / `.deb` preview; see [validation status](LINUX.md#validation-status) |
 | Windows | Not implemented | Future work |
 
 Both implementations use `shared/models.json`, the same pinned whisper.cpp release, and
@@ -45,5 +45,6 @@ availability alone is not a successful permission or insertion test. See the [su
 4. Validate the floating recording indicator on more compositors, GPU builds, and signed Linux updates.
 5. Implement Windows-specific audio, shortcuts, insertion, packaging, and update verification.
 
-Public Linux releases remain manual and separate from development artifacts. The public macOS
-Release workflow remains unchanged in scope. See [Linux build instructions](LINUX.md#build-from-source).
+Public Linux previews require separate desktop acceptance of packages built from the release tag.
+The manual Release workflow prepares signed macOS packages in a draft; maintainers attach accepted
+Linux packages and checksums before publication. See [Linux release policy](LINUX.md#packaging-and-release-policy).

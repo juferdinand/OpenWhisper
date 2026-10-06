@@ -1,6 +1,7 @@
 # Linux implementation and support
 
-The Linux app in `desktop/` is an early development preview, available as source and CI AppImage / `.deb` artifacts.
+The Linux app in `desktop/` is an early preview, available as source, release-preview downloads,
+and CI AppImage / `.deb` artifacts.
 A working build does not by itself establish support for
 global shortcuts, text insertion, microphone devices, or every desktop environment.
 
@@ -55,7 +56,7 @@ The app must report detected capabilities and any fallback it uses.
   a non-focusable floating window. Unsupported compositors keep the in-window control.
 - Store configuration and models in the user's XDG directories. Do not migrate or delete existing
   files without a documented migration. Avoid logging dictated text or private audio.
-- Start with local builds and development packages. Public Linux releases remain a manual action,
+- Public Linux preview packages remain a manual action after desktop acceptance,
   with package checksums and accurate support notes. Linux auto-update needs its own verified
   distribution design; do not reuse the macOS certificate checks as if they applied to Linux.
 
@@ -239,9 +240,14 @@ review them before posting diagnostics publicly.
 ## Packaging and release policy
 
 CI on `main` builds development `.deb` and AppImage packages and retains artifacts for 14 days.
-A main push does not change the version, create a tag, or publish a GitHub Release. Linux is not
-added to the public Release workflow until installation and desktop acceptance checks pass.
-The macOS workflow remains manual. Its version step also synchronizes the Linux manifests.
+A main push does not change the version, create a tag, or publish a GitHub Release.
+The manual Release workflow synchronizes every platform's version and creates a draft containing
+signed macOS packages by default. Linux preview packages are built by manually running CI on that
+same version tag, then accepted separately on the primary desktop before they are attached and
+the draft is published. Public preview downloads use the stable asset names
+`WhisperFree-Linux-x86_64.AppImage` and `WhisperFree-Linux-amd64.deb`; their internal version still
+matches the tag. `SHA256SUMS` covers both Linux packages and the macOS DMG/ZIP.
+Publication as a preview does not promote untested distributions to supported status.
 
 ## References
 

@@ -124,7 +124,10 @@ for key continuity and a future Developer ID migration; changing identities requ
   CI builds use ad-hoc signing and do not enable the in-app updater.
 - The manual Release workflow runs from `main`, checks the requested `X.Y.Z` version,
   tests, imports the persistent signing identity, builds, verifies, and publishes the DMG, ZIP,
-  and `SHA256SUMS` on GitHub Releases.
+  and `SHA256SUMS` to a draft GitHub Release by default. The `draft` input controls publication.
+  For Linux previews, run CI on the new release tag, accept the resulting packages on the primary
+  desktop, attach them using the stable Linux asset names in README, and regenerate the combined
+  checksums before publishing the draft. Do not relabel packages from an older version.
 - `WFUpdateRepository` is set through `UPDATE_REPO` during release builds.
 - The DMG is the primary installation download. The in-app updater still consumes the ZIP asset.
   Verify the mounted DMG and its contained app with `macos/scripts/verify-dmg.sh` before publication.

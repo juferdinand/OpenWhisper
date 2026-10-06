@@ -29,12 +29,12 @@ WhisperFree is in early development. Download the packaged macOS app from
 | Platform | Status |
 | --- | --- |
 | macOS 14+ | Native Swift services; universal package for Apple Silicon and Intel |
-| Linux x86_64 | Development preview with AppImage / `.deb` CI artifacts; CachyOS with KDE Plasma / Wayland is the primary test system |
+| Linux x86_64 | Preview AppImage / `.deb` downloads; CachyOS with KDE Plasma / Wayland is the primary test system |
 | Windows | Planned, not implemented yet — see the [platform plan](docs/PLATFORMS.md) |
 
 ### Linux compatibility
 
-There is no supported public Linux release yet. A source-build preview is available in `desktop/`.
+Linux downloads are an **early preview**. Source is available in `desktop/`.
 Distribution targets below are **not claims of completed end-to-end testing**. On Linux, desktop environment, Wayland/X11, audio services, and portal support
 determine which features work. See the [Linux implementation and test plan](docs/LINUX.md).
 
@@ -123,6 +123,23 @@ checksum. You can then drag the resulting `WhisperFree.app` into `/Applications`
 
 Alternatively, `make mac-install` builds the app, replaces an existing installation in
 `/Applications`, and launches it.
+
+### Install the Linux preview
+
+Download [**WhisperFree-Linux-x86_64.AppImage**](https://github.com/juferdinand/WhisperFree/releases/latest/download/WhisperFree-Linux-x86_64.AppImage)
+from the release page, then run:
+
+```bash
+chmod +x WhisperFree-Linux-x86_64.AppImage
+./WhisperFree-Linux-x86_64.AppImage
+```
+
+If FUSE is unavailable, run `APPIMAGE_EXTRACT_AND_RUN=1 ./WhisperFree-Linux-x86_64.AppImage`.
+On Debian/Ubuntu, the alternative [**WhisperFree-Linux-amd64.deb**](https://github.com/juferdinand/WhisperFree/releases/latest/download/WhisperFree-Linux-amd64.deb)
+can be installed with `sudo apt install ./WhisperFree-Linux-amd64.deb`.
+Verify downloads with the release's `SHA256SUMS`. Linux packages are not covered by the macOS certificate.
+Consult the [runtime dependencies and desktop support notes](docs/LINUX.md) before installation;
+building the Debian package does not establish tested Debian/Ubuntu desktop support.
 
 ### Build the Linux preview
 
@@ -223,8 +240,9 @@ builds universal DMG and ZIP packages, verifies the DMG, and retains both as dow
 The macOS development builds use ad-hoc signing and do not enable the in-app updater.
 Linux CI builds development `.deb` and AppImage artifacts on Ubuntu 22.04; packaging success
 alone does not certify every desktop. **Main pushes do not create a tag, change the version,
-or publish a release.** The public Release workflow still publishes macOS only.
-For normal installation, use the signed packages on [Releases](https://github.com/juferdinand/WhisperFree/releases/latest).
+or publish a release.** The manual Release workflow creates a draft by default with signed macOS
+packages. Maintainers add Linux preview packages after separate desktop acceptance, then publish
+the complete release. Download packages from [Releases](https://github.com/juferdinand/WhisperFree/releases/latest).
 Tests use shared cases from
 [`shared/test-vectors.json`](shared/test-vectors.json).
 
@@ -258,7 +276,12 @@ replacing it with a newly generated local certificate would break update signatu
 
 Then start the workflow under **Actions → Release → Run workflow**, supplying a new version
 in `X.Y.Z` format. It updates `VERSION`, creates a commit and tag, builds the universal bundle,
-and publishes the DMG and ZIP with `SHA256SUMS`. It also retains the packages as Actions artifacts.
+and creates a draft with the DMG, ZIP, and `SHA256SUMS` by default. It also retains the packages as Actions artifacts.
+For a Linux preview, run CI manually on the new version tag, download its Linux artifacts, and
+complete the [desktop acceptance checks](docs/LINUX.md#native-desktop-acceptance-test) on the primary system.
+Attach the verified AppImage as `WhisperFree-Linux-x86_64.AppImage` and the Debian package as
+`WhisperFree-Linux-amd64.deb`, regenerate `SHA256SUMS` across all four downloaded packages,
+and update the release's platform notes. Publish the draft only after these checks pass.
 The DMG contains the signed app and an Applications shortcut. CI mounts it read-only and checks
 its integrity, the contained app's signature, and agreement with the original build.
 The update repository is embedded in the bundle during the build.

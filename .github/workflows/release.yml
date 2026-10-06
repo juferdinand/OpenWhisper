@@ -3,7 +3,7 @@ run-name: Release ${{ inputs.version }}
 
 # Start manually: Actions → Release → Run workflow → enter a version (e.g. 0.2.0).
 # Writes VERSION, commits, tags v<version>, builds a signed universal app, and
-# publishes it as a GitHub release. Installed apps discover the update automatically.
+# creates a draft by default. Published releases are discovered by installed macOS apps.
 on:
   workflow_dispatch:
     inputs:
@@ -11,6 +11,10 @@ on:
         description: "New version (e.g. 0.2.0)"
         required: true
         type: string
+      draft:
+        description: "Keep the release private until additional platform acceptance is complete"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -20,8 +24,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Future platforms (desktop/: Linux, Windows) will have separate jobs that upload
-  # their assets to the same release; see docs/PLATFORMS.md.
+  # Linux packages are accepted separately and attached before publishing the draft;
+  # see docs/PLATFORMS.md. Windows is not implemented.
   macos:
     runs-on: macos-15
     timeout-minutes: 30
@@ -132,13 +136,16 @@ jobs:
       - name: Push and publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_DRAFT: ${{ inputs.draft }}
         run: |
           git push --atomic origin HEAD:refs/heads/main "refs/tags/v$VERSION"
+          EXTRA_ARGS=()
+          if [[ "$RELEASE_DRAFT" == "true" ]]; then EXTRA_ARGS+=(--draft); fi
           gh release create "v$VERSION" macos/build/WhisperFree-macOS.dmg macos/build/WhisperFree-macOS.zip macos/build/SHA256SUMS \
             --title "WhisperFree $VERSION" \
             --verify-tag \
             --notes-file .github/release-notes.md \
-            --generate-notes
+            --generate-notes "${EXTRA_ARGS[@]}"
 
       - name: Clean up keychain
         if: always()
