@@ -317,9 +317,11 @@ cloud synchronization, and LLM post-processing are not implemented.
 Automatic pasting uses the clipboard and a simulated keyboard shortcut, so behavior can vary
 between target apps.
 
-Next steps include desktop acceptance across Linux distributions and further macOS testing.
-The [roadmap](docs/ROADMAP.md) tracks Obsidian output, optional LM Studio/Ollama processing,
-configurable agent actions, and spoken responses. These integrations are not implemented yet.
+Next steps include Linux installation and desktop acceptance, plus further macOS testing.
+The [roadmap](docs/ROADMAP.md) schedules optional LM Studio/Ollama communication first,
+then speech output, then structured Obsidian notes. Configurable agent actions follow the
+provider/workflow contracts. These integrations are not implemented yet; each stage is
+tested and reviewed before delivery.
 [SPEC.md](SPEC.md) describes current behavior; [docs/PLATFORMS.md](docs/PLATFORMS.md) explains
 the shared UI and native services. Apple Developer ID signing and notarization remain future work.
 These are plans, not promised release dates.
