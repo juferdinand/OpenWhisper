@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Run a command in an owned desktop session with private audio and D-Bus.
 
-Requires Xvfb, PipeWire/PulseAudio compatibility, WirePlumber 0.5+, Python
-PyGObject, and AT-SPI. Wayland modes additionally require their compositor. No physical audio
+Requires Xvfb, PipeWire/PulseAudio compatibility, WirePlumber 0.4+, Python
+PyGObject, and AT-SPI. WirePlumber 0.4 uses private no-device Lua overrides.
+Wayland modes additionally require their compositor. No physical audio
 devices, live desktop input, user configuration, or user clipboard are used.
 Logs and disposable configuration remain in the printed output directory.
 """
@@ -62,6 +63,8 @@ def main():
     parser.add_argument("--session", choices=["x11", "kde-wayland", "sway", "gnome-wayland"], required=True)
     parser.add_argument("--x11-desktop", choices=["xfce", "cinnamon", "mate", "kde"], help="Start a genuine named session inside the private Xvfb display")
     parser.add_argument("--output", type=Path, help="New directory for private logs/configuration")
+    parser.add_argument("--gnome-headless", action="store_true", help="Use Mutter headless native backend with an owned virtual monitor")
+    parser.add_argument("--gnome-xwayland", action="store_true", help="Enable only the owned GNOME Xwayland server for mixed-client acceptance")
     parser.add_argument("--timeout", type=int, default=360, help="Command timeout in seconds")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -71,6 +74,8 @@ def main():
     if args.x11_desktop and args.session != "x11":
         parser.error("--x11-desktop requires --session x11")
     desktop_command = {"xfce": ["xfce4-session"], "cinnamon": ["cinnamon-session", "--session", "cinnamon"], "mate": ["mate-session"], "kde": ["startplasma-x11"]}.get(args.x11_desktop)
+    if (args.gnome_xwayland or args.gnome_headless) and args.session != "gnome-wayland":
+        parser.error("GNOME-specific options require --session gnome-wayland")
     compositor = {"kde-wayland": "kwin_wayland", "sway": "sway", "gnome-wayland": "gnome-shell"}.get(args.session)
     for name in ["Xvfb", "dbus-daemon", "pipewire", "pipewire-pulse", "wireplumber", "pactl"] + ([compositor] if compositor else []) + ([desktop_command[0], "xprop"] if desktop_command else []) + (["gdbus"] if args.x11_desktop == "kde" else []):
         if not shutil.which(name):
@@ -96,7 +101,7 @@ def main():
         "PIPEWIRE_RUNTIME_DIR", "LD_PRELOAD", "LD_LIBRARY_PATH", "QT_QPA_PLATFORM",
         "NO_AT_BRIDGE", "SESSION_MANAGER", "XAUTHORITY", "WAYLAND_SOCKET",
         "XDG_SESSION_ID", "XDG_SEAT", "XDG_VTNR", "DESKTOP_STARTUP_ID", "SWAYSOCK",
-        "HYPRLAND_INSTANCE_SIGNATURE", "AQ_BACKEND",
+        "HYPRLAND_INSTANCE_SIGNATURE", "AQ_BACKEND", "WF_OWNED_GNOME_XWAYLAND",
     ]:
         env.pop(key, None)
     for key, name in [
@@ -139,11 +144,11 @@ def main():
         result = 128 + signum
         raise SystemExit(result)
 
-    def start(name, values, pipe=False):
+    def start(name, values, pipe=False, child_env=None):
         log = (root / (name + ".log")).open("w")
         logs.append(log)
         process = subprocess.Popen(
-            values, env=env, stdout=subprocess.PIPE if pipe else log,
+            values, env=env if child_env is None else child_env, stdout=subprocess.PIPE if pipe else log,
             stderr=log, text=True, start_new_session=True,
         )
         processes.append(process)
@@ -234,7 +239,26 @@ def main():
             raise RuntimeError("Private accessibility router did not start")
         audio = start("pipewire", ["pipewire"])
         wait_socket(runtime / "pipewire-0", audio)
-        start("wireplumber-policy", ["wireplumber", "--profile=policy"])
+        version = subprocess.check_output(["wireplumber", "--version"], env=env, text=True, timeout=5)
+        (root / "wireplumber-version.txt").write_text(version)
+        if "libwireplumber 0.4." in version:
+            # Older LTS desktops have no policy-only profile. Disable every
+            # stock hardware monitor before their 90-enable-all Lua scripts run.
+            policy = root / "config/wireplumber"
+            for directory, content in [
+                ("main.lua.d", "assert(alsa_monitor)\nalsa_monitor.enabled = false\n"
+                 "if v4l2_monitor then v4l2_monitor.enabled = false end\n"
+                 "if libcamera_monitor then libcamera_monitor.enabled = false end\n"),
+                ("bluetooth.lua.d", "assert(bluez_monitor)\nbluez_monitor.enabled = false\n"),
+            ]:
+                folder = policy / directory
+                folder.mkdir(parents=True, mode=0o700)
+                (folder / "89-owned-no-devices.lua").write_text(content)
+            metadata["wireplumber_mode"] = "0.4 owned no-device Lua overrides"
+            start("wireplumber-policy", ["wireplumber"])
+        else:
+            metadata["wireplumber_mode"] = "policy-only profile"
+            start("wireplumber-policy", ["wireplumber", "--profile=policy"])
         pulse = start("pipewire-pulse", ["pipewire-pulse"])
         wait_socket(runtime / "pulse/native", pulse)
         info = subprocess.check_output(["pactl", "info"], env=env, text=True)
@@ -258,9 +282,30 @@ def main():
             sway = start("sway", ["sway", "--config", str(sway_config), "--debug"])
             env["WAYLAND_DISPLAY"] = wait_wayland_display(sway)
         elif args.session == "gnome-wayland":
-            shell = start("gnome-shell", ["gnome-shell", "--nested", "--wayland", "--no-x11", "--sm-disable", "--wayland-display=openwhisper-owned"])
+            help_text = subprocess.check_output(["gnome-shell", "--help"], env=env, text=True, timeout=5)
+            if args.gnome_headless:
+                metadata["gnome_backend"] = "headless virtual monitor"
+                values = ["gnome-shell", "--headless", "--wayland", "--virtual-monitor=1280x800", "--wayland-display=openwhisper-owned"]
+                values += [] if args.gnome_xwayland else ["--no-x11"]
+                shell = start("gnome-shell", values)
+            elif "--nested" in help_text:
+                metadata["gnome_backend"] = "nested-x11"
+                values = ["gnome-shell", "--nested", "--wayland", "--sm-disable", "--wayland-display=openwhisper-owned"]
+                values += [] if args.gnome_xwayland else ["--no-x11"]
+                shell = start("gnome-shell", values)
+            elif "--devkit" in help_text and Path("/usr/libexec/mutter-devkit").is_file():
+                metadata["gnome_backend"] = "mutter-devkit"
+                values = ["gnome-shell", "--devkit", "--wayland", "--wayland-display=openwhisper-owned"]
+                # Only the devkit frontend uses this private Xvfb. The tested
+                # application and all portal dialogs still use native Wayland.
+                values += [] if args.gnome_xwayland else ["--no-x11"]
+                shell = start("gnome-shell", values, child_env=env | {"GDK_BACKEND": "x11"})
+            else:
+                raise RuntimeError("GNOME requires its nested backend or the installed Mutter devkit")
             wait_socket(runtime / "openwhisper-owned", shell)
             env["WAYLAND_DISPLAY"] = "openwhisper-owned"
+            if args.gnome_xwayland:
+                env["WF_OWNED_GNOME_XWAYLAND"] = "1"
         if desktop_command:
             desktop = start("desktop-session", desktop_command)
             deadline = time.monotonic() + 30
