@@ -70,6 +70,14 @@ test("native layout accepts contained content and the measured fractional WebKit
   expect(await result(page)).toBe("PASS");
 });
 
+test("native layout accepts the packaged WebKit rounding geometry with integer device pixel ratio", async ({
+  page,
+}) => {
+  await fixture(page);
+  await rounding(page, 1, 1, 1);
+  expect(await result(page)).toBe("PASS");
+});
+
 for (const pixels of [1, 2, 24]) {
   test(`native layout rejects actual ${pixels}px visible overflow despite fractional getter mismatch`, async ({
     page,
@@ -112,7 +120,7 @@ test("native layout rejects unmatched rounding conditions and larger metric diff
   for (const [overflow, rootDifference, dpr] of [
     [1, 0, 1.25],
     [1, -1, 1.25],
-    [1, 1, 1],
+    [1, 2, 1],
     [2, 1, 1.25],
   ]) {
     await rounding(page, overflow, rootDifference, dpr);

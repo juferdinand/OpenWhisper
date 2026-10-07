@@ -18,8 +18,9 @@ function assertNativeSmokeLayout(main, tab) {
 
   const overflow = main.scrollWidth - main.clientWidth;
   // WebKit bug 268275: fractional zoom can round these integer getters differently.
-  // Keep the measured MATE exception narrow, after checking actual visible geometry.
-  const fractionalRounding = overflow === 1 && !Number.isInteger(devicePixelRatio) &&
+  // GTK font-DPI scaling can leave devicePixelRatio at 1 in bundled WebKit.
+  // Require the measured fractional viewport/root mismatch and contained geometry.
+  const fractionalRounding = overflow === 1 &&
     !Number.isInteger(bounds.width) && document.documentElement.clientWidth - innerWidth === 1;
   if (overflow > 0 && !fractionalRounding)
     throw new Error("Settings layout overflows horizontally");
