@@ -38,6 +38,8 @@ class OwnedSessionGuards(unittest.TestCase):
             cases = [
                 (["--owned"], {}, "--owned requires run-owned-desktop.py"),
                 (["--recovery"], {}, "--recovery requires --owned"),
+                (["--expect-no-overlay"], {}, "Fallback capability assertions require --owned"),
+                (["--expect-no-portals"], {}, "Fallback capability assertions require --owned"),
                 (["--owned", "--portals"], {
                     "WF_OWNED_DESKTOP_TEST": environment["XDG_RUNTIME_DIR"],
                     "PULSE_SERVER": "unix:" + str(root / "runtime/pulse/native"),

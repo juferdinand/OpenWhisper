@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Run a command in an owned X11 or nested KWin session with private audio and D-Bus.
+"""Run a command in an owned desktop session with private audio and D-Bus.
 
 Requires Xvfb, PipeWire/PulseAudio compatibility, WirePlumber 0.5+, Python
-PyGObject, and AT-SPI. KWin is required only for kde-wayland. No physical audio
+PyGObject, and AT-SPI. Wayland modes additionally require their compositor. No physical audio
 devices, live desktop input, user configuration, or user clipboard are used.
 Logs and disposable configuration remain in the printed output directory.
 """
@@ -58,7 +58,7 @@ def accessibility_router(address):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--session", choices=["x11", "kde-wayland"], required=True)
+    parser.add_argument("--session", choices=["x11", "kde-wayland", "sway", "gnome-wayland"], required=True)
     parser.add_argument("--output", type=Path, help="New directory for private logs/configuration")
     parser.add_argument("--timeout", type=int, default=360, help="Command timeout in seconds")
     parser.add_argument("command", nargs=argparse.REMAINDER)
@@ -66,9 +66,8 @@ def main():
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command or args.timeout < 1:
         parser.error("Supply a command after -- and a positive timeout")
-    for name in ["Xvfb", "dbus-daemon", "pipewire", "pipewire-pulse", "wireplumber", "pactl"] + (
-        ["kwin_wayland"] if args.session == "kde-wayland" else []
-    ):
+    compositor = {"kde-wayland": "kwin_wayland", "sway": "sway", "gnome-wayland": "gnome-shell"}.get(args.session)
+    for name in ["Xvfb", "dbus-daemon", "pipewire", "pipewire-pulse", "wireplumber", "pactl"] + ([compositor] if compositor else []):
         if not shutil.which(name):
             parser.error("Missing dependency: " + name)
     root = args.output.resolve() if args.output else Path(tempfile.mkdtemp(prefix="openwhisper-owned-"))
@@ -84,14 +83,14 @@ def main():
     (root / "run.json").write_text(json.dumps(metadata, indent=2) + "\n")
     env = os.environ.copy()
     for key in list(env):
-        if key.startswith(("PULSE_", "PIPEWIRE_", "WIREPLUMBER_", "ALSA_", "DBUS_", "AT_SPI_")):
+        if key.startswith(("PULSE_", "PIPEWIRE_", "WIREPLUMBER_", "ALSA_", "DBUS_", "AT_SPI_", "WLR_", "MUTTER_", "GNOME_")):
             env.pop(key)
     for key in [
         "DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS", "AT_SPI_BUS_ADDRESS",
         "ALSA_CONFIG_PATH", "PULSE_SERVER", "PULSE_COOKIE", "PIPEWIRE_REMOTE",
         "PIPEWIRE_RUNTIME_DIR", "LD_PRELOAD", "LD_LIBRARY_PATH", "QT_QPA_PLATFORM",
         "NO_AT_BRIDGE", "SESSION_MANAGER", "XAUTHORITY", "WAYLAND_SOCKET",
-        "XDG_SESSION_ID", "XDG_SEAT", "XDG_VTNR", "DESKTOP_STARTUP_ID",
+        "XDG_SESSION_ID", "XDG_SEAT", "XDG_VTNR", "DESKTOP_STARTUP_ID", "SWAYSOCK",
     ]:
         env.pop(key, None)
     for key, name in [
@@ -109,9 +108,9 @@ def main():
         WF_OWNED_DESKTOP_TEST=str(runtime),
         PIPEWIRE_RUNTIME_DIR=str(runtime), PIPEWIRE_REMOTE="pipewire-0",
         PULSE_SERVER="unix:" + str(runtime / "pulse/native"),
-        XDG_SESSION_TYPE="wayland" if args.session == "kde-wayland" else "x11",
-        XDG_CURRENT_DESKTOP="KDE" if args.session == "kde-wayland" else "OpenWhisperTest",
-        GDK_BACKEND="wayland" if args.session == "kde-wayland" else "x11",
+        XDG_SESSION_TYPE="x11" if args.session == "x11" else "wayland",
+        XDG_CURRENT_DESKTOP={"kde-wayland": "KDE", "sway": "sway", "gnome-wayland": "GNOME"}.get(args.session, "OpenWhisperTest"),
+        GDK_BACKEND="x11" if args.session == "x11" else "wayland",
         GTK_USE_PORTAL="0", LIBGL_ALWAYS_SOFTWARE="1", GALLIUM_DRIVER="llvmpipe",
         __GLX_VENDOR_LIBRARY_NAME="mesa", WEBKIT_DISABLE_DMABUF_RENDERER="1",
         GGML_DISABLE_VULKAN="1",
@@ -156,6 +155,16 @@ def main():
                 raise RuntimeError("Owned service socket unavailable: " + str(path))
             time.sleep(0.1)
 
+    def wait_wayland_display(process):
+        deadline = time.monotonic() + 15
+        while True:
+            sockets = [path for path in runtime.glob("wayland-*") if path.is_socket()]
+            if len(sockets) == 1:
+                return sockets[0].name
+            if process.poll() is not None or time.monotonic() > deadline:
+                raise RuntimeError("Owned compositor did not expose one private Wayland socket")
+            time.sleep(0.1)
+
     try:
         # Keep interruption inside this cleanup scope, including before any child starts.
         signal.signal(signal.SIGTERM, interrupted)
@@ -175,6 +184,14 @@ def main():
         )
         bus = start("session-bus", ["dbus-daemon", "--config-file=" + str(session_config), "--nofork", "--print-address"], True)
         env["DBUS_SESSION_BUS_ADDRESS"] = line(bus)
+        if args.session == "gnome-wayland":
+            # GNOME Shell requires a system-bus connection even in nested mode.
+            # This empty owned bus has no host services or activation directories.
+            system_config = root / "system-bus.conf"
+            system_config.write_text(session_config.read_text().replace("<type>session</type>", "<type>system</type>")
+                                     .replace(str(runtime / "session-bus"), str(runtime / "system-bus")))
+            system_bus = start("system-bus", ["dbus-daemon", "--config-file=" + str(system_config), "--nofork", "--print-address"], True)
+            env["DBUS_SYSTEM_BUS_ADDRESS"] = line(system_bus)
         a11y_config = next((path for path in [
             Path("/usr/share/defaults/at-spi2/accessibility.conf"),
             Path("/usr/share/at-spi2/accessibility.conf"),
@@ -205,6 +222,17 @@ def main():
             kwin = start("kwin", ["kwin_wayland", "--x11-display", env["DISPLAY"],
                 "--socket", "openwhisper-owned", "--no-lockscreen", "--no-kactivities", "--width", "1100", "--height", "750"])
             wait_socket(runtime / "openwhisper-owned", kwin)
+            env["WAYLAND_DISPLAY"] = "openwhisper-owned"
+        elif args.session == "sway":
+            # Headless/pixman never opens a physical DRM or input device.
+            env.update(WLR_BACKENDS="headless", WLR_RENDERER="pixman", WLR_HEADLESS_OUTPUTS="1", WLR_LIBINPUT_NO_DEVICES="1")
+            sway_config = root / "sway.conf"
+            sway_config.write_text("xwayland disable\noutput HEADLESS-1 mode 1280x800\nseat seat0 fallback true\n")
+            sway = start("sway", ["sway", "--config", str(sway_config), "--debug"])
+            env["WAYLAND_DISPLAY"] = wait_wayland_display(sway)
+        elif args.session == "gnome-wayland":
+            shell = start("gnome-shell", ["gnome-shell", "--nested", "--wayland", "--no-x11", "--sm-disable", "--wayland-display=openwhisper-owned"])
+            wait_socket(runtime / "openwhisper-owned", shell)
             env["WAYLAND_DISPLAY"] = "openwhisper-owned"
         with (root / "command.log").open("w") as output:
             process = subprocess.Popen(command, env=env, stdout=output, stderr=subprocess.STDOUT, start_new_session=True)

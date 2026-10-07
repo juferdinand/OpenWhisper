@@ -24,14 +24,19 @@ as macOS. Tauri hosts these assets on Linux; WKWebView hosts them on macOS.
 |---|---|---|---|
 | CachyOS | KDE Plasma 6 / Wayland | Primary acceptance system | Native UI, virtual-microphone capture beyond two minutes, floating stop/cancel, both CPU engines, clipboard, and AppImage launch verified |
 | Arch Linux and derivatives | KDE Plasma 6 / Wayland | Same integration path | Not yet tested |
-| Ubuntu LTS and Debian | GNOME / Wayland | Portal integration, clipboard fallback | GNOME / Wayland remains untested; Debian 13 package and owned X11 evidence are listed below |
+| Ubuntu LTS and Debian | GNOME / Wayland | Portal integration, clipboard fallback | Debian 13 nested GNOME native UI and main-window capture/cancel pass; clipboard hangs in the owned no-input session, so full acceptance remains open |
 | Fedora | GNOME or KDE / Wayland | Portal integration, clipboard fallback | Not yet tested |
 | Common desktop distributions | X11 | Record button, `xclip`, and available portals; no native X11 shortcut fallback yet | Owned Xvfb UI/capture/clipboard checks pass; a normal desktop session remains untested |
-| wlroots compositors | Sway / Hyprland / Wayland | Capability-dependent integration | Not yet tested; no blanket support claim |
+| wlroots compositors | Sway / Hyprland / Wayland | Capability-dependent integration | Debian 13 headless Sway UI/capture/clipboard and absent-portal fallback pass; physical Sway sessions and Hyprland remain untested |
 | Other architectures | ARM64 / 32-bit | Outside the initial release scope | No Linux packages yet |
 
 Actual features depend on the desktop and its portal backend, not just the distribution name.
 The app must report detected capabilities and any fallback it uses.
+Portal detection reads each interface's actual `version` property; automatic paste also
+requires the RemoteDesktop `AvailableDeviceTypes` keyboard bit. Session-bus connection
+has a one-second deadline, followed by independent two-second interface deadlines.
+Missing, invalid, or non-answering interfaces leave their permission actions unavailable.
+These probes do not request a shortcut binding or keyboard permission.
 Native KDE integration checks KWin, KGlobalAccel, Plasma version, the button-rebinding plugin,
 and available utilities. It is not restricted to CachyOS. Other KDE distributions with those
 capabilities can use the same adapter, but remain untested until their own acceptance report
@@ -340,7 +345,8 @@ test with a virtual source proves the capture/inference/output path, not physica
 
 `run-owned-desktop.py` needs Xvfb, D-Bus, PipeWire / pipewire-pulse, WirePlumber 0.5+,
 `pactl`, PyGObject, and AT-SPI. `test-session.py` additionally needs `paplay`, `gdbus`,
-and `xclip` for X11 or `wl-paste` for Wayland. Nested Wayland checks also need `kwin_wayland`.
+and `xclip` for X11 or `wl-paste` for Wayland. Wayland modes need `kwin_wayland`,
+`sway`, or `gnome-shell`/Mutter respectively.
 Use a new output directory for each run:
 
 ```bash
@@ -352,7 +358,20 @@ python3 linux/scripts/run-owned-desktop.py --session x11 \
 python3 linux/scripts/run-owned-desktop.py --session kde-wayland \
   --output .local/acceptance-review-kwin -- \
   python3 linux/scripts/test-session.py --owned --recovery
+python3 linux/scripts/run-owned-desktop.py --session sway \
+  --output .local/acceptance-review-sway -- \
+  python3 linux/scripts/test-session.py --owned --expect-no-portals
+python3 linux/scripts/run-owned-desktop.py --session gnome-wayland \
+  --output .local/acceptance-review-gnome -- \
+  python3 linux/scripts/test-session.py --owned --expect-no-portals --expect-no-overlay
 ```
+
+Sway uses its headless backend and pixman renderer without DRM or input devices.
+GNOME runs nested inside the private Xvfb, with an additional empty private system bus.
+Neither mode enables portal activation or reaches the user's desktop services.
+The optional fallback assertions require `--owned`: they check unavailable portal notices
+and disabled permission buttons, or the unsupported-overlay notice and main-window Stop/Cancel.
+Clipboard equality remains required, with a ten-second read deadline.
 
 The default duration remains 126 seconds. The session script handles SIGTERM so a harness
 timeout still stops its separate application process group and unloads its virtual sink.
@@ -366,6 +385,37 @@ German after restart. `--owned --portals` is rejected: permission acceptance req
 For a downloaded AppImage, prefix the harness command with `APPIMAGE_EXTRACT_AND_RUN=1` and
 pass `--binary /path/to/OpenWhisper_0.2.4_amd64.AppImage` to `test-session.py`.
 Add `--model /path/to/parakeet.bin --model-id parakeet-v3-q4` for the second model family.
+
+On 2026-10-07, disposable Debian 13 checks used Sway `1.10.1-2`, wlroots
+`0.18.2-3`, GNOME Shell `48.7-0+deb13u2`, Mutter `48.7-0+deb13u1`, PipeWire
+`1.4.2-1`, and WirePlumber `0.5.8-2`. The PR #20 CI package from source
+`03e69f5e6e64edd3b247a61e67ebd6b88721fd7f` passed native UI smoke checks in
+both compositors and the Sway capture/clipboard path. Its `.deb` SHA-256 was
+`71c73ce752deb1b3101c92b4379c09da4542b9dc204f5a8a2c49451369626df5`.
+That unchanged package failed the GNOME absent-portal assertion: proxy construction
+had incorrectly reported an unavailable shortcut service as available.
+
+A local CPU/custom-protocol development build of the correction on main baseline
+`46a6b82530bbd7927964332131319070674fe684` had executable SHA-256
+`ea8ead599f89d07f24e9fa121feeff0d50296c28882d2a919fae980e3007a46c`.
+Its owned Sway run passed explicit missing-portal notices, disabled permission actions,
+private CPAL capture, floating Cancel/Stop, Whisper Tiny fixture recognition, silence,
+history, Wayland clipboard equality, and German/CPU/onboarding persistence after restart.
+Both Sway duration checks in this additional evidence used one second; they do not add
+new long-recording or GPU evidence.
+
+The corrected GNOME run passed the unavailable-overlay/portal notices, disabled actions,
+main-window capture and cancellation, and fixture recognition/history. Clipboard output
+did not complete, so the full pipeline and later persistence checks did not pass.
+The owned Mutter registry advertised `wl_data_device_manager` without data-control;
+`wl-paste`'s transparent-window fallback received no keyboard focus in the retained trace. Upstream
+[documents this possible hang](https://github.com/bugaevc/wl-clipboard/blob/v2.2.1/data/wl-clipboard.1#L165-L171).
+This no-input nested result does not establish clipboard behavior in a physical GNOME
+session. [GNOME acceptance #5](https://github.com/juferdinand/OpenWhisper/issues/5)
+and [Sway/Hyprland acceptance #7](https://github.com/juferdinand/OpenWhisper/issues/7)
+remain open for their supervised checks. No portal permissions, physical microphone,
+target-field paste, login/autostart, tray, signed-update, or Hyprland acceptance follows
+from these owned results.
 
 To reproduce Debian package acceptance without installing anything on the host, provide the
 Ubuntu-built `.deb` with its verified checksum and the public fixture/model paths:
