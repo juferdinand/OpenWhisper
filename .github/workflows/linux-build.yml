@@ -46,9 +46,11 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libxkbcommon-dev libgtk-layer-shell0 libvulkan-dev patchelf cmake ninja-build ffmpeg xvfb dbus-x11
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libxkbcommon-dev libgtk-layer-shell0 libvulkan-dev patchelf cmake ninja-build ffmpeg xvfb dbus-x11 openssl squashfs-tools desktop-file-utils
           rustup toolchain install 1.99.0 --profile minimal --component rustfmt,clippy
           rustup default 1.99.0
+      - name: Test the terminal installer in disposable homes
+        run: python3 scripts/test-release-installer.py
       - name: Cache native source and test model
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -76,6 +78,7 @@ jobs:
           cargo clippy --locked --workspace --all-targets -- -D warnings
           cargo build --locked -p openwhisper-core --example verify-update
           python3 scripts/test-update-signatures.py
+          OPENWHISPER_UPDATE_VERIFIER="$PWD/target/debug/examples/verify-update" python3 scripts/test-release-installer.py ReleaseInstallerTests.test_native_verifier_matches_signature_and_version_decisions
           bash scripts/test-recognition.sh
       - name: Build Linux packages
         env:
@@ -107,7 +110,7 @@ jobs:
         run: dbus-run-session -- xvfb-run -a target/release/openwhisper-desktop --ui-smoke-test
       - name: Upload Linux release packages
         if: inputs.version != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.artifact_name }}
           path: linux/target/release/bundle/release/*
@@ -115,7 +118,7 @@ jobs:
           retention-days: ${{ inputs.retention_days }}
       - name: Upload Linux packages
         if: inputs.version == ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.artifact_name }}
           path: |
@@ -125,7 +128,7 @@ jobs:
           if-no-files-found: error
           retention-days: ${{ inputs.retention_days }}
       - name: Upload shared UI previews
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: OpenWhisper-shared-UI-${{ github.sha }}
           path: shared/ui/test-results/*.png
