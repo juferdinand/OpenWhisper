@@ -172,11 +172,11 @@ Paste tests verify that server's UID and compositor ancestry before selecting it
 WirePlumber 0.4 uses private no-device policy overrides; no hardware monitor is enabled.
 Older AT-SPI's `push button` role is accepted without changing the session guards.
 
-## Additional owned desktop source evidence, 2026-10-07
+## Additional owned desktop evidence, 2026-10-07
 
 The following results use separately hashed development binaries, not the published 0.2.4
 release. [PR #28](https://github.com/juferdinand/OpenWhisper/pull/28) combines the source changes;
-its eventual CI packages require their own checks. All audio is the public upstream JFK
+package-specific outcomes and remaining fresh packaging checks are recorded below. All audio is the public upstream JFK
 fixture played into a private virtual source, with Whisper Tiny and manual CPU selection.
 Containers use ordinary app users, private configuration/session buses and software graphics,
 without host display/audio/input sockets or physical devices. The Hyprland VM uses QEMU's
@@ -240,7 +240,7 @@ SHA-256 `a616f2389ad04b32a68cad633353378fe58fa5d7a8be74300f5c06b926f895a8`
 in Debian 13 image `sha256:352a1233bdca10f1644feee2589a8765d9f8f8009a85e2053ca458dbc7f49ce2`.
 Genuine Xfce session 4.20.2 / Xfwm4 4.20.0, Cinnamon 6.4.10, MATE session 1.26.1 /
 Marco 1.26.2 and KDE Plasma/KWin 6.3.6 run inside private Xvfb displays. Each passes actual
-native keyboard capture, Escape/focus cancellation, toggle and physical-key release for hold,
+native keyboard capture, Escape/focus cancellation, toggle and actual key-release edges for hold,
 public-fixture capture/recognition, focused GTK paste equal clipboard/history, explicit paste
 revocation, saved trigger restart/removal, and shared onboarding/German/manual-CPU persistence.
 KDE retains and prefers its own adapter. These are owned virtual key events, not physical keys.
@@ -258,6 +258,27 @@ the content viewport and accepts only the precisely reproduced fractional-scale 
 rounding case. Seven browser checks still reject real overflow and disconnected navigation.
 Actual MATE native smoke passes on corrected binary SHA-256
 `c3155bfa1ca0009f696bdb2d1cd61eec4f064ddec192b91640e2064b71ab80e4`.
+The exact combined CI AppImage `6afe2fbe…` / native `7483aeeb…` has a separately retained
+named-desktop follow-up. Full extracted AppRun context passes native keyboard/hold-release,
+focused insertion, passive-helper safety and restart on all four desktops. Cinnamon completes
+all four phases; Xfce strict capture and direct AppImage UI pass. MATE strict capture passes,
+but the old bundled WebKit returns integer `devicePixelRatio=1` for the same reproduced
+fractional viewport rounding. Original package smoke therefore fails the earlier guard.
+Diagnostic source based on `816a6d0` shows scroll/client widths 697/696, fractional main width
+702.981384, document/window widths 921/920, and every visible child inside the viewport.
+Test-only correction `0b3ab4b` (combined source `3bbbea3`) uses that measured viewport/root
+mismatch instead of requiring fractional DPR. Eight browser checks retain rejection of real
+visible overflow, integer geometry, other root differences and disconnected navigation.
+Corrected local native SHA-256
+`6b5fce6a4d2ae1ad39df9fc4b50ecd97b4289393ef9ee656bc79022838cac8b7`
+passes actual owned MATE smoke with the original package's seven GTK/WebKit library hashes.
+This local correction still requires fresh combined CI package confirmation.
+
+One original KDE extracted-AppRun secondary launcher exits with SIGSEGV; later direct
+AppImage and same-AppRun strict replays pass. The single intermittent result remains recorded
+and is not claimed fixed. Initial bare-ELF attempts bypassed GTK launch hooks and failed before
+UI; those launch-context fixture failures remain separate from complete AppRun/AppImage tests.
+
 No application CSS or layout tolerance was changed. `test-x11-triggers.py` and
 `test-x11-session.py` are reusable guarded harnesses; exact reports are under
 `.local/planning/x11-desktop-acceptance/`. Login-manager sessions, physical tray/keyboards,
