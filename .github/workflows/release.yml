@@ -3,7 +3,7 @@ run-name: Release ${{ inputs.version }}
 
 # Start manually: Actions → Release → Run workflow → enter a version (e.g. 0.2.0).
 # Builds and tests macOS and Linux, then commits VERSION, tags, and uploads all packages.
-# Creates a draft by default for desktop acceptance before publication.
+# Creates a draft by default for final artifact verification before publication.
 on:
   workflow_dispatch:
     inputs:
@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       draft:
-        description: "Keep the release private until additional platform acceptance is complete"
+        description: "Keep the release private until final artifact verification is complete"
         type: boolean
         default: true
 

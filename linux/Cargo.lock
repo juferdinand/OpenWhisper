@@ -2846,6 +2846,7 @@ dependencies = [
  "tokio",
  "uuid",
  "wayland-client",
+ "x11-dl",
  "xkbcommon",
  "zbus",
 ]

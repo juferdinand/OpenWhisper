@@ -123,6 +123,10 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false, f
           return 1;
         }
         host.calls.push({ command, args });
+        if (command === "enable_paste" && host.rejectPortal) {
+          await new Promise(resolve => setTimeout(resolve, host.portalDelay ?? 0));
+          throw new Error("Permission request cancelled");
+        }
         if (command === "get_state") {
           const saved = await host.loadTestPreferences();
           if (saved) state.preferences = saved;
@@ -147,9 +151,12 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false, f
           state.recording_shortcut = false;
         }
         if (command === "clear_shortcut") {
-          state.preferences.native_trigger = null;
+          if (state.native_x11) state.preferences.x11_trigger = null;
+          else state.preferences.native_trigger = null;
           state.shortcut = null;
         }
+        if (command === "enable_paste") state.paste_ready = true;
+        if (command === "disable_paste") state.paste_ready = false;
         if (command === "clear_history") state.history = [];
         publish();
         return command === "save_preferences" ? JSON.parse(JSON.stringify(state)) : null;
@@ -560,6 +567,49 @@ test("Linux: native trigger capture blocks recording, cancels, and shows saved m
   await expect(page.getByRole("button", { name: "Set trigger …", exact: true })).toBeVisible();
 });
 
+test("Linux X11 fallback exposes explicit keyboard setup and session paste without portals", async ({ page }) => {
+  await start(page, "linux");
+  await page.evaluate(() => {
+    const w = window as any;
+    Object.assign(w.testState, { session: "X11", native_shortcuts: true, native_x11: true, native_paste: true, shortcut_portal: false, paste_portal: false });
+    w.testState.preferences.native_trigger = { kind: "key", key: 0x01000021 };
+    w.publishState();
+  });
+  await page.getByRole("button", { name: "General", exact: true }).click();
+  await expect(page.getByText("Choose a regular keyboard key or shortcut.", { exact: false })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Recording mode" })).toBeEnabled();
+  await expect(page.getByText("Automatic X11 paste", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Set trigger …", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Press and release a keyboard key" })).toBeVisible();
+  await expect(page.locator("#record")).toBeDisabled();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page.locator("#record")).toBeEnabled();
+  await page.getByRole("button", { name: "Allow", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Revoke", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Revoke", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Allow", exact: true })).toBeEnabled();
+  await expect(page.getByText("Native X11 triggers", { exact: true })).toBeVisible();
+  await expect(page.getByText("Native X11 paste", { exact: true })).toBeVisible();
+  await expect(page.getByText("Unavailable", { exact: true })).toHaveCount(2);
+});
+
+test("Linux X11 trigger removal and German help preserve the inactive KDE profile", async ({ page }) => {
+  await start(page, "linux");
+  await page.evaluate(() => {
+    const w = window as any;
+    Object.assign(w.testState, { session: "X11", native_shortcuts: true, native_x11: true, native_paste: true, shortcut_portal: false, paste_portal: false, shortcut: "F8" });
+    Object.assign(w.testState.preferences, { ui_language: "de", x11_trigger: { keycode: 74, keysym: 65477, modifiers: 0, group: 0 }, native_trigger: { kind: "key", key: 0x01000021 } });
+    w.publishState();
+  });
+  await page.getByRole("button", { name: "Allgemein", exact: true }).click();
+  await expect(page.getByText("Automatisches Einfügen unter X11", { exact: true })).toBeVisible();
+  await expect(page.getByText("Wähle eine normale Taste", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Auslöser entfernen", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Auslöser festlegen …", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => (window as any).testState.preferences.native_trigger.key)).toBe(0x01000021);
+  expect(await page.evaluate(() => (window as any).testState.preferences.x11_trigger)).toBeNull();
+});
+
 test("Linux: modifier-only triggers explain toggle mode and disable push to talk", async ({ page }) => {
   await start(page, "linux");
   await page.evaluate(() => {
@@ -599,3 +649,30 @@ test("Linux clipboard delivery failures fully translate while retaining raw dict
   await expect(page.locator(".history-row p")).toHaveText("Clipboard delivery timed out");
   expect(await page.evaluate(() => (window as any).testState.transcript)).toBe("Clipboard delivery timed out");
 });
+
+for (const platform of ["linux", "macos"] as const) {
+  test(`${platform}: cancelled permission can be retried without a host state event`, async ({ page }) => {
+    await start(page, platform);
+    await page.evaluate(() => {
+      const host = window as any;
+      host.rejectPortal = true;
+      host.portalDelay = 500;
+    });
+    await page.getByRole("button", { name: "Allow", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Allow", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Set trigger …", exact: true })).toBeDisabled();
+    await expect(page.getByRole("alert")).toContainText("Permission request cancelled");
+    await expect(page.getByRole("button", { name: "Allow", exact: true })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Set trigger …", exact: true })).toBeEnabled();
+    await page.evaluate(() => { (window as any).rejectPortal = false; });
+    await page.getByRole("button", { name: "Allow", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).calls.filter((call: any) => call.command === "enable_paste").length)).toBe(2);
+    if (platform === "linux") {
+      await expect(page.getByRole("button", { name: "Revoke", exact: true })).toBeEnabled();
+      await page.getByRole("button", { name: "Revoke", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Allow", exact: true })).toBeEnabled();
+    } else {
+      await expect(page.locator('[data-portal="disable_paste"]')).toBeEnabled();
+    }
+  });
+}

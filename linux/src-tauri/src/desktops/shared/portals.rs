@@ -6,6 +6,18 @@ use ashpd::desktop::{
 };
 use futures_util::StreamExt;
 use std::sync::Arc;
+use std::time::Duration;
+
+async fn register_host_identity(runtime: &Runtime) {
+    // A direct/AppImage launch may have no systemd app scope from which the
+    // frontend can infer an ID. Register on ashpd's shared connection before
+    // creating a session. This identifies the host; it grants no permissions.
+    // Older frontends lack Registry, so their existing detection remains usable.
+    if let Ok(app_id) = runtime.app.config().identifier.parse::<ashpd::AppID>() {
+        let _ =
+            tokio::time::timeout(Duration::from_secs(2), ashpd::register_host_app(app_id)).await;
+    }
+}
 
 pub struct PasteSession {
     proxy: RemoteDesktop,
@@ -60,16 +72,29 @@ pub async fn enable_paste(runtime: &Arc<Runtime>) -> Result<(), String> {
     if holder.is_some() {
         return Ok(());
     }
+    register_host_identity(runtime).await;
     let result = async {
         let proxy = RemoteDesktop::new().await?;
         let session = proxy.create_session(Default::default()).await?;
         let options = ashpd::desktop::remote_desktop::SelectDevicesOptions::default()
             .set_devices(Some(DeviceType::Keyboard.into()));
-        proxy.select_devices(&session, options).await?.response()?;
-        let selected = proxy
-            .start(&session, None, Default::default())
-            .await?
-            .response()?;
+        let selected = async {
+            proxy.select_devices(&session, options).await?.response()?;
+            proxy
+                .start(&session, None, Default::default())
+                .await?
+                .response()
+        }
+        .await;
+        let selected = match selected {
+            Ok(selected) => selected,
+            Err(error) => {
+                // ashpd sessions do not close on Drop. Failed or cancelled
+                // setup must not leave an unused keyboard session behind.
+                let _ = session.close().await;
+                return Err(error);
+            }
+        };
         if !selected.devices().contains(DeviceType::Keyboard) {
             let _ = session.close().await;
             return Err(ashpd::Error::NoResponse);
@@ -134,6 +159,7 @@ pub async fn enable_shortcut(runtime: Arc<Runtime>) -> Result<(), String> {
             .send(true)
             .map_err(|_| "Shortcut session ended. Restart the app to reconnect.".into());
     }
+    register_host_identity(&runtime).await;
     let proxy = GlobalShortcuts::new()
         .await
         .map_err(|e| format!("Global shortcuts are unavailable: {e}. Use the Record button."))?;
@@ -159,9 +185,16 @@ pub async fn enable_shortcut(runtime: Arc<Runtime>) -> Result<(), String> {
             Default::default(),
         )
         .await
-        .map_err(|e| e.to_string())?
-        .response()
-        .map_err(|e| format!("Shortcut setup cancelled or denied: {e}"))?;
+        .and_then(|request| request.response());
+    let response = match response {
+        Ok(response) => response,
+        Err(error) => {
+            // Some backends can install a binding before returning an error.
+            // A failed setup must not leave an unmonitored shortcut active.
+            let _ = session.close().await;
+            return Err(format!("Shortcut setup cancelled or denied: {error}"));
+        }
+    };
     let description = shortcut_description(response.shortcuts());
     let unassigned = description.is_none();
     let session_path = serde_json::to_value(&session)

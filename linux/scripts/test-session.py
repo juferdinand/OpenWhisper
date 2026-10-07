@@ -73,7 +73,8 @@ def button(prefix, frame='OpenWhisper'):
                 if child.get_role_name() == 'frame' and child.get_name() == frame:
                     for item in descendants(child):
                         try:
-                            if item.get_role_name() in ['button', 'toggle button'] and item.get_name().startswith(prefix): return item
+                            # AT-SPI 2.52 on Ubuntu LTS names this role "push button".
+                            if item.get_role_name() in ['button', 'push button', 'toggle button'] and item.get_name().startswith(prefix): return item
                         except GLib.Error: pass
             except GLib.Error: pass
     return None

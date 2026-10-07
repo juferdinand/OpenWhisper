@@ -4,6 +4,16 @@
     "linux": {
       "deb": {
         "desktopTemplate": "resources/desktop-entry.hbs"
+      },
+      "appimage": {
+        "files": {
+          "/usr/lib/libgtk-layer-shell.so.0": "../target/appimage-extra/libgtk-layer-shell.so.0",
+          "/usr/share/doc/gtk-layer-shell/copyright": "../target/appimage-extra/copyright",
+          "/usr/share/doc/gtk-layer-shell/LICENSE_LGPL.txt": "../target/appimage-extra/LICENSE_LGPL.txt",
+          "/usr/share/doc/gtk-layer-shell/LICENSE_GPL.txt": "../target/appimage-extra/LICENSE_GPL.txt",
+          "/usr/share/doc/gtk-layer-shell/LICENSE_MIT.txt": "../target/appimage-extra/LICENSE_MIT.txt",
+          "/usr/share/doc/gtk-layer-shell/build-origin.json": "../target/appimage-extra/build-origin.json"
+        }
       }
     }
   }

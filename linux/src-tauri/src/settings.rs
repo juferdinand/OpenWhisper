@@ -21,6 +21,7 @@ pub struct Preferences {
     pub output: String,
     pub hold_to_record: bool,
     pub native_trigger: Option<crate::desktops::kde::Trigger>,
+    pub x11_trigger: Option<crate::desktops::x11::Trigger>,
     pub gpu: bool,
     pub gpu_configured: bool,
     pub keep_history: bool,
@@ -41,6 +42,7 @@ impl Default for Preferences {
             output: "clipboard".into(),
             hold_to_record: false,
             native_trigger: None,
+            x11_trigger: None,
             gpu: true,
             gpu_configured: true,
             keep_history: true,
@@ -50,12 +52,29 @@ impl Default for Preferences {
     }
 }
 impl Preferences {
+    pub fn validate_recording_mode(&self, kde_active: bool) -> Result<(), String> {
+        if kde_active
+            && self.hold_to_record
+            && self
+                .native_trigger
+                .as_ref()
+                .is_some_and(|trigger| trigger.modifier_only())
+        {
+            return Err("Modifier-only triggers use toggle mode. Use a regular key or mouse button for push to talk.".into());
+        }
+        Ok(())
+    }
+    pub fn restore_kde_recording_mode(&mut self) {
+        if self.validate_recording_mode(true).is_err() {
+            self.hold_to_record = false;
+        }
+    }
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(trigger) = &self.x11_trigger {
+            trigger.validate()?;
+        }
         if let Some(trigger) = &self.native_trigger {
             trigger.validate()?;
-            if self.hold_to_record && trigger.modifier_only() {
-                return Err("Modifier-only triggers use toggle mode. Use a regular key or mouse button for push to talk.".into());
-            }
         }
         if !["en", "de"].contains(&self.ui_language.as_str()) {
             return Err("Unknown interface language".into());
@@ -111,9 +130,22 @@ impl Paths {
         if !path.exists() {
             return Ok(Preferences::default());
         }
-        let value: serde_json::Value =
+        let mut value: serde_json::Value =
             serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
                 .map_err(|e| format!("Cannot read settings: {e}"))?;
+        // A malformed optional X11 binding must not reset ordinary saved preferences.
+        if value
+            .get("x11_trigger")
+            .is_some_and(|trigger| !trigger.is_null())
+        {
+            let valid = serde_json::from_value::<crate::desktops::x11::Trigger>(
+                value["x11_trigger"].clone(),
+            )
+            .is_ok_and(|trigger| trigger.validate().is_ok());
+            if !valid {
+                value["x11_trigger"] = serde_json::Value::Null;
+            }
+        }
         let mut prefs: Preferences = serde_json::from_value(value.clone())
             .map_err(|e| format!("Cannot read settings: {e}"))?;
         // Existing installations must not return to onboarding after an update.
@@ -217,6 +249,85 @@ mod tests {
         assert!(reloaded.setup_completed);
         assert_eq!(reloaded.ui_language, "de");
         assert_eq!(reloaded.language, "auto");
+        fs::remove_dir_all(paths.config).unwrap();
+    }
+    #[test]
+    fn recording_mode_follows_the_active_adapter_and_preserves_inactive_profiles() {
+        let paths = isolated();
+        let mut prefs = Preferences {
+            native_trigger: Some(crate::desktops::kde::Trigger::Key { key: 0x0100_0021 }),
+            x11_trigger: Some(crate::desktops::x11::Trigger {
+                keycode: 74,
+                keysym: 65477,
+                modifiers: 0,
+                group: 0,
+            }),
+            hold_to_record: true,
+            ..Preferences::default()
+        };
+        // The current X11 adapter supports actual press/release even with a saved KDE modifier.
+        assert!(prefs.validate_recording_mode(false).is_ok());
+        assert!(prefs.validate_recording_mode(true).is_err());
+        paths.save(&prefs).unwrap();
+        prefs = paths.load().unwrap();
+        assert!(prefs.hold_to_record);
+        prefs.restore_kde_recording_mode();
+        assert!(!prefs.hold_to_record);
+        assert!(prefs.native_trigger.is_some());
+        assert!(prefs.x11_trigger.is_some());
+        assert!(prefs.validate_recording_mode(true).is_ok());
+        // Returning to X11 can select hold mode without changing the retained KDE profile.
+        prefs.hold_to_record = true;
+        assert!(prefs.validate_recording_mode(false).is_ok());
+        prefs.native_trigger = Some(crate::desktops::kde::Trigger::Key { key: 0x0100_0037 });
+        assert!(prefs.validate_recording_mode(true).is_ok());
+        fs::remove_dir_all(paths.config).unwrap();
+    }
+    #[test]
+    fn malformed_optional_x11_binding_preserves_ordinary_preferences() {
+        let paths = isolated();
+        for trigger in [
+            serde_json::json!("invalid"),
+            serde_json::json!({"keycode": 0, "keysym": 65477, "modifiers": 0, "group": 0}),
+            serde_json::json!({"keycode": 74, "keysym": 65477, "modifiers": 0, "group": 0, "extra": true}),
+        ] {
+            let mut value = serde_json::to_value(Preferences {
+                model: "tiny".into(),
+                language: "de".into(),
+                ui_language: "de".into(),
+                setup_completed: true,
+                gpu: false,
+                keep_history: false,
+                vocabulary: "OpenWhisper".into(),
+                ..Preferences::default()
+            })
+            .unwrap();
+            value["x11_trigger"] = trigger;
+            private_write(
+                &paths.config.join("settings.json"),
+                &serde_json::to_vec(&value).unwrap(),
+            )
+            .unwrap();
+            let prefs = paths.load().unwrap();
+            assert!(prefs.x11_trigger.is_none());
+            assert_eq!(prefs.model, "tiny");
+            assert_eq!(prefs.language, "de");
+            assert_eq!(prefs.ui_language, "de");
+            assert_eq!(prefs.vocabulary, "OpenWhisper");
+            assert!(prefs.setup_completed);
+            assert!(!prefs.gpu);
+            assert!(!prefs.keep_history);
+        }
+        let invalid = Preferences {
+            x11_trigger: Some(crate::desktops::x11::Trigger {
+                keycode: 0,
+                keysym: 65477,
+                modifiers: 0,
+                group: 0,
+            }),
+            ..Preferences::default()
+        };
+        assert!(paths.save(&invalid).is_err());
         fs::remove_dir_all(paths.config).unwrap();
     }
     #[test]

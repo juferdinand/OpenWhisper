@@ -20,16 +20,17 @@ Linux reliability and acceptance work can continue alongside provider developmen
 new integrations one stage at a time: model communication before TTS, then Obsidian.
 Agent actions depend on the provider and workflow contracts; conversation mode depends on
 cancellation and structured results. Prepare isolated branches, automated evidence, and focused
-acceptance steps before requesting user review. Functional changes require user acceptance
-before merging or replacing the actively used installation.
+acceptance steps before requesting user review of new integrations. Linux reliability changes
+can merge after their documented automated checks pass. Replacing the actively used installation
+still requires an explicit instruction from the user.
 
 ## Linux desktop acceptance
 
 KDE support is implemented through available KWin/KGlobalAccel services and optional KWin mouse
 rebinding capabilities. [`kde::capabilities`](../linux/src-tauri/src/desktops/kde/bindings.rs) checks
 services, Plasma version, plugin availability, and utilities; it does not check for CachyOS.
-Compatibility beyond the primary host is therefore a plausible implementation path, while
-successful linux/package testing remains outstanding.
+The [Linux validation notes](LINUX.md) record automated package and graphical-session evidence
+across KDE, GNOME, named X11 desktops, Sway and Hyprland.
 
 | Test track | Initial environments | Features to establish |
 | --- | --- | --- |
@@ -46,9 +47,10 @@ cannot substitute for an actual graphical session.
 
 The [acceptance report format](LINUX.md#acceptance-evidence) requires release/checksum,
 distribution, desktop/session, portals, package type, hardware, and a result for each feature.
-Agents can run fixture, isolated compositor, and private virtual-source tests. Physical
-microphone, permission dialogs, device events, and actual logout/login checks require an
-explicitly supervised tester. Untested checks stay open.
+Agents can run fixture, isolated compositor, owned permission-dialog and private virtual-source
+tests. Physical microphones, device events and actual logout/login remain separately identified
+coverage limits. The user waived an additional proactive manual Linux acceptance round in favor
+of bug reports; completed automated acceptance issues can close with those limits documented.
 
 ## Platform structure and Electron
 
@@ -161,9 +163,10 @@ English quality, latency, offline behavior, resource usage, and licenses with sh
 ## Work tracking
 
 GitHub issues track desktop acceptance, installation, architecture, Obsidian, providers,
-actions, and TTS. Each issue contains completion criteria and relevant sources. Testing issues
-must stay open until their stated evidence exists; implementation or a green CI run alone
-does not close a desktop acceptance task.
+actions, and TTS. Each issue contains completion criteria and relevant sources. Desktop
+acceptance issues close after their documented automated package/runtime scope passes;
+a build alone is insufficient. Concrete defects remain separate bug reports, and untested
+physical-device or login coverage is recorded without requiring a proactive manual round.
 
 | Work item | Issue |
 | --- | --- |

@@ -15,14 +15,17 @@ or subscription. The project is open source under the MIT License.
 
 ## Delivery and acceptance
 
-- Prepare functional changes on isolated branches with automated evidence and focused manual acceptance steps.
-  The user actively relies on the app and requires acceptance before merging functional changes or replacing
-  the running installation. Complete the independently runnable checks before requesting review.
+- Prepare functional changes on isolated branches with automated evidence and independent review.
+  Linux desktop acceptance uses the documented automated package/runtime checks; the user waived proactive
+  manual desktop checks in favor of bug reports. Merge validated changes through the normal PR workflow.
+  The user actively relies on the app; replacing the running installation still requires explicit instruction.
 - Prioritize Linux installation and desktop reliability. Deliver new integrations incrementally:
   model communication first, optional text-to-speech next, then structured Obsidian output.
   Ordinary dictation must remain independent of these integrations.
-- Keep desktop acceptance issues open for outstanding supervised checks. Mark synthetic, container,
-  nested-compositor, and physical-device evidence separately; never infer full desktop support from a build.
+- Close Linux desktop acceptance issues after their automated scope passes; retain concrete remaining
+  defects as bug reports. Do not keep them open solely for proactive physical-device or login-session checks.
+  Mark synthetic, container, nested-compositor, and physical-device evidence separately; never infer full
+  desktop support from a build or claim untested hardware coverage.
 
 ## Project structure
 
@@ -48,8 +51,12 @@ or subscription. The project is open source under the MIT License.
   font, and navigation structure. `bridge.ts` selects Tauri IPC or the native WebKit reply handler.
 - `linux/src-tauri/`: Linux Rust backend (CPAL audio, downloads, and history).
   `src/desktops/kde/` owns KGlobalAccel, KWin leases, and direct trigger capture.
-  `src/desktops/shared/` owns common portals, clipboard, session helpers, and overlay fallbacks.
-  GNOME, X11, and wlroots integration boundaries record their acceptance gaps alongside these modules.
+  `src/desktops/x11/` owns explicit keyboard setup, helper-only Xlib/XKB grabs, and opt-in
+  session-only XTEST paste on actual X11 sessions; keep its trigger profile separate from KDE.
+  `src/desktops/shared/` owns bounded portal probes, the portal/native paste facade, clipboard,
+  session command control, tray-host monitoring, and overlay fallbacks. GNOME and wlroots use
+  these shared services according to detected capabilities. Acceptance evidence belongs in
+  `docs/LINUX.md`; implemented services do not imply complete desktop or release acceptance.
 - `linux/crates/core/`: text processing against the same shared fixtures as Swift.
 - `linux/crates/speech/` and `linux/native/`: pinned whisper.cpp / Parakeet C++ bridge.
   Speech contexts stay on one worker thread. Packages include Vulkan with a portable CPU fallback;
@@ -88,6 +95,11 @@ The macOS app supports `--ui-smoke-test` and `--overlay-smoke-test` for native W
 `linux/scripts/test-session.py` exercises Linux capture through a private virtual audio source,
 including a recording beyond two minutes, floating controls, recognition, and clipboard output.
 Its optional `--portals` mode also checks KDE shortcut binding and pasting into an owned test field.
+`linux/scripts/test-x11-triggers.py` and `test-x11-session.py` require an owned non-root X11
+session from `run-owned-desktop.py`; `--x11-desktop` starts a genuine Xfce, Cinnamon, MATE,
+or KDE session inside the private display. `test-compositor-control.py` verifies explicit
+commands with private audio and owned compositor bindings. These checks must never inherit
+the user's desktop sockets, input devices, or audio services.
 See `docs/LINUX.md` for dependencies and permission details. Never use the real microphone for unattended tests.
 Recording, permissions, hotkeys, and pasting also need manual testing on macOS.
 For documentation-only changes, check content, links, and formatting.
@@ -148,6 +160,26 @@ For documentation-only changes, check content, links, and formatting.
   and later user edits. Never use root, raw input devices, or unattended real-desktop input tests.
   Run `linux/scripts/test-kde-triggers.py --binary <binary>` for owned nested-KWin regression
   coverage. Modifier-only triggers are toggle-only because KDE emits their edges on release.
+- **Linux X11 triggers and paste:** capture a keyboard key only during explicit setup, commit
+  on release, and restore the old binding on Escape or focus loss. The same executable's
+  `--linux-x11-helper` owns passive grabs; preserve conflicts, lock-modifier variants, real
+  release edges, layout-change invalidation, and finite EOF/SIGTERM cleanup. Never enable
+  this path on Wayland through XWayland. Preserve both saved profiles, but apply hold-mode
+  restrictions according to the active adapter, so an inactive X11 profile cannot bypass
+  KDE's modifier-only toggle rule. Keep X11 paste disabled until an explicit session Allow;
+  portal and native paste must never both be enabled. Reject paste while physical, latched,
+  or locked modifiers are active. Preserve the custom XKB state record and its primary-header
+  offset tests; x11-dl 2.21.0's record has a different field order from `XKBstr.h`.
+- **Linux command control:** dispatch `--control start|stop|toggle|cancel|status` before GTK or
+  audio initialization. Contact only the already running same-user session-bus owner, without
+  service activation or changes to compositor configuration. Bound requests and reject
+  expired/disconnected callers before starting capture. A failed Start reply must drop newly
+  opened audio. Stop acknowledges stream closure/error checks before duration-dependent
+  resampling and inference; its acknowledgment does not mean recognition or delivery completed.
+  Status must never expose transcripts, audio, history, or preferences.
+- **Linux tray lifecycle:** a successful tray-object creation does not establish a visible host.
+  Hide on close only while a registered tray host is available; restore a previously hidden
+  window when that host disappears. Keep the main-window path usable without tray support.
 - **Shortcut capture:** SwiftUI can take first-responder status away from an NSView recorder.
   Capture shortcuts through the event tap instead of a text field.
 - **Mouse events:** reading `NSEvent.keyCode` for a mouse event raises an exception.
@@ -172,7 +204,7 @@ for key continuity and a future Developer ID migration; changing identities requ
   CI and Release share `.github/workflows/linux-build.yml` for Linux tests and packaging.
   Only after both builds succeed does the publication job commit/tag the version, verify artifact
   checksums, and upload DMG, ZIP, AppImage, Debian package, Linux signatures, `latest.json`, and combined `SHA256SUMS`.
-  It creates a complete draft by default for Linux desktop acceptance. The `draft` input controls
+  It creates a complete draft by default for final artifact verification. The `draft` input controls
   publication. No separate CI dispatch or manual Linux attachment is needed. Do not relabel
   packages from an older version.
 - Linux release signing uses `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
@@ -190,7 +222,7 @@ for key continuity and a future Developer ID migration; changing identities requ
   Keep the README and release instructions aligned with the app.
 - Linux CI builds on Ubuntu 22.04, checks both host UI adapters, and uploads development
   packages. A main push never changes versions, tags, or public releases. Linux public releases
-  require separate desktop acceptance; do not present intended distro support as tested.
+  require the documented automated package/runtime checks; do not present intended distro support as tested.
 - The manual version step uses `linux/scripts/set-version.py` to synchronize all manifests.
 - CI repeats weekly. See `SECURITY.md` for the security policy.
 - Renovate tracks Cargo, npm, Actions, and whisper.cpp versions; keep SHA pins and auto-merge disabled.

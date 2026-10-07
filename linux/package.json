@@ -7,8 +7,8 @@
     "dev": "npm --prefix ../shared/ui ci && npm --prefix ../shared/ui run dev",
     "build": "npm --prefix ../shared/ui ci && npm --prefix ../shared/ui run build",
     "tauri": "tauri",
-    "bundle:linux": "python3 scripts/fetch-vulkan-headers.py && tauri build --config src-tauri/bundle.conf.json --features vulkan --bundles deb,appimage && python3 scripts/name-packages.py",
-    "bundle:linux:release": "python3 scripts/fetch-vulkan-headers.py && tauri build --config src-tauri/bundle.conf.json --features release-updater,vulkan --bundles deb,appimage && python3 scripts/name-packages.py"
+    "bundle:linux": "python3 scripts/prepare-appimage.py && python3 scripts/fetch-vulkan-headers.py && tauri build --config src-tauri/bundle.conf.json --features vulkan --bundles deb,appimage && python3 scripts/name-packages.py",
+    "bundle:linux:release": "python3 scripts/prepare-appimage.py && python3 scripts/fetch-vulkan-headers.py && tauri build --config src-tauri/bundle.conf.json --features release-updater,vulkan --bundles deb,appimage && python3 scripts/name-packages.py"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0"

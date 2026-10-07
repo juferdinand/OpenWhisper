@@ -1,5 +1,6 @@
 use crate::{
-    audio, portals,
+    audio, control,
+    desktops::shared::paste,
     transcription::{SavedRecording, Service},
     Runtime, WorkerCommand,
 };
@@ -38,6 +39,40 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
             Err(mpsc::RecvTimeoutError::Timeout) => None,
             Err(_) => break,
         };
+        let mut reply = None;
+        let command = match command {
+            Some(WorkerCommand::Control(request)) => {
+                if !request.active(runtime.control.closing()) {
+                    let _ = request.reply.send(Err("Control request expired".into()));
+                    continue;
+                }
+                let blocked = {
+                    let state = runtime.state.lock().unwrap();
+                    state.updates.installing()
+                        || state.recording_shortcut
+                        || state.status == "transcribing"
+                };
+                if blocked {
+                    let _ = request.reply.send(Err("OpenWhisper is busy".into()));
+                    continue;
+                }
+                reply = Some(request.reply);
+                Some(match request.action {
+                    control::Action::Start => WorkerCommand::Start,
+                    control::Action::Stop => WorkerCommand::Stop,
+                    control::Action::Toggle => WorkerCommand::Toggle,
+                    control::Action::Cancel => WorkerCommand::Cancel,
+                })
+            }
+            command => command,
+        };
+        if matches!(command, Some(WorkerCommand::Start)) && recording.is_some()
+            || matches!(command, Some(WorkerCommand::Stop)) && recording.is_none()
+            || matches!(command, Some(WorkerCommand::Cancel)) && recording.is_none()
+        {
+            respond(&runtime, &mut reply, None);
+            continue;
+        }
         if matches!(command, Some(WorkerCommand::Cancel)) {
             recording.take();
             runtime.update(|s| {
@@ -45,6 +80,7 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
                 s.message = "Recording cancelled. Audio discarded.".into();
                 s.elapsed = 0;
             });
+            respond(&runtime, &mut reply, None);
             continue;
         }
         let prefs = runtime.state.lock().unwrap().preferences.clone();
@@ -74,24 +110,43 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
                 continue;
             }
         }
-        let should_toggle = matches!(command, Some(WorkerCommand::Toggle))
+        let should_toggle = matches!(command, Some(WorkerCommand::Toggle | WorkerCommand::Start))
             || matches!(command, Some(WorkerCommand::ShortcutPressed))
                 && (!prefs.hold_to_record || recording.is_none());
-        let should_stop =
-            matches!(command, Some(WorkerCommand::ShortcutReleased)) && prefs.hold_to_record;
+        let should_stop = matches!(command, Some(WorkerCommand::Stop))
+            || matches!(command, Some(WorkerCommand::ShortcutReleased)) && prefs.hold_to_record;
         if recording.is_none() && should_toggle {
+            if runtime.control.closing() {
+                respond(&runtime, &mut reply, Some("OpenWhisper is closing"));
+                continue;
+            }
             if pending.is_some() || SavedRecording::latest(&recovery_directory).is_some() {
+                respond(
+                    &runtime,
+                    &mut reply,
+                    Some("Retry or discard the saved recording before starting another."),
+                );
                 continue;
             }
             let model = catalog().into_iter().find(|m| m.id == prefs.model).unwrap();
             if !runtime.paths.models.join(model.file).is_file() {
                 runtime.error("Download the selected model in Models before recording.".into());
+                respond(
+                    &runtime,
+                    &mut reply,
+                    Some("Download the selected model before recording."),
+                );
                 continue;
             }
             // Reserve recording under the same lock used by the installer before opening audio.
             {
                 let mut state = runtime.state.lock().unwrap();
-                if state.updates.installing() || state.recording_shortcut {
+                if runtime.control.closing()
+                    || state.updates.installing()
+                    || state.recording_shortcut
+                {
+                    drop(state);
+                    respond(&runtime, &mut reply, Some("OpenWhisper is busy"));
                     continue;
                 }
                 state.status = "recording".into();
@@ -104,8 +159,29 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
                         s.message = "Listening. Speak naturally, then stop to transcribe.".into();
                         s.elapsed = 0;
                     });
+                    // A timed-out caller cannot leave a newly opened microphone recording.
+                    let closing = runtime.control.closing();
+                    if !respond(
+                        &runtime,
+                        &mut reply,
+                        closing.then_some("OpenWhisper is closing"),
+                    ) || closing
+                    {
+                        recording.take();
+                        runtime.update(|s| {
+                            s.status = "idle".into();
+                            s.message = "Recording cancelled. Audio discarded.".into();
+                        });
+                    }
                 }
-                Err(error) => runtime.error(error),
+                Err(error) => {
+                    respond(
+                        &runtime,
+                        &mut reply,
+                        Some("Microphone could not start. Check the app for details."),
+                    );
+                    runtime.error(error);
+                }
             }
         } else if retry || recording.is_some() && (should_toggle || should_stop) {
             let (samples, saved, prefs) = if retry {
@@ -126,18 +202,32 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
                 }
             } else {
                 let (capture, _, prefs) = recording.take().unwrap();
-                match capture.finish() {
+                match capture.finish(|| {
+                    runtime.update(|s| {
+                        s.status = "transcribing".into();
+                        s.message =
+                            "Transcribing locally… The first run also loads the model.".into();
+                    });
+                    respond(&runtime, &mut reply, None);
+                }) {
                     Ok(samples) => (samples, None, prefs),
                     Err(error) => {
+                        respond(
+                            &runtime,
+                            &mut reply,
+                            Some("Recording could not stop. Check the app for details."),
+                        );
                         runtime.error(error);
                         continue;
                     }
                 }
             };
-            runtime.update(|s| {
-                s.status = "transcribing".into();
-                s.message = "Transcribing locally… The first run also loads the model.".into();
-            });
+            if retry {
+                runtime.update(|s| {
+                    s.status = "transcribing".into();
+                    s.message = "Transcribing locally… The first run also loads the model.".into();
+                });
+            }
             let mut saved = saved;
             let result = (|| {
                 if samples.len() < 3200
@@ -212,7 +302,7 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
                     if prefs.output == "paste" && copied.is_ok() {
                         let state = runtime.clone();
                         tauri::async_runtime::block_on(async move {
-                            let message = match portals::paste(&state).await {
+                            let message = match paste::paste(&state).await {
                                 Ok(_) => "Text pasted into the focused app.".into(),
                                 Err(e) => e,
                             };
@@ -242,12 +332,35 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
                 }
             }
             // Ignore shortcut repeats queued during inference.
-            while commands.try_recv().is_ok() {}
+            while let Ok(command) = commands.try_recv() {
+                if let WorkerCommand::Control(request) = command {
+                    // Never defer a control request made during inference into a later recording.
+                    let _ = request
+                        .reply
+                        .send(Err("OpenWhisper was transcribing. Try again.".into()));
+                }
+            }
         } else if let Some((capture, start, _)) = &recording {
             runtime.update(|s| {
                 s.elapsed = start.elapsed().as_secs();
                 s.level = capture.level();
             });
         }
+    }
+}
+
+fn respond(
+    runtime: &Runtime,
+    reply: &mut Option<tokio::sync::oneshot::Sender<Result<String, String>>>,
+    error: Option<&str>,
+) -> bool {
+    match reply.take() {
+        Some(reply) => reply
+            .send(match error {
+                Some(error) => Err(error.into()),
+                None => Ok(control::status(runtime)),
+            })
+            .is_ok(),
+        None => true,
     }
 }
