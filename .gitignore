@@ -34,3 +34,11 @@ __pycache__/
 /shared/ui/dist/
 /shared/ui/test-results/
 /shared/ui/playwright-report/
+
+# Electron development outputs and private profiles
+/electron/node_modules/
+/electron/dist/
+/electron/test-results/
+/electron/.profiles/
+/electron/.local/
+/electron/vendor/

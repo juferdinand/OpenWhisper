@@ -337,5 +337,8 @@
   "Trigger setup timed out": "Die Einrichtung des Auslösers hat zu lange gedauert",
   "Trigger shutdown monitoring failed": "Die Überwachung beim Beenden des Auslösers ist fehlgeschlagen",
   "X11 trigger enabled. It will reconnect when OpenWhisper starts.": "X11-Auslöser aktiviert. Er wird beim Start von OpenWhisper wieder verbunden.",
-  "X11 trigger removed. The key is available to other applications.": "X11-Auslöser entfernt. Die Taste ist für andere Anwendungen verfügbar."
+  "X11 trigger removed. The key is available to other applications.": "X11-Auslöser entfernt. Die Taste ist für andere Anwendungen verfügbar.",
+  "Development preview": "Entwicklungsvorschau",
+  "Development model directory": "Modellordner der Entwicklungsvorschau",
+  "Recording is not available in this development preview.": "Aufnahmen sind in dieser Entwicklungsvorschau noch nicht verfügbar."
 }

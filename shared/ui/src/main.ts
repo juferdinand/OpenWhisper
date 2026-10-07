@@ -2,97 +2,11 @@ import { invoke, listen } from "./bridge";
 import { setLocale, t, type UILanguage } from "./i18n";
 import "./style.css";
 
-interface Snippet {
-  id: string;
-  trigger: string;
-  expansion: string;
-  enabled: boolean;
-}
-type NativeTrigger = { kind: "key"; key: number } | { kind: "mouse"; button: number };
-interface Preferences {
-  ui_language: UILanguage;
-  setup_completed: boolean;
-  model: string;
-  language: string;
-  microphone: string;
-  vocabulary: string;
-  snippets: Snippet[];
-  output: string;
-  hold_to_record: boolean;
-  native_trigger?: NativeTrigger | null;
-  x11_trigger?: { keycode: number; keysym: number; modifiers: number; group: number } | null;
-  gpu: boolean;
-  keep_history: boolean;
-  restore_clipboard?: boolean;
-  play_sounds?: boolean;
-  show_idle_overlay?: boolean;
-  launch_at_login?: boolean;
-  auto_check_updates?: boolean;
-}
-interface Model {
-  id: string;
-  title: string;
-  family: string;
-  size: string;
-  note: string;
-}
-interface MacState {
-  microphone_allowed: boolean;
-  recording_shortcut: boolean;
-  shortcut_hint: string;
-  editor: string;
-  recommended: string[];
-  updates_configured: boolean;
-  launch_at_login_pending?: boolean;
-}
-interface UpdateState {
-  configured: boolean;
-  status: string;
-  version: string | null;
-  progress: number;
-  error: string | null;
-  package: string;
-}
-interface State {
-  updates: UpdateState;
-  initial_tab?: Tab;
-  platform: string;
-  macos?: MacState;
-  version: string;
-  status: string;
-  message: string;
-  transcript: string;
-  history: string[];
-  preferences: Preferences;
-  models: Model[];
-  installed: string[];
-  microphones: string[];
-  session: string;
-  desktop: string;
-  clipboard_available: boolean;
-  shortcut_portal: boolean;
-  paste_portal: boolean;
-  shortcut: string | null;
-  native_shortcuts?: boolean;
-  native_x11?: boolean;
-  native_paste?: boolean;
-  native_mouse?: boolean;
-  native_middle_mouse?: boolean;
-  recording_shortcut?: boolean;
-  paste_ready: boolean;
-  gpu_available: boolean;
-  gpu_supported?: boolean;
-  gpu_device?: string | null;
-  gpu_fallback?: boolean;
-  recovery_available?: boolean;
-  overlay_available?: boolean;
-  download: string | null;
-  progress: number;
-  elapsed: number;
-  level?: number;
-  model_directory: string;
-}
-type Tab = "setup" | "general" | "models" | "snippets" | "history" | "about";
+import {
+  preferencePatchSchema, validateCommandName, validateCommandInput,
+  type AppState as State, type Preferences, type PreferencePatch, type Tab, type Model, type Snippet,
+} from "../../../electron/src/contracts/ui";
+
 let state: State;
 let tab: Tab = "general";
 let dirty = false;
@@ -143,8 +57,8 @@ const row = (label: string, control: string) =>
   `<div class="row"><span>${label}</span><div class="control">${control}</div></div>`;
 const toggle = (label: string, name: string, checked: boolean, disabled = false) =>
   `<label class="row"><span>${label}</span><input class="switch" type="checkbox" data-pref="${name}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}></label>`;
-const languages = () =>
-  `<select data-pref="language" aria-label="${esc(t("Language"))}">${[
+const languages = () => {
+  const choices: readonly (readonly [string, string])[] = [
     ["auto", t("Detect automatically")],
     ["en", t("English")],
     ["de", t("German")],
@@ -160,9 +74,11 @@ const languages = () =>
     ["tr", t("Turkish")],
     ["ru", t("Russian")],
     ["ko", t("Korean")],
-  ]
+  ];
+  return `<select data-pref="language" aria-label="${esc(t("Language"))}">${choices
     .map(([v, l]) => option(v, l, state.preferences.language))
     .join("")}</select>`;
+};
 const isMac = () => state.platform === "macos";
 const outputs = () =>
   `<div class="radio-group">${[["paste", t("Paste at the cursor")], ["clipboard", t("Copy to clipboard only")], ...(isMac() ? [["editor", t("Open in a text editor")]] : [])].map(([v, l]) => `<label><input type="radio" name="output" data-pref="output" value="${v}" ${state.preferences.output === v ? "checked" : ""}>${l}</label>`).join("")}</div>`;
@@ -177,7 +93,8 @@ async function command(
   args?: Record<string, unknown>,
 ): Promise<boolean> {
   try {
-    await invoke(name, args);
+    const command = validateCommandName(name);
+    await invoke(command, validateCommandInput(command, args ?? {}));
     return true;
   } catch (error) {
     notice(String(error));
@@ -185,15 +102,15 @@ async function command(
   }
 }
 // Send only the edited fields. Serializing writes also keeps delayed host replies in order.
-async function savePreferences(changes: Partial<Preferences>): Promise<boolean> {
+async function savePreferences(changes: PreferencePatch): Promise<boolean> {
   pendingPreferences++;
   const saved = preferenceQueue.then(async () => {
     try {
-      state = await invoke<State>("save_preferences", { changes });
+      state = await invoke("save_preferences", { changes });
       return true;
     } catch (error) {
       notice(String(error));
-      try { state = await invoke<State>("get_state"); } catch { /* Keep the last confirmed state. */ }
+      try { state = await invoke("get_state"); } catch { /* Keep the last confirmed state. */ }
       return false;
     } finally {
       pendingPreferences--;
@@ -204,7 +121,7 @@ async function savePreferences(changes: Partial<Preferences>): Promise<boolean> 
   return saved;
 }
 async function preference(name: string, value: unknown) {
-  return savePreferences({ [name]: value });
+  return savePreferences(preferencePatchSchema.parse({ [name]: value }));
 }
 function syncPreferenceControls() {
   if (pendingPreferences) return;
@@ -235,11 +152,11 @@ const pageDescriptions: Record<Tab, string> = {
   about: "A little more freedom for your voice.",
 };
 function renderShell() {
-  const key = `${state.preferences.ui_language}:${state.preferences.setup_completed}`;
+  const key = `${state.preferences.ui_language}:${state.preferences.setup_completed}:${state.profile ?? "stable"}`;
   if (shellKey === key) return;
   shellKey = key;
   contentKey = "";
-app.innerHTML = `<aside><div class="sidebar-brand"><img src="./app-icon.png" width="38" height="38" alt=""><div><strong>OpenWhisper</strong><span>${esc(t("Make yourself heard."))}</span></div></div><div class="nav-caption">${esc(t("WORKSPACE"))}</div><nav aria-label="${esc(t("Settings"))}">${tabs.filter(([id]) => id !== "setup" || !state.preferences.setup_completed).map(([id, title, path]) => `<button data-tab="${id}">${symbol(path)}<span>${esc(t(title))}</span></button>`).join("")}</nav><div class="language-switch" role="group" aria-label="${esc(t("Interface language"))}"><button data-ui-language="en" aria-pressed="${state.preferences.ui_language === "en"}">${esc(t("English"))}</button><button data-ui-language="de" aria-pressed="${state.preferences.ui_language === "de"}">Deutsch</button></div><div class="sidebar-foot">${symbol("M12 3 4 6v6c0 4 4 7 8 9 4-2 8-5 8-9V6l-8-3m-4 9 3 3 5-6")}<div><strong>${esc(t("Private by design"))}</strong><span>${esc(t("Your voice stays here."))}</span></div></div></aside><main><header class="page-header"><div class="page-eyebrow">${esc(t("YOUR SPACE, YOUR PACE"))}</div><h1 id="page-title"></h1><p id="page-description"></p></header><div id="notice" role="alert" hidden></div><div id="content"></div></main><div id="record-control"></div>`;
+app.innerHTML = `<aside><div class="sidebar-brand"><img src="./app-icon.png" width="38" height="38" alt=""><div><strong>OpenWhisper${state.profile === "development" ? " Dev" : ""}</strong><span>${esc(t("Make yourself heard."))}</span></div></div><div class="nav-caption">${esc(t("WORKSPACE"))}</div><nav aria-label="${esc(t("Settings"))}">${tabs.filter(([id]) => id !== "setup" || !state.preferences.setup_completed).map(([id, title, path]) => `<button data-tab="${id}">${symbol(path)}<span>${esc(t(title))}</span></button>`).join("")}</nav><div class="language-switch" role="group" aria-label="${esc(t("Interface language"))}"><button data-ui-language="en" aria-pressed="${state.preferences.ui_language === "en"}">${esc(t("English"))}</button><button data-ui-language="de" aria-pressed="${state.preferences.ui_language === "de"}">Deutsch</button></div><div class="sidebar-foot">${symbol("M12 3 4 6v6c0 4 4 7 8 9 4-2 8-5 8-9V6l-8-3m-4 9 3 3 5-6")}<div><strong>${esc(t("Private by design"))}</strong><span>${esc(t("Your voice stays here."))}</span></div></div></aside><main><header class="page-header"><div class="page-eyebrow">${esc(t("YOUR SPACE, YOUR PACE"))}</div><h1 id="page-title"></h1><p id="page-description"></p></header><div id="notice" role="alert" hidden></div><div id="content"></div></main><div id="record-control"></div>`;
 if (overlay)
   app.innerHTML =
     '<div id="notice" role="alert" hidden></div><div id="record-control"></div>';
@@ -279,7 +196,7 @@ function recordControl() {
       .addEventListener("click", () => void command(state.recovery_available && state.status !== "recording" ? "discard_recovery" : "cancel_recording"));
   }
   const button = document.querySelector<HTMLButtonElement>("#record")!;
-  button.disabled = busy || !!state.recording_shortcut || ["downloading", "installing"].includes(state.updates.status);
+  button.disabled = state.recording_available === false || busy || !!state.recording_shortcut || ["downloading", "installing"].includes(state.updates.status);
   button.classList.toggle("recording", recording);
   button.title = t(state.message);
   document.querySelector("#record-symbol")!.innerHTML = symbol(
@@ -296,7 +213,7 @@ function recordControl() {
       ? t("Finding your words")
       : state.status === "error"
         ? t("Something needs attention")
-        : t("Ready when you are");
+        : state.recording_available === false ? t("Development preview") : t("Ready when you are");
   document.querySelector("#record-label")!.textContent = text;
   const cancel = document.querySelector<HTMLButtonElement>("#cancel")!;
   cancel.hidden = !recording && !recovery;
@@ -592,6 +509,8 @@ function render() {
         "",
         `<strong>${esc(t("Your computer:"))} ${esc(state.desktop)} · ${esc(state.session)} · ${isMac() ? t("Native speech engine") : state.gpu_available ? "CPU / Vulkan" : "CPU"}</strong><p class="secondary">${esc(t("Highlighted models are recommended for your device."))}</p>`,
       ) +
+      (state.profile === "development" ? section(t("Development model directory"),
+        `<p class="secondary" id="development-model-directory" style="overflow-wrap:anywhere">${esc(state.model_directory)}</p>`) : "") +
       section(
         "NVIDIA Parakeet",
         state.models
@@ -737,7 +656,7 @@ function render() {
       section(
         "",
         `<div class="about-brand"><img src="./app-icon.png" width="88" height="88" alt="${esc(t("OpenWhisper app icon"))}"><div><span class="page-eyebrow">${esc(t("LESS TYPING. MORE YOU."))}</span><h1>OpenWhisper</h1><p class="version-badge">Version ` +
-          esc(state.version) +
+          esc(state.version) + (state.profile === "development" && state.development_build ? ` · Dev ${esc(state.development_build)}` : "") +
           (isMac() ? "" : " · " + t("Linux")) +
           `</p></div></div><p class="about-intro">${esc(t("A little more freedom for your voice."))}</p><p class="secondary">${esc(t("Turn your thoughts into text, right on your computer."))}</p><div class="about-values"><span>${esc(t("On-device recognition"))}</span><span>${esc(t("No subscription"))}</span><span>${esc(t("Open source · MIT"))}</span></div><p class="engine-credit">${esc(t("Powered by whisper.cpp, OpenAI Whisper, and NVIDIA Parakeet."))}</p>`,
       ) +
@@ -859,7 +778,7 @@ function snippetRow(s?: Snippet) {
 
 async function start() {
   try {
-    await listen<Tab>("navigate", (event) => {
+    await listen("navigate", (event) => {
       if (tabs.some(([id]) => id === event.payload)) {
         tab = event.payload;
         dirty = false;
@@ -867,11 +786,11 @@ async function start() {
         render();
       }
     });
-    await listen<State>("state", (event) => {
+    await listen("state", (event) => {
       state = event.payload;
       render();
     });
-    state = await invoke<State>("get_state");
+    state = await invoke("get_state");
     if (!state.preferences.setup_completed) tab = "setup";
     else if (state.initial_tab && tabs.some(([id]) => id === state.initial_tab))
       tab = state.initial_tab === "setup" ? "general" : state.initial_tab;

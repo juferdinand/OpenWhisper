@@ -10,7 +10,8 @@
     "format:check": "prettier --check src vite.config.ts playwright.config.ts tests"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.0.0"
+    "@tauri-apps/api": "^2.0.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

@@ -337,5 +337,8 @@
   "Trigger setup timed out": "Trigger setup timed out",
   "Trigger shutdown monitoring failed": "Trigger shutdown monitoring failed",
   "X11 trigger enabled. It will reconnect when OpenWhisper starts.": "X11 trigger enabled. It will reconnect when OpenWhisper starts.",
-  "X11 trigger removed. The key is available to other applications.": "X11 trigger removed. The key is available to other applications."
+  "X11 trigger removed. The key is available to other applications.": "X11 trigger removed. The key is available to other applications.",
+  "Development preview": "Development preview",
+  "Development model directory": "Development model directory",
+  "Recording is not available in this development preview.": "Recording is not available in this development preview."
 }

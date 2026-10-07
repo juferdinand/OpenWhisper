@@ -1,8 +1,10 @@
 import { defineConfig } from "vite";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   base: "./",
+  resolve: { alias: { zod: fileURLToPath(new URL("./node_modules/zod/index.js", import.meta.url)) } },
   build: {
     target: ["chrome107", "edge107", "firefox104", "safari16"],
     rolldownOptions: { output: { format: "iife" } },

@@ -408,6 +408,9 @@ These are plans, not promised release dates.
 
 ## Development
 
+The isolated TypeScript Electron preview has its own [development instructions](docs/ELECTRON-DEVELOPMENT.md).
+It keeps the current UI and separate Dev data; recording and platform parity are still being implemented.
+
 ```bash
 make test                      # Test text processing and the model catalog
 make mac                       # Build a local macOS app bundle

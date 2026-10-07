@@ -98,9 +98,6 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false, f
           editor: "TextEdit",
           recommended: ["base"],
           updates_configured: true,
-          update_status: "Not checked yet.",
-          can_install_update: false,
-          update_busy: false,
         },
       };
       const callbacks = new Map<number, Function>();
