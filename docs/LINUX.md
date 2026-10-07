@@ -282,6 +282,23 @@ remains recorded separately. Exposing layer-shell or
 virtual-keyboard protocols alone does not establish overlay focus or physical support.
 The guest has no physical devices, and post-provisioning network access is disabled.
 
+A separate owned Sway focus check uses the verified CI native payload
+`7483aeeb21cb1688dbd082a77fac97def83f050ad6dfeae0f89a01275ef08e7f` as a detached ELF
+with an explicitly installed system gtk-layer-shell 0.10.1. It passes an actual visible
+floating Cancel after 126 seconds without changing the focused target; floating Stop
+recognizes the public fixture, and history, private clipboard and actual manual Ctrl+V
+in that target match exactly. Actual compositor Close exits cleanly when no tray host
+can reopen the app, while the separate target remains alive. This is native runtime
+and system-library evidence, not AppRun or self-contained AppImage evidence. The initial
+library-free image could use main recording controls but had no visible overlay; the
+combined CI AppImage's missing optional library is separately undergoing packaging correction.
+
+`test-wlroots-focus.py` requires the private runner and validates its Wayland endpoint before
+app/input actions. Its fixed-key `owned-wayland-keyboard.py` uses a standard virtual-keyboard
+keymap for actual GTK clear/paste shortcuts, never physical input devices. Test focus and
+Close are scoped to owned process/window identities. Earlier target-map, keyboard-map,
+and bounded VM startup failures remain separate from later passing fixtures.
+
 `test-compositor-control.py` keeps finite test deadlines, an explicit owned-session guard and
 private virtual audio. Its optional recognition deadline accommodates CPU-emulated test VMs;
 it does not change product inference limits or introduce a recording cutoff. See the
