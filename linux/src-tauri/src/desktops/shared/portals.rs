@@ -78,11 +78,23 @@ pub async fn enable_paste(runtime: &Arc<Runtime>) -> Result<(), String> {
         let session = proxy.create_session(Default::default()).await?;
         let options = ashpd::desktop::remote_desktop::SelectDevicesOptions::default()
             .set_devices(Some(DeviceType::Keyboard.into()));
-        proxy.select_devices(&session, options).await?.response()?;
-        let selected = proxy
-            .start(&session, None, Default::default())
-            .await?
-            .response()?;
+        let selected = async {
+            proxy.select_devices(&session, options).await?.response()?;
+            proxy
+                .start(&session, None, Default::default())
+                .await?
+                .response()
+        }
+        .await;
+        let selected = match selected {
+            Ok(selected) => selected,
+            Err(error) => {
+                // ashpd sessions do not close on Drop. Failed or cancelled
+                // setup must not leave an unused keyboard session behind.
+                let _ = session.close().await;
+                return Err(error);
+            }
+        };
         if !selected.devices().contains(DeviceType::Keyboard) {
             let _ = session.close().await;
             return Err(ashpd::Error::NoResponse);
