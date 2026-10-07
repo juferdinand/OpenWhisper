@@ -65,6 +65,12 @@ other Wayland sessions independently.
   Capture still uses RAM; this does not protect audio before Stop, or promise success when neither
   backend has enough memory to load the model. Disk-write failures retain the stopped samples in RAM
   for retry while the app remains open.
+- Wayland clipboard attempts use a three-second input/readiness deadline. A running
+  `wl-copy` waiting for focus is reported as a failure, with the stopped WAV and transcript
+  retained for retry or explicit discard. Copy actions run off the native UI thread. The
+  helper's successful command completion is not proof against cancellation or another
+  client replacing the selection; no previous clipboard is read or rolled back. Explicit
+  Quit/update exit stops the owned clipboard helper, preserving the existing exit policy.
 - KDE Plasma 6 supports direct keyboard capture, including single keys without Ctrl. On KDE
   Wayland, extra mouse buttons are supported; the middle button requires Plasma 6.3+. Saved
   bindings reconnect at startup. Other desktops use the GlobalShortcuts portal. Toggle and
@@ -363,7 +369,8 @@ python3 linux/scripts/run-owned-desktop.py --session sway \
   python3 linux/scripts/test-session.py --owned --expect-no-portals
 python3 linux/scripts/run-owned-desktop.py --session gnome-wayland \
   --output .local/acceptance-review-gnome -- \
-  python3 linux/scripts/test-session.py --owned --expect-no-portals --expect-no-overlay
+  python3 linux/scripts/test-session.py --owned --expect-no-portals --expect-no-overlay \
+    --expect-clipboard-unavailable
 ```
 
 Sway uses its headless backend and pixman renderer without DRM or input devices.
@@ -371,7 +378,12 @@ GNOME runs nested inside the private Xvfb, with an additional empty private syst
 Neither mode enables portal activation or reaches the user's desktop services.
 The optional fallback assertions require `--owned`: they check unavailable portal notices
 and disabled permission buttons, or the unsupported-overlay notice and main-window Stop/Cancel.
-Clipboard equality remains required, with a ten-second read deadline.
+Normal output checks require exact clipboard equality, with a ten-second read deadline.
+`--expect-clipboard-unavailable` is a separate negative fixture restricted to owned Wayland
+sessions. It requires a clipboard timeout without a delivery claim, private WAV/text retention,
+fully German errors, responsive History/Transcript Copy while the helper is pending, restart
+recovery and explicit discard. It does not read the clipboard or exercise pasting, and cannot
+be combined with `--recovery` or `--portals`.
 
 The default duration remains 126 seconds. The session script handles SIGTERM so a harness
 timeout still stops its separate application process group and unloads its virtual sink.
@@ -416,6 +428,22 @@ and [Sway/Hyprland acceptance #7](https://github.com/juferdinand/OpenWhisper/iss
 remain open for their supervised checks. No portal permissions, physical microphone,
 target-field paste, login/autostart, tray, signed-update, or Hyprland acceptance follows
 from these owned results.
+
+A separate clipboard-readiness correction based on main
+`e0e27fa82938f359f6658b703bb1aca0b96a7f92` passed 57 Rust tests, Clippy,
+frontend/assets checks and 30 shared UI tests. Ten private fake-helper tests cover
+bounded writes/readiness, nonzero exits, redacted errors, large multibyte input,
+unreaped-parent ownership, failed/successful replacement, descendant cleanup,
+ordinary Drop versus explicit Quit cleanup, lost ownership and queued copies during shutdown.
+Its disposable Debian 13 CPU development executable had SHA-256
+`41d9b54e548ede25a24f6103b286f6091a699e28cfae2d30e53b287653644d86`.
+Headless Sway still passed exact recognized-text/clipboard equality. The nested GNOME
+no-focus negative fixture passed bounded failure without a delivery claim, complete German
+errors, responsive native History and Transcript Copy during pending helper waits, private
+WAV/text persistence across restart and explicit discard. The fixture deliberately disables
+its private history to expose Transcript Copy. These are owned synthetic checks, not an
+Ubuntu CI package or physical-desktop acceptance. [Clipboard issue #25](https://github.com/juferdinand/OpenWhisper/issues/25)
+tracks this focused correction; broad GNOME and Sway/Hyprland acceptance stays open.
 
 To reproduce Debian package acceptance without installing anything on the host, provide the
 Ubuntu-built `.deb` with its verified checksum and the public fixture/model paths:

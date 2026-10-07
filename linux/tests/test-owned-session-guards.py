@@ -40,6 +40,16 @@ class OwnedSessionGuards(unittest.TestCase):
                 (["--recovery"], {}, "--recovery requires --owned"),
                 (["--expect-no-overlay"], {}, "Fallback capability assertions require --owned"),
                 (["--expect-no-portals"], {}, "Fallback capability assertions require --owned"),
+                (["--expect-clipboard-unavailable"], {}, "--expect-clipboard-unavailable requires an owned Wayland session"),
+                (["--owned", "--expect-clipboard-unavailable"], {
+                    "WF_OWNED_DESKTOP_TEST": environment["XDG_RUNTIME_DIR"],
+                    "PULSE_SERVER": "unix:" + str(root / "runtime/pulse/native"),
+                }, "--expect-clipboard-unavailable requires an owned Wayland session"),
+                (["--owned", "--recovery", "--expect-clipboard-unavailable"], {
+                    "WF_OWNED_DESKTOP_TEST": environment["XDG_RUNTIME_DIR"],
+                    "PULSE_SERVER": "unix:" + str(root / "runtime/pulse/native"),
+                    "WAYLAND_DISPLAY": "private-unused-test-socket",
+                }, "--expect-clipboard-unavailable requires an owned Wayland session"),
                 (["--owned", "--portals"], {
                     "WF_OWNED_DESKTOP_TEST": environment["XDG_RUNTIME_DIR"],
                     "PULSE_SERVER": "unix:" + str(root / "runtime/pulse/native"),

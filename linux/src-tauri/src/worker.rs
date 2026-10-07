@@ -1,5 +1,5 @@
 use crate::{
-    audio, clipboard, portals,
+    audio, portals,
     transcription::{SavedRecording, Service},
     Runtime, WorkerCommand,
 };
@@ -183,11 +183,10 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
                     });
                 }
                 Ok(text) => {
-                    let copied =
-                        clipboard::clipboard(&text, &mut runtime.clipboard.lock().unwrap());
+                    let copied = runtime.clipboard.copy(&text);
                     let message = match copied {
                         Ok(_) => "Copied. Paste your text with Ctrl+V.".into(),
-                        Err(ref e) => e.clone(),
+                        Err(ref error) => format!("{error}. Your recording is retained. Retry transcription or discard it."),
                     };
                     runtime.update(|s| {
                         s.transcript = text.clone();

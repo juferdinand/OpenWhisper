@@ -3,7 +3,7 @@
 Requires PyGObject/AT-SPI and PulseAudio tools. Replaces this session's clipboard with the public JFK fixture.
 Use run-owned-desktop.py with --owned for a private owned desktop session.
 """
-import argparse, gi, hashlib, json, os, pathlib, shutil, signal, subprocess, tempfile, time
+import argparse, gi, hashlib, json, os, pathlib, shutil, signal, subprocess, sys, tempfile, time
 gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi, GLib
 
@@ -16,6 +16,7 @@ parser.add_argument("--fixture", type=pathlib.Path, default=root/"linux/vendor/w
 parser.add_argument("--owned", action="store_true", help="Require run-owned-desktop.py's private display, D-Bus and audio session")
 parser.add_argument("--expect-no-overlay", action="store_true", help="In an owned session, require the unsupported-overlay notice and main-window Stop/Cancel fallback")
 parser.add_argument("--expect-no-portals", action="store_true", help="In an owned session, require disabled shortcut and paste permission actions")
+parser.add_argument("--expect-clipboard-unavailable", action="store_true", help="In an owned no-focus Wayland session, require bounded clipboard failure, responsive Copy controls and retained audio/text recovery")
 parser.add_argument("--recovery", action="store_true", help="In an owned session, fail inference with a disposable invalid model and verify retry after restart")
 parser.add_argument("--duration", type=int, default=126, help="Seconds for the recording-duration check (126 tests the former two-minute cutoff)")
 parser.add_argument("--portals", action="store_true", help="Also request keyboard permission, bind a shortcut, and verify insertion into a private GTK test field")
@@ -32,6 +33,8 @@ if args.owned:
 if args.recovery and not args.owned: parser.error("--recovery requires --owned; restart/failure regression must not use the live session.")
 if (args.expect_no_overlay or args.expect_no_portals) and not args.owned: parser.error("Fallback capability assertions require --owned; refusing the live session.")
 wayland = bool(os.environ.get("WAYLAND_DISPLAY"))
+if args.expect_clipboard_unavailable and (not args.owned or not wayland or args.recovery or args.portals):
+    parser.error("--expect-clipboard-unavailable requires an owned Wayland session without --recovery or --portals.")
 clipboard_command = ["wl-paste", "--no-newline"] if wayland else ["xclip", "-selection", "clipboard", "-o"]
 for command in ["pactl", "paplay", clipboard_command[0], "gdbus"] + (["qdbus6"] if args.portals else []):
     if not shutil.which(command): parser.error(f"Missing test dependency: {command}")
@@ -102,6 +105,42 @@ def visible_app_text():
                 values.append(Atspi.Text.get_text(item, 0, -1))
         except GLib.Error: pass
     return '\n'.join(value for value in values if value)
+
+def pending_clipboard(parent):
+    # Read only process metadata for our application's own wl-copy child. No
+    # helper argv, clipboard bytes, input events or live-session processes.
+    children = set()
+    for task in pathlib.Path(f'/proc/{parent}/task').glob('*/children'):
+        try: children.update(task.read_text().split())
+        except OSError: pass
+    for child in children:
+        entry = pathlib.Path('/proc')/child
+        try:
+            fields = dict(line.split(':', 1) for line in (entry/'status').read_text().splitlines() if ':' in line)
+            if fields['Name'].strip() == 'wl-copy' and not fields['State'].strip().startswith('Z') and int(fields['PPid']) == parent:
+                return True
+        except (OSError, KeyError, ValueError): pass
+    return False
+
+def wait_text(expected, seconds=10):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if expected in visible_app_text(): return
+        time.sleep(.1)
+    raise RuntimeError('Expected native UI message did not appear')
+
+def alert_texts():
+    values = set()
+    for item in descendants(app()):
+        try:
+            # WebKitGTK exposes the shared UI's role=alert as an AT-SPI
+            # notification (confirmed in the owned Debian GNOME fixture).
+            if item.get_role_name() not in ['alert', 'notification']: continue
+            for child in descendants(item):
+                values.add(child.get_name())
+                if 'Text' in child.get_interfaces(): values.add(Atspi.Text.get_text(child, 0, -1))
+        except GLib.Error: pass
+    return values
 
 def stop_app():
     if process:
@@ -215,11 +254,85 @@ Gtk.main()
         assert script_id.isdigit()
         subprocess.run(['qdbus6','org.kde.KWin',f'/Scripting/Script{script_id}','org.kde.kwin.Script.run'],check=True)
         subprocess.run(['qdbus6','org.kde.KWin','/Scripting','org.kde.kwin.Scripting.unloadScript','openwhisper-typing-test'],check=True,stdout=subprocess.DEVNULL)
-    click(wait_button('Start dictation'))
-    wait_button('Recording')
+    if args.expect_clipboard_unavailable:
+        # Native preference saves replace the current status message. Select
+        # German before delivery so this asserts the actual localized failure.
+        click(wait_button('Deutsch'))
+        wait_button('Diktat starten')
+    click(wait_button('Diktat starten' if args.expect_clipboard_unavailable else 'Start dictation'))
+    wait_button('Aufnahme ·' if args.expect_clipboard_unavailable else 'Recording')
     subprocess.run(['paplay', '--device', sink, str(args.fixture.resolve())], check=True)
     time.sleep(.4)
-    click(wait_button('Recording', frame=recording_frame))
+    click(wait_button('Aufnahme ·' if args.expect_clipboard_unavailable else 'Recording', frame=recording_frame))
+    if args.expect_clipboard_unavailable:
+        wait_button('Erneut transkribieren', seconds=90)
+        history = json.loads((config/'history.json').read_text())
+        assert history and 'country' in history[0].lower(), 'Known speech fixture not recognized'
+        english = 'Clipboard delivery timed out. Copy from the transcript or try again. Your recording is retained. Retry transcription or discard it.'
+        assert 'Copied. Paste your text with Ctrl+V.' not in visible_app_text(), 'Failed delivery claimed success'
+        backups = list((config/'recovery').glob('*.wav'))
+        assert len(backups) == 1, 'Failed clipboard delivery did not retain one WAV'
+        backup = backups[0]
+        transcript = backup.with_suffix('.txt')
+        assert transcript.read_text() == history[0], 'Retained transcript differs from recognized fixture'
+        for path in [backup, transcript]:
+            assert path.stat().st_mode & 0o777 == 0o600, 'Recovery file permissions are not private'
+        assert backup.parent.stat().st_mode & 0o777 == 0o700, 'Recovery directory permissions are not private'
+        saved_hashes = [hashlib.sha256(path.read_bytes()).hexdigest() for path in [backup, transcript]]
+        print('PASS: bounded no-focus clipboard failure claims no delivery and retains private WAV plus transcript', flush=True)
+        german = 'Die Übertragung in die Zwischenablage hat zu lange gedauert. Kopiere den Text aus der Transkription oder versuche es erneut. Deine Aufnahme bleibt erhalten. Versuche die Transkription erneut oder verwirf sie.'
+        wait_text(german)
+        assert english not in visible_app_text() and 'Your recording is retained.' not in visible_app_text(), 'Delivery failure was only partially translated'
+        print('PASS: native German delivery failure and retained-recording message are fully localized', flush=True)
+        for index, (prefix, label) in enumerate([('Diktat kopieren', 'History Copy'), ('Kopieren', 'Transcript Copy')]):
+            if index:
+                # A language shell refresh clears the previous IPC alert. The
+                # next result must be a fresh alert, not the recording status.
+                click(wait_button('Englisch'))
+                wait_button('Retry transcription')
+                click(wait_button('Deutsch'))
+                wait_button('Erneut transkribieren')
+            failure = 'Die Übertragung in die Zwischenablage hat zu lange gedauert. Kopiere den Text aus der Transkription oder versuche es erneut'
+            assert failure not in alert_texts(), 'Previous Copy alert was not cleared'
+            click(wait_button('Verlauf'))
+            if index:
+                # The shared UI exposes Transcript Copy only with history
+                # disabled. Explicitly turning it off clears this owned
+                # fixture's history, while the saved WAV/text stay retained.
+                history_switch = next(item for item in descendants(app()) if item.get_role() == Atspi.Role.CHECK_BOX and item.get_name() == 'Die letzten 20 Diktate lokal speichern')
+                click(history_switch)
+                wait_button('Kopieren')
+                assert json.loads((config/'settings.json').read_text())['keep_history'] is False
+                history = json.loads((config/'history.json').read_text())
+                assert history == [], 'Disabling history did not clear the owned fixture history'
+            parent = app().get_process_id()
+            click(wait_button(prefix))
+            deadline = time.monotonic() + 1
+            while not pending_clipboard(parent) and time.monotonic() < deadline: time.sleep(.02)
+            assert pending_clipboard(parent), 'Copy IPC did not start its owned pending wl-copy helper'
+            started = time.monotonic()
+            click(wait_button('Allgemein'))
+            wait_button('Auslöser festlegen', seconds=1)
+            assert 'Ausgabe' in visible_app_text(), 'General navigation did not render while Copy was pending'
+            assert time.monotonic() - started < 2 and pending_clipboard(parent), 'Copy IPC blocked native UI until helper completion'
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and (pending_clipboard(parent) or failure not in alert_texts()): time.sleep(.05)
+            assert not pending_clipboard(parent), 'Timed-out clipboard helper was not cleaned up'
+            assert failure in alert_texts(), 'Copy IPC did not report a fresh exact German error alert'
+            print('PASS: ' + label + ' IPC remains responsive during no-focus helper wait, then reports German failure', flush=True)
+        preferences = json.loads((config/'settings.json').read_text())
+        assert preferences['ui_language'] == 'de' and preferences['setup_completed'] is True and preferences['gpu'] is False and preferences['gpu_configured'] is True
+        stop_app()
+        process = start_app()
+        wait_button('Erneut transkribieren')
+        assert [hashlib.sha256(path.read_bytes()).hexdigest() for path in [backup, transcript]] == saved_hashes, 'Restart changed retained audio or transcript'
+        assert json.loads((config/'history.json').read_text()) == history, 'Restart changed recognized history'
+        assert json.loads((config/'settings.json').read_text()) == preferences, 'Restart changed preferences'
+        click(wait_button('Gesicherte Aufnahme verwerfen'))
+        wait_button('Diktat starten')
+        assert not backup.exists() and not transcript.exists(), 'Explicit discard did not remove retained audio and transcript'
+        print('PASS: failed delivery retains exact WAV/text across restart; explicit discard removes both', flush=True)
+        sys.exit(0)
     wait_button('Start dictation', seconds=90)
     history = json.loads((config/'history.json').read_text())
     assert history and 'country' in history[0].lower(), 'Known speech fixture not recognized'
