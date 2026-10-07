@@ -65,6 +65,7 @@ def main():
     parser.add_argument("--output", type=Path, help="New directory for private logs/configuration")
     parser.add_argument("--gnome-headless", action="store_true", help="Use Mutter headless native backend with an owned virtual monitor")
     parser.add_argument("--gnome-xwayland", action="store_true", help="Enable only the owned GNOME Xwayland server for mixed-client acceptance")
+    parser.add_argument("--kde-xwayland", action="store_true", help="Start a private inner KWin Xwayland server and record its owned DISPLAY")
     parser.add_argument("--timeout", type=int, default=360, help="Command timeout in seconds")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -76,6 +77,8 @@ def main():
     desktop_command = {"xfce": ["xfce4-session"], "cinnamon": ["cinnamon-session", "--session", "cinnamon"], "mate": ["mate-session"], "kde": ["startplasma-x11"]}.get(args.x11_desktop)
     if (args.gnome_xwayland or args.gnome_headless) and args.session != "gnome-wayland":
         parser.error("GNOME-specific options require --session gnome-wayland")
+    if args.kde_xwayland and args.session != "kde-wayland":
+        parser.error("--kde-xwayland requires --session kde-wayland")
     compositor = {"kde-wayland": "kwin_wayland", "sway": "sway", "gnome-wayland": "gnome-shell"}.get(args.session)
     for name in ["Xvfb", "dbus-daemon", "pipewire", "pipewire-pulse", "wireplumber", "pactl"] + ([compositor] if compositor else []) + ([desktop_command[0], "xprop"] if desktop_command else []) + (["gdbus"] if args.x11_desktop == "kde" else []):
         if not shutil.which(name):
@@ -102,6 +105,7 @@ def main():
         "NO_AT_BRIDGE", "SESSION_MANAGER", "XAUTHORITY", "WAYLAND_SOCKET",
         "XDG_SESSION_ID", "XDG_SEAT", "XDG_VTNR", "DESKTOP_STARTUP_ID", "SWAYSOCK",
         "HYPRLAND_INSTANCE_SIGNATURE", "AQ_BACKEND", "WF_OWNED_GNOME_XWAYLAND",
+        "WF_OWNED_XWAYLAND_ENV_FILE",
     ]:
         env.pop(key, None)
     for key, name in [
@@ -270,8 +274,19 @@ def main():
         if any(row.split()[1] != "auto_null.monitor" for row in sources.splitlines() if row.strip()):
             raise RuntimeError("Private audio server unexpectedly has a non-dummy source")
         if args.session == "kde-wayland":
-            kwin = start("kwin", ["kwin_wayland", "--x11-display", env["DISPLAY"],
-                "--socket", "openwhisper-owned", "--no-lockscreen", "--no-kactivities", "--width", "1100", "--height", "750"])
+            kwin_command = ["kwin_wayland", "--x11-display", env["DISPLAY"],
+                "--socket", "openwhisper-owned", "--no-lockscreen", "--no-kactivities", "--width", "1100", "--height", "750"]
+            if args.kde_xwayland:
+                # KWin alone knows its dynamically allocated inner display and cookie.
+                # An owned child inherits those values after Xwayland becomes ready.
+                inner_environment = root / "xwayland-environment.json"
+                writer = root / "record-xwayland-environment.py"
+                writer.write_text("#!/usr/bin/python3\nimport json,os\nfrom pathlib import Path\n"
+                    + "Path(" + repr(str(inner_environment)) + ").write_text(json.dumps({key:os.environ.get(key) for key in ['DISPLAY','XAUTHORITY','WAYLAND_DISPLAY']})+'\\n')\n")
+                writer.chmod(0o700)
+                kwin_command += ["--xwayland", str(writer)]
+                env["WF_OWNED_XWAYLAND_ENV_FILE"] = str(inner_environment)
+            kwin = start("kwin", kwin_command)
             wait_socket(runtime / "openwhisper-owned", kwin)
             env["WAYLAND_DISPLAY"] = "openwhisper-owned"
         elif args.session == "sway":
