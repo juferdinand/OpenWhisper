@@ -559,7 +559,7 @@ CachyOS / Arch build and runtime dependencies:
 sudo pacman -S --needed rust nodejs npm base-devel cmake python curl webkit2gtk-4.1 gtk3 libappindicator-gtk3 alsa-lib pipewire-alsa libxkbcommon gtk-layer-shell wayland-protocols binutils squashfs-tools wl-clipboard xclip vulkan-icd-loader shaderc
 ```
 
-Ubuntu 22.04+ / Debian build dependencies (desktop validation is still pending):
+Ubuntu 22.04+ / Debian build dependencies (see the desktop-specific evidence above):
 
 ```bash
 sudo apt install build-essential cmake ninja-build pkg-config python3 curl libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libxkbcommon-dev libgtk-layer-shell0 libvulkan-dev patchelf binutils squashfs-tools wl-clipboard xclip
@@ -877,9 +877,10 @@ If your desktop has neither native shortcut support nor a shortcut portal, use t
 button or configure the compositor command bindings below. Clipboard output remains available. No root,
 `input` group membership, `evdev`, or `uinput` access is required. The app never disables Wayland
 security controls. Linux custom model import, clipboard restoration, text
-editor output and start/stop sounds are not implemented yet. The floating indicator
-requires `gtk-layer-shell` on a Wayland compositor supporting layer-shell; GNOME does not
-provide that protocol. Its availability is shown in General.
+editor output and start/stop sounds are not implemented yet. The AppImage includes
+`gtk-layer-shell` for floating controls on a compatible Wayland compositor; native builds
+use an optional system library. GNOME does not provide that protocol. Availability is
+shown in General.
 
 ## Compositor command bindings
 
