@@ -37,12 +37,19 @@ OpenWhisper is in early development. Download the packaged macOS or Linux app fr
 
 Linux x86_64 releases are available as AppImage and `.deb` packages. Source is in `linux/`.
 Version 0.2.3 adds single-key triggers on KDE Plasma 6 and direct extra mouse buttons on
-KDE Wayland (middle button: Plasma 6.3+), with saved bindings and no root access. Other desktops
-retain portal-based shortcuts. Version 0.2.4 adds isolated, adaptive recognition and local recovery
+KDE Wayland (middle button: Plasma 6.3+), with saved bindings and no root access. Published packages
+use portal-based shortcuts on other desktops. Version 0.2.4 adds isolated, adaptive recognition and local recovery
 for stopped Linux recordings.
 KDE integration is detected through KWin and KGlobalAccel capabilities, not a CachyOS check.
 Other distributions with the required Plasma 6 services can use that implementation, but each
-linux/package combination still needs its own acceptance evidence.
+distribution and package combination still needs its own acceptance evidence.
+
+Current source and development builds also provide explicit native X11 keyboard setup,
+session-only automatic X11 paste, commands for user-configured compositor bindings, and
+detection of an available tray host that keeps a hidden app reachable. These changes are separate from
+the published 0.2.4 packages. The table below summarizes integration paths; exact builds,
+owned desktop checks, physical acceptance, and remaining gaps are recorded in
+[the Linux validation matrix](docs/LINUX.md#validation-status).
 See [trigger setup and limitations](docs/LINUX.md#first-use).
 Distribution targets below are **not claims of completed end-to-end testing**. On Linux, desktop environment, Wayland/X11, audio services, and portal support
 determine which features work. See the [Linux implementation and test plan](docs/LINUX.md).
@@ -50,17 +57,24 @@ determine which features work. See the [Linux implementation and test plan](docs
 | Distribution/session | Status | Feature coverage / limits |
 | --- | --- | --- |
 | CachyOS x86_64, KDE Plasma 6, Wayland, PipeWire | Primary test system; native UI, floating recorder, both CPU engines, clipboard, and AppImage launch checked | See the detailed [validation evidence](docs/LINUX.md#validation-status); real microphone and broader desktop checks remain |
-| Arch Linux and derivatives, KDE Wayland | Targeted; untested | Same integration path, subject to installed portal backend |
-| Ubuntu LTS / Debian, GNOME Wayland | Targeted; untested | Local dictation and clipboard; shortcuts/pasting depend on portal support |
-| Fedora, GNOME or KDE Wayland | Targeted; untested | Local dictation and clipboard; shortcuts/pasting depend on portal support |
-| X11 desktops | Experimental; untested | Record button and `xclip`; KDE Plasma 6 has native key bindings; other desktops need a shortcut portal. Direct mouse capture on X11 is not implemented. |
-| Sway / Hyprland and other Wayland compositors | Experimental target; untested | Capability-dependent; no blanket compatibility claim |
+| Arch Linux and derivatives, KDE Wayland | Acceptance tracked per distribution and package | Native KDE adapter; exact session evidence is tracked in the Linux matrix |
+| Ubuntu LTS / Debian, GNOME Wayland | Owned development checks; physical acceptance separate | Shortcut and keyboard portals; native and XWayland insertion checks are recorded in the Linux matrix |
+| Fedora, GNOME or KDE Wayland | Development validation tracked in the Linux matrix | Capability-dependent portal/KDE integration; desktop and package evidence remain separate |
+| Xfce, Cinnamon, MATE, and KDE X11 | Owned desktop development checks; physical acceptance separate | Source builds provide native keyboard triggers and opt-in Ctrl+V paste; KDE keeps its own adapter. Direct X11 mouse capture is not implemented. |
+| Sway / Hyprland and other Wayland compositors | Source command bindings; validation tracked in the Linux matrix | User-configured toggle or press/release commands; overlay, clipboard, and portals depend on compositor capabilities |
 | Linux ARM64 or 32-bit | Outside the initial release scope | No packages or support claim |
 
 Microphone recording, hotkeys, and automatic pasting must pass an end-to-end test on a desktop
 before it is listed as tested. Clipboard output is the fallback for unavailable
 or denied input permissions. See [Linux build and setup](docs/LINUX.md#build-from-source) and
 the [feature and validation checklist](docs/LINUX.md#validation-status).
+
+In a source/development build with command control, open the app normally before binding
+`openwhisper-desktop --control toggle` to a desktop shortcut. Explicit `start` and `stop`
+commands support press/release bindings; `cancel` and `status` are also available.
+For an AppImage, use its permanent installed path. These commands contact the existing
+app on the current user's session bus; they do not launch or activate it or configure
+desktop bindings. See [compositor binding setup](docs/LINUX.md).
 
 ## Features
 
@@ -69,7 +83,7 @@ English/German settings, and recording controls. Host-specific differences are c
 and in [docs/LINUX.md](docs/LINUX.md).
 
 - **System-wide dictation:** Paste text into the active text field, copy it to the clipboard, or open it in a text editor.
-- **Your preferred trigger:** macOS supports keyboard shortcuts, individual modifiers, Fn, and extra mouse buttons. Linux supports native Plasma 6 keys, KDE Wayland mouse buttons, and a shortcut portal fallback. KDE modifier-only triggers use toggle mode; other supported triggers also offer push-to-talk.
+- **Your preferred trigger:** macOS supports keyboard shortcuts, individual modifiers, Fn, and extra mouse buttons. Linux supports native Plasma 6 keys, KDE Wayland mouse buttons, and shortcut portals. Current source builds add native X11 keyboard triggers and user-configured compositor commands. KDE modifier-only triggers use toggle mode; regular X11 keys and explicit compositor press/release bindings provide push-to-talk.
 - **Local speech recognition:** OpenAI Whisper and NVIDIA Parakeet through [whisper.cpp](https://github.com/ggml-org/whisper.cpp), with Metal on macOS and Vulkan with CPU fallback on Linux.
 - **Model management:** Download and select catalog models on both platforms. macOS also provides deletion, custom ggml import, and hardware-based recommendations.
 - **Vocabulary and snippets:** Correct custom terms and replace spoken phrases with saved text, such as “my link” with a URL.
@@ -417,7 +431,7 @@ macos/
   Tests/                    Tests using Swift Testing
   scripts/                  Build, dependencies, and signing
 linux/                      Linux Rust host, desktop integrations, packaging, and speech bridge
-  src-tauri/src/desktops/    KDE bindings and common Linux portal/clipboard services
+  src-tauri/src/desktops/    KDE and X11 adapters; shared portals, command control, clipboard, and tray services
 shared/                     Shared model catalog, locales, and test cases
   ui/                       Common settings and recording UI for macOS and Linux
 docs/                       Platform planning
