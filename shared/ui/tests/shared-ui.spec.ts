@@ -572,3 +572,30 @@ test("Linux: modifier-only triggers explain toggle mode and disable push to talk
   await expect(page.getByRole("combobox", { name: "Recording mode" })).toBeDisabled();
   await expect(page.getByText("Modifier-only triggers use toggle mode.", { exact: false })).toBeVisible();
 });
+
+test("Linux clipboard delivery failures fully translate while retaining raw dictation", async ({ page }) => {
+  await start(page, "linux");
+  await page.getByRole("button", { name: "Deutsch", exact: true }).click();
+  const german = JSON.parse(readFileSync(resolve("../locales/de.json"), "utf8"));
+  const messages = [
+    "Clipboard delivery could not be confirmed. Copy from the transcript or try again",
+    "Clipboard delivery timed out. Copy from the transcript or try again",
+    "Clipboard unavailable. Install wl-clipboard (Wayland) or xclip (X11)",
+  ].map((message) => message + ". Your recording is retained. Retry transcription or discard it.");
+  for (const message of messages) {
+    await page.evaluate((message) => {
+      const host = window as any;
+      host.testState.status = "done";
+      host.testState.message = message;
+      host.testState.recovery_available = true;
+      host.testState.transcript = "Clipboard delivery timed out";
+      host.testState.history = ["Clipboard delivery timed out"];
+      host.publishState();
+    }, message);
+    await expect(page.locator("#status")).toHaveText(german[message]);
+    await expect(page.getByRole("button", { name: "Erneut transkribieren", exact: true })).toBeVisible();
+  }
+  await page.getByRole("button", { name: "Verlauf", exact: true }).click();
+  await expect(page.locator(".history-row p")).toHaveText("Clipboard delivery timed out");
+  expect(await page.evaluate(() => (window as any).testState.transcript)).toBe("Clipboard delivery timed out");
+});

@@ -17,10 +17,7 @@ use desktops::{
 use openwhisper_core::{catalog, Model};
 use serde::Serialize;
 use settings::{Paths, Preferences};
-use std::{
-    process::Child,
-    sync::{atomic::AtomicBool, mpsc, Arc, Mutex},
-};
+use std::sync::{atomic::AtomicBool, mpsc, Arc, Mutex};
 use tauri::{Emitter, Manager};
 
 #[derive(Clone, Serialize)]
@@ -78,7 +75,7 @@ struct Runtime {
     app: tauri::AppHandle,
     paths: Paths,
     commands: mpsc::Sender<WorkerCommand>,
-    clipboard: Mutex<Option<Child>>,
+    clipboard: clipboard::Clipboard,
     paste: tokio::sync::Mutex<Option<portals::PasteSession>>,
     shortcut_task: tokio::sync::Mutex<Option<portals::ShortcutHandle>>,
     cancel_download: AtomicBool,
@@ -220,12 +217,12 @@ fn refresh_microphones(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), St
     Ok(())
 }
 #[tauri::command]
-fn copy_transcript(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
+async fn copy_transcript(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
     let text = runtime.state.lock().unwrap().transcript.clone();
     if text.is_empty() {
         return Err("No transcript to copy".into());
     }
-    clipboard::clipboard(&text, &mut runtime.clipboard.lock().unwrap())?;
+    copy_text(runtime.inner().clone(), text).await?;
     runtime.update(|s| s.message = "Transcript copied.".into());
     Ok(())
 }
@@ -245,7 +242,7 @@ fn clear_history(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> 
     Ok(())
 }
 #[tauri::command]
-fn copy_history(runtime: tauri::State<'_, Arc<Runtime>>, index: usize) -> Result<(), String> {
+async fn copy_history(runtime: tauri::State<'_, Arc<Runtime>>, index: usize) -> Result<(), String> {
     let text = runtime
         .state
         .lock()
@@ -254,7 +251,13 @@ fn copy_history(runtime: tauri::State<'_, Arc<Runtime>>, index: usize) -> Result
         .get(index)
         .cloned()
         .ok_or("History item no longer available")?;
-    clipboard::clipboard(&text, &mut runtime.clipboard.lock().unwrap())
+    copy_text(runtime.inner().clone(), text).await
+}
+
+async fn copy_text(runtime: Arc<Runtime>, text: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || runtime.clipboard.copy(&text))
+        .await
+        .map_err(|_| clipboard::FAILED.to_owned())?
 }
 #[tauri::command]
 fn show_models_folder(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
@@ -459,7 +462,7 @@ fn main() {
                 app: app.handle().clone(),
                 paths,
                 commands,
-                clipboard: Mutex::new(None),
+                clipboard: clipboard::Clipboard::default(),
                 paste: tokio::sync::Mutex::new(None),
                 shortcut_task: tokio::sync::Mutex::new(None),
                 cancel_download: AtomicBool::new(false),
@@ -551,11 +554,8 @@ fn main() {
     let exit_code = app.run_return(|app, event| {
         if matches!(event, tauri::RunEvent::Exit) {
             if let Some(state) = app.try_state::<Arc<Runtime>>() {
+                state.clipboard.shutdown();
                 tauri::async_runtime::block_on(kde::shutdown(&state));
-                if let Some(mut child) = state.clipboard.lock().unwrap().take() {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                }
             }
         }
     });
