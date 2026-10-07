@@ -205,7 +205,8 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
                 match capture.finish(|| {
                     runtime.update(|s| {
                         s.status = "transcribing".into();
-                        s.message = "Transcribing locally… The first run also loads the model.".into();
+                        s.message =
+                            "Transcribing locally… The first run also loads the model.".into();
                     });
                     respond(&runtime, &mut reply, None);
                 }) {

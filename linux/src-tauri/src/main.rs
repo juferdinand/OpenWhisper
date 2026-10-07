@@ -589,19 +589,27 @@ fn main() {
                 .ui_language
                 .clone();
             localize_tray(&runtime, &locale);
-            if tray.is_ok() {
-                let tray_host = tray::monitor(app.handle().clone());
-                if let Some(window) = app.get_webview_window("main") {
-                    let w = window.clone();
-                    window.on_window_event(move |event| {
-                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                            if tray_host.load(std::sync::atomic::Ordering::Relaxed) {
-                                api.prevent_close();
-                                let _ = w.hide();
-                            }
+            let tray_host = if tray.is_ok() {
+                tray::monitor(app.handle().clone())
+            } else {
+                Arc::new(AtomicBool::new(false))
+            };
+            if let Some(window) = app.get_webview_window("main") {
+                let w = window.clone();
+                let app_handle = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        if tray_host.load(std::sync::atomic::Ordering::Relaxed) {
+                            let _ = w.hide();
+                        } else {
+                            // The hidden recording window can keep Tauri alive
+                            // after the main window closes. Use the same exit
+                            // path as Quit when no tray can reopen the app.
+                            app_handle.exit(0);
                         }
-                    });
-                }
+                    }
+                });
             }
             Ok(())
         })
