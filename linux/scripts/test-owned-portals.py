@@ -88,11 +88,15 @@ class GnomeInput:
             "org.freedesktop.DBus", "GetConnectionUnixProcessID", GLib.Variant("(s)", ("org.gnome.Shell",)),
             None, Gio.DBusCallFlags.NONE, 3000, None).unpack()[0]
         shell = NativeUI(type("OwnedShell", (), {"pid": shell_pid})())
-        if shell.find("Skip"):
-            shell.click("Skip")
-            print("PASS: actual owned GNOME welcome tour is dismissed before input checks", flush=True)
-        else:
-            Path(os.environ["XDG_STATE_HOME"], "shell-controls.txt").write_text(shell.text())
+        for pressed in [True, False]:
+            self.call("NotifyKeyboardKeycode", GLib.Variant("(ub)", (1, pressed)))
+            time.sleep(0.05)
+        time.sleep(0.5)
+        for node in shell.nodes():
+            if node.get_name() == "Skip" and node.get_state_set().contains(Atspi.StateType.SHOWING):
+                self.focus_field(node)
+                print("PASS: actual owned GNOME welcome tour is dismissed before input checks", flush=True)
+                break
 
     def call(self, method, parameters=None):
         require_owned()
@@ -203,6 +207,7 @@ class NativeUI:
         for node in self.nodes():
             try:
                 if (node.get_role_name() in roles and node.get_name().startswith(name)
+                        and node.get_action_iface() is not None
                         and node.get_action_iface().get_n_actions() > 0
                         and (not sensitive or node.get_state_set().contains(Atspi.StateType.SENSITIVE))):
                     return node
