@@ -19,6 +19,11 @@ import time
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--binary", type=Path, required=True)
+parser.add_argument(
+    "--expect-mouse-unsupported",
+    action="store_true",
+    help="Verify refusal before Ready or lease changes on an owned unsupported map",
+)
 parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
 args = parser.parse_args()
 binary = args.binary.resolve()
@@ -79,16 +84,19 @@ if not args.inside:
             number = display.stdout.readline().strip()
             assert number.isdigit(), "Could not start an owned Xvfb display"
             env["DISPLAY"] = ":" + number
+            command = [
+                "dbus-run-session",
+                "--",
+                sys.executable,
+                str(Path(__file__).resolve()),
+                "--inside",
+                "--binary",
+                str(binary),
+            ]
+            if args.expect_mouse_unsupported:
+                command.append("--expect-mouse-unsupported")
             result = subprocess.run(
-                [
-                    "dbus-run-session",
-                    "--",
-                    sys.executable,
-                    str(Path(__file__).resolve()),
-                    "--inside",
-                    "--binary",
-                    str(binary),
-                ],
+                command,
                 env=env,
             )
         finally:
@@ -238,6 +246,23 @@ try:
         assert receive(process) == {"event": "released"}
     close(process)
     print("PASS: modifier-only triggers activate on release (toggle mode)", flush=True)
+    if args.expect_mouse_unsupported:
+        config = root / "config/kcminputrc"
+        original = config.read_bytes() if config.exists() else None
+        for button in [2, 8, 9, 10, 31]:
+            helper({"kind": "mouse", "button": button}, "cannot safely provide")
+            assert not lease.exists(), "Unsupported metadata created a shortcut lease"
+            assert (config.read_bytes() if config.exists() else None) == original
+            assert kwin.poll() is None, "The compositor exited during metadata refusal"
+        process = helper({"kind": "key", "key": 0x01000037})
+        edges(process, inputs.key, 66)
+        close(process)
+        inputs.close()
+        print(
+            "PASS: unsupported mouse metadata rejected before Ready without a lease or mapping change; keyboard remains usable",
+            flush=True,
+        )
+        sys.exit(0)
     for button, linux, key in [
         (2, 274, "MiddleButton"),
         (8, 275, "ExtraButton1"),
@@ -328,6 +353,30 @@ try:
     close(process)
     accel("unregister", "(ss)", (action[0], action[1]))
     print("PASS: occupied F19 uses the free F24 fallback", flush=True)
+    # This changes only this test's disposable compositor configuration. Do not
+    # hold a mouse button: binding removal does not prove compositor key release.
+    process = helper({"kind": "mouse", "button": 8})
+    subprocess.run(
+        ["kwriteconfig6", "--file", "kxkbrc", "--group", "Layout", "--key", "LayoutList", "--notify", "us,de"],
+        env=env,
+        check=True,
+    )
+    bus.emit_signal(None, "/Layouts", "org.kde.keyboard", "reloadConfig", None)
+    bus.flush_sync(None)
+    reply = receive(process)
+    assert reply["event"] == "error" and "keyboard layout changed" in reply["message"], reply
+    assert process.wait(timeout=5) == 1
+    assert not lease.exists(), "Metadata invalidation left a recovery lease"
+    assert mapping("ExtraButton1", read=True) == "<absent>"
+    layouts = bus.call_sync(
+        "org.kde.keyboard", "/Layouts", "org.kde.KeyboardLayouts", "getLayoutsList",
+        None, None, Gio.DBusCallFlags.NONE, 5000, None,
+    ).unpack()[0]
+    assert len(layouts) == 2, "The owned replacement map did not advertise both layouts"
+    process = helper({"kind": "mouse", "button": 8})
+    edges(process, inputs.button, 275)
+    close(process)
+    print("PASS: keymap replacement stops the helper and restores its lease; a fresh helper validates all layouts", flush=True)
     inputs.close()
     print(
         "PASS: keyboard conflicts rejected without taking another application’s binding",

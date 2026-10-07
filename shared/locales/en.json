@@ -295,5 +295,8 @@
   "Retry transcription": "Retry transcription",
   "Discard saved recording": "Discard saved recording",
   "An unfinished recording is saved. Retry transcription or discard it.": "An unfinished recording is saved. Retry transcription or discard it.",
-  "{error}. Your recording is retained. Retry transcription or discard it.": "{error}. Your recording is retained. Retry transcription or discard it."
+  "{error}. Your recording is retained. Retry transcription or discard it.": "{error}. Your recording is retained. Retry transcription or discard it.",
+  "This desktop keyboard layout cannot safely provide a mouse trigger. Use a keyboard trigger or the Record button.": "This desktop keyboard layout cannot safely provide a mouse trigger. Use a keyboard trigger or the Record button.",
+  "Could not verify the desktop keyboard layout for a mouse trigger. Use a keyboard trigger or the Record button.": "Could not verify the desktop keyboard layout for a mouse trigger. Use a keyboard trigger or the Record button.",
+  "The desktop keyboard layout changed and the mouse trigger stopped. Set it again, or use a keyboard trigger or the Record button.": "The desktop keyboard layout changed and the mouse trigger stopped. Set it again, or use a keyboard trigger or the Record button."
 }

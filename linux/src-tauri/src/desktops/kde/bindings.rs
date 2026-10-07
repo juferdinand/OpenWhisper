@@ -250,7 +250,8 @@ pub async fn recover(proxy: &Proxy<'_>, config: &Path) -> Result<(), String> {
 
 pub fn mouse_keys() -> Vec<(i32, String)> {
     // KWin can leave synthetic modifiers down if its rebind device is removed while held.
-    // F19/F24 have unmodified keys in the standard evdev map and avoid that failure mode.
+    // These fixed candidates require compositor-keymap validation before use;
+    // the candidate list alone does not establish unmodified representability.
     [19, 24]
         .into_iter()
         .map(|n| (0x01000030 + n - 1, format!("F{n}")))

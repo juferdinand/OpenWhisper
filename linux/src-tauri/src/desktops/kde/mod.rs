@@ -1,6 +1,7 @@
 mod bindings;
 mod capture;
 pub mod helper;
+mod keymap;
 mod trigger;
 
 use self::bindings as kde;
