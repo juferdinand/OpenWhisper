@@ -15,14 +15,17 @@ or subscription. The project is open source under the MIT License.
 
 ## Delivery and acceptance
 
-- Prepare functional changes on isolated branches with automated evidence and focused manual acceptance steps.
-  The user actively relies on the app and requires acceptance before merging functional changes or replacing
-  the running installation. Complete the independently runnable checks before requesting review.
+- Prepare functional changes on isolated branches with automated evidence and independent review.
+  Linux desktop acceptance uses the documented automated package/runtime checks; the user waived proactive
+  manual desktop checks in favor of bug reports. Merge validated changes through the normal PR workflow.
+  The user actively relies on the app; replacing the running installation still requires explicit instruction.
 - Prioritize Linux installation and desktop reliability. Deliver new integrations incrementally:
   model communication first, optional text-to-speech next, then structured Obsidian output.
   Ordinary dictation must remain independent of these integrations.
-- Keep desktop acceptance issues open for outstanding supervised checks. Mark synthetic, container,
-  nested-compositor, and physical-device evidence separately; never infer full desktop support from a build.
+- Close Linux desktop acceptance issues after their automated scope passes; retain concrete remaining
+  defects as bug reports. Do not keep them open solely for proactive physical-device or login-session checks.
+  Mark synthetic, container, nested-compositor, and physical-device evidence separately; never infer full
+  desktop support from a build or claim untested hardware coverage.
 
 ## Project structure
 

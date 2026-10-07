@@ -18,6 +18,13 @@ This avoids recording the real microphone during automated checks.
 The settings and floating recording control use the same custom UI, settings navigation, bundled font, and original icon
 as macOS. Tauri hosts these assets on Linux; WKWebView hosts them on macOS.
 
+Linux desktop acceptance now uses the documented automated source/package checks. The user
+waived an additional proactive manual acceptance round on 2026-10-07 in favor of bug reports.
+Completed acceptance issues can close after their automated scope passes; concrete remaining
+defects stay tracked separately. Evidence still distinguishes owned containers, nested
+compositors, VMs and physical devices. Untested hardware, login sessions and target applications
+remain coverage limits rather than prerequisites for closing the automated acceptance work.
+
 ## Compatibility targets
 
 | Distribution family | Desktop/session | Target | Current evidence |
