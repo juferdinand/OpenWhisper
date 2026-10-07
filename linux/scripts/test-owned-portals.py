@@ -117,7 +117,11 @@ class GnomeInput:
     def recording_mode(self, app, hold):
         combo = wait_for(lambda: next((node for node in app.nodes()
             if node.get_role_name() == "combo box" and node.get_name() == "Recording mode"), None), "Recording mode combobox")
-        self.focus_field(combo)
+        component = combo.get_component_iface()
+        with contextlib.suppress(GLib.Error):
+            component.scroll_to(Atspi.ScrollType.ANYWHERE)
+        assert component.grab_focus(), "Recording mode refused accessible focus"
+        assert combo.get_action_iface().do_action(0), "Recording mode menu refused to open"
         self.tap(102)  # Home
         if hold:
             self.tap(108)  # Down
