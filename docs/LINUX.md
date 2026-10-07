@@ -24,13 +24,13 @@ as macOS. Tauri hosts these assets on Linux; WKWebView hosts them on macOS.
 |---|---|---|---|
 | CachyOS | KDE Plasma 6 / Wayland | Primary acceptance system | Native UI, virtual-microphone capture beyond two minutes, floating stop/cancel, both CPU engines, clipboard, and AppImage launch verified |
 | Arch Linux and derivatives | KDE Plasma 6 / Wayland | Same integration path | Stock Arch nested KWin: exact CI AppImage capture/recovery/install and native trigger leases pass; patched native real keyboard portal and Wayland/XWayland paste pass |
-| Ubuntu LTS and Debian | GNOME / Wayland | Portal integration, clipboard fallback | Debian 13 nested GNOME native UI and main-window capture/cancel pass; the exact CI Debian package passes bounded no-focus clipboard failure and recovery checks. Successful focused delivery and full desktop acceptance remain open |
+| Ubuntu 24.04 and Debian 13 | GNOME / Wayland | Portal integration, clipboard and configured-command fallback | Owned GNOME 46/48 keyboard permission and focused native Wayland paste pass on patched source; Ubuntu inner-XWayland paste and Debian custom command shortcuts pass. GNOME 48 shortcut backend has a separately documented upstream response failure |
 | Fedora KDE 43 | KDE Plasma 6 / Wayland | Native keys, portals, clipboard fallback | Owned stock KWin capture/recovery/install pass. Native keys pass; untouched stock keymap rejects mouse leases safely. Patched native real keyboard portal and Wayland/XWayland paste pass |
 | Kubuntu / Ubuntu 24.04 LTS | KDE Plasma 5.27 / Wayland | Portal or Record-button fallback | Exact CI AppImage owned capture/recovery/install pass with stock Plasma 5.27 and private WirePlumber 0.4 policy. Unsupported native Plasma 6 trigger helpers reject before leasing; physical acceptance remains open |
 | openSUSE Tumbleweed | KDE Plasma 6 / Wayland | Same integration path | Stock nested KWin: exact CI AppImage capture/recovery/install and native trigger leases pass; patched native real keyboard portal and Wayland/XWayland paste pass |
-| Fedora GNOME | GNOME / Wayland | Portal integration, clipboard fallback | See the separately scoped GNOME acceptance evidence; KDE checks do not establish GNOME support |
-| Common desktop distributions | X11 | Record button, `xclip`, and available portals; no native X11 shortcut fallback yet | Owned Xvfb UI/capture/clipboard checks pass; a normal desktop session remains untested |
-| wlroots compositors | Sway / Hyprland / Wayland | Capability-dependent integration | Debian 13 headless Sway UI/capture/clipboard and absent-portal fallback pass; physical Sway sessions and Hyprland remain untested |
+| Fedora 43 GNOME | GNOME / Wayland | Portals and main recording control | Owned GNOME 49 actual shortcut Activate/Deactivate and hold edges, keyboard Cancel/retry/Share/Revoke, native Wayland and inner-XWayland paste pass on integrated native source |
+| Debian 13 named desktops | Xfce, Cinnamon, MATE and KDE / X11 | Native keyboard triggers and explicit session paste; KDE adapter preferred | Actual owned named-desktop setup, toggle/hold, focused paste, conflicts, release/cleanup, persistence and capture pass on native source; physical and login-manager checks remain open |
+| Arch compositor environments | Sway / Hyprland / Wayland | Explicit user-configured command bindings and clipboard | Sway 1.12 headless command/capture/recognition/clipboard pass; Hyprland 0.56.2 owned QEMU guest toggle/hold and busy-state checks pass. Full Hyprland recognition and physical acceptance are tracked separately |
 | Other architectures | ARM64 / 32-bit | Outside the initial release scope | No Linux packages yet |
 
 Actual features depend on the desktop and its portal backend, not just the distribution name.
@@ -132,6 +132,102 @@ Paste tests verify that server's UID and compositor ancestry before selecting it
 WirePlumber 0.4 uses private no-device policy overrides; no hardware monitor is enabled.
 Older AT-SPI's `push button` role is accepted without changing the session guards.
 
+## Additional owned desktop source evidence, 2026-10-07
+
+The following results use separately hashed development binaries, not the published 0.2.4
+release. [PR #28](https://github.com/juferdinand/OpenWhisper/pull/28) combines the source changes;
+its eventual CI packages require their own checks. All audio is the public upstream JFK
+fixture played into a private virtual source, with Whisper Tiny and manual CPU selection.
+Containers use ordinary app users, private configuration/session buses and software graphics,
+without host display/audio/input sockets or physical devices. The Hyprland VM uses QEMU's
+virtual keyboard and graphics devices, with no host device passthrough. Nothing here replaces
+the running user installation or establishes physical microphone, GPU, login or signed-update
+acceptance. Earlier failed runs remain separate from later passing corrections.
+
+### GNOME
+
+| Owned environment | Keyboard permission / paste | Shortcut path |
+|---|---|---|
+| Ubuntu 24.04, GNOME Shell 46.0 / Mutter 46.2 | Actual Cancel/retry/Approve/Revoke; focused native Wayland and inner-XWayland GTK insertion equal clipboard/history | GlobalShortcuts is unavailable; Record and explicit custom-command fallback remain usable |
+| Debian 13, GNOME Shell/Mutter 48.7, portal backend 48.0 | Actual Cancel/retry/Approve/Revoke; focused native Wayland and inner-XWayland GTK insertion equal clipboard/history | Actual `gsd-media-keys` custom shortcuts invoking `--control toggle/start/stop` pass; portal binding response fails in this backend |
+| Fedora 43, GNOME Shell 49.10 / Mutter 49.8, portal backend 49.0 | Actual Cancel/retry/Share/Revoke; focused native Wayland and inner-XWayland GTK insertion equal clipboard/history | Actual shortcut dialog Cancel/Add, Activate/Deactivate and hold press/release pass |
+
+The earlier corrected portal/paste source is `ad8cd4a`; its native binary SHA-256 is
+`84fdbc4df046057e52f55967087108cc72b8f6691675acb82ee55dc615d2c914`.
+The final Fedora, Debian and Ubuntu portal/paste and custom-command checks use native binary SHA-256
+`7778dda99bbe1c5a8045f4e19998dac62947624ea6b1a96e4ac6373649581c06`.
+Permission cancellation no longer leaves Allow disabled. Failed shortcut and keyboard-session
+setup explicitly closes the rejected portal session. Host registration uses the same cached
+portal connection and stable application identity where the Registry interface exists;
+older backends remain supported without pretending that registration grants permission.
+
+GNOME 48's tested backend returns a failed binding response even when its Shell binding
+exists. In the upstream `shell_grab_accelerators_done` success path, `response` is uninitialized;
+[version 49 initializes it to zero](https://gitlab.gnome.org/GNOME/xdg-desktop-portal-gnome/-/blob/49.0/src/globalshortcuts.c).
+This explains the observed version-specific failure; OpenWhisper continues treating failed
+responses as failures and closes the session. It does not bypass permission responses.
+GNOME's missing layer-shell protocol keeps the main-window recording controls usable.
+No-watcher Close/restart passes; host-loss recovery with a replacement test watcher is
+recorded as synthetic tray evidence, separate from KDE's actual panel widgets.
+
+`test-owned-portals.py` checks real dialog widgets, owned virtual input and exact target-field
+delivery. Its environment guards remain mandatory. Raw local reports are under
+`.local/planning/gnome-comprehensive/`; fixture focus failures and the GNOME 48 backend failure
+are retained separately from passing runs. Normal login identity, real hardware and other
+application paste bindings still require supervised checks.
+
+### Named X11 desktops
+
+The native fallback source is `086f419e4e640e7cab93c5f37bb392def2d5282a`, tested with CPU binary
+SHA-256 `a616f2389ad04b32a68cad633353378fe58fa5d7a8be74300f5c06b926f895a8`
+in Debian 13 image `sha256:352a1233bdca10f1644feee2589a8765d9f8f8009a85e2053ca458dbc7f49ce2`.
+Genuine Xfce session 4.20.2 / Xfwm4 4.20.0, Cinnamon 6.4.10, MATE session 1.26.1 /
+Marco 1.26.2 and KDE Plasma/KWin 6.3.6 run inside private Xvfb displays. Each passes actual
+native keyboard capture, Escape/focus cancellation, toggle and physical-key release for hold,
+public-fixture capture/recognition, focused GTK paste equal clipboard/history, explicit paste
+revocation, saved trigger restart/removal, and shared onboarding/German/manual-CPU persistence.
+KDE retains and prefers its own adapter. These are owned virtual key events, not physical keys.
+
+The general X11 adapter uses conflict-preserving passive grabs and a disposable helper. It
+rejects nonlocal displays, stops on keymap changes, preserves existing grabs and releases its
+grabs on EOF/SIGTERM/SIGKILL. Held autorepeat, lock variants, AltGr, sticky/latched modifiers
+and bounded startup are exercised. Native paste requires explicit session-only opt-in and
+refuses unsafe modifier/focus combinations; portal and native paste permissions are exclusive.
+An XWayland display inside Wayland does not enable this X11 adapter. Mouse capture is absent.
+
+MATE's first generic UI smoke failed on a one-pixel integer layout metric despite no visible
+overflow. The corrected smoke source `8aa721a` requires every visible child to remain inside
+the content viewport and accepts only the precisely reproduced fractional-scale integer
+rounding case. Seven browser checks still reject real overflow and disconnected navigation.
+Actual MATE native smoke passes on corrected binary SHA-256
+`c3155bfa1ca0009f696bdb2d1cd61eec4f064ddec192b91640e2064b71ab80e4`.
+No application CSS or layout tolerance was changed. `test-x11-triggers.py` and
+`test-x11-session.py` are reusable guarded harnesses; exact reports are under
+`.local/planning/x11-desktop-acceptance/`. Login-manager sessions, physical tray/keyboards,
+hardware audio/GPU and application-specific paste shortcuts remain open.
+
+### Sway and Hyprland
+
+The integrated native binary `7778dda9…` passes all eleven command-control checks in owned
+Arch Sway 1.12 / wlroots 0.20: no-service/no-activation, content-free status, missing-model
+rejection, idempotent and concurrent commands, immediate Stop acknowledgement, real F8 toggle
+and F9 press/release, busy refusal while an owned helper is deliberately stalled, public-fixture
+recognition and clipboard delivery, and preservation of the completed result.
+
+Hyprland 0.56.2 / Aquamarine 0.15.1 runs in a disposable Arch QEMU guest with software Mesa
+and a virtual GPU. Actual guest F8/F9 compositor bindings, capture, Stop acknowledgement and
+all four capture controls' bounded busy responses pass. The original debug recognition run
+did not finish within its 90-second test deadline under CPU emulation; that failure remains
+recorded and full recognition/clipboard acceptance is still pending. Exposing layer-shell or
+virtual-keyboard protocols alone does not establish overlay focus or physical support.
+The guest has no physical devices, and post-provisioning network access is disabled.
+
+`test-compositor-control.py` keeps finite test deadlines, an explicit owned-session guard and
+private virtual audio. Its optional recognition deadline accommodates CPU-emulated test VMs;
+it does not change product inference limits or introduce a recording cutoff. See the
+[command-binding examples](#compositor-command-bindings) and
+[acceptance issue #7](https://github.com/juferdinand/OpenWhisper/issues/7).
+
 ## Implemented features
 
 - Tauri 2 with the shared English custom interface and a Rust backend. macOS renders the same
@@ -168,7 +264,9 @@ Older AT-SPI's `push button` role is accepted without changing the session guard
 - For automatic pasting on Wayland, request keyboard control through the RemoteDesktop portal.
   Request keyboard access only; do not request screen capture. Clipboard output remains available
   if permission is denied or the backend is unsupported. Do not require root or input-group access.
-- Tray controls remain available when the settings window is closed. The Linux app uses an
+- When an actual tray host is registered, closing settings keeps tray controls available.
+  Without a tray host, Close uses the explicit Quit path so a hidden recording window cannot
+  strand the process. Losing a tray host reopens hidden settings. The Linux app uses an
   in-window recording control and the same floating recording UI as macOS. KDE and other
   layer-shell Wayland compositors use `gtk-layer-shell` with keyboard focus disabled; X11 uses
   a non-focusable floating window. Unsupported compositors keep the in-window control.
@@ -600,7 +698,8 @@ temporary files and never opens the microphone, desktop, clipboard, or applicati
 2. In **General**, select the system default microphone and your usual language.
 3. Click the recording control, speak, and click again. Inspect the result in **History**.
 4. In **General**, click **Set trigger …**, then press and release a key or supported mouse button
-   on KDE Plasma 6. Other desktops open their shortcut portal dialog.
+   on KDE Plasma 6. X11 offers native keyboard capture; other desktops open their shortcut
+   portal dialog when available.
 5. For automatic insertion, choose **Allow** keyboard access and **Paste at the cursor**.
    This requests keyboard control only. No screen capture is requested.
 6. Focus a text field in another app and try the shortcut. With clipboard output, paste manually.
@@ -634,8 +733,12 @@ state. The app ends its hold-to-talk state when the helper fails, but this wider
 remains open in [issue #21](https://github.com/juferdinand/OpenWhisper/issues/21). Release the mouse
 button before changing its trigger or keyboard layout.
 
-**Desktop shortcut dialog** selects the portal alternative on KDE. Other desktops use it by
-default; their recorder determines the accepted keys. Portal setup remains session-scoped and
+On X11, native keyboard setup supports toggle and hold/release; paste additionally requires
+explicit session-only keyboard permission. Existing desktop shortcuts are preserved. The
+native X11 adapter never runs merely because a Wayland session exposes XWayland.
+
+**Desktop shortcut dialog** selects the portal alternative on KDE. Other Wayland desktops use it
+when available; their recorder determines the accepted keys. Portal setup remains session-scoped and
 must be enabled again after restart. OpenWhisper suggests Ctrl+Alt+Space but does not require
 Ctrl. Direct mouse capture on GNOME, Sway, Hyprland, and X11 is not implemented.
 
@@ -765,8 +868,10 @@ review them before posting diagnostics publicly.
   field. Targets with a different paste binding (including many terminals) may require manual paste.
 - **Clipboard unavailable:** install `wl-clipboard` on Wayland or `xclip` on X11. You can also
   select text directly in **History**. Clipboard contents may be saved by your desktop’s clipboard manager.
-- **No tray icon on GNOME:** support depends on the desktop’s AppIndicator integration. Keep the
-  settings window open if a tray is unavailable; tray registration alone cannot prove it is visible.
+- **No tray icon on GNOME:** support depends on the desktop's AppIndicator integration.
+  Settings and its recording controls remain usable. Close quits when no tray host is registered;
+  losing a registered host reopens hidden settings. Creating an AppIndicator alone does not prove
+  the desktop displays it.
 
 ## Known dependency risk
 

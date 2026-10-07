@@ -17,7 +17,11 @@ parser.add_argument('--output', type=Path, required=True)
 parser.add_argument('--sway-bindings', action='store_true')
 parser.add_argument('--hyprland-bindings', action='store_true')
 parser.add_argument('--vm-keyboard', action='store_true', help='Request F8/F9 input from an owned VM driver')
+parser.add_argument('--recognition-timeout', type=int, default=90,
+    help='Test completion deadline in seconds (1–600); CPU-emulated VMs can require longer')
 args = parser.parse_args()
+if not 1 <= args.recognition_timeout <= 600:
+    parser.error('Recognition test deadline must be between 1 and 600 seconds.')
 runtime = os.environ.get('XDG_RUNTIME_DIR')
 if (not runtime or os.environ.get('WF_OWNED_DESKTOP_TEST') != runtime
         or os.environ.get('PULSE_SERVER') != 'unix:' + str(Path(runtime) / 'pulse/native')
@@ -89,11 +93,17 @@ def vm_key(key, hold_ms=100):
     request = work / 'keyboard-request.json'
     acknowledgement = work / 'keyboard-ack.json'
     sequence = json.loads(request.read_text())['sequence'] + 1 if request.exists() else 1
-    request.write_text(json.dumps(dict(sequence=sequence, key=key, hold_ms=hold_ms)))
+    pending = request.with_suffix('.tmp')
+    pending.write_text(json.dumps(dict(sequence=sequence, key=key, hold_ms=hold_ms)))
+    pending.replace(request)
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
-        if acknowledgement.exists() and json.loads(acknowledgement.read_text()).get('sequence') == sequence:
-            return
+        try:
+            if json.loads(acknowledgement.read_text()).get('sequence') == sequence:
+                return
+        except (FileNotFoundError, json.JSONDecodeError):
+            # The external owned-VM driver may still be writing its reply.
+            pass
         time.sleep(.1)
     raise RuntimeError('Owned VM keyboard driver did not acknowledge input')
 
@@ -234,7 +244,7 @@ try:
         signal.pidfd_send_signal(helper_fd, signal.SIGCONT)
         os.close(helper_fd)
         helper_fd = None
-    wait_status('done', 90)
+    wait_status('done', args.recognition_timeout)
     clipboard = subprocess.check_output(['wl-paste', '--no-newline'], env=environment, text=True, timeout=5)
     assert 'country' in clipboard.lower(), 'Public speech fixture was not delivered'
     passed('Command-controlled virtual capture recognizes the public JFK fixture and delivers clipboard text')
