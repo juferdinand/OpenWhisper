@@ -298,7 +298,7 @@ try:
         ).unpack()
 
     accel("doRegister", "(as)", (action,))
-    accel("setShortcutKeys", "(asa(ai)u)", (action, [([0x01000037],)], 6))
+    accel("setShortcutKeys", "(asa(ai)u)", (action, [([0x01000037, 0, 0, 0],)], 6))
     helper({"kind": "key", "key": 0x01000037}, "conflicts")
     accel("unregister", "(ss)", (action[0], action[1]))
     process = helper({"kind": "key", "key": 0x01000037})
@@ -321,7 +321,7 @@ try:
         flush=True,
     )
     accel("doRegister", "(as)", (action,))
-    accel("setShortcutKeys", "(asa(ai)u)", (action, [([0x01000042],)], 6))
+    accel("setShortcutKeys", "(asa(ai)u)", (action, [([0x01000042, 0, 0, 0],)], 6))
     process = helper({"kind": "mouse", "button": 8})
     assert mapping("ExtraButton1", read=True) == "Key,F24"
     edges(process, inputs.button, 275)

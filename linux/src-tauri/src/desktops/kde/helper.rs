@@ -78,7 +78,7 @@ async fn session() -> Result<(), String> {
     let mut selected = None;
     for (key, mapping) in candidates {
         let free: bool = proxy
-            .call("globalShortcutAvailable", &((vec![key],), ""))
+            .call("globalShortcutAvailable", &(kde::key_sequence(key), ""))
             .await
             .map_err(|e| e.to_string())?;
         if free {
@@ -97,7 +97,7 @@ async fn session() -> Result<(), String> {
         let component = zbus::Proxy::new(&connection, "org.kde.kglobalaccel", path, "org.kde.kglobalaccel.Component").await.map_err(|e| e.to_string())?;
         // A single stream preserves press/release ordering, including modifier-only bursts.
         let mut events = component.receive_all_signals().await.map_err(|e| e.to_string())?;
-        let bound: Vec<(Vec<i32>,)> = proxy.call("setShortcutKeys", &(&action, vec![(vec![key],)], 6u32)).await.map_err(|e| e.to_string())?;
+        let bound: Vec<(Vec<i32>,)> = proxy.call("setShortcutKeys", &(&action, vec![kde::key_sequence(key)], 6u32)).await.map_err(|e| e.to_string())?;
         // Qt serializes each QKeySequence as four entries, padding unused keys with zero.
         if bound.len() != 1 || bound[0].0.first() != Some(&key) || bound[0].0.iter().skip(1).any(|k| *k != 0) { return Err("The desktop rejected this trigger because it conflicts with another shortcut.".into()); }
         lease.apply_mouse()?;
