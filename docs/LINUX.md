@@ -127,7 +127,7 @@ SHA-256 `2c37ec272f9ccf9d46c567b17ffebe02cd6589dbfa811f9ce5bcc8fd8835bca9`,
 passes the same real host-loss regression on Fedora, including Close while the recording
 overlay and one private virtual capture stream are active: exit status 0, no app frames,
 and no remaining capture streams. The same binary preserves actual rendered tray Show/Quit
-on Arch. These are separate native source checks, pending combined package acceptance.
+on Arch. These native source checks remain separate from the combined package checks below.
 Run `test-owned-kde-tray.py --host-loss` in the owned harness; adding
 `--recording-model /path/to/ggml-tiny.bin` exercises the private recording variant.
 
@@ -135,6 +135,34 @@ The unchanged public 0.2.4 signed AppImage fixture also passes signature-verifie
 and removal on all four containers, preserving private data sentinels. That passive package
 check does not execute or relabel the old public binary, exercise its updater, or establish
 that the new development candidate has public release signatures.
+
+The combined Ubuntu 22.04 development package from
+[CI run 37678314536](https://github.com/juferdinand/OpenWhisper/actions/runs/37678314536),
+artifact `11508384203`, source `816a6d0`, test merge
+`e73b72fdf70abd4ed855c95d731e5c5e29e93740`, also passes bounded owned checks on all four
+environments above. The exact AppImage SHA-256 is
+`6afe2fbe3aa06a58baac24d263082f1657635ddca2884da8128a2559c72df284`;
+its extracted native payload is
+`7483aeeb21cb1688dbd082a77fac97def83f050ad6dfeae0f89a01275ef08e7f`.
+Direct AppImage execution passes native UI, short virtual capture/Cancel/Stop, fixture
+recognition/clipboard, persisted settings, failed-inference recovery, actual local
+installation/GIO reactivation/autostart entry, and real Wayland plus inner-XWayland paste.
+Fedora/Arch/openSUSE pass actual permission Deny/retry/Approve/Revoke; Ubuntu retains the
+explicit legacy grant/revoke profile and its identity/denial limitation. The verified native
+payload separately passes Fedora's actual tray-host loss and recording Close cleanup, and
+Arch's rendered tray Show/Quit. Using the native payload for those PID-owned tray checks
+is explicitly recorded; it is not a direct AppImage tray result. Final harness source is
+`b3235f7`. The unchanged-duration 126-second evidence remains the earlier baseline result;
+this final package run uses a one-second cancellation check and the full public speech fixture.
+The corresponding `.deb`, SHA-256
+`f5f1c82ecf6e677a045b7b1789eb0af53d67e0081b6e7905b07474e461cfc505`, also passes actual
+offline APT installation, installed desktop-entry GIO reactivation/original icon, native UI,
+short capture/recovery and removal retaining private settings/history/models on Ubuntu 24.04.
+Its installed native SHA-256 is
+`39226b31ed81c53189c0275d679529d0c8cf9f139d3e61fd37e23e630d2e34f2`.
+All four KDE images provide system gtk-layer-shell. This AppImage does not contain that optional
+library, so its positive overlay checks do not establish self-contained overlay portability;
+explicit inclusion and fresh package acceptance remain required.
 
 Private evidence, exact image IDs, package versions, input hashes and earlier failed fixture
 attempts remain in `.local/planning/kde-distro-matrix/`. The reusable scripts are
