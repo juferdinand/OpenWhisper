@@ -127,6 +127,7 @@ class GnomeInput:
         if hold:
             self.tap(108)  # Down
         self.tap(28)  # Enter
+        self.tap(1)  # Escape also dismisses older GTK selection popups.
 
     def xwayland_environment(self):
         runtime = require_owned()
@@ -177,7 +178,15 @@ class GnomeInput:
             float(rect.x + rect.width / 2), float(rect.y + rect.height / 2))))
         time.sleep(0.2)
         self.tap(1)  # Escape
-        time.sleep(0.2)
+        # Shell publishes this property on its actual hidden signal, after the
+        # transition. A fixed delay can still click an animating Overview.
+        def overview_hidden():
+            value = self.bus.call_sync("org.gnome.Shell", "/org/gnome/Shell",
+                "org.freedesktop.DBus.Properties", "Get",
+                GLib.Variant("(ss)", ("org.gnome.Shell", "OverviewActive")), None,
+                self.Gio.DBusCallFlags.NONE, 3000, None).unpack()[0]
+            return not value
+        wait_for(overview_hidden, "Owned GNOME Overview fully hidden")
         self.call("NotifyPointerButton", GLib.Variant("(ib)", (272, True)))
         self.call("NotifyPointerButton", GLib.Variant("(ib)", (272, False)))
 
@@ -511,12 +520,20 @@ def main():
                         if node.get_name() == "Owned dictation field"), None), "Owned typing field accessibility")
                     input_device.focus_field(field)
                     assert field.get_component_iface().grab_focus(), "Owned typing field refused focus"
-                    wait_for(lambda: field.get_state_set().contains(Atspi.StateType.FOCUSED), "Owned typing field focus")
                     # Widget FOCUSED can remain true while another application is
                     # active. Verify delivery through the actual owned compositor
                     # before capture, then clear only this fixed public probe.
                     input_device.tap(25)  # P
-                    wait_for(lambda: pasted.read_text() == "p", "Active owned " + target_backend + " typing field")
+                    try:
+                        wait_for(lambda: pasted.read_text() == "p", "Active owned " + target_backend + " typing field")
+                    except RuntimeError:
+                        # Retain only owned controls, never transcript content.
+                        (args.output / "field-focus-debug.json").write_text(json.dumps(dict(
+                            field_focused=field.get_state_set().contains(Atspi.StateType.FOCUSED),
+                            app=[dict(role=node.get_role_name(), name=node.get_name(),
+                                showing=node.get_state_set().contains(Atspi.StateType.SHOWING))
+                                for node in app.nodes() if node.get_role_name() in ["frame", "menu", "combo box"]]), indent=2))
+                        raise
                     input_device.call("NotifyKeyboardKeycode", GLib.Variant("(ub)", (29, True)))
                     input_device.tap(30)  # A
                     input_device.call("NotifyKeyboardKeycode", GLib.Variant("(ub)", (29, False)))
