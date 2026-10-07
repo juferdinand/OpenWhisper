@@ -180,16 +180,75 @@ Open OpenWhisper from the application launcher after installation so desktop por
 correct app identity. These checksums verify download integrity against the release manifest;
 the in-app updater additionally verifies cryptographic package signatures.
 
-For a per-user AppImage installation without administrator access, download and verify the
-AppImage, then use the existing installer from a source checkout:
+For a per-user AppImage installation without compiling or checking out the repository, download
+and review the [terminal installer](linux/scripts/install-release.py). It requires Python 3.10+,
+OpenSSL 3, and `unsquashfs` (the `squashfs-tools` package). Install those prerequisites through
+your distribution's package manager. On Ubuntu/Debian:
 
 ```bash
-bash linux/scripts/install-local.sh --appimage /absolute/path/to/WhisperFree-Linux-x86_64.AppImage
+sudo apt install python3 openssl squashfs-tools
+curl --fail --location --proto '=https' --tlsv1.2 \
+  --output install-release.py \
+  https://raw.githubusercontent.com/juferdinand/OpenWhisper/main/linux/scripts/install-release.py
+less install-release.py
+python3 install-release.py --version 0.2.4
 ```
 
-This installer does not build the app. It creates the desktop entry and installs the icon and
-licenses. A standalone terminal installer and additional packaging channels are tracked in the
-[roadmap](docs/ROADMAP.md#linux-installation).
+Finish dictation and quit the app before installation or uninstalling, then run the installer as
+your regular user. It downloads only the exact release requested, verifies
+the persistent signing key and signed version/filename, and passively extracts the original icon
+and licenses. It installs the AppImage at `~/.local/lib/whisperfree/OpenWhisper.AppImage`, with
+the `io.github.whisperfree.desktop` application launcher under `$XDG_DATA_HOME`. It does not
+launch the app. Open it from your application launcher so desktop portals use its identity.
+
+Use the same command with a newer version to upgrade. Reinstalling the same version is supported;
+downgrades are refused. Installation failures restore the prior files. If interrupted, the next
+invocation restores the previous files before proceeding. The permanent AppImage path and
+existing launch-at-login preference remain unchanged. Settings, models, snippets, history, and
+saved recordings live separately and are preserved.
+
+For offline/manual installation, obtain the AppImage and its `.sig` from the exact release,
+transfer both files with the reviewed installer, and run:
+
+```bash
+python3 install-release.py --version 0.2.4 \
+  --appimage /absolute/path/to/WhisperFree-Linux-x86_64.AppImage \
+  --signature /absolute/path/to/WhisperFree-Linux-x86_64.AppImage.sig
+python3 install-release.py --uninstall
+```
+
+Uninstall removes only installer-managed application files and an autostart entry pointing at
+that installed AppImage; user data remains. This first installer refuses to replace an existing
+unmanaged installation. If the in-app updater has replaced its AppImage, use the in-app updater
+for later updates, or uninstall with this script before reinstalling. This prevents an outdated
+installer record from allowing a downgrade. A user-edited application launcher must be removed
+manually before uninstalling. Reinstall and uninstall require the recorded HOME/XDG paths;
+changed paths or an invalid record are refused without adopting other files.
+See [Linux runtime dependencies and acceptance](docs/LINUX.md):
+installer checks do not establish graphical desktop, microphone, GPU, or portal support.
+The terminal installer was checked on 2026-10-07 in non-root Ubuntu 22.04 and 24.04 containers
+with the signed public 0.2.4 package: offline installation, exact-release online reinstall,
+downgrade refusal, launcher validation, and uninstall preserving settings passed. Inert fixture
+tests also cover upgrades, signature failures, rollback, and recovery after SIGKILL.
+
+To review installation without touching your usual files, create a disposable home and override
+all XDG locations for each command. These checks install files but do not launch the AppImage:
+
+```bash
+sandbox=$(mktemp -d)
+env HOME="$sandbox" XDG_DATA_HOME="$sandbox/data" XDG_CONFIG_HOME="$sandbox/config" \
+  python3 install-release.py --version 0.2.4
+desktop-file-validate "$sandbox/data/applications/io.github.whisperfree.desktop"
+env HOME="$sandbox" XDG_DATA_HOME="$sandbox/data" XDG_CONFIG_HOME="$sandbox/config" \
+  python3 install-release.py --uninstall
+rm -r -- "$sandbox"
+```
+
+`desktop-file-validate` is an optional review tool from `desktop-file-utils`. Before accepting a
+normal installation, quit the app, review any existing unmanaged launcher, and verify launch from
+the application menu, portal identity, and launch-at-login on your actual desktop. Automated
+regressions run with `python3 linux/scripts/test-release-installer.py` from a source checkout;
+they use inert signed packages, disposable homes, and a committed independent Minisign vector.
 
 ### Build the Linux app
 
@@ -317,9 +376,11 @@ cloud synchronization, and LLM post-processing are not implemented.
 Automatic pasting uses the clipboard and a simulated keyboard shortcut, so behavior can vary
 between target apps.
 
-Next steps include desktop acceptance across Linux distributions and further macOS testing.
-The [roadmap](docs/ROADMAP.md) tracks Obsidian output, optional LM Studio/Ollama processing,
-configurable agent actions, and spoken responses. These integrations are not implemented yet.
+Next steps include Linux installation and desktop acceptance, plus further macOS testing.
+The [roadmap](docs/ROADMAP.md) schedules optional LM Studio/Ollama communication first,
+then speech output, then structured Obsidian notes. Configurable agent actions follow the
+provider/workflow contracts. These integrations are not implemented yet; each stage is
+tested and reviewed before delivery.
 [SPEC.md](SPEC.md) describes current behavior; [docs/PLATFORMS.md](docs/PLATFORMS.md) explains
 the shared UI and native services. Apple Developer ID signing and notarization remain future work.
 These are plans, not promised release dates.

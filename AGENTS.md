@@ -13,6 +13,17 @@ or subscription. The project is open source under the MIT License.
 - `README.md` is the single documentation entry point.
 - Preserve multilingual speech-processing patterns and test inputs; use English test names and comments.
 
+## Delivery and acceptance
+
+- Prepare functional changes on isolated branches with automated evidence and focused manual acceptance steps.
+  The user actively relies on the app and requires acceptance before merging functional changes or replacing
+  the running installation. Complete the independently runnable checks before requesting review.
+- Prioritize Linux installation and desktop reliability. Deliver new integrations incrementally:
+  model communication first, optional text-to-speech next, then structured Obsidian output.
+  Ordinary dictation must remain independent of these integrations.
+- Keep desktop acceptance issues open for outstanding supervised checks. Mark synthetic, container,
+  nested-compositor, and physical-device evidence separately; never infer full desktop support from a build.
+
 ## Project structure
 
 - `macos/`: native Swift app, SwiftPM, Swift 5.10 language mode, macOS 14+.

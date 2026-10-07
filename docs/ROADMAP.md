@@ -1,8 +1,8 @@
 # OpenWhisper roadmap
 
-The next priorities are broader Linux desktop acceptance and a small Obsidian output feature.
-Optional language-model processing, configured agent actions, and spoken replies can follow
-without making ordinary dictation depend on another service. These are planned features,
+The next priorities are Linux installation and broader desktop acceptance. New integrations
+start with optional language-model communication, followed by speech output, then structured
+Obsidian notes. Ordinary dictation remains independent of these services. These are planned features,
 not current capabilities or promised release dates. Start with [README.md](../README.md) for
 installation and current behavior.
 
@@ -10,14 +10,18 @@ installation and current behavior.
 
 | Stage | Deliverable | Completion evidence |
 | --- | --- | --- |
-| 1 | Linux desktop acceptance and clearer platform boundaries | Package/session reports with passed, failed, skipped, and manual checks; accurate support matrix |
-| 2 | Obsidian output | Append a reviewed dictation to a selected vault on both hosts without an LLM or vault-wide scan |
-| 3 | Optional LM Studio/Ollama processing | Summarize or structure text with cancellation, raw-text fallback, and explicit provider selection |
-| 4 | Configurable coding-agent and other actions | Previewed input, approved destination, structured results, and user control over execution |
-| 5 | Short spoken conversations | LLM replies, optional local/BYOK speech output, interruption, and reliable microphone/playback separation |
+| 1 | Linux installation, desktop acceptance, and clearer platform boundaries | Verified installer tests; package/session reports with passed, failed, skipped, and manual checks; accurate support matrix |
+| 2 | Optional LM Studio/Ollama communication | Explicitly send text to a chosen provider/model, preview the result, cancel safely, and preserve the input on failure |
+| 3 | Optional speech output and short spoken conversations | Speak reviewed model replies with interruption and reliable microphone/playback separation |
+| 4 | Structured Obsidian output | Review and save a model-structured note to a selected vault on both hosts, preserving the original dictation |
+| Later | Configurable coding-agent and other actions | Previewed input, approved destination, structured results, and user control over execution |
 
-Linux acceptance can continue alongside Obsidian work. Agent actions depend on the provider
-and workflow contracts; conversation mode depends on cancellation and structured results.
+Linux reliability and acceptance work can continue alongside provider development. Deliver
+new integrations one stage at a time: model communication before TTS, then Obsidian.
+Agent actions depend on the provider and workflow contracts; conversation mode depends on
+cancellation and structured results. Prepare isolated branches, automated evidence, and focused
+acceptance steps before requesting user review. Functional changes require user acceptance
+before merging or replacing the actively used installation.
 
 ## Linux desktop acceptance
 
@@ -83,10 +87,13 @@ and sandboxed packaging must revalidate native helpers and desktop permissions.
 
 ## Obsidian output
 
-Start with a selected local vault and destination note or inbox. Append dictation as Markdown,
-with an optional timestamp/template and a visible result. This feature needs neither an LLM
-nor indexing the entire vault. Preserve the original transcript on a failed write and avoid
-duplicate appends when retrying.
+Implement this stage after model communication and speech output have been reviewed. Use the
+provider result to create a structured note with a title, headings, and concise content, rather
+than automatically appending unstructured dictation. Preview and edit the note before writing
+to a selected local vault and destination. Keep the original transcript available, preserve it
+on a failed write, and avoid duplicate appends when retrying. Speech output remains optional
+when saving notes; the delivery sequence does not require audio playback for every note.
+Whole-vault indexing is later work.
 
 Obsidian's official [URI documentation](https://help.obsidian.md/Extending+Obsidian/Obsidian+URI),
 under **Create note**, supports note content and append operations. A URI adapter is useful for
