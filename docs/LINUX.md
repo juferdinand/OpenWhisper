@@ -24,7 +24,7 @@ as macOS. Tauri hosts these assets on Linux; WKWebView hosts them on macOS.
 |---|---|---|---|
 | CachyOS | KDE Plasma 6 / Wayland | Primary acceptance system | Native UI, virtual-microphone capture beyond two minutes, floating stop/cancel, both CPU engines, clipboard, and AppImage launch verified |
 | Arch Linux and derivatives | KDE Plasma 6 / Wayland | Same integration path | Not yet tested |
-| Ubuntu LTS and Debian | GNOME / Wayland | Portal integration, clipboard fallback | Debian 13 nested GNOME native UI and main-window capture/cancel pass; clipboard hangs in the owned no-input session, so full acceptance remains open |
+| Ubuntu LTS and Debian | GNOME / Wayland | Portal integration, clipboard fallback | Debian 13 nested GNOME native UI and main-window capture/cancel pass; the exact CI Debian package passes bounded no-focus clipboard failure and recovery checks. Successful focused delivery and full desktop acceptance remain open |
 | Fedora | GNOME or KDE / Wayland | Portal integration, clipboard fallback | Not yet tested |
 | Common desktop distributions | X11 | Record button, `xclip`, and available portals; no native X11 shortcut fallback yet | Owned Xvfb UI/capture/clipboard checks pass; a normal desktop session remains untested |
 | wlroots compositors | Sway / Hyprland / Wayland | Capability-dependent integration | Debian 13 headless Sway UI/capture/clipboard and absent-portal fallback pass; physical Sway sessions and Hyprland remain untested |
@@ -443,7 +443,23 @@ errors, responsive native History and Transcript Copy during pending helper wait
 WAV/text persistence across restart and explicit discard. The fixture deliberately disables
 its private history to expose Transcript Copy. These are owned synthetic checks, not an
 Ubuntu CI package or physical-desktop acceptance. [Clipboard issue #25](https://github.com/juferdinand/OpenWhisper/issues/25)
-tracks this focused correction; broad GNOME and Sway/Hyprland acceptance stays open.
+tracked this focused correction, merged in [PR #26](https://github.com/juferdinand/OpenWhisper/pull/26);
+broad GNOME and Sway/Hyprland acceptance stays open.
+
+The exact packages from [CI run 37651712074](https://github.com/juferdinand/OpenWhisper/actions/runs/37651712074),
+source `c1d7e4612d5cda25bf66a99b74ab47fac0c035b9`, subsequently passed separate owned
+Debian 13 runtime profiles on 2026-10-07. The Debian package SHA-256 is
+`e6c4430ac69d04bdbf0c128c147f7b46eda39a4652cb196cdeae9ac3fc1c976f`;
+its installed executable SHA-256 is
+`f73bd3005fc5fe0a33d93a63b18b9c7234aaa568875bbc840d96b1fe30315806`.
+Nested GNOME passed the complete no-focus negative flow above. The AppImage SHA-256 is
+`2f60cdec9034979546042bc005d9d4b6971598b062254d53c5b15738f7e41a7c`;
+it passed native UI and the unchanged strict Sway capture, cancellation, recognition,
+clipboard equality, silence and setup/language/manual-CPU persistence checks.
+The AppImage was launched with `APPIMAGE_EXTRACT_AND_RUN=1`, default runtime cleanup
+and no host devices or desktop services. These checks do not establish every extracted
+resource's lifetime or automatic removal of all extraction scratch. No physical desktop,
+portal consent/pasting, actual model server or public signed update was exercised.
 
 To reproduce Debian package acceptance without installing anything on the host, provide the
 Ubuntu-built `.deb` with its verified checksum and the public fixture/model paths:
@@ -685,13 +701,21 @@ KGlobalAccel `6.30.0-1.1`, Qt `6.11.2-3.1`, xkeyboard-config `2.48-1`, and libxk
 shell exited with SIGSEGV before loading a page, retained separately as an environment failure.
 Local commands, exact binary checksum, and logs are under `.local/planning/kde-keymap-module-check/`.
 This proves the readiness guard and owned cleanup assertions; it does not prove physical input,
-absence of a held compositor surrogate, or distribution-wide support. Stock Debian 13 refusal and
-the separately augmented private-map suite require the exact Ubuntu-built CI package before acceptance.
+absence of a held compositor surrogate, or distribution-wide support. The exact Ubuntu-built Debian package from [CI run 37647268687](https://github.com/juferdinand/OpenWhisper/actions/runs/37647268687)
+subsequently passed both the stock Debian 13 refusal profile and all nine trigger groups with
+separately augmented private F19/F24 maps. The package SHA-256 is
+`b93511a73a671463613ec5c7273e18ea21912ae3d24dd9461d2723f398e0ddb2`;
+the installed executable SHA-256 is
+`4b800c63b315f306d018d984bd63826a3eb855d0daaf657338a1a342a0aa7001`.
+These owned tests used KWin 6.3.6, Qt 6.8.2 and xkb-data 2.42; no stock keymap was
+changed. Missing safe mouse symbols still mean keyboard/Record fallback, rather than
+completed mouse support. Held compositor-surrogate state and physical checks remain
+in [issue #21](https://github.com/juferdinand/OpenWhisper/issues/21).
 
 ## Acceptance evidence
 
-Use one report per distribution, linux/session, and package combination. Record the release
-tag/commit and package SHA-256, OS release, linux/compositor and version, Wayland/X11,
+Use one report per distribution, desktop/session, and package combination. Record the release
+tag/commit and package SHA-256, OS release, desktop/compositor and version, Wayland/X11,
 portal/backend versions, audio service, GPU/driver, and AppImage or Debian installation method.
 Do not infer a passing result from a missing feature, a package build, or another distribution.
 

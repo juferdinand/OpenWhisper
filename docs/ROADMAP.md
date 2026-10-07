@@ -45,7 +45,7 @@ test `.deb` installation separately on Debian-family systems. A package build or
 cannot substitute for an actual graphical session.
 
 The [acceptance report format](LINUX.md#acceptance-evidence) requires release/checksum,
-distribution, linux/session, portals, package type, hardware, and a result for each feature.
+distribution, desktop/session, portals, package type, hardware, and a result for each feature.
 Agents can run fixture, isolated compositor, and private virtual-source tests. Physical
 microphone, permission dialogs, device events, and actual logout/login checks require an
 explicitly supervised tester. Untested checks stay open.
