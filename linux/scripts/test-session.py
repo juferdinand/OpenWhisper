@@ -276,7 +276,7 @@ Gtk.main()
         wait_button('Start dictation', seconds=90)
         recovered = json.loads((config/'history.json').read_text())
         assert len(recovered) == len(history) + 1 and 'country' in recovered[0].lower(), 'Retry did not recover the fixture'
-        assert subprocess.check_output(clipboard_command, text=True) == recovered[0], 'Recovered transcript was not delivered'
+        assert subprocess.check_output(clipboard_command, text=True, timeout=10) == recovered[0], 'Recovered transcript was not delivered'
         assert not backup.exists(), 'Successful retry retained the recovered audio'
         print('PASS: failed inference retains a private WAV across restart; restored model retry delivers and removes it', flush=True)
     if args.owned:
