@@ -119,6 +119,18 @@ Virtual pointer events target that owned panel only. This checks real tray widge
 protocols rather than substituting a test watcher. Minimal openSUSE container panel rendering
 remains unresolved; physical tray/login acceptance remains open on every distribution.
 
+A separate actual Fedora host-loss test exposed a no-tray Close defect in native source
+`ad8cd4a`: after KDED and PlasmaShell stopped, the main window reopened, but closing it left
+the process alive without an accessible window. Source `816a6d0` explicitly exits through
+the normal Quit path when no tray host can reopen the app. Its retained CPU native binary,
+SHA-256 `2c37ec272f9ccf9d46c567b17ffebe02cd6589dbfa811f9ce5bcc8fd8835bca9`,
+passes the same real host-loss regression on Fedora, including Close while the recording
+overlay and one private virtual capture stream are active: exit status 0, no app frames,
+and no remaining capture streams. The same binary preserves actual rendered tray Show/Quit
+on Arch. These are separate native source checks, pending combined package acceptance.
+Run `test-owned-kde-tray.py --host-loss` in the owned harness; adding
+`--recording-model /path/to/ggml-tiny.bin` exercises the private recording variant.
+
 The unchanged public 0.2.4 signed AppImage fixture also passes signature-verified installation
 and removal on all four containers, preserving private data sentinels. That passive package
 check does not execute or relabel the old public binary, exercise its updater, or establish
