@@ -84,14 +84,7 @@ class GnomeInput:
             "/org/gnome/Mutter/RemoteDesktop", "org.gnome.Mutter.RemoteDesktop",
             "CreateSession", None, None, Gio.DBusCallFlags.NONE, 3000, None).unpack()[0]
         self.call("Start")
-        monitor_state = self.bus.call_sync("org.gnome.Mutter.DisplayConfig", "/org/gnome/Mutter/DisplayConfig",
-            "org.gnome.Mutter.DisplayConfig", "GetCurrentState", None, None,
-            Gio.DBusCallFlags.NONE, 3000, None).unpack()
-        if len(monitor_state[1]) != 1 or len(monitor_state[2]) != 1 or monitor_state[2][0][3] != 0:
-            raise RuntimeError("Expected one unrotated owned GNOME monitor")
-        mode = next(mode for mode in monitor_state[1][0][1] if mode[-1].get("is-current"))
-        scale = monitor_state[2][0][2]
-        self.width, self.height = int(mode[1] / scale), int(mode[2] / scale)
+        self.monitor_size()
         shell_pid = self.bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus",
             "org.freedesktop.DBus", "GetConnectionUnixProcessID", GLib.Variant("(s)", ("org.gnome.Shell",)),
             None, Gio.DBusCallFlags.NONE, 3000, None).unpack()[0]
@@ -159,18 +152,32 @@ class GnomeInput:
                     continue
         return wait_for(environment, "Owned Mutter Xwayland child")
 
+    def monitor_size(self):
+        monitor_state = self.bus.call_sync("org.gnome.Mutter.DisplayConfig", "/org/gnome/Mutter/DisplayConfig",
+            "org.gnome.Mutter.DisplayConfig", "GetCurrentState", None, None,
+            self.Gio.DBusCallFlags.NONE, 3000, None).unpack()
+        if len(monitor_state[1]) != 1 or len(monitor_state[2]) != 1 or monitor_state[2][0][3] != 0:
+            raise RuntimeError("Expected one unrotated owned GNOME monitor")
+        mode = next(mode for mode in monitor_state[1][0][1] if mode[-1].get("is-current"))
+        scale = monitor_state[2][0][2]
+        return int(mode[1] / scale), int(mode[2] / scale)
+
     def focus_field(self, field):
+        self.monitor_size()
         rect = field.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
         if rect.width < 1 or rect.height < 1:
             raise RuntimeError("Owned typing field has no displayed extent")
-        # Move only the compositor's synthetic pointer. No XTEST or physical
-        # input device is opened. Clamp to the owned monitor then click its field.
-        # The top-left hot corner can open Overview and consume the target
-        # click. Clamp to the bottom-right of the actual owned logical monitor.
-        self.call("NotifyPointerMotionRelative", GLib.Variant("(dd)", (10000.0, 10000.0)))
+        # Move only the compositor's synthetic pointer. Nested X11 carriers
+        # can have a larger parent screen than the logical monitor, so use
+        # their shared top-left origin rather than a bottom-right clamp.
+        # Move away, then dismiss Overview before clicking the owned field.
+        self.call("NotifyPointerMotionRelative", GLib.Variant("(dd)", (-10000.0, -10000.0)))
+        time.sleep(0.2)
         self.call("NotifyPointerMotionRelative", GLib.Variant("(dd)", (
-            float(rect.x + rect.width / 2 - (self.width - 1)),
-            float(rect.y + rect.height / 2 - (self.height - 1)))))
+            float(rect.x + rect.width / 2), float(rect.y + rect.height / 2))))
+        time.sleep(0.2)
+        self.tap(1)  # Escape
+        time.sleep(0.2)
         self.call("NotifyPointerButton", GLib.Variant("(ib)", (272, True)))
         self.call("NotifyPointerButton", GLib.Variant("(ib)", (272, False)))
 
@@ -505,6 +512,16 @@ def main():
                     input_device.focus_field(field)
                     assert field.get_component_iface().grab_focus(), "Owned typing field refused focus"
                     wait_for(lambda: field.get_state_set().contains(Atspi.StateType.FOCUSED), "Owned typing field focus")
+                    # Widget FOCUSED can remain true while another application is
+                    # active. Verify delivery through the actual owned compositor
+                    # before capture, then clear only this fixed public probe.
+                    input_device.tap(25)  # P
+                    wait_for(lambda: pasted.read_text() == "p", "Active owned " + target_backend + " typing field")
+                    input_device.call("NotifyKeyboardKeycode", GLib.Variant("(ub)", (29, True)))
+                    input_device.tap(30)  # A
+                    input_device.call("NotifyKeyboardKeycode", GLib.Variant("(ub)", (29, False)))
+                    input_device.tap(14)  # Backspace
+                    wait_for(lambda: pasted.read_text() == "", "Owned typing probe cleared")
                     app.click("Start dictation")
                     wait_for(lambda: app.find("Recording"), "Private fixture recording")
                     subprocess.run(["paplay", "--device", sink, str(args.fixture.resolve())], check=True, timeout=20)
