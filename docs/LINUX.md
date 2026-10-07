@@ -24,9 +24,9 @@ as macOS. Tauri hosts these assets on Linux; WKWebView hosts them on macOS.
 |---|---|---|---|
 | CachyOS | KDE Plasma 6 / Wayland | Primary acceptance system | Native UI, virtual-microphone capture beyond two minutes, floating stop/cancel, both CPU engines, clipboard, and AppImage launch verified |
 | Arch Linux and derivatives | KDE Plasma 6 / Wayland | Same integration path | Not yet tested |
-| Ubuntu LTS and Debian | GNOME / Wayland | Portal integration, clipboard fallback | Not yet tested |
+| Ubuntu LTS and Debian | GNOME / Wayland | Portal integration, clipboard fallback | GNOME / Wayland remains untested; Debian 13 package and owned X11 evidence are listed below |
 | Fedora | GNOME or KDE / Wayland | Portal integration, clipboard fallback | Not yet tested |
-| Common desktop distributions | X11 | Record button, `xclip`, and available portals; no native X11 shortcut fallback yet | Not yet tested |
+| Common desktop distributions | X11 | Record button, `xclip`, and available portals; no native X11 shortcut fallback yet | Owned Xvfb UI/capture/clipboard checks pass; a normal desktop session remains untested |
 | wlroots compositors | Sway / Hyprland / Wayland | Capability-dependent integration | Not yet tested; no blanket support claim |
 | Other architectures | ARM64 / 32-bit | Outside the initial release scope | No Linux packages yet |
 
@@ -144,6 +144,81 @@ Still required before calling a distribution fully supported:
 - Installer, relaunch, tray behavior, and uninstall on each target distribution.
 - AMD/Intel GPU validation and non-CachyOS desktop combinations.
 
+### Owned acceptance evidence, 2026-10-07
+
+These checks use private HOME/XDG directories, session and accessibility D-Bus buses, Xvfb,
+and a PipeWire server running WirePlumber's policy-only profile. The harness refuses unexpected
+audio sources before creating its virtual sink. Nested KWin uses the owned Xvfb display.
+No host desktop sockets, physical microphone, live portal permission dialogs, user clipboard,
+or user configuration are used. Container execution has networking disabled and no host devices
+or desktop sockets mounted. This is synthetic, nested-compositor, and container evidence;
+acceptance checks 3–7 and the broad desktop issues remain open for supervised physical testing.
+
+The source baseline is `de9dbe962115aa41ac426a26ff70d94bc5e2dce7`, version **0.2.4**.
+The Ubuntu 22.04 packages came from the successful
+[CI run 37537458103](https://github.com/juferdinand/OpenWhisper/actions/runs/37537458103),
+Linux job `112521985732`, artifact `11447809811`. CI checked out merge commit
+`622582f8a4806e23eb3fd864c3e705099072e19f`; its tree and the baseline's tree are both
+`7150a9bbff7358f559922116003613d568365631`. These are unsigned development artifacts,
+not public release-signature acceptance. The archive digest reported by GitHub is
+`sha256:1e207d27427e36bd8492d79f35787e8a0ea03ae776a3c64cd2aca21cdd196108`.
+
+Recorded file SHA-256 values:
+
+```text
+4cb4c361c52f848cebfd3cfe3a65343f785b3a431f14a8fe8b163d1ac66d35bd  OpenWhisper_0.2.4_amd64.deb
+79601d73326e8363d351a6c772a5b516b048f0705f64b606abc9014fe161247b  OpenWhisper_0.2.4_amd64.AppImage
+d0c940a28e2166c99252b054794a56cc60259f2bd17cac31b29219a8a9e84a41  Debian-installed /usr/bin/openwhisper-desktop
+ec1ff66435001e1b32f20f41df6c65232f057795a0d56caf871f4a01c7a20820  Local baseline openwhisper-desktop
+be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21  Whisper Tiny model
+aa7fe2f5fb47d863ca23e8b1d490632d63a2599f515268b6d6bd656158dad45e  Parakeet v3 q4 model
+59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e  Pinned upstream samples/jfk.wav
+```
+
+The host versions were CachyOS x86_64, KWin / plasma-workspace `6.7.5-1.1`, PipeWire /
+pipewire-pulse `1:1.6.9-1`, WirePlumber `0.5.18-1.1`, GTK `1:3.24.52-1.1`,
+WebKitGTK `2.52.6-1`, AT-SPI `2.60.7-1.1`, PyGObject `3.56.3-1`, and D-Bus `1.16.2-1.1`.
+The privately extracted Xvfb was `xorg-server-xvfb 21.1.24-1.1`, x86_64_v3;
+its executable SHA-256 was `7d16a6e019ae16428663835b14e4e6a53c73eec605178129f0b0da62d41974cc`.
+No system package installation was needed for that display server.
+
+The Debian container base is pinned in `linux/tests/debian-package/Dockerfile` to
+`debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f`.
+The tested runtime had Debian 13, GTK `3.24.49-3`, WebKitGTK `2.54.0-1~deb13u2`,
+PipeWire `1.4.2-1`, WirePlumber `0.5.8-2`, PyGObject `3.50.0-4+b1`,
+D-Bus `1.16.2-2`, and Xvfb `2:21.1.16-1.3+deb13u4`.
+The built acceptance image ID was
+`sha256:471ebea3fd4d99aeb83547c18a8e148a5cf16bd91a951493ceaef30b75e6ab44`.
+
+| Check | Status | Exact scope / local evidence directory |
+|---|---|---|
+| KDE keys, modifier release, mouse-button leases, conflicts, EOF/SIGTERM/SIGKILL cleanup | PASS | Owned nested KWin; `kde-triggers.log` |
+| Local native WebKitGTK UI and GTK reactivation | PASS | Owned X11 and nested KWin; `x11-smoke-3`, `wayland-smoke` |
+| 126-second capture, floating Cancel/Stop, fixture recognition, silence, history and clipboard | PASS | Local CPU Whisper Tiny; `x11-capture`, `wayland-capture` |
+| Failed inference retains mode-0600 WAV unchanged across restart; retry delivers and removes it | PASS | Local CPU Whisper Tiny; `x11-recovery-2`, `wayland-recovery` |
+| Parakeet capture, recognition, silence, clipboard and saved CPU preferences | PASS | Local CPU Parakeet v3 q4; `wayland-parakeet`; its duration check was one second |
+| CI AppImage native WebKitGTK UI | PASS | Owned nested KWin; `appimage-wayland-smoke` |
+| CI AppImage 126-second capture and inference-failure recovery | PASS | Owned nested KWin, CPU Whisper Tiny; `appimage-wayland-complete` |
+| CI AppImage Parakeet capture/recovery and native onboarding/German persistence | PASS | Owned nested KWin, CPU Parakeet v3 q4; `appimage-parakeet-accepted`; its duration check was one second |
+| Debian 13 APT installation, library resolution, packaged resources/identity and native WebKitGTK UI | PASS | Actual CI `.deb` in disposable container; `debian13-accepted` |
+| Debian 13 126-second capture/recovery, native onboarding/German/CPU persistence and clipboard | PASS | Owned X11 in container, CPU Whisper Tiny; `debian13-accepted/capture` |
+| Debian 13 package removal preserves private settings/history/model storage | PASS | Settings/history SHA-256 and model-link checks after APT removal; `debian13-accepted.log` |
+| Live-session guards | PASS | Three unsafe combinations reject before desktop/audio tools; `isolation-guards.log` |
+| Harness timeout cleanup | PASS | Expected exit 124; owned application groups disappeared and runtime was removed; `timeout-cleanup-check.log` |
+| Harness interruption cleanup | PASS | SIGTERM/SIGINT during owned capture preserve exit 143/130; app/service groups and private runtime disappear; `harness-interruption-final.log` |
+| Earlier harness attempts | FAIL, superseded | Stale AT-SPI objects after restart, shallow container script path, missing `at-spi2-core` / `libglib2.0-bin`, language switch's toggle-button role; corrected harnesses were rerun |
+| GNOME, wlroots, target-distribution Wayland portals, signed update/restart and physical devices | SKIP | Not exercised by these owned checks |
+| Full session login/autostart, tray acceptance, real shortcut/hold edges, portal denial, XWayland paste and target-field focus | MANUAL REQUIRED | Run the supervised checklist below; no desktop-support claim follows from the owned overlay's unfocused accessibility button |
+
+Logs and host test data remain local under `.local/planning/overnight-linux-acceptance/`
+and the printed `/tmp/openwhisper-desktop-test-*` paths; they are not committed.
+Container logs and checksums are retained there, while its disposable `/tmp` data disappears
+when the container exits. New harness runs also
+write `run.json` with the command, UTC timestamps, session type and exit status.
+The native app sources are unchanged by these acceptance harness changes. The baseline has
+green Linux backend/Clippy/shared-UI CI evidence; the new guard test and Python/Bash syntax
+checks exercise the changed scripts.
+
 ## Acceptance checks
 
 1. Pass the shared multilingual text-processing cases and Linux backend tests.
@@ -260,6 +335,66 @@ systemd-run --user --wait --pipe --collect --unit=app-io.github.whisperfree \
 
 Do not start a second instance while the test owns OpenWhisper's application ID. A recording
 test with a virtual source proves the capture/inference/output path, not physical microphone quality.
+
+### Owned unattended checks
+
+`run-owned-desktop.py` needs Xvfb, D-Bus, PipeWire / pipewire-pulse, WirePlumber 0.5+,
+`pactl`, PyGObject, and AT-SPI. `test-session.py` additionally needs `paplay`, `gdbus`,
+and `xclip` for X11 or `wl-paste` for Wayland. Nested Wayland checks also need `kwin_wayland`.
+Use a new output directory for each run:
+
+```bash
+python3 linux/tests/test-owned-session-guards.py
+python3 linux/tests/test-owned-session-interruption.py
+python3 linux/scripts/run-owned-desktop.py --session x11 \
+  --output .local/acceptance-review-x11 -- \
+  python3 linux/scripts/test-session.py --owned --recovery
+python3 linux/scripts/run-owned-desktop.py --session kde-wayland \
+  --output .local/acceptance-review-kwin -- \
+  python3 linux/scripts/test-session.py --owned --recovery
+```
+
+The default duration remains 126 seconds. The session script handles SIGTERM so a harness
+timeout still stops its separate application process group and unloads its virtual sink.
+The harness handles SIGTERM/SIGINT within its cleanup scope, including during service startup,
+and preserves exit 143/130 while stopping its owned services and removing the private runtime.
+`--recovery` replaces only the test's private model
+link with an invalid disposable model, verifies its retained WAV after restart, restores the
+link and retries. Owned runs also complete onboarding through **Finish setup**, assert the
+saved completion and manual CPU choice, select **Deutsch** through the native UI, and verify
+German after restart. `--owned --portals` is rejected: permission acceptance requires supervision.
+For a downloaded AppImage, prefix the harness command with `APPIMAGE_EXTRACT_AND_RUN=1` and
+pass `--binary /path/to/OpenWhisper_0.2.4_amd64.AppImage` to `test-session.py`.
+Add `--model /path/to/parakeet.bin --model-id parakeet-v3-q4` for the second model family.
+
+To reproduce Debian package acceptance without installing anything on the host, provide the
+Ubuntu-built `.deb` with its verified checksum and the public fixture/model paths:
+
+```bash
+ow_package_test="$(mktemp -d /tmp/openwhisper-package-test-XXXXXX)"
+mkdir "$ow_package_test/context" "$ow_package_test/evidence"
+cp /path/to/OpenWhisper_0.2.4_amd64.deb "$ow_package_test/context/package.deb"
+docker build -f linux/tests/debian-package/Dockerfile \
+  -t openwhisper-debian13-acceptance "$ow_package_test/context"
+docker run --rm --network none \
+  --mount "type=bind,src=$PWD/linux/scripts,dst=/scripts,readonly" \
+  --mount "type=bind,src=$PWD/linux/tests/debian-package/test.sh,dst=/test.sh,readonly" \
+  --mount "type=bind,src=$PWD/linux/target/speech-smoke/ggml-tiny.bin,dst=/fixtures/ggml-tiny.bin,readonly" \
+  --mount "type=bind,src=$PWD/linux/vendor/whisper.cpp/samples/jfk.wav,dst=/fixtures/jfk.wav,readonly" \
+  --mount "type=bind,src=$ow_package_test/evidence,dst=/evidence" \
+  openwhisper-debian13-acceptance bash /test.sh
+```
+
+The container installs the actual package through APT, runs native X11 UI/capture/recovery as
+an unprivileged test user, removes the package, and verifies that private settings, history,
+model storage and a sentinel survive. A container has no ordinary GNOME/KDE desktop session;
+this cannot establish Debian desktop, portal, tray or physical-device support.
+
+For morning acceptance, first review the retained logs and the branch diff. Then, on the actual
+target desktop, perform checks 3–8 above with a supervised tester: physical speech and device
+disconnect, toggle/hold and release, permission denial, native Wayland and XWayland targets,
+focus preservation, tray close/reopen, and a full logout/login. Review German and completed
+setup after relaunch. Keep the running installation until those functional changes are accepted.
 
 ### Long-recording and process-failure regression
 
