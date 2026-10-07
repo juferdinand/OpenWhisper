@@ -84,6 +84,15 @@ class GnomeInput:
             "/org/gnome/Mutter/RemoteDesktop", "org.gnome.Mutter.RemoteDesktop",
             "CreateSession", None, None, Gio.DBusCallFlags.NONE, 3000, None).unpack()[0]
         self.call("Start")
+        shell_pid = self.bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus",
+            "org.freedesktop.DBus", "GetConnectionUnixProcessID", GLib.Variant("(s)", ("org.gnome.Shell",)),
+            None, Gio.DBusCallFlags.NONE, 3000, None).unpack()[0]
+        shell = NativeUI(type("OwnedShell", (), {"pid": shell_pid})())
+        if shell.find("Skip"):
+            shell.click("Skip")
+            print("PASS: actual owned GNOME welcome tour is dismissed before input checks", flush=True)
+        else:
+            Path(os.environ["XDG_STATE_HOME"], "shell-controls.txt").write_text(shell.text())
 
     def call(self, method, parameters=None):
         require_owned()
@@ -92,8 +101,8 @@ class GnomeInput:
             self.Gio.DBusCallFlags.NONE, 3000, None)
 
     def keys(self, pressed):
-        for key in ([65507, 65513, 32] if pressed else [32, 65513, 65507]):
-            self.call("NotifyKeyboardKeysym", GLib.Variant("(ub)", (key, pressed)))
+        for key in ([29, 56, 57] if pressed else [57, 56, 29]):
+            self.call("NotifyKeyboardKeycode", GLib.Variant("(ub)", (key, pressed)))
             time.sleep(0.05)
 
     def xwayland_environment(self):
@@ -413,14 +422,14 @@ def main():
                         input_device.focus_field(probe_field)
                         wait_for(lambda: probe_field.get_state_set().contains(Atspi.StateType.FOCUSED), "Probe field focus")
                         for pressed in [True, False]:
-                            input_device.call("NotifyKeyboardKeysym", GLib.Variant("(ub)", (112, pressed)))
+                            input_device.call("NotifyKeyboardKeycode", GLib.Variant("(ub)", (25, pressed)))
                         wait_for(lambda: probe_path.read_text() == "p", "Owned virtual keyboard sends text")
                         print("PASS: real Mutter virtual keyboard inserts a fixed probe in the owned field", flush=True)
                         # Owned Shell may start in Overview before any pointer input.
                         # Escape dismisses that startup mode; the real backend binds
                         # application shortcuts only in normal desktop mode.
                         for pressed in [True, False]:
-                            input_device.call("NotifyKeyboardKeysym", GLib.Variant("(ub)", (65307, pressed)))
+                            input_device.call("NotifyKeyboardKeycode", GLib.Variant("(ub)", (1, pressed)))
                         time.sleep(0.5)
                         input_device.keys(True)
                         input_device.keys(False)
