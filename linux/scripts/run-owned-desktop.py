@@ -60,7 +60,7 @@ def accessibility_router(address):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--session", choices=["x11", "kde-wayland", "sway", "gnome-wayland"], required=True)
+    parser.add_argument("--session", choices=["x11", "kde-wayland", "sway", "gnome-wayland", "hyprland"], required=True)
     parser.add_argument("--x11-desktop", choices=["xfce", "cinnamon", "mate", "kde"], help="Start a genuine named session inside the private Xvfb display")
     parser.add_argument("--output", type=Path, help="New directory for private logs/configuration")
     parser.add_argument("--gnome-headless", action="store_true", help="Use Mutter headless native backend with an owned virtual monitor")
@@ -79,7 +79,15 @@ def main():
         parser.error("GNOME-specific options require --session gnome-wayland")
     if args.kde_xwayland and args.session != "kde-wayland":
         parser.error("--kde-xwayland requires --session kde-wayland")
-    compositor = {"kde-wayland": "kwin_wayland", "sway": "sway", "gnome-wayland": "gnome-shell"}.get(args.session)
+    if args.session == "hyprland":
+        # DRM/libinput are permitted only inside an explicitly owned QEMU guest,
+        # provisioned without physical-device passthrough, for this test mode.
+        vendor = Path("/sys/class/dmi/id/sys_vendor")
+        if (os.environ.get("WF_OWNED_VIRTUAL_MACHINE") != "openwhisper-hyprland-20261007"
+                or not vendor.is_file() or vendor.read_text().strip() != "QEMU"):
+            parser.error("Hyprland mode requires the explicit owned QEMU VM without device passthrough")
+    ready_timeout = 60 if args.session == "hyprland" else 15
+    compositor = {"kde-wayland": "kwin_wayland", "sway": "sway", "gnome-wayland": "gnome-shell", "hyprland": "Hyprland"}.get(args.session)
     for name in ["Xvfb", "dbus-daemon", "pipewire", "pipewire-pulse", "wireplumber", "pactl"] + ([compositor] if compositor else []) + ([desktop_command[0], "xprop"] if desktop_command else []) + (["gdbus"] if args.x11_desktop == "kde" else []):
         if not shutil.which(name):
             parser.error("Missing dependency: " + name)
@@ -124,7 +132,7 @@ def main():
         PIPEWIRE_RUNTIME_DIR=str(runtime), PIPEWIRE_REMOTE="pipewire-0",
         PULSE_SERVER="unix:" + str(runtime / "pulse/native"),
         XDG_SESSION_TYPE="x11" if args.session == "x11" else "wayland",
-        XDG_CURRENT_DESKTOP={"kde-wayland": "KDE", "sway": "sway", "gnome-wayland": "GNOME"}.get(args.session, "OpenWhisperTest"),
+        XDG_CURRENT_DESKTOP={"kde-wayland": "KDE", "sway": "sway", "gnome-wayland": "GNOME", "hyprland": "Hyprland"}.get(args.session, "OpenWhisperTest"),
         GDK_BACKEND="x11" if args.session == "x11" else "wayland",
         GTK_USE_PORTAL="0", LIBGL_ALWAYS_SOFTWARE="1", GALLIUM_DRIVER="llvmpipe",
         __GLX_VENDOR_LIBRARY_NAME="mesa", WEBKIT_DISABLE_DMABUF_RENDERER="1",
@@ -159,7 +167,7 @@ def main():
         return process
 
     def line(process):
-        if not select.select([process.stdout], [], [], 15)[0]:
+        if not select.select([process.stdout], [], [], ready_timeout)[0]:
             raise RuntimeError("Owned service did not become ready")
         value = process.stdout.readline().strip()
         if not value:
@@ -167,14 +175,14 @@ def main():
         return value
 
     def wait_socket(path, process):
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + ready_timeout
         while not path.exists():
             if process.poll() is not None or time.monotonic() > deadline:
                 raise RuntimeError("Owned service socket unavailable: " + str(path))
             time.sleep(0.1)
 
     def wait_wayland_display(process):
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + ready_timeout
         while True:
             sockets = [path for path in runtime.glob("wayland-*") if path.is_socket()]
             if len(sockets) == 1:
@@ -296,6 +304,21 @@ def main():
             sway_config.write_text("xwayland disable\noutput HEADLESS-1 mode 1280x800\nseat seat0 fallback true\n")
             sway = start("sway", ["sway", "--config", str(sway_config), "--debug"])
             env["WAYLAND_DISPLAY"] = wait_wayland_display(sway)
+        elif args.session == "hyprland":
+            env["LIBSEAT_BACKEND"] = "seatd"
+            config = root / "hyprland.conf"
+            config.write_text("monitor = , 1280x800@60, 0x0, 1\nanimations {\n enabled = false\n}\nmisc {\n disable_hyprland_logo = true\n disable_splash_rendering = true\n}\n")
+            hyprland = start("hyprland", ["Hyprland", "--config", str(config)])
+            env["WAYLAND_DISPLAY"] = wait_wayland_display(hyprland)
+            deadline = time.monotonic() + ready_timeout
+            while True:
+                sockets = list((runtime / "hypr").glob("*/.socket.sock"))
+                if len(sockets) == 1:
+                    env["HYPRLAND_INSTANCE_SIGNATURE"] = sockets[0].parent.name
+                    break
+                if hyprland.poll() is not None or time.monotonic() > deadline:
+                    raise RuntimeError("Owned Hyprland control socket unavailable")
+                time.sleep(.1)
         elif args.session == "gnome-wayland":
             help_text = subprocess.check_output(["gnome-shell", "--help"], env=env, text=True, timeout=5)
             if args.gnome_headless:

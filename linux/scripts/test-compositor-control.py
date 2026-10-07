@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Test session command control with private virtual audio and owned compositor bindings."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
@@ -14,12 +15,17 @@ parser.add_argument('--model', type=Path, required=True)
 parser.add_argument('--fixture', type=Path, required=True)
 parser.add_argument('--output', type=Path, required=True)
 parser.add_argument('--sway-bindings', action='store_true')
+parser.add_argument('--hyprland-bindings', action='store_true')
+parser.add_argument('--vm-keyboard', action='store_true', help='Request F8/F9 input from an owned VM driver')
 args = parser.parse_args()
 runtime = os.environ.get('XDG_RUNTIME_DIR')
 if (not runtime or os.environ.get('WF_OWNED_DESKTOP_TEST') != runtime
         or os.environ.get('PULSE_SERVER') != 'unix:' + str(Path(runtime) / 'pulse/native')
         or os.getuid() == 0):
     parser.error('Requires an owned run-owned-desktop.py session as a regular user.')
+if args.vm_keyboard and (not args.hyprland_bindings or
+        os.environ.get('WF_OWNED_VIRTUAL_MACHINE') != 'openwhisper-hyprland-20261007'):
+    parser.error('VM keyboard requests require the explicit owned Hyprland VM.')
 for path in [args.binary, args.model, args.fixture]:
     if not path.is_file():
         parser.error('Missing binary or public fixture: ' + str(path))
@@ -45,6 +51,7 @@ environment = os.environ | dict(XDG_CONFIG_HOME=str(work / 'config'),
     XDG_DATA_HOME=str(work / 'data'), ALSA_CONFIG_PATH=str(alsa))
 binary = str(args.binary.resolve())
 process = None
+helper_fd = None
 log = (work / 'app.log').open('w')
 checks = []
 
@@ -75,6 +82,20 @@ def wait_status(expected, timeout=30):
 def passed(message):
     checks.append(message)
     print('PASS: ' + message, flush=True)
+
+
+def vm_key(key, hold_ms=100):
+    # The external QEMU driver injects only into its owned guest, never the host.
+    request = work / 'keyboard-request.json'
+    acknowledgement = work / 'keyboard-ack.json'
+    sequence = json.loads(request.read_text())['sequence'] + 1 if request.exists() else 1
+    request.write_text(json.dumps(dict(sequence=sequence, key=key, hold_ms=hold_ms)))
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if acknowledgement.exists() and json.loads(acknowledgement.read_text()).get('sequence') == sequence:
+            return
+        time.sleep(.1)
+    raise RuntimeError('Owned VM keyboard driver did not acknowledge input')
 
 
 def interrupted(signum, _frame):
@@ -112,6 +133,20 @@ try:
     assert control('cancel')['status'] == 'idle'
     assert control('cancel')['status'] == 'idle'
     passed('Explicit start, stop, and cancel are idempotent; repeated start does not stop capture')
+    def concurrent_start(_):
+        return subprocess.run([binary, '--control', 'start'], env=environment,
+            text=True, capture_output=True, timeout=8)
+    with ThreadPoolExecutor(max_workers=6) as callers:
+        results = list(callers.map(concurrent_start, range(6)))
+    assert any(result.returncode == 0 for result in results), 'Every concurrent start was rejected'
+    for result in results:
+        if result.returncode == 0:
+            assert json.loads(result.stdout)['status'] == 'recording'
+        else:
+            assert 'busy' in result.stderr.lower(), 'Unexpected concurrent control failure'
+    assert control('status')['status'] == 'recording'
+    assert control('cancel')['status'] == 'idle'
+    passed('Concurrent start clients return recording or bounded busy errors without toggling capture off')
     assert control('toggle')['status'] == 'recording'
     time.sleep(.4)
     assert control('stop')['status'] == 'transcribing'
@@ -138,10 +173,67 @@ try:
         assert held.returncode == 0
         wait_status('idle')
         passed('Actual owned Sway F9 press/release bindings provide hold-to-record')
+    if args.hyprland_bindings:
+        signature = os.environ.get('HYPRLAND_INSTANCE_SIGNATURE', '')
+        socket = Path(runtime) / 'hypr' / signature / '.socket.sock'
+        assert signature and socket.is_socket(), 'No private Hyprland control socket'
+        for keyword, binding in [
+            ('bind', ', F8, exec, ' + binary + ' --control toggle'),
+            ('bind', ', F9, exec, ' + binary + ' --control start'),
+            ('bindr', ', F9, exec, ' + binary + ' --control stop'),
+        ]:
+            result = subprocess.run(['hyprctl', 'keyword', keyword, binding], env=environment,
+                check=True, capture_output=True, text=True, timeout=15)
+            assert result.stdout.strip() == 'ok', 'Hyprland rejected the owned binding'
+        if args.vm_keyboard:
+            vm_key('f8')
+        else:
+            subprocess.run(['wtype', '-k', 'F8'], env=environment, check=True)
+        wait_status('recording')
+        if args.vm_keyboard:
+            vm_key('f8')
+        else:
+            subprocess.run(['wtype', '-k', 'F8'], env=environment, check=True)
+        wait_status('idle')
+        passed('Actual owned Hyprland F8 toggle binding starts and stops capture')
+        if args.vm_keyboard:
+            vm_key('f9', 5000)
+        else:
+            held = subprocess.Popen(['wtype', '-P', 'F9', '-s', '5000', '-p', 'F9'], env=environment)
+        wait_status('recording')
+        if not args.vm_keyboard:
+            held.wait(timeout=15)
+            assert held.returncode == 0
+        wait_status('idle')
+        passed('Actual owned Hyprland F9 press/release bindings provide hold-to-record')
+    # Pin this owned app's disposable speech helper so stalled inference is deterministic.
+    helper = None
+    for task in Path('/proc/' + str(process.pid) + '/task').glob('*/children'):
+        for child in task.read_text().split():
+            try:
+                arguments = (Path('/proc') / child / 'cmdline').read_bytes().split(b'\0')
+                if b'--linux-speech-helper' in arguments:
+                    helper = int(child)
+                    break
+            except OSError:
+                pass
+    assert helper is not None, 'Owned speech helper not found'
+    helper_fd = os.pidfd_open(helper)
+    signal.pidfd_send_signal(helper_fd, signal.SIGSTOP)
     assert control('start')['status'] == 'recording'
     subprocess.run(['paplay', '--device', sink, str(args.fixture.resolve())], check=True)
     time.sleep(.4)
     assert control('stop')['status'] == 'transcribing'
+    try:
+        for action in ['start', 'stop', 'toggle', 'cancel']:
+            result = control(action, False)
+            assert 'busy' in result.stderr.lower(), 'Stalled inference did not reject control'
+        assert control('status')['status'] == 'transcribing'
+        passed('Stalled owned speech helper keeps status responsive and rejects every capture control')
+    finally:
+        signal.pidfd_send_signal(helper_fd, signal.SIGCONT)
+        os.close(helper_fd)
+        helper_fd = None
     wait_status('done', 90)
     clipboard = subprocess.check_output(['wl-paste', '--no-newline'], env=environment, text=True, timeout=5)
     assert 'country' in clipboard.lower(), 'Public speech fixture was not delivered'
@@ -151,6 +243,12 @@ try:
     assert control('cancel')['status'] == 'done'
     passed('Idle stop/cancel preserve the delivered result and successful delivery clears its backup')
 finally:
+    if helper_fd is not None:
+        try:
+            signal.pidfd_send_signal(helper_fd, signal.SIGCONT)
+        except ProcessLookupError:
+            pass
+        os.close(helper_fd)
     if process is not None:
         try:
             os.killpg(process.pid, signal.SIGTERM)

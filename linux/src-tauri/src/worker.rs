@@ -202,7 +202,13 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
                 }
             } else {
                 let (capture, _, prefs) = recording.take().unwrap();
-                match capture.finish() {
+                match capture.finish(|| {
+                    runtime.update(|s| {
+                        s.status = "transcribing".into();
+                        s.message = "Transcribing locally… The first run also loads the model.".into();
+                    });
+                    respond(&runtime, &mut reply, None);
+                }) {
                     Ok(samples) => (samples, None, prefs),
                     Err(error) => {
                         respond(
@@ -215,12 +221,12 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
                     }
                 }
             };
-            runtime.update(|s| {
-                s.status = "transcribing".into();
-                s.message = "Transcribing locally… The first run also loads the model.".into();
-            });
-            // Stop acknowledges capture ending, while local inference continues independently.
-            respond(&runtime, &mut reply, None);
+            if retry {
+                runtime.update(|s| {
+                    s.status = "transcribing".into();
+                    s.message = "Transcribing locally… The first run also loads the model.".into();
+                });
+            }
             let mut saved = saved;
             let result = (|| {
                 if samples.len() < 3200

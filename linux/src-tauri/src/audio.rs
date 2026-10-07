@@ -80,11 +80,13 @@ impl Capture {
         })
     }
 
-    pub fn finish(self) -> Result<Vec<f32>, String> {
+    pub fn finish(self, stopped: impl FnOnce()) -> Result<Vec<f32>, String> {
         drop(self.stream);
         if let Some(error) = self.error.lock().unwrap().take() {
             return Err(error);
         }
+        // Capture has ended. Acknowledge stop before duration-dependent preprocessing.
+        stopped();
         resample(&self.samples.lock().unwrap(), self.rate)
     }
 }

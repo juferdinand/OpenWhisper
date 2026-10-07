@@ -667,6 +667,12 @@ for (const platform of ["linux", "macos"] as const) {
     await page.evaluate(() => { (window as any).rejectPortal = false; });
     await page.getByRole("button", { name: "Allow", exact: true }).click();
     await expect.poll(() => page.evaluate(() => (window as any).calls.filter((call: any) => call.command === "enable_paste").length)).toBe(2);
-    await expect(page.getByRole("button", { name: "Allow", exact: true })).toBeEnabled();
+    if (platform === "linux") {
+      await expect(page.getByRole("button", { name: "Revoke", exact: true })).toBeEnabled();
+      await page.getByRole("button", { name: "Revoke", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Allow", exact: true })).toBeEnabled();
+    } else {
+      await expect(page.locator('[data-portal="disable_paste"]')).toBeEnabled();
+    }
   });
 }
