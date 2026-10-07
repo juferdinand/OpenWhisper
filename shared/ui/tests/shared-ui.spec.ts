@@ -123,6 +123,10 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false, f
           return 1;
         }
         host.calls.push({ command, args });
+        if (command === "enable_paste" && host.rejectPortal) {
+          await new Promise(resolve => setTimeout(resolve, host.portalDelay ?? 0));
+          throw new Error("Permission request cancelled");
+        }
         if (command === "get_state") {
           const saved = await host.loadTestPreferences();
           if (saved) state.preferences = saved;
@@ -599,3 +603,24 @@ test("Linux clipboard delivery failures fully translate while retaining raw dict
   await expect(page.locator(".history-row p")).toHaveText("Clipboard delivery timed out");
   expect(await page.evaluate(() => (window as any).testState.transcript)).toBe("Clipboard delivery timed out");
 });
+
+for (const platform of ["linux", "macos"] as const) {
+  test(`${platform}: cancelled permission can be retried without a host state event`, async ({ page }) => {
+    await start(page, platform);
+    await page.evaluate(() => {
+      const host = window as any;
+      host.rejectPortal = true;
+      host.portalDelay = 500;
+    });
+    await page.getByRole("button", { name: "Allow", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Allow", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Set trigger …", exact: true })).toBeDisabled();
+    await expect(page.getByRole("alert")).toContainText("Permission request cancelled");
+    await expect(page.getByRole("button", { name: "Allow", exact: true })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Set trigger …", exact: true })).toBeEnabled();
+    await page.evaluate(() => { (window as any).rejectPortal = false; });
+    await page.getByRole("button", { name: "Allow", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).calls.filter((call: any) => call.command === "enable_paste").length)).toBe(2);
+    await expect(page.getByRole("button", { name: "Allow", exact: true })).toBeEnabled();
+  });
+}

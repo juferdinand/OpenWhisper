@@ -781,11 +781,15 @@ function render() {
   content.querySelectorAll<HTMLButtonElement>("[data-portal]").forEach(
     (button) =>
       (button.onclick = async () => {
+        const action = button.dataset.portal!;
         portalBusy = true;
-        button.disabled = true;
-        await command(button.dataset.portal!);
-        portalBusy = false;
         render();
+        try {
+          await command(action);
+        } finally {
+          portalBusy = false;
+          render();
+        }
       }),
   );
   content.querySelectorAll("[data-discard]").forEach((b) =>

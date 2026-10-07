@@ -11,7 +11,7 @@ mod worker;
 
 use desktops::{
     kde,
-    shared::{clipboard, control, overlay, portal_capabilities, portals, session},
+    shared::{clipboard, control, overlay, portal_capabilities, portals, session, tray},
 };
 
 use openwhisper_core::{catalog, Model};
@@ -539,12 +539,15 @@ fn main() {
                 .clone();
             localize_tray(&runtime, &locale);
             if tray.is_ok() {
+                let tray_host = tray::monitor(app.handle().clone());
                 if let Some(window) = app.get_webview_window("main") {
                     let w = window.clone();
                     window.on_window_event(move |event| {
                         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                            api.prevent_close();
-                            let _ = w.hide();
+                            if tray_host.load(std::sync::atomic::Ordering::Relaxed) {
+                                api.prevent_close();
+                                let _ = w.hide();
+                            }
                         }
                     });
                 }
