@@ -10,8 +10,13 @@ const QUERY_TIMEOUT: Duration = Duration::from_millis(500);
 
 async fn registered_host(connection: &zbus::Connection) -> bool {
     tokio::time::timeout(QUERY_TIMEOUT, async {
+        // Resolve a running owner without activating a missing panel service.
+        // Pin the subsequent property read to that unique owner: a panel that
+        // vanishes between these calls must not be auto-started by polling.
+        let bus = zbus::fdo::DBusProxy::new(connection).await?;
+        let owner = bus.get_name_owner(WATCHER.try_into()?).await?;
         let proxy: zbus::Proxy<'_> = zbus::proxy::Builder::new(connection)
-            .destination(WATCHER)?
+            .destination(owner)?
             .path("/StatusNotifierWatcher")?
             .interface(WATCHER)?
             .cache_properties(zbus::proxy::CacheProperties::No)
