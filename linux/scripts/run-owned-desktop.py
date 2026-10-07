@@ -91,6 +91,7 @@ def main():
         "PIPEWIRE_RUNTIME_DIR", "LD_PRELOAD", "LD_LIBRARY_PATH", "QT_QPA_PLATFORM",
         "NO_AT_BRIDGE", "SESSION_MANAGER", "XAUTHORITY", "WAYLAND_SOCKET",
         "XDG_SESSION_ID", "XDG_SEAT", "XDG_VTNR", "DESKTOP_STARTUP_ID", "SWAYSOCK",
+        "HYPRLAND_INSTANCE_SIGNATURE", "AQ_BACKEND",
     ]:
         env.pop(key, None)
     for key, name in [

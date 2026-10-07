@@ -11,7 +11,7 @@ mod worker;
 
 use desktops::{
     kde,
-    shared::{clipboard, overlay, portal_capabilities, portals, session},
+    shared::{clipboard, control, overlay, portal_capabilities, portals, session},
 };
 
 use openwhisper_core::{catalog, Model};
@@ -58,6 +58,9 @@ struct Snapshot {
 }
 
 enum WorkerCommand {
+    Start,
+    Stop,
+    Control(control::Request),
     Toggle,
     Cancel,
     ShortcutPressed,
@@ -67,6 +70,7 @@ enum WorkerCommand {
 }
 
 struct Runtime {
+    control: control::Service,
     autostart: autostart::Autostart,
     updater: updates::Service,
     triggers: kde::Service,
@@ -287,6 +291,9 @@ async fn disable_paste(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), St
 
 fn main() {
     let arguments: Vec<String> = std::env::args().collect();
+    if let Some(code) = control::cli(&arguments) {
+        std::process::exit(code);
+    }
     if arguments
         .get(1)
         .is_some_and(|a| a == "--transcription-smoke-test")
@@ -415,6 +422,7 @@ fn main() {
             };
             let (commands, receiver) = mpsc::channel();
             let state = Arc::new(Runtime {
+                control: control::Service::default(),
                 autostart,
                 updater: updates::Service::default(),
                 triggers: kde::Service::default(),
@@ -468,6 +476,7 @@ fn main() {
                 cancel_download: AtomicBool::new(false),
             });
             app.manage(state.clone());
+            tauri::async_runtime::spawn(control::start(state.clone()));
             updates::start(state.clone());
             kde::install_capture(state.clone())?;
             tauri::async_runtime::spawn(kde::initialize(state.clone()));
@@ -555,6 +564,7 @@ fn main() {
         if matches!(event, tauri::RunEvent::Exit) {
             if let Some(state) = app.try_state::<Arc<Runtime>>() {
                 state.clipboard.shutdown();
+                tauri::async_runtime::block_on(control::shutdown(&state));
                 tauri::async_runtime::block_on(kde::shutdown(&state));
             }
         }

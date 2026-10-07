@@ -550,13 +550,65 @@ default; their recorder determines the accepted keys. Portal setup remains sessi
 must be enabled again after restart. OpenWhisper suggests Ctrl+Alt+Space but does not require
 Ctrl. Direct mouse capture on GNOME, Sway, Hyprland, and X11 is not implemented.
 
-If your desktop has neither native shortcut support nor a shortcut portal, keep using the Record
-button and clipboard output. No root,
+If your desktop has neither native shortcut support nor a shortcut portal, use the Record
+button or configure the compositor command bindings below. Clipboard output remains available. No root,
 `input` group membership, `evdev`, or `uinput` access is required. The app never disables Wayland
 security controls. Linux custom model import, clipboard restoration, text
 editor output and start/stop sounds are not implemented yet. The floating indicator
 requires `gtk-layer-shell` on a Wayland compositor supporting layer-shell; GNOME does not
 provide that protocol. Its availability is shown in General.
+
+## Compositor command bindings
+
+When a Wayland compositor has no GlobalShortcuts portal, configure a binding to the
+running app with `openwhisper-desktop --control toggle`. AppImage users should replace
+`openwhisper-desktop` with the absolute path of their installed AppImage. Open the app
+normally first; command control never activates it or opens audio if it is not running.
+It uses the current user's session bus and does not change compositor configuration.
+
+The allowed commands are `start`, `stop`, `toggle`, `cancel`, and `status`. Start, stop,
+and cancel are idempotent. Stop ends capture and acknowledges the `transcribing` state;
+recognition and clipboard delivery continue locally. Status returns only `status`,
+`elapsed`, and `recovery_available`, with no transcript, audio, history, or preferences.
+Requests fail while transcribing, installing an update, or assigning a trigger. Missing
+models and pending recovery recordings still prevent a new recording. Cancel discards
+only the current recording; it does not discard a saved recovery recording or a completed
+transcript. No recording duration limit is introduced.
+
+For Sway, use non-repeating bindings. The two alternatives below use different keys;
+choose a free key or chord and preserve your existing desktop bindings:
+
+```sway
+# Toggle recording with F8.
+bindsym --no-repeat F8 exec openwhisper-desktop --control toggle
+# Hold F9 to record; releasing F9 stops capture.
+bindsym --no-repeat F9 exec openwhisper-desktop --control start
+bindsym --release F9 exec openwhisper-desktop --control stop
+```
+
+For Hyprland, ordinary `bind` does not request key repeat; `bindr` runs on release:
+
+```ini
+bind = , F8, exec, openwhisper-desktop --control toggle
+bind = , F9, exec, openwhisper-desktop --control start
+bindr = , F9, exec, openwhisper-desktop --control stop
+```
+
+Sway bindings were exercised in an owned headless Arch session using real compositor
+key dispatch, a private virtual keyboard, virtual CPAL capture, the public JFK audio
+fixture, and clipboard delivery. This is isolated compositor evidence, not physical
+keyboard, GPU, signed-update, or login acceptance. Hyprland acceptance is tracked
+separately in [issue #7](https://github.com/juferdinand/OpenWhisper/issues/7).
+
+The reproducible command check requires an owned session:
+
+```bash
+python3 linux/scripts/run-owned-desktop.py --session sway --output /tmp/ow-sway-control -- \
+  python3 linux/scripts/test-compositor-control.py \
+  --binary /absolute/path/openwhisper-desktop \
+  --model /absolute/path/ggml-tiny.bin --fixture /absolute/path/jfk.wav \
+  --output /tmp/ow-sway-control-flow --sway-bindings
+```
 
 ## Updates and first-run setup
 
