@@ -33,3 +33,6 @@ zbus = "5"
 sha2 = "0.11"
 uuid = { version = "1", features = ["v4"] }
 tauri-plugin-updater = { version = "2.13.1", default-features = false, features = ["rustls-tls"] }
+wayland-client = "0.31.15"
+xkbcommon = { version = "0.9.0", default-features = false }
+rustix = { version = "1", features = ["event", "net"] }

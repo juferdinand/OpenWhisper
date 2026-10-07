@@ -245,13 +245,13 @@ Install Rust/Cargo, Node.js/npm, Python 3, a C++ compiler, CMake, pkg-config, an
 CachyOS / Arch build and runtime dependencies:
 
 ```bash
-sudo pacman -S --needed rust nodejs npm base-devel cmake python curl webkit2gtk-4.1 gtk3 libappindicator-gtk3 alsa-lib pipewire-alsa gtk-layer-shell wl-clipboard xclip vulkan-icd-loader shaderc
+sudo pacman -S --needed rust nodejs npm base-devel cmake python curl webkit2gtk-4.1 gtk3 libappindicator-gtk3 alsa-lib pipewire-alsa libxkbcommon gtk-layer-shell wl-clipboard xclip vulkan-icd-loader shaderc
 ```
 
 Ubuntu 22.04+ / Debian build dependencies (desktop validation is still pending):
 
 ```bash
-sudo apt install build-essential cmake ninja-build pkg-config python3 curl libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libgtk-layer-shell0 libvulkan-dev patchelf wl-clipboard xclip
+sudo apt install build-essential cmake ninja-build pkg-config python3 curl libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libxkbcommon-dev libgtk-layer-shell0 libvulkan-dev patchelf wl-clipboard xclip
 python3 linux/scripts/build-glslc.py
 export PATH="$PWD/linux/vendor/shaderc/bin:$PATH"
 ```
@@ -434,11 +434,22 @@ Middle requires Plasma 6.3+. `kreadconfig6`, `kwriteconfig6`, and KWin's `button
 must be available. The selected button is reserved for dictation while the app runs. Existing
 KDE remappings are rejected rather than overwritten. OpenWhisper registers a free internal
 function key (F19 or F24) and temporarily maps the chosen mouse button to it using KDE's configuration API.
+Before registering a new mouse shortcut or changing its mapping, a separate, surface-free Wayland
+connection checks the compositor's keyboard-map metadata. A candidate must emit its single symbol
+without modifier or layout-changing actions, on the same first keycode in every layout, and be
+available on every advertised keyboard seat. Missing, unsafe, or unverifiable metadata leaves
+keyboard triggers and the Record button available. No input events are recorded and no user keymap
+is changed. A subsequent keymap or keyboard-seat change stops the mouse helper and restores its lease.
 A helper restores the mapping on normal exit or when the app crashes. Later user edits are
 preserved. If the helper itself is forcibly killed (SIGKILL, including an entire process group),
 its recovery file restores the mapping on the next app start; until then, remove that button's
 mapping in KDE System Settings if necessary. **Remove trigger** also restores the normal binding.
 No root, input-device access, or additional permission prompt is required for these KDE bindings.
+KWin 6.3.6 does not emit a synthetic key release when its rebinding device is removed. Restoration
+therefore does not prove that a surrogate held during teardown has cleared from compositor key/repeat
+state. The app ends its hold-to-talk state when the helper fails, but this wider compositor limitation
+remains open in [issue #21](https://github.com/juferdinand/OpenWhisper/issues/21). Release the mouse
+button before changing its trigger or keyboard layout.
 
 **Desktop shortcut dialog** selects the portal alternative on KDE. Other desktops use it by
 default; their recorder determines the accepted keys. Portal setup remains session-scoped and
@@ -512,7 +523,8 @@ review them before posting diagnostics publicly.
   the GlobalShortcuts portal; its initial suggestion is Ctrl+Alt+Space. Check for desktop conflicts.
 - **Mouse button unavailable:** direct capture requires KDE Wayland and its configuration utilities.
   Buttons already remapped in KDE are rejected; hardware-only DPI/profile switches may not emit
-  usable input events. After forcibly killing both app and helper, start OpenWhisper again to
+  usable input events. Some distribution keymaps, including stock Debian 13's xkb-data 2.42,
+  lack both safe internal symbols; use a keyboard trigger or the Record button. After forcibly killing both app and helper, start OpenWhisper again to
   recover its temporary mouse mapping.
 - **No pasted text:** enable keyboard access in **General**, select paste output, and focus a text
   field. Targets with a different paste binding (including many terminals) may require manual paste.
@@ -568,10 +580,35 @@ configuration utilities. It creates a private D-Bus session, nested KWin, and di
 settings. Synthetic events are sent only to that owned compositor. It checks single keys,
 modifier release behavior, middle/extra mouse buttons, conflicting shortcuts, EOF/SIGTERM cleanup,
 SIGKILL recovery, and preservation of existing or later user mappings. It never opens a microphone.
+It also replaces only the owned compositor's map with a two-layout fixture while no button is held,
+checks that metadata invalidation restores the lease, and validates a fresh mouse helper afterward.
+For an owned map known to lack both safe candidates, run the same command with
+`--expect-mouse-unsupported`: it verifies five mouse-button requests fail before Ready without a new
+lease or mapping change, then confirms keyboard triggering still works. That mode deliberately skips
+the working-mouse cases.
 The test passed with Plasma 6.7.5 on the primary host; it does not establish physical-device or
 other-desktop coverage. The native GTK capture path was also exercised in an isolated Wayland session: key/mouse capture,
 Escape cancellation, virtual-source toggle/push-to-talk recording, app-crash cleanup, saved binding restoration,
 and trigger removal. Physical-device checks remain outstanding.
+
+### Mouse-keymap readiness guard, 2026-10-07
+
+The guard was checked on an isolated branch based on `46a6b82530bbd7927964332131319070674fe684`.
+`make linux-test` passed (5 core, 38 desktop, and 2 speech tests; Clippy with warnings denied;
+shared assets and synchronized English/German messages). Fourteen desktop tests use complete synthetic
+XKB maps or private file/socket fixtures: absent/present symbols, earlier shifted duplicates,
+multi-symbol levels, differing first keycodes across layouts, modifier/group actions, maximum-keycode
+exclusion, incompatible seats, safe-to-safe map replacement, malformed/bounded file descriptors,
+and an unresponsive private socket deadline. None contacts the user's display.
+
+The owned nested-KWin suite passed all nine groups on CachyOS with KWin `6.7.5-1.1`,
+KGlobalAccel `6.30.0-1.1`, Qt `6.11.2-3.1`, xkeyboard-config `2.48-1`, and libxkbcommon
+`1.13.2-1.1`. The shared UI suite passed all 29 tests using system Chromium; the bundled headless
+shell exited with SIGSEGV before loading a page, retained separately as an environment failure.
+Local commands, exact binary checksum, and logs are under `.local/planning/kde-keymap-module-check/`.
+This proves the readiness guard and owned cleanup assertions; it does not prove physical input,
+absence of a held compositor surrogate, or distribution-wide support. Stock Debian 13 refusal and
+the separately augmented private-map suite require the exact Ubuntu-built CI package before acceptance.
 
 ## Acceptance evidence
 

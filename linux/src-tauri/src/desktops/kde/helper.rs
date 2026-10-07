@@ -1,4 +1,4 @@
-use super::{bindings as kde, Trigger};
+use super::{bindings as kde, keymap, Trigger};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -68,6 +68,11 @@ async fn session() -> Result<(), String> {
     let proxy = kde::accelerator(&connection).await?;
     let paths = crate::settings::Paths::new()?;
     kde::recover(&proxy, &paths.config).await?;
+    let mut keymap = if matches!(trigger, Trigger::Mouse { .. }) {
+        Some(keymap::Monitor::start().await?)
+    } else {
+        None
+    };
     let candidates = match trigger {
         Trigger::Key { key } => vec![(key, None)],
         Trigger::Mouse { .. } => kde::mouse_keys()
@@ -76,7 +81,14 @@ async fn session() -> Result<(), String> {
             .collect(),
     };
     let mut selected = None;
+    let mut representable = false;
     for (key, mapping) in candidates {
+        if let Some(monitor) = keymap.as_ref() {
+            if !monitor.current()?.contains(key) {
+                continue;
+            }
+        }
+        representable = true;
         let free: bool = proxy
             .call("globalShortcutAvailable", &(kde::key_sequence(key), ""))
             .await
@@ -86,9 +98,16 @@ async fn session() -> Result<(), String> {
             break;
         }
     }
-    let (key, mapping) = selected.ok_or(
-        "This trigger conflicts with an existing desktop shortcut. Choose another trigger.",
-    )?;
+    let (key, mapping) = selected.ok_or(if representable {
+        "This trigger conflicts with an existing desktop shortcut. Choose another trigger."
+    } else {
+        keymap::UNSUPPORTED
+    })?;
+    if let Some(monitor) = keymap.as_ref() {
+        if !monitor.current()?.contains(key) {
+            return Err(keymap::CHANGED.into());
+        }
+    }
     let lease = kde::Lease::new(trigger, mapping, &paths.config)?;
     let result = async {
         let action = vec![lease.component.as_str(), kde::ACTION, "OpenWhisper", "Start or stop dictation"];
@@ -100,7 +119,13 @@ async fn session() -> Result<(), String> {
         let bound: Vec<(Vec<i32>,)> = proxy.call("setShortcutKeys", &(&action, vec![kde::key_sequence(key)], 6u32)).await.map_err(|e| e.to_string())?;
         // Qt serializes each QKeySequence as four entries, padding unused keys with zero.
         if bound.len() != 1 || bound[0].0.first() != Some(&key) || bound[0].0.iter().skip(1).any(|k| *k != 0) { return Err("The desktop rejected this trigger because it conflicts with another shortcut.".into()); }
+        if let Some(monitor) = keymap.as_ref() {
+            if !monitor.current()?.contains(key) { return Err(keymap::CHANGED.into()); }
+        }
         lease.apply_mouse()?;
+        if let Some(monitor) = keymap.as_ref() {
+            if !monitor.current()?.contains(key) { return Err(keymap::CHANGED.into()); }
+        }
         send(Event::Ready)?;
         let mut held = false;
         let mut byte = [0];
@@ -109,6 +134,17 @@ async fn session() -> Result<(), String> {
                 _ = input.read(&mut byte) => break,
                 _ = terminate.recv() => break,
                 _ = interrupt.recv() => break,
+                update = async {
+                    match keymap.as_mut() {
+                        Some(monitor) => monitor.changed().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if !update.map_err(|_| keymap::CHANGED)?.contains(key) {
+                        return Err(keymap::CHANGED.into());
+                    }
+                    continue;
+                },
                 event = events.next() => match event {
                     Some(event) => {
                         let down = match event.header().member().map(|m| m.as_str()) {

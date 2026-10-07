@@ -1,5 +1,6 @@
 mod bindings;
 mod capture;
+mod keymap;
 pub mod helper;
 mod trigger;
 

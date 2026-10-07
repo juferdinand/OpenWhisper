@@ -295,5 +295,8 @@
   "Retry transcription": "Erneut transkribieren",
   "Discard saved recording": "Gesicherte Aufnahme verwerfen",
   "An unfinished recording is saved. Retry transcription or discard it.": "Eine nicht abgeschlossene Aufnahme ist gesichert. Versuche die Transkription erneut oder verwirf sie.",
-  "{error}. Your recording is retained. Retry transcription or discard it.": "{error}. Deine Aufnahme bleibt erhalten. Versuche die Transkription erneut oder verwirf sie."
+  "{error}. Your recording is retained. Retry transcription or discard it.": "{error}. Deine Aufnahme bleibt erhalten. Versuche die Transkription erneut oder verwirf sie.",
+  "This desktop keyboard layout cannot safely provide a mouse trigger. Use a keyboard trigger or the Record button.": "Diese Tastaturbelegung unterstützt keinen sicheren Maustasten-Auslöser. Verwende eine Tastaturtaste oder die Aufnahmetaste.",
+  "Could not verify the desktop keyboard layout for a mouse trigger. Use a keyboard trigger or the Record button.": "Die Tastaturbelegung konnte für den Maustasten-Auslöser nicht geprüft werden. Verwende eine Tastaturtaste oder die Aufnahmetaste.",
+  "The desktop keyboard layout changed and the mouse trigger stopped. Set it again, or use a keyboard trigger or the Record button.": "Die Tastaturbelegung hat sich geändert und der Maustasten-Auslöser wurde beendet. Richte ihn erneut ein oder verwende eine Tastaturtaste oder die Aufnahmetaste."
 }
