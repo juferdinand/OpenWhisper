@@ -71,7 +71,7 @@ These unsigned CI artifacts are distinct from a signed public release.
 | Fedora KDE 43, KWin 6.7.5 | PASS | Keyboard and modifier-only toggle PASS; mouse helper rejects unsupported stock spare-key mapping before Ready or a lease | Actual Deny/retry/Approve/Revoke and insertion into focused GTK Wayland and inner XWayland targets PASS |
 | Arch, KWin 6.7.5 | PASS | Nine regression groups PASS on the untouched stock keymap, including five mouse buttons | Actual Deny/retry/Approve/Revoke and Wayland/XWayland insertion PASS |
 | openSUSE Tumbleweed, KWin 6.7.5 | PASS | Nine regression groups PASS on the untouched stock keymap, including five mouse buttons | Actual Deny/retry/Approve/Revoke and Wayland/XWayland insertion PASS |
-| Ubuntu 24.04 / Kubuntu package set, KWin 5.27.11 | PASS | Plasma 6 native keyboard/modifier/mouse helpers reject before Ready or a lease; Record-button and clipboard fallback PASS | Actual Plasma 5 portal and focused paste acceptance remains open; main-window recording and clipboard fallback are proven |
+| Ubuntu 24.04 / Kubuntu package set, KWin 5.27.11 | PASS | Plasma 6 native keyboard/modifier/mouse helpers reject before Ready or a lease; Record-button and clipboard fallback PASS | Actual legacy keyboard grant/revoke and Wayland/XWayland insertion PASS; unidentified owned host received no dialog, so identity-associated Deny remains open |
 
 For each baseline AppImage, PASS includes native onboarding/English/German persistence,
 GTK reactivation, a 126-second recording stopped or cancelled explicitly, floating controls,
@@ -100,6 +100,17 @@ It passes actual KDE dialogs without persistent restoration, keyboard-session re
 and automatic Ctrl+V into separately owned Wayland/XWayland GTK text fields. Each insertion
 must equal both saved history and the private clipboard; successful delivery removes its WAV.
 These native source checks do not substitute for re-testing the eventual combined CI package.
+
+Ubuntu 24.04 additionally passes actual keyboard-session grant/revoke and focused Wayland
+and inner-XWayland insertion using native source `ad8cd4a`, binary SHA-256
+`84fdbc4df046057e52f55967087108cc72b8f6691675acb82ee55dc615d2c914`
+(maximum required GLIBC 2.39). The private-bus host receives an immediate grant without a
+consent dialog. This is explicitly selected with `--permission-profile legacy-automatic`;
+it does not establish Deny or a normal login-session application identity. The
+[upstream Plasma 5.27 backend](https://raw.githubusercontent.com/KDE/xdg-desktop-portal-kde/Plasma/5.27/src/remotedesktop.cpp)
+skips its dialog for an empty application ID; that is a source-based explanation of the
+observed behavior, rather than proof of the identity assigned by this isolated frontend.
+The harness supports KDE 5's actual script object and window APIs without changing the app.
 
 Fedora and Arch's actual PlasmaShell and KDED StatusNotifierWatcher additionally render the native
 candidate's tray icon. An owned compositor Close hides the settings window while the app

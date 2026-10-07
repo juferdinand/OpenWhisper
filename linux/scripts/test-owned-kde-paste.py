@@ -14,6 +14,8 @@ parser.add_argument('--binary',type=Path,required=True)
 parser.add_argument('--model',type=Path,required=True)
 parser.add_argument('--fixture',type=Path,required=True)
 parser.add_argument('--output',type=Path,required=True)
+parser.add_argument('--permission-profile',choices=['dialog','legacy-automatic'],default='dialog',
+                    help='Explicitly label older backends that grant an unidentified host without a dialog')
 args=parser.parse_args()
 m.require_owned()
 assert os.getuid()!=0,'Regular user required'
@@ -33,21 +35,38 @@ checks=[]
 def passed(value):checks.append(value);print('PASS:',value,flush=True)
 def focus(title):
     script=root/'focus-owned.js'
-    script.write_text('for (const w of workspace.windowList()) { if (w.caption === '+json.dumps(title)+') workspace.activeWindow = w; }')
+    script.write_text('const modern = typeof workspace.windowList === "function"; '
+        'for (const w of (modern ? workspace.windowList() : workspace.clientList())) { '
+        'if (w.caption === '+json.dumps(title)+') { if (modern) workspace.activeWindow = w; else workspace.activeClient = w; } }')
     bus=Gio.bus_get_sync(Gio.BusType.SESSION,None)
     result=bus.call_sync('org.kde.KWin','/Scripting','org.kde.kwin.Scripting','loadScript',GLib.Variant('(ss)',(str(script),'owned-paste-focus')),None,Gio.DBusCallFlags.NO_AUTO_START,5000,None)
     number=result.unpack()[0]
-    bus.call_sync('org.kde.KWin','/Scripting/Script'+str(number),'org.kde.kwin.Script','run',None,None,Gio.DBusCallFlags.NO_AUTO_START,5000,None)
+    script_path=None
+    for candidate in ['/Scripting/Script'+str(number),'/'+str(number)]:
+        try:
+            xml=bus.call_sync('org.kde.KWin',candidate,'org.freedesktop.DBus.Introspectable','Introspect',None,None,Gio.DBusCallFlags.NO_AUTO_START,5000,None).unpack()[0]
+        except GLib.Error as error:
+            if 'UnknownObject' in str(error):continue
+            raise
+        if 'name="org.kde.kwin.Script"' in xml:
+            script_path=candidate;break
+    assert script_path,'Owned KWin did not expose the loaded script'
+    bus.call_sync('org.kde.KWin',script_path,'org.kde.kwin.Script','run',None,None,Gio.DBusCallFlags.NO_AUTO_START,5000,None)
     bus.call_sync('org.kde.KWin','/Scripting','org.kde.kwin.Scripting','unloadScript',GLib.Variant('(s)',('owned-paste-focus',)),None,Gio.DBusCallFlags.NO_AUTO_START,5000,None)
 with m.PortalServices('kde',root/'portals') as services,(root/'app.log').open('w') as log:
     try:
         app_process=subprocess.Popen([str(args.binary.resolve())],env=os.environ|{'ALSA_CONFIG_PATH':str(alsa)},stdout=log,stderr=log,start_new_session=True)
         app=m.NativeUI(app_process)
         app.click('General');app.click('Allow');portal=services.ui()
-        restore=m.wait_for(lambda:portal.find('Allow restoring on future sessions',roles=('check box',)),'Keyboard consent')
-        if restore.get_state_set().contains(Atspi.StateType.CHECKED):portal.click('Allow restoring on future sessions',roles=('check box',))
-        portal.click('Approve');m.wait_for(lambda:app.find('Revoke'),'Keyboard permission')
-        passed('real KDE RemoteDesktop keyboard-only session approved without persistent restoration')
+        if args.permission_profile=='legacy-automatic':
+            m.wait_for(lambda:app.find('Revoke'),'Actual legacy keyboard session grant')
+            assert not portal.find('Deny',sensitive=False),'Legacy profile unexpectedly displayed consent'
+            passed('real legacy KDE backend granted the unidentified owned host without a consent dialog; denial is not established')
+        else:
+            restore=m.wait_for(lambda:portal.find('Allow restoring on future sessions',roles=('check box',)),'Keyboard consent')
+            if restore.get_state_set().contains(Atspi.StateType.CHECKED):portal.click('Allow restoring on future sessions',roles=('check box',))
+            portal.click('Approve');m.wait_for(lambda:app.find('Revoke'),'Keyboard permission')
+            passed('real KDE RemoteDesktop keyboard-only session approved without persistent restoration')
         target=root/'typing-target.py'
         title='OpenWhisper Owned Paste '+str(os.getpid())
         target.write_text('''import gi,pathlib,sys
@@ -96,7 +115,7 @@ window.show_all();view.grab_focus();Gtk.main()
                 assert '-auth' in xwayland[1] and xwayland[1][xwayland[1].index('-auth')+1]==inner['XAUTHORITY']
             else:assert '-auth' not in xwayland[1],'Missing configured inner Xwayland cookie'
             (root/'inner-xwayland-ownership.json').write_text(json.dumps({'kwin_pid':compositor_pid,'xwayland_pid':xwayland[0],'argv':xwayland[1],'display':inner['DISPLAY'],'xauthority':inner['XAUTHORITY'],'uid':os.getuid()},indent=2)+'\n')
-            target_environment.update(DISPLAY=inner['DISPLAY'],XAUTHORITY=inner['XAUTHORITY'],GDK_BACKEND='x11')
+            target_environment.update(DISPLAY=inner['DISPLAY'],XAUTHORITY=inner['XAUTHORITY'] or '',GDK_BACKEND='x11')
         target_process=subprocess.Popen(['python3',str(target),str(pasted),title],env=target_environment,stdout=log,stderr=log,start_new_session=True)
         m.wait_for(lambda:pasted.exists(),'Owned GTK target')
         time.sleep(.5);focus(title);time.sleep(.5)
