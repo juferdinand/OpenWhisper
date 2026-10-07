@@ -9,6 +9,7 @@ linux:
 	cargo build --locked --release --manifest-path linux/Cargo.toml -p openwhisper-desktop --features $(LINUX_FEATURES)
 
 linux-test:
+	python3 linux/scripts/test-local-installer.py
 	bash linux/scripts/fetch-native.sh
 	cd shared/ui && npm ci && npm run build
 	cargo test --locked --manifest-path linux/Cargo.toml --workspace

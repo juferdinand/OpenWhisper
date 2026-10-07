@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Accept a local AppImage installation in run-owned-desktop.py's private session.
 
-Uses the unchanged local installer and generated GIO desktop launcher. No public
+Uses the local installer and generated GIO desktop launcher. No public
 release, signature acceptance, actual login, or physical device is exercised.
 """
 import argparse
@@ -138,6 +138,19 @@ try:
     assert "Icon=io.github.whisperfree" in text and "StartupWMClass=io.github.whisperfree" in text
     assert (data / "icons/hicolor/256x256/apps/io.github.whisperfree.png").read_bytes() == (args.source / "linux/src-tauri/icons/icon.png").read_bytes()
     assert (installed.parent / "THIRD_PARTY_NOTICES.md").read_bytes() == (args.source / "linux/THIRD_PARTY_NOTICES.md").read_bytes()
+    license_source = args.source / "linux/licenses"
+    assert (license_source / "gtk-layer-shell/LICENSE_LGPL.txt").is_file(), "Nested overlay license fixture required"
+    license_hashes = {}
+    for source in license_source.rglob("*"):
+        if source.is_file():
+            relative = source.relative_to(license_source)
+            target = installed.parent / "licenses" / relative
+            assert target.is_file() and not target.is_symlink(), "Installed license is missing or linked: " + str(relative)
+            assert target.read_bytes() == source.read_bytes(), "Installed license bytes differ: " + str(relative)
+            assert target.stat().st_mode & 0o777 == 0o644, "Installed license permissions differ: " + str(relative)
+            license_hashes[str(relative)] = hashlib.sha256(target.read_bytes()).hexdigest()
+    report["installed_license_sha256"] = license_hashes
+    passed("local installer retains all nested license paths, exact bytes and 0644 modes")
     (args.output / "generated.desktop").write_bytes(desktop.read_bytes())
     passed("local installer preserves exact AppImage, identity, original icon and notices at permanent paths")
     with (args.output / "launcher.log").open("w") as log:
