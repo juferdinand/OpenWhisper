@@ -222,7 +222,9 @@ that installed AppImage; user data remains. This first installer refuses to repl
 unmanaged installation. If the in-app updater has replaced its AppImage, use the in-app updater
 for later updates, or uninstall with this script before reinstalling. This prevents an outdated
 installer record from allowing a downgrade. A user-edited application launcher must be removed
-manually before uninstalling. See [Linux runtime dependencies and acceptance](docs/LINUX.md):
+manually before uninstalling. Reinstall and uninstall require the recorded HOME/XDG paths;
+changed paths or an invalid record are refused without adopting other files.
+See [Linux runtime dependencies and acceptance](docs/LINUX.md):
 installer checks do not establish graphical desktop, microphone, GPU, or portal support.
 The terminal installer was checked on 2026-10-07 in non-root Ubuntu 22.04 and 24.04 containers
 with the signed public 0.2.4 package: offline installation, exact-release online reinstall,

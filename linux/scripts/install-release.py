@@ -268,6 +268,9 @@ class Installation:
         self.files += [self.icon, self.desktop, self.image, self.destination / "OpenWhisper.AppImage.sig", self.manifest]
         self.transaction = self.control / "transaction"
 
+    def target_paths(self):
+        return [str(path) for path in [*self.files, self.autostart]]
+
     @contextlib.contextmanager
     def locked(self):
         for path in [self.control, self.autostart, *self.files]:
@@ -303,7 +306,7 @@ class Installation:
             if journal.stat().st_size > MAX_METADATA:
                 raise ValueError("Journal is too large")
             state = json.loads(journal.read_text())
-            if state["targets"] != [str(path) for path in [*self.files, self.autostart]]:
+            if state["targets"] != self.target_paths():
                 raise InstallError("Interrupted installation used different HOME/XDG paths. Restore those environment variables before retrying.")
             records = state["records"]
             if not isinstance(records, list) or len(records) > len(self.files) + 1:
@@ -360,7 +363,7 @@ class Installation:
                 records.append(record)
             journal = self.transaction / "journal.json"
             pending = self.transaction / "journal.pending"
-            pending.write_text(json.dumps({"targets": [str(path) for path in [*self.files, self.autostart]], "records": records}))
+            pending.write_text(json.dumps({"targets": self.target_paths(), "records": records}))
             atomic_copy(pending, journal, 0o600)
             for target, source, mode in changes:
                 if source is None:
@@ -373,16 +376,27 @@ class Installation:
             raise
         self.finish()
 
-    def previous(self):
-        if not self.manifest.exists():
-            if any(path.exists() for path in self.files):
-                raise InstallError("An unmanaged installation exists. Keep it unchanged or uninstall it manually before using this installer.")
-            return None
+    def installation_record(self):
         try:
             if self.manifest.stat().st_size > MAX_METADATA:
                 raise ValueError("Installation record is too large")
             previous = json.loads(self.manifest.read_text())
             version(previous["version"])
+            if not isinstance(previous["image_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", previous["image_sha256"]):
+                raise ValueError("Invalid recorded AppImage hash")
+            if previous["targets"] != self.target_paths():
+                raise InstallError("Installation used different HOME/XDG paths. Restore those environment variables before retrying.")
+            return previous
+        except (ValueError, KeyError, TypeError, OSError) as error:
+            raise InstallError("Invalid installation record; no files were changed.") from error
+
+    def previous(self):
+        if not self.manifest.exists():
+            if any(path.exists() for path in self.files):
+                raise InstallError("An unmanaged installation exists. Keep it unchanged or uninstall it manually before using this installer.")
+            return None
+        previous = self.installation_record()
+        try:
             if previous["image_sha256"] != sha256(self.image):
                 raise InstallError("The AppImage changed outside this installer (for example, through the in-app updater). Use the in-app updater, or uninstall before reinstalling; your data will be preserved.")
             if self.desktop.exists() and self.desktop.read_text() != desktop_entry(self.image):
@@ -394,6 +408,7 @@ class Installation:
     def uninstall(self):
         if not self.manifest.exists():
             raise InstallError("No installation managed by this terminal installer was found.")
+        self.installation_record()
         if self.desktop.exists() and self.desktop.read_text() != desktop_entry(self.image):
             raise InstallError("The desktop entry was changed; remove it manually before uninstalling.")
         changes = [(path, None, 0) for path in self.files if path.exists()]
@@ -457,7 +472,8 @@ def install(installation, release, work, offline_image=None, offline_signature=N
     signed = work / "package.sig"
     signed.write_text(signature + "\n")
     manifest = work / "manifest.json"
-    manifest.write_text(json.dumps({"version": release, "image_sha256": sha256(image)}, indent=2) + "\n")
+    manifest.write_text(json.dumps({"version": release, "image_sha256": sha256(image),
+                                    "targets": installation.target_paths()}, indent=2) + "\n")
     staged += [(installation.icon, icon, 0o644), (installation.desktop, entry, 0o644),
                (installation.image, image, 0o755), (installation.files[-2], signed, 0o644),
                (installation.manifest, manifest, 0o600)]

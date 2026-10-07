@@ -421,6 +421,59 @@ with installation.locked(), tempfile.TemporaryDirectory(dir=str(Path(HOME).paren
             self.install()
         self.assertEqual(self.sentinel.read_bytes(), b"private user model fixture")
 
+    def test_completed_install_changed_xdg_paths_preserve_original_and_foreign_files(self):
+        self.install("0.2.4")
+        self.installation.autostart.parent.mkdir(parents=True)
+        self.installation.autostart.write_text(installer.desktop_entry(self.installation.image))
+        foreign = installer.Installation(self.home, self.home / "other-data", self.home / "other-config")
+        foreign.icon.parent.mkdir(parents=True)
+        foreign.icon.write_bytes(b"unrelated icon in another XDG data directory")
+        foreign.autostart.parent.mkdir(parents=True)
+        foreign.autostart.write_text(installer.desktop_entry(self.installation.image) + "X-Owned-Foreign=true\n")
+        before = self.snapshot()
+        image, signature = self.packages["0.2.5"]
+        for data, config in ((self.home / "other-data", self.home / "config"),
+                             (self.home / "data", self.home / "other-config"),
+                             (self.home / "other-data", self.home / "other-config")):
+            with self.subTest(data=data.name, config=config.name):
+                changed = installer.Installation(self.home, data, config)
+                with changed.locked(), tempfile.TemporaryDirectory(dir=self.root) as work:
+                    with self.assertRaisesRegex(installer.InstallError, "Restore those environment variables"):
+                        installer.install(changed, "0.2.5", Path(work), image, signature)
+                    with self.assertRaisesRegex(installer.InstallError, "Restore those environment variables"):
+                        changed.uninstall()
+                self.assertEqual(self.snapshot(), before)
+        self.install("0.2.5")
+        with self.installation.locked():
+            self.installation.uninstall()
+        self.assertEqual(foreign.icon.read_bytes(), b"unrelated icon in another XDG data directory")
+        self.assertTrue(foreign.autostart.exists())
+        self.assertTrue(self.sentinel.exists())
+
+    def test_missing_malformed_and_tampered_target_records_refuse_install_and_uninstall(self):
+        self.install()
+        valid = json.loads(self.installation.manifest.read_text())
+        missing = {key: value for key, value in valid.items() if key != "targets"}
+        altered = valid["targets"].copy()
+        altered[0] = str(self.home / "unmanaged/LICENSE")
+        cases = [missing, None, [], {**valid, "targets": None}, {**valid, "targets": {}},
+                 {**valid, "targets": valid["targets"][:-1]}, {**valid, "targets": altered},
+                 {**valid, "image_sha256": None}]
+        for record in cases:
+            with self.subTest(record=record):
+                self.installation.manifest.write_text(json.dumps(record))
+                before = self.snapshot()
+                with self.assertRaises(installer.InstallError):
+                    self.install("0.3.0")
+                with self.installation.locked():
+                    with self.assertRaises(installer.InstallError):
+                        self.installation.uninstall()
+                self.assertEqual(self.snapshot(), before)
+        self.installation.manifest.write_text(json.dumps(valid))
+        with self.installation.locked():
+            self.installation.uninstall()
+        self.assertTrue(self.sentinel.exists())
+
     def test_unmanaged_icon_and_edited_launcher_are_not_overwritten(self):
         self.installation.icon.parent.mkdir(parents=True)
         self.installation.icon.write_bytes(b"owned unrelated icon fixture")
@@ -461,6 +514,9 @@ with installation.locked(), tempfile.TemporaryDirectory(dir=str(Path(HOME).paren
             self.install("0.3.0")
         with self.installation.locked():
             self.installation.uninstall()
+        self.assertFalse(self.installation.image.exists())
+        self.assertFalse(self.installation.manifest.exists())
+        self.assertFalse(self.installation.desktop.exists())
         self.assertTrue(self.sentinel.exists())
 
     @unittest.skipUnless(shutil.which("gio") and shutil.which("desktop-file-validate"), "GIO and desktop-file-utils required")
