@@ -24,11 +24,11 @@ as macOS. Tauri hosts these assets on Linux; WKWebView hosts them on macOS.
 |---|---|---|---|
 | CachyOS | KDE Plasma 6 / Wayland | Primary acceptance system | Native UI, virtual-microphone capture beyond two minutes, floating stop/cancel, both CPU engines, clipboard, and AppImage launch verified |
 | Arch Linux and derivatives | KDE Plasma 6 / Wayland | Same integration path | Stock Arch nested KWin: exact CI AppImage capture/recovery/install and native trigger leases pass; patched native real keyboard portal and Wayland/XWayland paste pass |
-| Ubuntu 24.04 and Debian 13 | GNOME / Wayland | Portal integration, clipboard and configured-command fallback | Owned GNOME 46/48 keyboard permission and focused native Wayland paste pass on patched source; Ubuntu inner-XWayland paste and Debian custom command shortcuts pass. GNOME 48 shortcut backend has a separately documented upstream response failure |
+| Ubuntu 24.04 and Debian 13 | GNOME / Wayland | Portal integration, clipboard and configured-command fallback | Exact combined CI AppImage passes keyboard permission, native Wayland/inner-XWayland insertion, custom command shortcuts, local installation and reactivation on GNOME 46/48. GNOME 48 shortcut backend has a separately documented upstream response failure |
 | Fedora KDE 43 | KDE Plasma 6 / Wayland | Native keys, portals, clipboard fallback | Owned stock KWin capture/recovery/install pass. Native keys pass; untouched stock keymap rejects mouse leases safely. Patched native real keyboard portal and Wayland/XWayland paste pass |
 | Kubuntu / Ubuntu 24.04 LTS | KDE Plasma 5.27 / Wayland | Portal or Record-button fallback | Exact CI AppImage owned capture/recovery/install pass with stock Plasma 5.27 and private WirePlumber 0.4 policy. Unsupported native Plasma 6 trigger helpers reject before leasing; physical acceptance remains open |
 | openSUSE Tumbleweed | KDE Plasma 6 / Wayland | Same integration path | Stock nested KWin: exact CI AppImage capture/recovery/install and native trigger leases pass; patched native real keyboard portal and Wayland/XWayland paste pass |
-| Fedora 43 GNOME | GNOME / Wayland | Portals and main recording control | Owned GNOME 49 actual shortcut Activate/Deactivate and hold edges, keyboard Cancel/retry/Share/Revoke, native Wayland and inner-XWayland paste pass on integrated native source |
+| Fedora 43 GNOME | GNOME / Wayland | Portals and main recording control | Exact combined CI AppImage passes actual shortcut Activate/Deactivate and hold edges, keyboard Cancel/retry/Share/Revoke, native Wayland/inner-XWayland insertion, local installation and reactivation on GNOME 49 |
 | Debian 13 named desktops | Xfce, Cinnamon, MATE and KDE / X11 | Native keyboard triggers and explicit session paste; KDE adapter preferred | Actual owned named-desktop setup, toggle/hold, focused paste, conflicts, release/cleanup, persistence and capture pass on native source; physical and login-manager checks remain open |
 | Arch compositor environments | Sway / Hyprland / Wayland | Explicit user-configured command bindings and clipboard | Sway 1.12 headless and Hyprland 0.56.2 owned QEMU guest command/capture/recognition/clipboard checks pass on native source; physical and exact package acceptance remain separate |
 | Other architectures | ARM64 / 32-bit | Outside the initial release scope | No Linux packages yet |
@@ -200,6 +200,23 @@ Permission cancellation no longer leaves Allow disabled. Failed shortcut and key
 setup explicitly closes the rejected portal session. Host registration uses the same cached
 portal connection and stable application identity where the Registry interface exists;
 older backends remain supported without pretending that registration grants permission.
+
+The exact combined AppImage from [CI run 37678314536](https://github.com/juferdinand/OpenWhisper/actions/runs/37678314536),
+artifact `11508384203`, source `816a6d0`, has SHA-256
+`6afe2fbe3aa06a58baac24d263082f1657635ddca2884da8128a2559c72df284`;
+its actual native process has SHA-256
+`7483aeeb21cb1688dbd082a77fac97def83f050ad6dfeae0f89a01275ef08e7f`.
+Direct AppImage execution passes 11 portal/shortcut/paste gates on GNOME 49 and nine
+portal/fallback/paste gates each on GNOME 48 and 46. All three final portal runs use the
+same test-only correction `3aa9554`, which waits for the actual Overview-hidden property
+and verifies field activation through owned typing rather than cached accessibility focus.
+Actual packaged custom `--control toggle/start/stop` bindings separately pass on both
+GNOME 48 and 46. Local AppImage installation, original identity/icon, GIO reactivation of
+that same native process, generated permanent-path autostart enable/launch/disable, and
+retention of private data pass on all three. These checks launch the generated autostart
+entry; they do not establish login-manager startup. GNOME's missing layer-shell protocol
+keeps the main recording fallback usable regardless of the optional library's presence.
+The packaging correction for that library requires fresh affected fallback checks.
 
 GNOME 48's tested backend returns a failed binding response even when its Shell binding
 exists. In the upstream `shell_grab_accelerators_done` success path, `response` is uninitialized;
