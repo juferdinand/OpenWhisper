@@ -1,3 +1,30 @@
+function assertNativeSmokeLayout(main, tab) {
+  if (!main || !tab.isConnected || !tab.classList.contains("selected"))
+    throw new Error("Navigation failed");
+
+  const bounds = main.getBoundingClientRect();
+  const style = getComputedStyle(main);
+  const borderLeft = parseFloat(style.borderLeftWidth);
+  const borderRight = parseFloat(style.borderRightWidth);
+  const gutter = Math.max(0, main.offsetWidth - main.clientWidth - borderLeft - borderRight);
+  const left = bounds.left + borderLeft;
+  const right = bounds.right - borderRight - gutter;
+  for (const child of main.querySelectorAll("*")) {
+    if (!child.getClientRects().length || getComputedStyle(child).visibility !== "visible") continue;
+    const childBounds = child.getBoundingClientRect();
+    if (childBounds.left < left || childBounds.right > right)
+      throw new Error("Visible settings content exceeds its viewport");
+  }
+
+  const overflow = main.scrollWidth - main.clientWidth;
+  // WebKit bug 268275: fractional zoom can round these integer getters differently.
+  // Keep the measured MATE exception narrow, after checking actual visible geometry.
+  const fractionalRounding = overflow === 1 && !Number.isInteger(devicePixelRatio) &&
+    !Number.isInteger(bounds.width) && document.documentElement.clientWidth - innerWidth === 1;
+  if (overflow > 0 && !fractionalRounding)
+    throw new Error("Settings layout overflows horizontally");
+}
+
 // Executed only when the native Linux binary starts with --ui-smoke-test.
 (async () => {
   const invoke = window.__TAURI_INTERNALS__.invoke;
@@ -30,11 +57,7 @@
       tab.click();
       await wait();
       const main = document.querySelector("main");
-      if (
-        !tab.classList.contains("selected") ||
-        main.scrollWidth > main.clientWidth
-      )
-        throw new Error("Navigation or layout failed");
+      assertNativeSmokeLayout(main, tab);
     }
     const icon = document.querySelector(".about-brand img");
     await document.fonts.ready;
