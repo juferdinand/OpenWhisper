@@ -84,6 +84,14 @@ class GnomeInput:
             "/org/gnome/Mutter/RemoteDesktop", "org.gnome.Mutter.RemoteDesktop",
             "CreateSession", None, None, Gio.DBusCallFlags.NONE, 3000, None).unpack()[0]
         self.call("Start")
+        monitor_state = self.bus.call_sync("org.gnome.Mutter.DisplayConfig", "/org/gnome/Mutter/DisplayConfig",
+            "org.gnome.Mutter.DisplayConfig", "GetCurrentState", None, None,
+            Gio.DBusCallFlags.NONE, 3000, None).unpack()
+        if len(monitor_state[1]) != 1 or len(monitor_state[2]) != 1 or monitor_state[2][0][3] != 0:
+            raise RuntimeError("Expected one unrotated owned GNOME monitor")
+        mode = next(mode for mode in monitor_state[1][0][1] if mode[-1].get("is-current"))
+        scale = monitor_state[2][0][2]
+        self.width, self.height = int(mode[1] / scale), int(mode[2] / scale)
         shell_pid = self.bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus",
             "org.freedesktop.DBus", "GetConnectionUnixProcessID", GLib.Variant("(s)", ("org.gnome.Shell",)),
             None, Gio.DBusCallFlags.NONE, 3000, None).unpack()[0]
@@ -157,8 +165,12 @@ class GnomeInput:
             raise RuntimeError("Owned typing field has no displayed extent")
         # Move only the compositor's synthetic pointer. No XTEST or physical
         # input device is opened. Clamp to the owned monitor then click its field.
-        self.call("NotifyPointerMotionRelative", GLib.Variant("(dd)", (-10000.0, -10000.0)))
-        self.call("NotifyPointerMotionRelative", GLib.Variant("(dd)", (float(rect.x + rect.width / 2), float(rect.y + rect.height / 2))))
+        # The top-left hot corner can open Overview and consume the target
+        # click. Clamp to the bottom-right of the actual owned logical monitor.
+        self.call("NotifyPointerMotionRelative", GLib.Variant("(dd)", (10000.0, 10000.0)))
+        self.call("NotifyPointerMotionRelative", GLib.Variant("(dd)", (
+            float(rect.x + rect.width / 2 - (self.width - 1)),
+            float(rect.y + rect.height / 2 - (self.height - 1)))))
         self.call("NotifyPointerButton", GLib.Variant("(ib)", (272, True)))
         self.call("NotifyPointerButton", GLib.Variant("(ib)", (272, False)))
 
