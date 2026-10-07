@@ -20,6 +20,7 @@ interface Preferences {
   output: string;
   hold_to_record: boolean;
   native_trigger?: NativeTrigger | null;
+  x11_trigger?: { keycode: number; keysym: number; modifiers: number; group: number } | null;
   gpu: boolean;
   keep_history: boolean;
   restore_clipboard?: boolean;
@@ -73,6 +74,8 @@ interface State {
   paste_portal: boolean;
   shortcut: string | null;
   native_shortcuts?: boolean;
+  native_x11?: boolean;
+  native_paste?: boolean;
   native_mouse?: boolean;
   native_middle_mouse?: boolean;
   recording_shortcut?: boolean;
@@ -335,7 +338,7 @@ function render() {
     state.shortcut_portal,
     state.paste_portal,
     state.shortcut,
-    state.native_shortcuts, state.native_mouse, state.native_middle_mouse, state.recording_shortcut, state.preferences.native_trigger,
+    state.native_shortcuts, state.native_x11, state.native_paste, state.native_mouse, state.native_middle_mouse, state.recording_shortcut, state.preferences.native_trigger, state.preferences.x11_trigger,
     state.paste_ready,
     state.download,
     Math.round(state.progress * 100),
@@ -424,19 +427,19 @@ function render() {
           ) +
           step(
             5,
-            isMac() ? t("Allow Accessibility access") : t("Allow keyboard access"),
+            isMac() ? t("Allow Accessibility access") : nativePaste() ? t("Allow automatic X11 paste") : t("Allow keyboard access"),
             isMac()
               ? t("Required for automatic insertion and advanced triggers. Clipboard-only output remains available.")
-              : t("Optional permission for automatic pasting. Only keyboard access is requested; no screen capture."),
+              : nativePaste() ? t("Enable Ctrl+V pasting into the focused application for this X11 session. No screen capture is requested.") : t("Optional permission for automatic pasting. Only keyboard access is requested; no screen capture."),
             state.paste_ready,
-            `<button data-portal="${state.paste_ready ? "disable_paste" : "enable_paste"}" ${!state.paste_portal || portalBusy ? "disabled" : ""}>${state.paste_ready ? (isMac() ? t("System Settings") : t("Revoke")) : t("Allow")}</button>${!state.paste_portal ? `<p class="secondary">${esc(t("Your desktop does not expose this portal. Clipboard output remains available."))}</p>` : ""}`,
+            `<button data-portal="${state.paste_ready ? "disable_paste" : "enable_paste"}" ${!pasteAvailable() || portalBusy ? "disabled" : ""}>${state.paste_ready ? (isMac() ? t("System Settings") : t("Revoke")) : t("Allow")}</button>${!pasteAvailable() ? `<p class="secondary">${esc(t("Your desktop does not expose this portal. Clipboard output remains available."))}</p>` : ""}`,
           ) +
           step(
             6,
             t("Set a trigger and try it"),
             isMac() || state.native_mouse
               ? t("Choose a key, shortcut, or mouse button. Place the cursor in a text field, press the trigger, speak, then press it again.")
-              : t("Choose a shortcut in your desktop’s dialog. Place the cursor in a text field, press the trigger, speak, then press it again."),
+              : state.native_x11 ? t("Choose a keyboard key or shortcut. Place the cursor in a text field, press the trigger, speak, then press it again.") : t("Choose a shortcut in your desktop’s dialog. Place the cursor in a text field, press the trigger, speak, then press it again."),
             !!state.shortcut,
             shortcutButton(),
           ),
@@ -478,9 +481,9 @@ function render() {
       section(
         t("Permissions"),
         (isMac() ? row(t("Microphone access"), `<button data-command="allow_microphone">${esc(t("System Settings"))}</button>`) : "") +
-        row(isMac() ? t("Accessibility access") : t("Keyboard access"), permissionButton()),
+        row(isMac() ? t("Accessibility access") : nativePaste() ? t("Automatic X11 paste") : t("Keyboard access"), permissionButton()),
         isMac() ? t("Accessibility access enables automatic pasting and advanced triggers.")
-          : t("Keyboard access is needed for automatic pasting. Portal permission may need to be enabled again after restarting the app."),
+          : nativePaste() ? t("Enable Ctrl+V pasting into the focused application for this X11 session. No screen capture is requested.") : t("Keyboard access is needed for automatic pasting. Portal permission may need to be enabled again after restarting the app."),
       ) +
       section(
         t("Custom vocabulary"),
@@ -527,7 +530,9 @@ function render() {
           (isMac()
             ? row(t("System"), `<span class="secondary">${esc(state.desktop)} · macOS</span>`) +
               row(t("Recognition"), t("Metal GPU acceleration (CPU fallback)"))
-            : row(
+            : (state.native_x11 ? row(t("Native X11 triggers"), t("Available")) : "") +
+              (state.native_paste ? row(t("Native X11 paste"), t("Available")) : "") +
+              row(
                 t("Desktop"),
                 `<span class="secondary">${esc(state.desktop)} · ${esc(state.session)}</span>`,
               ) +
@@ -799,8 +804,10 @@ function render() {
     }),
   );
 }
+function nativePaste() { return !isMac() && !!state.native_paste && !state.paste_portal; }
+function pasteAvailable() { return state.paste_portal || (!isMac() && !!state.native_paste); }
 function permissionButton() {
-  return `<button data-portal="${state.paste_ready ? "disable_paste" : "enable_paste"}" ${!state.paste_portal || portalBusy ? "disabled" : ""}>${state.paste_ready ? (isMac() ? t("System Settings") : t("Revoke")) : t("Allow")}</button>`;
+  return `<button data-portal="${state.paste_ready ? "disable_paste" : "enable_paste"}" ${!pasteAvailable() || portalBusy ? "disabled" : ""}>${state.paste_ready ? (isMac() ? t("System Settings") : t("Revoke")) : t("Allow")}</button>`;
 }
 function updateStatus() {
   const u = state.updates;
@@ -817,7 +824,7 @@ function updateStatus() {
 
 function modifierOnlyTrigger() {
   const trigger = state.preferences.native_trigger;
-  return !isMac() && !!state.native_shortcuts && trigger?.kind === "key" && (trigger.key & 0x01ffffff) >= 0x01000020 && (trigger.key & 0x01ffffff) <= 0x01000023;
+  return !isMac() && !state.native_x11 && !!state.native_shortcuts && trigger?.kind === "key" && (trigger.key & 0x01ffffff) >= 0x01000020 && (trigger.key & 0x01ffffff) <= 0x01000023;
 }
 function triggerLabel() {
   const trigger = state.preferences.native_trigger;
@@ -830,6 +837,7 @@ function triggerLabel() {
   return state.shortcut ?? t("Set trigger …");
 }
 function triggerHelp() {
+  if (state.native_x11) return t("Choose a regular keyboard key or shortcut. X11 reserves the selected key while OpenWhisper is running. Existing shortcuts are not replaced.");
   if (state.native_mouse) return t("Choose a single key, shortcut, or mouse button. The selected trigger is reserved for dictation while OpenWhisper is running.");
   if (state.native_shortcuts) return t("Choose a single key or shortcut. Direct mouse triggers require KDE Plasma 6 on Wayland.");
   return t("Your desktop controls which shortcuts are allowed. Direct mouse triggers currently require KDE Plasma 6 on Wayland.");
@@ -839,11 +847,11 @@ function shortcutButton() {
   if (isMac() && state.macos!.recording_shortcut)
     return `<span class="secondary">${esc(t(state.macos!.shortcut_hint))}</span> <button data-command="cancel_shortcut">${esc(t("Cancel"))}</button>`;
   if (!isMac() && state.recording_shortcut)
-    return `<span class="secondary" role="status">${esc(t("Press and release a key or mouse button. Escape cancels."))}</span> <button data-command="cancel_shortcut">${esc(t("Cancel"))}</button>`;
+    return `<span class="secondary" role="status">${esc(t(state.native_x11 ? "Press and release a keyboard key. Escape cancels." : "Press and release a key or mouse button. Escape cancels."))}</span> <button data-command="cancel_shortcut">${esc(t("Cancel"))}</button>`;
   const busy = portalBusy || ["recording", "transcribing"].includes(state.status) || ["downloading", "installing"].includes(state.updates.status);
   const select = `<button data-portal="enable_shortcut" ${(!state.shortcut_portal && !state.native_shortcuts) || busy ? "disabled" : ""}>${state.shortcut ? esc(triggerLabel()) : t("Set trigger …")}</button>`;
   if (isMac()) return select;
-  return `<div class="trigger-controls">${select}${state.shortcut || state.preferences.native_trigger ? ` <button data-portal="clear_shortcut" ${busy ? "disabled" : ""}>${esc(t("Remove trigger"))}</button>` : ""}${state.native_shortcuts && state.shortcut_portal ? ` <button class="quiet" data-portal="desktop_shortcut" ${busy ? "disabled" : ""}>${esc(t("Desktop shortcut dialog"))}</button>` : ""}</div>`;
+  return `<div class="trigger-controls">${select}${state.shortcut || state.preferences.native_trigger || state.preferences.x11_trigger ? ` <button data-portal="clear_shortcut" ${busy ? "disabled" : ""}>${esc(t("Remove trigger"))}</button>` : ""}${state.native_shortcuts && state.shortcut_portal ? ` <button class="quiet" data-portal="desktop_shortcut" ${busy ? "disabled" : ""}>${esc(t("Desktop shortcut dialog"))}</button>` : ""}</div>`;
 }
 function snippetRow(s?: Snippet) {
   return `<div class="snippet-row" data-id="${esc(s?.id ?? crypto.randomUUID())}"><input class="switch" type="checkbox" name="enabled" aria-label="${esc(t("Enable snippet"))}" ${!s || s.enabled ? "checked" : ""}><input name="trigger" aria-label="${esc(t("When I say"))}" placeholder="${esc(t("When I say …"))}" value="${esc(s?.trigger ?? "")}" maxlength="128"><span>→</span><textarea name="expansion" aria-label="${esc(t("Insert"))}" placeholder="${esc(t("… insert"))}" rows="2">${esc(s?.expansion ?? "")}</textarea><button type="button" data-remove aria-label="${esc(t("Remove snippet"))}">×</button></div>`;

@@ -11,7 +11,8 @@ mod worker;
 
 use desktops::{
     kde,
-    shared::{clipboard, control, overlay, portal_capabilities, portals, session, tray},
+    shared::{clipboard, control, overlay, paste, portal_capabilities, portals, session, tray},
+    x11,
 };
 
 use openwhisper_core::{catalog, Model};
@@ -40,6 +41,8 @@ struct Snapshot {
     paste_portal: bool,
     shortcut: Option<String>,
     native_shortcuts: bool,
+    native_x11: bool,
+    native_paste: bool,
     native_mouse: bool,
     native_middle_mouse: bool,
     recording_shortcut: bool,
@@ -74,6 +77,7 @@ struct Runtime {
     autostart: autostart::Autostart,
     updater: updates::Service,
     triggers: kde::Service,
+    x11: x11::Service,
     tray_items: Mutex<Vec<tauri::menu::MenuItem<tauri::Wry>>>,
     state: Mutex<Snapshot>,
     app: tauri::AppHandle,
@@ -165,7 +169,13 @@ fn save_preferences(
         let mut value = serde_json::to_value(current).map_err(|e| e.to_string())?;
         for (key, change) in changes {
             if !value.as_object().unwrap().contains_key(&key)
-                || ["setup_completed", "gpu_configured", "native_trigger"].contains(&key.as_str())
+                || [
+                    "setup_completed",
+                    "gpu_configured",
+                    "native_trigger",
+                    "x11_trigger",
+                ]
+                .contains(&key.as_str())
             {
                 return Err("Unknown or read-only preference".into());
             }
@@ -184,6 +194,8 @@ fn update_preferences(
     let mut preferences = change(&state.preferences)?;
     preferences.setup_completed |= state.preferences.setup_completed;
     preferences.native_trigger = state.preferences.native_trigger.clone();
+    preferences.x11_trigger = state.preferences.x11_trigger.clone();
+    preferences.validate_recording_mode(state.native_shortcuts && !state.native_x11)?;
     runtime.paths.save(&preferences)?;
     if preferences.launch_at_login != state.preferences.launch_at_login {
         if let Err(error) = runtime.autostart.set(preferences.launch_at_login) {
@@ -273,7 +285,9 @@ fn show_models_folder(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), Str
 }
 #[tauri::command]
 async fn enable_shortcut(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
-    if runtime.state.lock().unwrap().native_shortcuts {
+    if runtime.state.lock().unwrap().native_x11 {
+        x11::begin_capture(runtime.inner().clone()).await
+    } else if runtime.state.lock().unwrap().native_shortcuts {
         kde::begin_capture(runtime.inner().clone()).await
     } else {
         portals::enable_shortcut(runtime.inner().clone()).await
@@ -281,12 +295,38 @@ async fn enable_shortcut(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), 
 }
 #[tauri::command]
 async fn enable_paste(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
-    portals::enable_paste(runtime.inner()).await
+    paste::enable(runtime.inner()).await
 }
 #[tauri::command]
 async fn disable_paste(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
-    portals::disable_paste(runtime.inner()).await;
+    paste::disable(runtime.inner()).await;
     Ok(())
+}
+
+#[tauri::command]
+async fn cancel_shortcut(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
+    if runtime.state.lock().unwrap().native_x11 {
+        x11::cancel_capture(runtime.inner().clone()).await
+    } else {
+        kde::cancel_shortcut(runtime).await
+    }
+}
+#[tauri::command]
+async fn clear_shortcut(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
+    if runtime.state.lock().unwrap().native_x11 {
+        x11::clear_trigger(runtime.inner().clone()).await
+    } else {
+        kde::clear_shortcut(runtime).await
+    }
+}
+#[tauri::command]
+async fn desktop_shortcut(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
+    if runtime.state.lock().unwrap().native_x11 {
+        x11::clear_trigger(runtime.inner().clone()).await?;
+        portals::enable_shortcut(runtime.inner().clone()).await
+    } else {
+        kde::desktop_shortcut(runtime).await
+    }
 }
 
 fn main() {
@@ -311,6 +351,9 @@ fn main() {
     }
     if std::env::args().any(|arg| arg == "--linux-trigger-helper") {
         std::process::exit(desktops::kde::helper::run());
+    }
+    if std::env::args().any(|arg| arg == "--linux-x11-helper") {
+        std::process::exit(desktops::x11::helper::run());
     }
     let _smoke_environment = smoke::Environment::prepare();
     gtk::glib::set_prgname(Some("io.github.whisperfree"));
@@ -356,9 +399,9 @@ fn main() {
             copy_history,
             show_models_folder,
             enable_shortcut,
-            kde::cancel_shortcut,
-            kde::clear_shortcut,
-            kde::desktop_shortcut,
+            cancel_shortcut,
+            clear_shortcut,
+            desktop_shortcut,
             enable_paste,
             disable_paste,
             models::download_model,
@@ -426,6 +469,7 @@ fn main() {
                 autostart,
                 updater: updates::Service::default(),
                 triggers: kde::Service::default(),
+                x11: x11::Service::default(),
                 tray_items: Mutex::new(vec![]),
                 state: Mutex::new(Snapshot {
                     updates: updates::Snapshot::new(app.handle()),
@@ -451,6 +495,8 @@ fn main() {
                     paste_portal: false,
                     shortcut: None,
                     native_shortcuts: false,
+                    native_x11: false,
+                    native_paste: false,
                     native_mouse: false,
                     native_middle_mouse: false,
                     recording_shortcut: false,
@@ -479,7 +525,12 @@ fn main() {
             tauri::async_runtime::spawn(control::start(state.clone()));
             updates::start(state.clone());
             kde::install_capture(state.clone())?;
-            tauri::async_runtime::spawn(kde::initialize(state.clone()));
+            x11::install_capture(state.clone())?;
+            let shortcuts = state.clone();
+            tauri::async_runtime::spawn(async move {
+                kde::initialize(shortcuts.clone()).await;
+                x11::initialize(shortcuts).await;
+            });
             let worker = state.clone();
             std::thread::Builder::new()
                 .name("speech-worker".into())
@@ -567,8 +618,11 @@ fn main() {
         if matches!(event, tauri::RunEvent::Exit) {
             if let Some(state) = app.try_state::<Arc<Runtime>>() {
                 state.clipboard.shutdown();
-                tauri::async_runtime::block_on(control::shutdown(&state));
-                tauri::async_runtime::block_on(kde::shutdown(&state));
+                tauri::async_runtime::block_on(async {
+                    control::shutdown(&state).await;
+                    x11::shutdown(&state).await;
+                    kde::shutdown(&state).await;
+                });
             }
         }
     });

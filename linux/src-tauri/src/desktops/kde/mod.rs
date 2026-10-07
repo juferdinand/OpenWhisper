@@ -195,6 +195,27 @@ pub async fn initialize(runtime: Arc<Runtime>) {
             return;
         }
     }
+    // A retained X11 profile must never give a KDE modifier-only shortcut hold semantics.
+    if keyboard {
+        let saved = {
+            let mut state = runtime.state.lock().unwrap();
+            let mut prefs = state.preferences.clone();
+            prefs.restore_kde_recording_mode();
+            let result = if prefs.hold_to_record != state.preferences.hold_to_record {
+                runtime.paths.save(&prefs)
+            } else {
+                Ok(())
+            };
+            if result.is_ok() {
+                state.preferences = prefs;
+            }
+            result
+        };
+        if let Err(error) = saved {
+            runtime.update(|s| s.message = error);
+            return;
+        }
+    }
     let saved = runtime
         .state
         .lock()
@@ -299,14 +320,12 @@ async fn finish_capture(runtime: Arc<Runtime>, trigger: Option<Trigger>) -> Resu
     });
     Ok(())
 }
-#[tauri::command]
 pub async fn cancel_shortcut(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
     if runtime.triggers.capture.lock().unwrap().cancel() {
         finish_capture(runtime.inner().clone(), None).await?;
     }
     Ok(())
 }
-#[tauri::command]
 pub async fn clear_shortcut(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
     let _operation = runtime.triggers.operation.lock().await;
     editable(&runtime)?;
@@ -326,7 +345,6 @@ pub async fn clear_shortcut(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(
     });
     Ok(())
 }
-#[tauri::command]
 pub async fn desktop_shortcut(runtime: tauri::State<'_, Arc<Runtime>>) -> Result<(), String> {
     clear_shortcut(runtime.clone()).await?;
     crate::desktops::shared::portals::enable_shortcut(runtime.inner().clone()).await

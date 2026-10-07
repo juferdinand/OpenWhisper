@@ -1,5 +1,6 @@
 use crate::{
-    audio, control, portals,
+    audio, control,
+    desktops::shared::paste,
     transcription::{SavedRecording, Service},
     Runtime, WorkerCommand,
 };
@@ -294,7 +295,7 @@ pub fn run(runtime: Arc<Runtime>, commands: mpsc::Receiver<WorkerCommand>) {
                     if prefs.output == "paste" && copied.is_ok() {
                         let state = runtime.clone();
                         tauri::async_runtime::block_on(async move {
-                            let message = match portals::paste(&state).await {
+                            let message = match paste::paste(&state).await {
                                 Ok(_) => "Text pasted into the focused app.".into(),
                                 Err(e) => e,
                             };

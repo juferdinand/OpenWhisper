@@ -11,6 +11,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 import os
+import re
 from pathlib import Path
 import select
 import signal
@@ -59,6 +60,7 @@ def accessibility_router(address):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--session", choices=["x11", "kde-wayland", "sway", "gnome-wayland"], required=True)
+    parser.add_argument("--x11-desktop", choices=["xfce", "cinnamon", "mate", "kde"], help="Start a genuine named session inside the private Xvfb display")
     parser.add_argument("--output", type=Path, help="New directory for private logs/configuration")
     parser.add_argument("--timeout", type=int, default=360, help="Command timeout in seconds")
     parser.add_argument("command", nargs=argparse.REMAINDER)
@@ -66,8 +68,11 @@ def main():
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command or args.timeout < 1:
         parser.error("Supply a command after -- and a positive timeout")
+    if args.x11_desktop and args.session != "x11":
+        parser.error("--x11-desktop requires --session x11")
+    desktop_command = {"xfce": ["xfce4-session"], "cinnamon": ["cinnamon-session", "--session", "cinnamon"], "mate": ["mate-session"], "kde": ["startplasma-x11"]}.get(args.x11_desktop)
     compositor = {"kde-wayland": "kwin_wayland", "sway": "sway", "gnome-wayland": "gnome-shell"}.get(args.session)
-    for name in ["Xvfb", "dbus-daemon", "pipewire", "pipewire-pulse", "wireplumber", "pactl"] + ([compositor] if compositor else []):
+    for name in ["Xvfb", "dbus-daemon", "pipewire", "pipewire-pulse", "wireplumber", "pactl"] + ([compositor] if compositor else []) + ([desktop_command[0], "xprop"] if desktop_command else []) + (["gdbus"] if args.x11_desktop == "kde" else []):
         if not shutil.which(name):
             parser.error("Missing dependency: " + name)
     root = args.output.resolve() if args.output else Path(tempfile.mkdtemp(prefix="openwhisper-owned-"))
@@ -77,7 +82,7 @@ def main():
         root.chmod(0o700)
     print("Owned session evidence:", root, flush=True)
     metadata = {
-        "session": args.session, "command": command, "timeout_seconds": args.timeout,
+        "session": args.session, "x11_desktop": args.x11_desktop, "command": command, "timeout_seconds": args.timeout,
         "started_utc": datetime.now(timezone.utc).isoformat(),
     }
     (root / "run.json").write_text(json.dumps(metadata, indent=2) + "\n")
@@ -116,6 +121,9 @@ def main():
         __GLX_VENDOR_LIBRARY_NAME="mesa", WEBKIT_DISABLE_DMABUF_RENDERER="1",
         GGML_DISABLE_VULKAN="1",
     )
+    if args.x11_desktop:
+        env["XDG_CURRENT_DESKTOP"] = {"xfce": "XFCE", "cinnamon": "X-Cinnamon", "mate": "MATE", "kde": "KDE"}[args.x11_desktop]
+        env["DESKTOP_SESSION"] = {"xfce": "xfce", "cinnamon": "cinnamon", "mate": "mate", "kde": "plasma"}[args.x11_desktop]
     alsa = root / "alsa-private.conf"
     alsa.write_text('pcm.!default { type pulse }\nctl.!default { type pulse }\n')
     env["ALSA_CONFIG_PATH"] = str(alsa)
@@ -177,20 +185,38 @@ def main():
         env["DISPLAY"] = ":" + number
         # No service directories: portal/systemd services cannot activate against the real session.
         session_config = root / "session-bus.conf"
+        desktop_services = ""
+        if args.x11_desktop:
+            # Activate only the named desktop's packaged services on this private bus.
+            # Portal/systemd activation remains absent, and no host service path is shared.
+            service_dir = root / "desktop-services"
+            service_dir.mkdir()
+            prefix = {"xfce": "org.xfce.", "cinnamon": "org.Cinnamon.", "mate": "org.mate.", "kde": "org.kde."}[args.x11_desktop]
+            names = []
+            for service in Path("/usr/share/dbus-1/services").glob("*.service"):
+                match = re.search(r"^Name=(.+)$", service.read_text(), re.MULTILINE)
+                if match and (match.group(1).startswith(prefix) or match.group(1) == "ca.desrt.dconf"):
+                    shutil.copyfile(service, service_dir / service.name)
+                    names.append(match.group(1))
+            metadata["owned_activation_services"] = sorted(names)
+            desktop_services = '<servicedir>' + str(service_dir) + '</servicedir>'
         session_config.write_text(
             '<busconfig><type>session</type><listen>unix:path=' + str(runtime / "session-bus") +
             '</listen><auth>EXTERNAL</auth><policy context="default">'
             '<allow own="*"/><allow send_destination="*"/><allow receive_sender="*"/>'
-            '</policy></busconfig>'
+            '</policy>' + desktop_services + '</busconfig>'
         )
         bus = start("session-bus", ["dbus-daemon", "--config-file=" + str(session_config), "--nofork", "--print-address"], True)
         env["DBUS_SESSION_BUS_ADDRESS"] = line(bus)
-        if args.session == "gnome-wayland":
-            # GNOME Shell requires a system-bus connection even in nested mode.
+        if args.session == "gnome-wayland" or args.x11_desktop:
+            # Named sessions require a system-bus connection even in an owned display.
             # This empty owned bus has no host services or activation directories.
             system_config = root / "system-bus.conf"
-            system_config.write_text(session_config.read_text().replace("<type>session</type>", "<type>system</type>")
-                                     .replace(str(runtime / "session-bus"), str(runtime / "system-bus")))
+            system_contents = session_config.read_text().replace("<type>session</type>", "<type>system</type>")
+            system_contents = system_contents.replace(str(runtime / "session-bus"), str(runtime / "system-bus"))
+            if desktop_services:
+                system_contents = system_contents.replace(desktop_services, "")
+            system_config.write_text(system_contents)
             system_bus = start("system-bus", ["dbus-daemon", "--config-file=" + str(system_config), "--nofork", "--print-address"], True)
             env["DBUS_SYSTEM_BUS_ADDRESS"] = line(system_bus)
         a11y_config = next((path for path in [
@@ -235,6 +261,28 @@ def main():
             shell = start("gnome-shell", ["gnome-shell", "--nested", "--wayland", "--no-x11", "--sm-disable", "--wayland-display=openwhisper-owned"])
             wait_socket(runtime / "openwhisper-owned", shell)
             env["WAYLAND_DISPLAY"] = "openwhisper-owned"
+        if desktop_command:
+            desktop = start("desktop-session", desktop_command)
+            deadline = time.monotonic() + 30
+            expected = {"xfce": "xfwm4", "cinnamon": "muffin", "mate": "marco", "kde": "kwin"}[args.x11_desktop]
+            while True:
+                if desktop.poll() is not None:
+                    raise RuntimeError("Owned named desktop exited before becoming ready")
+                check = subprocess.run(["xprop", "-root", "_NET_SUPPORTING_WM_CHECK"], env=env, capture_output=True, text=True, timeout=2)
+                match = re.search(r"window id # (0x[0-9a-fA-F]+)", check.stdout)
+                if match:
+                    name = subprocess.run(["xprop", "-id", match.group(1), "_NET_WM_NAME"], env=env, capture_output=True, text=True, timeout=2)
+                    owner_ready = True
+                    if args.x11_desktop == "kde":
+                        owner = subprocess.run(["gdbus", "call", "--session", "--dest", "org.freedesktop.DBus", "--object-path", "/org/freedesktop/DBus", "--method", "org.freedesktop.DBus.NameHasOwner", "org.kde.kglobalaccel"], env=env, capture_output=True, text=True, timeout=2)
+                        owner_ready = "true" in owner.stdout
+                    if expected in name.stdout.lower() and owner_ready:
+                        metadata["window_manager"] = name.stdout.strip()
+                        (root / "desktop-ready.txt").write_text(name.stdout)
+                        break
+                if time.monotonic() > deadline:
+                    raise RuntimeError("Owned named desktop did not report its expected window manager")
+                time.sleep(0.2)
         with (root / "command.log").open("w") as output:
             process = subprocess.Popen(command, env=env, stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
             command_process = process
@@ -246,6 +294,9 @@ def main():
                 result = 124
         print(("PASS" if result == 0 else "FAIL") + ": owned " + args.session + " command, exit " + str(result), flush=True)
         return result
+    except Exception:
+        result = 1
+        raise
     finally:
         # A second interrupt must not interrupt cleanup of the owned processes.
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
