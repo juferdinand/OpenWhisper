@@ -11,7 +11,7 @@ mod worker;
 
 use desktops::{
     kde,
-    shared::{clipboard, overlay, portals, session},
+    shared::{clipboard, overlay, portal_capabilities, portals, session},
 };
 
 use openwhisper_core::{catalog, Model};
@@ -315,23 +315,13 @@ fn main() {
     }
     if std::env::args().any(|arg| arg == "--diagnose") {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let (shortcut, paste) = rt.block_on(async {
-            (
-                ashpd::desktop::global_shortcuts::GlobalShortcuts::new()
-                    .await
-                    .map(|p| p.version())
-                    .ok(),
-                ashpd::desktop::remote_desktop::RemoteDesktop::new()
-                    .await
-                    .map(|p| p.version())
-                    .ok(),
-            )
-        });
+        let capabilities = rt.block_on(portal_capabilities::probe());
         println!(
             "{}",
             serde_json::json!({"session": if session::wayland() {"Wayland"} else {"X11"},
             "desktop": std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(), "microphones": audio::devices(),
-            "global_shortcuts_portal": shortcut, "remote_desktop_portal": paste, "vulkan_build": cfg!(feature="vulkan"),
+            "global_shortcuts_portal": capabilities.shortcut_version, "remote_desktop_portal": capabilities.remote_desktop_version,
+            "remote_desktop_keyboard": capabilities.keyboard, "vulkan_build": cfg!(feature="vulkan"),
             "clipboard_helper": session::available(if session::wayland() {"wl-copy"} else {"xclip"})})
         );
         return;
@@ -483,15 +473,10 @@ fn main() {
                 .name("speech-worker".into())
                 .spawn(move || worker::run(worker, receiver))?;
             tauri::async_runtime::spawn(async move {
-                let shortcuts = ashpd::desktop::global_shortcuts::GlobalShortcuts::new()
-                    .await
-                    .is_ok();
-                let paste = ashpd::desktop::remote_desktop::RemoteDesktop::new()
-                    .await
-                    .is_ok();
+                let capabilities = portal_capabilities::probe().await;
                 state.update(|s| {
-                    s.shortcut_portal = shortcuts;
-                    s.paste_portal = paste;
+                    s.shortcut_portal = capabilities.shortcut_version.is_some();
+                    s.paste_portal = capabilities.keyboard;
                 });
             });
             let show = tauri::menu::MenuItem::with_id(

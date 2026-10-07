@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Native desktop acceptance test using a silent virtual sink; never records the real microphone.
 Requires PyGObject/AT-SPI and PulseAudio tools. Replaces this session's clipboard with the public JFK fixture.
-Use run-owned-desktop.py with --owned for an isolated X11 or nested KWin session.
+Use run-owned-desktop.py with --owned for a private owned desktop session.
 """
 import argparse, gi, hashlib, json, os, pathlib, shutil, signal, subprocess, tempfile, time
 gi.require_version("Atspi", "2.0")
@@ -14,6 +14,8 @@ parser.add_argument("--model", type=pathlib.Path, default=root/"linux/target/spe
 parser.add_argument("--model-id", choices=["tiny", "parakeet-v3-q4"], default="tiny")
 parser.add_argument("--fixture", type=pathlib.Path, default=root/"linux/vendor/whisper.cpp/samples/jfk.wav", help="Public pinned speech fixture (useful with a binary built in another checkout)")
 parser.add_argument("--owned", action="store_true", help="Require run-owned-desktop.py's private display, D-Bus and audio session")
+parser.add_argument("--expect-no-overlay", action="store_true", help="In an owned session, require the unsupported-overlay notice and main-window Stop/Cancel fallback")
+parser.add_argument("--expect-no-portals", action="store_true", help="In an owned session, require disabled shortcut and paste permission actions")
 parser.add_argument("--recovery", action="store_true", help="In an owned session, fail inference with a disposable invalid model and verify retry after restart")
 parser.add_argument("--duration", type=int, default=126, help="Seconds for the recording-duration check (126 tests the former two-minute cutoff)")
 parser.add_argument("--portals", action="store_true", help="Also request keyboard permission, bind a shortcut, and verify insertion into a private GTK test field")
@@ -28,6 +30,7 @@ if args.owned:
         parser.error("--owned requires run-owned-desktop.py; refusing the live desktop/audio session.")
     if args.portals: parser.error("Owned sessions do not include permission-portal acceptance; run that flow with a supervised tester.")
 if args.recovery and not args.owned: parser.error("--recovery requires --owned; restart/failure regression must not use the live session.")
+if (args.expect_no_overlay or args.expect_no_portals) and not args.owned: parser.error("Fallback capability assertions require --owned; refusing the live session.")
 wayland = bool(os.environ.get("WAYLAND_DISPLAY"))
 clipboard_command = ["wl-paste", "--no-newline"] if wayland else ["xclip", "-selection", "clipboard", "-o"]
 for command in ["pactl", "paplay", clipboard_command[0], "gdbus"] + (["qdbus6"] if args.portals else []):
@@ -90,6 +93,16 @@ def click(item):
     time.sleep(.2)  # Let WebKit scroll an off-screen control before invoking its accessibility action.
     assert item.get_action_iface().do_action(0)
 
+def visible_app_text():
+    values = []
+    for item in descendants(app()):
+        try:
+            values.append(item.get_name())
+            if 'Text' in item.get_interfaces():
+                values.append(Atspi.Text.get_text(item, 0, -1))
+        except GLib.Error: pass
+    return '\n'.join(value for value in values if value)
+
 def stop_app():
     if process:
         try: os.killpg(process.pid, signal.SIGTERM)
@@ -130,11 +143,28 @@ try:
     time.sleep(.5)
     wait_button('Start dictation')
     print('PASS: launcher reactivation preserves the existing app and UI', flush=True)
+    if args.expect_no_overlay or args.expect_no_portals:
+        click(wait_button('General'))
+        text = visible_app_text()
+        if args.expect_no_overlay:
+            assert 'Floating recording indicator' in text and 'Not supported by this desktop' in text, 'Unsupported overlay notice is missing'
+            assert 'Show overlay when idle' not in text, 'Unsupported floating overlay is promised as available'
+            print('PASS: unsupported layer-shell shows its capability notice and no overlay preference', flush=True)
+        if args.expect_no_portals:
+            assert not wait_button('Set trigger').get_state_set().contains(Atspi.StateType.SENSITIVE), 'Unavailable shortcut portal action is enabled'
+            assert not wait_button('Allow').get_state_set().contains(Atspi.StateType.SENSITIVE), 'Unavailable keyboard portal permission action is enabled'
+            assert 'Global shortcuts portal' in text and 'Keyboard portal' in text and text.count('Unavailable') >= 2, 'Missing unavailable portal capability notices'
+            print('PASS: absent owned portals show capability notices and disable shortcut/paste permission actions', flush=True)
     click(wait_button('Start dictation'))
     wait_button('Recording')
-    indicator = wait_button('Recording', frame='OpenWhisper Recording')
-    assert not indicator.get_state_set().contains(Atspi.StateType.FOCUSED), 'Overlay stole keyboard focus'
-    print('PASS: native record control starts CPAL capture and floating overlay appears', flush=True)
+    recording_frame = 'OpenWhisper' if args.expect_no_overlay else 'OpenWhisper Recording'
+    if args.expect_no_overlay:
+        assert not button('Recording', frame='OpenWhisper Recording'), 'Unsupported overlay appeared'
+        print('PASS: native main-window recording control starts private CPAL capture without an overlay', flush=True)
+    else:
+        indicator = wait_button('Recording', frame=recording_frame)
+        assert not indicator.get_state_set().contains(Atspi.StateType.FOCUSED), 'Overlay stole keyboard focus'
+        print('PASS: native record control starts CPAL capture and floating overlay appears', flush=True)
     started = time.monotonic()
     while time.monotonic() - started < args.duration:
         assert button('Recording'), 'Recording stopped unexpectedly'
@@ -143,9 +173,9 @@ try:
         if elapsed in [30, 60, 90, 120]: print(f'Recording duration check: {elapsed}s', flush=True)
     assert button('Recording'), 'Recording stopped before the explicit cancel action'
     print(f'PASS: recording remains active after {args.duration} seconds', flush=True)
-    click(wait_button('Discard recording', frame='OpenWhisper Recording'))
+    click(wait_button('Discard recording', frame=recording_frame))
     wait_button('Start dictation')
-    print('PASS: floating Cancel discards the recording', flush=True)
+    print('PASS: ' + ('main-window' if args.expect_no_overlay else 'floating') + ' Cancel discards the recording', flush=True)
     if args.portals:
         click(wait_button('General'))
         click(wait_button('Allow'))
@@ -189,13 +219,13 @@ Gtk.main()
     wait_button('Recording')
     subprocess.run(['paplay', '--device', sink, str(args.fixture.resolve())], check=True)
     time.sleep(.4)
-    click(wait_button('Recording', frame='OpenWhisper Recording'))
+    click(wait_button('Recording', frame=recording_frame))
     wait_button('Start dictation', seconds=90)
     history = json.loads((config/'history.json').read_text())
     assert history and 'country' in history[0].lower(), 'Known speech fixture not recognized'
-    clipboard = subprocess.check_output(clipboard_command, text=True)
+    clipboard = subprocess.check_output(clipboard_command, text=True, timeout=10)
     assert clipboard == history[0], 'Clipboard differs from recognized fixture'
-    print('PASS: floating Stop → CPAL/PipeWire → recognition → history → ' + ('Wayland' if wayland else 'X11') + ' clipboard', flush=True)
+    print('PASS: ' + ('main-window' if args.expect_no_overlay else 'floating') + ' Stop → CPAL/PipeWire → recognition → history → ' + ('Wayland' if wayland else 'X11') + ' clipboard', flush=True)
     if args.portals:
         time.sleep(.5)
         assert (work/'pasted.txt').read_text() == history[0], 'Automatic paste did not reach the focused test field'
@@ -228,7 +258,7 @@ Gtk.main()
         wait_button('Recording')
         subprocess.run(['paplay', '--device', sink, str(args.fixture.resolve())], check=True)
         time.sleep(.4)
-        click(wait_button('Recording', frame='OpenWhisper Recording'))
+        click(wait_button('Recording', frame=recording_frame))
         wait_button('Retry transcription', seconds=60)
         backups = list((config/'recovery').glob('*.wav'))
         assert len(backups) == 1, 'Failed inference did not retain one WAV backup'
@@ -246,7 +276,7 @@ Gtk.main()
         wait_button('Start dictation', seconds=90)
         recovered = json.loads((config/'history.json').read_text())
         assert len(recovered) == len(history) + 1 and 'country' in recovered[0].lower(), 'Retry did not recover the fixture'
-        assert subprocess.check_output(clipboard_command, text=True) == recovered[0], 'Recovered transcript was not delivered'
+        assert subprocess.check_output(clipboard_command, text=True, timeout=10) == recovered[0], 'Recovered transcript was not delivered'
         assert not backup.exists(), 'Successful retry retained the recovered audio'
         print('PASS: failed inference retains a private WAV across restart; restored model retry delivers and removes it', flush=True)
     if args.owned:
