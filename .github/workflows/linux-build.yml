@@ -114,7 +114,11 @@ jobs:
       - name: Verify CPU fallback in the Vulkan build
         env:
           GGML_DISABLE_VULKAN: '1'
-        run: bash scripts/test-recognition.sh --release --features vulkan
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          features="openwhisper-desktop/custom-protocol,openwhisper-desktop/vulkan"
+          if [[ -n "$RELEASE_VERSION" ]]; then features+=",openwhisper-desktop/release-updater"; fi
+          bash scripts/test-recognition.sh --release --features "$features"
       - name: Verify and checksum packages
         run: |
           dpkg-deb --info target/release/bundle/deb/*.deb
