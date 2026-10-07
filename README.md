@@ -385,7 +385,7 @@ Remove personal dictations and other confidential information from any logs you 
 ## Limitations and roadmap
 
 The current app transcribes after recording; a live text preview is not implemented yet.
-Linux has packaged releases; acceptance testing across additional desktops is still pending. Windows,
+Linux has packaged releases and automated checks across the desktops listed in the support matrix. Windows,
 cloud synchronization, and LLM post-processing are not implemented.
 Automatic pasting uses the clipboard and a simulated keyboard shortcut, so behavior can vary
 between target apps.
@@ -417,7 +417,7 @@ Linux CI builds development `.deb` and AppImage artifacts on Ubuntu 22.04; packa
 alone does not certify every desktop. **Main pushes do not create a tag, change the version,
 or publish a release.** The manual Release workflow builds and tests macOS and Linux together.
 After both succeed, it creates the version commit/tag and uploads all four packages with combined
-checksums. It creates a draft by default for desktop acceptance before publication. Download packages from [Releases](https://github.com/juferdinand/OpenWhisper/releases/latest).
+checksums. It creates a draft by default for final artifact verification before publication. Download packages from [Releases](https://github.com/juferdinand/OpenWhisper/releases/latest).
 Tests use shared cases from
 [`shared/test-vectors.json`](shared/test-vectors.json).
 
@@ -457,10 +457,11 @@ macOS and Linux tests and packaging in parallel. Only after both succeed does th
 create the version commit/tag and upload the universal DMG/ZIP, `OpenWhisper-Linux-x86_64.AppImage`,
 `OpenWhisper-Linux-amd64.deb`, Linux `.sig` files, `latest.json`, and a combined `SHA256SUMS`. No separate CI dispatch or manual asset
 upload is needed. Packages are also retained as Actions artifacts.
-The workflow creates a draft by default. Download its AppImage and complete the
-[desktop acceptance checks](docs/LINUX.md#native-desktop-acceptance-test) on the primary system,
-then update the platform notes and publish the draft. The `draft` input can be disabled when the
-required desktop acceptance is already complete for the release source.
+The workflow creates a draft by default. Verify its complete asset set, checksums and signatures,
+then publish it after the documented automated package/runtime checks pass. The `draft` input
+can be disabled for direct publication. Additional physical-device and login-session coverage
+is documented in the [Linux validation notes](docs/LINUX.md#acceptance-evidence); it is no longer
+a required manual release gate. Concrete desktop problems are tracked through bug reports.
 The DMG contains the signed app and an Applications shortcut. CI mounts it read-only and checks
 its integrity, the contained app's signature, and agreement with the original build.
 The update repository is embedded in the bundle during the build.

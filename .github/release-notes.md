@@ -1,12 +1,15 @@
-## What's new in 0.2.4
+## What's new in 0.2.5
 
-- Fix Linux crashes when transcribing long Parakeet recordings. Recognition now uses bounded sections for both model families instead of building a GPU graph for the entire recording.
-- Isolate Linux recognition in a separate process. Failed sections are retried with progressively smaller windows on GPU and CPU; a manual CPU choice is preserved. Already recognized sections are retained through automatic retries.
-- Save a private local WAV before recognition. If recognition cannot finish or the app exits unexpectedly, **Retry transcription** and **Discard saved recording** remain available after restart. Temporary audio is deleted after successful clipboard delivery. Nothing is sent to a server.
-- Keep the shared English/German interface, existing GPU/CPU selection, saved models and settings, and recording without a fixed time limit. macOS and Linux continue to share one release version.
+- Add native keyboard setup and toggle/hold triggers for X11 desktops, with explicitly allowed session-only automatic paste. KDE keeps its own native adapter.
+- Add `--control toggle`, `--control start` and `--control stop` for user-configured shortcuts on Sway, Hyprland and desktops without a usable shortcut portal.
+- Make permission retry usable after denial, clean up failed portal sessions, and keep the main recording control available when a compositor has no floating-overlay protocol.
+- Recover the settings window when the Linux tray host disappears. Closing without a tray host now quits cleanly, including during recording.
+- Include the optional Wayland overlay runtime and its notices in the AppImage. Preserve nested notices during local installation.
+- Acknowledge Stop before preparing captured audio for recognition. Recording still has no fixed time limit; the existing private recovery recordings, GPU/CPU retries and manual CPU choice remain available.
+- Validate the shared English/German UI and Linux desktop flows in isolated graphical sessions across KDE, GNOME, Xfce, Cinnamon, MATE, Sway and Hyprland. The validation notes identify exact packages, virtual input/audio and remaining hardware coverage.
 
 **Updating from Linux 0.2.1 or 0.2.2:** use **About → Check now**. The older updater may still
-close after installing 0.2.4 when launched by a systemd service. If that happens, open OpenWhisper
+close after installing the update when launched by a systemd service. If that happens, open OpenWhisper
 once from your application launcher; the new package is already installed. Original Linux 0.2.0
 and source/CI builds need a manual installation of a signed release to obtain the updater.
 
@@ -34,24 +37,29 @@ for setup and permissions. Dictation still supports multiple languages.
 
 ## Linux download and installation
 
-Linux packages are available for x86_64. Desktop integration depends on KDE native services or the installed portal backend.
-The primary tested environment is **CachyOS x86_64, KDE Plasma 6, Wayland, and PipeWire**.
+Linux packages are available for x86_64. Desktop integration depends on KDE native services,
+the installed portal backend, X11, or explicit user-configured compositor bindings. Owned
+graphical tests cover additional KDE distributions, GNOME 46/48/49, named X11 desktops,
+Sway and Hyprland; these results do not establish every physical device or target application.
 
 - **AppImage:** download `OpenWhisper-Linux-x86_64.AppImage`, make it executable, and run it. If FUSE is unavailable, use `APPIMAGE_EXTRACT_AND_RUN=1 ./OpenWhisper-Linux-x86_64.AppImage`.
-- **Debian/Ubuntu package:** download `OpenWhisper-Linux-amd64.deb` and install it with `sudo apt install ./OpenWhisper-Linux-amd64.deb`. The package is built on Ubuntu 22.04; desktop acceptance on Debian/Ubuntu is still pending.
-- Wayland clipboard output requires `wl-clipboard`. KDE Plasma 6 supports native keyboard triggers; KDE Wayland mouse triggers also require `kreadconfig6`, `kwriteconfig6`, and the `buttonsrebind` plugin. Other desktops use the GlobalShortcuts portal. Automatic pasting requires a compatible RemoteDesktop portal; keyboard access is requested only when enabled.
-- The floating indicator requires `gtk-layer-shell` and a compatible Wayland compositor. GNOME does not provide layer-shell; the main-window control remains available.
-- Set the trigger and optional paste permission in General. KDE native triggers reconnect at startup; portal setup remains session-scoped. Primary left/right clicks and scrolling are excluded. Fn, DPI/profile, and vendor buttons work only if the hardware exposes supported input events. Direct mouse capture on other desktops and X11 is not implemented.
+- **Debian/Ubuntu package:** download `OpenWhisper-Linux-amd64.deb` and install it with `sudo apt install ./OpenWhisper-Linux-amd64.deb`. Packages are built on Ubuntu 22.04; owned APT installation/removal tests preserve existing user data.
+- Wayland clipboard output requires `wl-clipboard`; X11 requires `xclip`. KDE Plasma 6 supports native keyboard triggers; KDE Wayland mouse triggers also require `kreadconfig6`, `kwriteconfig6`, and the `buttonsrebind` plugin. Other Wayland desktops use an available GlobalShortcuts portal or explicit command bindings. Automatic Wayland paste requires a compatible RemoteDesktop portal; keyboard access is requested only when enabled.
+- The AppImage includes `gtk-layer-shell` for floating controls on compatible Wayland compositors. Native builds use an optional system library. GNOME does not provide layer-shell; the main-window control remains available.
+- Set the trigger and optional paste permission in General. KDE native and X11 keyboard triggers reconnect at startup; portal permissions remain session-scoped. Primary left/right clicks and scrolling are excluded. Fn, DPI/profile, and vendor buttons work only if the hardware exposes supported input events. Direct mouse capture outside KDE Wayland is not implemented.
+- GNOME 48's tested shortcut backend returns a failed binding response; the main recording control and configured-command fallback remain available. The tested GNOME 49 backend passes shortcut activation and hold/release checks.
 - Vulkan recognition requires a Vulkan loader and compatible graphics driver. Whisper Tiny and Parakeet v3 q4 were tested on an NVIDIA RTX 3060; AMD/Intel GPUs and other drivers still need hardware acceptance. CPU recognition remains available without a compatible GPU.
 - Custom model import, clipboard restoration, editor output, and sounds are not yet available on Linux.
 
 Linux updates use a separate persistent signing key and signed version. Verify the first download's origin and `SHA256SUMS`. The `.sig` files and `latest.json` are used by the updater.
 AppImages must be in a writable permanent location; Debian updates request system administrator
-authorization. Debian/Ubuntu update installation still needs desktop acceptance.
-Read the [Linux support and validation notes](https://github.com/juferdinand/OpenWhisper/blob/v0.2.4/docs/LINUX.md)
-for dependencies, tested behavior, and remaining checks. Physical microphone quality, physical hold/toggle shortcut events,
-XWayland insertion, and other distributions still need broader acceptance testing.
+authorization. A signed update into a real desktop login session remains separate from owned
+installation tests.
+Read the [Linux support and validation notes](https://github.com/juferdinand/OpenWhisper/blob/v0.2.5/docs/LINUX.md)
+for dependencies, exact tested behavior, and coverage limits. Physical microphones, GPU drivers,
+login sessions and application-specific paste behavior remain separately identified. Report
+reproducible problems with the version, package, desktop and session type.
 
 Known dependency risk: the Linux GTK 3 stack includes `glib 0.18.5`, affected by
 [RUSTSEC-2024-0429](https://rustsec.org/advisories/RUSTSEC-2024-0429.html). The alert remains open;
-see the [scope and source review](https://github.com/juferdinand/OpenWhisper/blob/v0.2.4/SECURITY.md#known-linux-dependency-advisory).
+see the [scope and source review](https://github.com/juferdinand/OpenWhisper/blob/v0.2.5/SECURITY.md#known-linux-dependency-advisory).

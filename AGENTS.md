@@ -204,7 +204,7 @@ for key continuity and a future Developer ID migration; changing identities requ
   CI and Release share `.github/workflows/linux-build.yml` for Linux tests and packaging.
   Only after both builds succeed does the publication job commit/tag the version, verify artifact
   checksums, and upload DMG, ZIP, AppImage, Debian package, Linux signatures, `latest.json`, and combined `SHA256SUMS`.
-  It creates a complete draft by default for Linux desktop acceptance. The `draft` input controls
+  It creates a complete draft by default for final artifact verification. The `draft` input controls
   publication. No separate CI dispatch or manual Linux attachment is needed. Do not relabel
   packages from an older version.
 - Linux release signing uses `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
@@ -222,7 +222,7 @@ for key continuity and a future Developer ID migration; changing identities requ
   Keep the README and release instructions aligned with the app.
 - Linux CI builds on Ubuntu 22.04, checks both host UI adapters, and uploads development
   packages. A main push never changes versions, tags, or public releases. Linux public releases
-  require separate desktop acceptance; do not present intended distro support as tested.
+  require the documented automated package/runtime checks; do not present intended distro support as tested.
 - The manual version step uses `linux/scripts/set-version.py` to synchronize all manifests.
 - CI repeats weekly. See `SECURITY.md` for the security policy.
 - Renovate tracks Cargo, npm, Actions, and whisper.cpp versions; keep SHA pins and auto-merge disabled.

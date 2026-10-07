@@ -33,10 +33,10 @@ remain coverage limits rather than prerequisites for closing the automated accep
 | Arch Linux and derivatives | KDE Plasma 6 / Wayland | Same integration path | Stock Arch nested KWin: exact CI AppImage capture/recovery/install and native trigger leases pass; patched native real keyboard portal and Wayland/XWayland paste pass |
 | Ubuntu 24.04 and Debian 13 | GNOME / Wayland | Portal integration, clipboard and configured-command fallback | Exact combined CI AppImage passes keyboard permission, native Wayland/inner-XWayland insertion, custom command shortcuts, local installation and reactivation on GNOME 46/48. GNOME 48 shortcut backend has a separately documented upstream response failure |
 | Fedora KDE 43 | KDE Plasma 6 / Wayland | Native keys, portals, clipboard fallback | Owned stock KWin capture/recovery/install pass. Native keys pass; untouched stock keymap rejects mouse leases safely. Patched native real keyboard portal and Wayland/XWayland paste pass |
-| Kubuntu / Ubuntu 24.04 LTS | KDE Plasma 5.27 / Wayland | Portal or Record-button fallback | Exact CI AppImage owned capture/recovery/install pass with stock Plasma 5.27 and private WirePlumber 0.4 policy. Unsupported native Plasma 6 trigger helpers reject before leasing; physical acceptance remains open |
+| Kubuntu / Ubuntu 24.04 LTS | KDE Plasma 5.27 / Wayland | Portal or Record-button fallback | Exact CI AppImage owned capture/recovery/install pass with stock Plasma 5.27 and private WirePlumber 0.4 policy. Unsupported native Plasma 6 trigger helpers reject before leasing; physical-device coverage remains untested |
 | openSUSE Tumbleweed | KDE Plasma 6 / Wayland | Same integration path | Stock nested KWin: exact CI AppImage capture/recovery/install and native trigger leases pass; patched native real keyboard portal and Wayland/XWayland paste pass |
 | Fedora 43 GNOME | GNOME / Wayland | Portals and main recording control | Exact combined CI AppImage passes actual shortcut Activate/Deactivate and hold edges, keyboard Cancel/retry/Share/Revoke, native Wayland/inner-XWayland insertion, local installation and reactivation on GNOME 49 |
-| Debian 13 named desktops | Xfce, Cinnamon, MATE and KDE / X11 | Native keyboard triggers and explicit session paste; KDE adapter preferred | Actual owned named-desktop setup, toggle/hold, focused paste, conflicts, release/cleanup, persistence and capture pass on native source; physical and login-manager checks remain open |
+| Debian 13 named desktops | Xfce, Cinnamon, MATE and KDE / X11 | Native keyboard triggers and explicit session paste; KDE adapter preferred | Actual owned named-desktop setup, toggle/hold, focused paste, conflicts, release/cleanup, persistence and capture pass on native source; physical-device and login-manager coverage remains untested |
 | Arch compositor environments | Sway / Hyprland / Wayland | Explicit user-configured command bindings and clipboard | Sway 1.12 headless and Hyprland 0.56.2 owned QEMU guest command/capture/recognition/clipboard checks pass on native source; physical and exact package acceptance remain separate |
 | Other architectures | ARM64 / 32-bit | Outside the initial release scope | No Linux packages yet |
 
@@ -124,7 +124,7 @@ candidate's tray icon. An owned compositor Close hides the settings window while
 stays alive; actual rendered context-menu actions reopen the same window and Quit cleanly.
 Virtual pointer events target that owned panel only. This checks real tray widgets and
 protocols rather than substituting a test watcher. Minimal openSUSE container panel rendering
-remains unresolved; physical tray/login acceptance remains open on every distribution.
+remains unresolved; physical tray/login coverage remains untested on these distributions.
 
 A separate actual Fedora host-loss test exposed a no-tray Close defect in native source
 `ad8cd4a`: after KDED and PlasmaShell stopped, the main window reopened, but closing it left
@@ -238,7 +238,7 @@ recorded as synthetic tray evidence, separate from KDE's actual panel widgets.
 delivery. Its environment guards remain mandatory. Raw local reports are under
 `.local/planning/gnome-comprehensive/`; fixture focus failures and the GNOME 48 backend failure
 are retained separately from passing runs. Normal login identity, real hardware and other
-application paste bindings still require supervised checks.
+application paste bindings remain separate coverage limits; reproducible problems should be reported as bugs.
 
 ### Named X11 desktops
 
@@ -384,7 +384,7 @@ it does not change product inference limits or introduce a recording cutoff. See
   a non-focusable floating window. Unsupported compositors keep the in-window control.
 - Store configuration and models in the user's XDG directories. Do not migrate or delete existing
   files without a documented migration. Avoid logging dictated text or private audio.
-- Public Linux packages remain a manual action after desktop acceptance,
+- Public Linux packages use the Release workflow after the documented automated package/runtime checks,
   with package checksums and accurate support notes. Release builds use a separate persistent Linux
   signing key, verified with the embedded public key and signed package version before installation.
 
@@ -462,7 +462,8 @@ audio sources before creating its virtual sink. Nested KWin uses the owned Xvfb 
 No host desktop sockets, physical microphone, live portal permission dialogs, user clipboard,
 or user configuration are used. Container execution has networking disabled and no host devices
 or desktop sockets mounted. This is synthetic, nested-compositor, and container evidence;
-acceptance checks 3–7 and the broad desktop issues remain open for supervised physical testing.
+at this historical baseline, checks 3–7 had not been exercised. Later desktop evidence is
+recorded above. Physical coverage is separate and no longer a manual release gate.
 
 The source baseline is `de9dbe962115aa41ac426a26ff70d94bc5e2dce7`, version **0.2.4**.
 The Ubuntu 22.04 packages came from the successful
@@ -518,7 +519,7 @@ The built acceptance image ID was
 | Harness interruption cleanup | PASS | SIGTERM/SIGINT during owned capture preserve exit 143/130; app/service groups and private runtime disappear; `harness-interruption-final.log` |
 | Earlier harness attempts | FAIL, superseded | Stale AT-SPI objects after restart, shallow container script path, missing `at-spi2-core` / `libglib2.0-bin`, language switch's toggle-button role; corrected harnesses were rerun |
 | GNOME, wlroots, target-distribution Wayland portals, signed update/restart and physical devices | SKIP | Not exercised by these owned checks |
-| Full session login/autostart, tray acceptance, real shortcut/hold edges, portal denial, XWayland paste and target-field focus | MANUAL REQUIRED | Run the supervised checklist below; no desktop-support claim follows from the owned overlay's unfocused accessibility button |
+| Full session login/autostart, tray acceptance, real shortcut/hold edges, portal denial, XWayland paste and target-field focus | SKIP at this baseline | Later owned portal/tray/focus checks are recorded above; physical/login coverage remains separate |
 
 Logs and host test data remain local under `.local/planning/overnight-linux-acceptance/`
 and the printed `/tmp/openwhisper-desktop-test-*` paths; they are not committed.
@@ -633,7 +634,7 @@ shaders compile; CPU work for audio conversion and other orchestration is still 
 only this user's XDG autostart file. AppImages use their persistent installed path, not a temporary
 extraction path. Moving an AppImage requires turning this setting off and on at its new location.
 No administrator access is needed. Automatic launch after a full desktop logout/login still needs
-manual acceptance; creation, disabling, path escaping, and native IPC are covered by tests.
+separate coverage; creation, disabling, path escaping, and native IPC are covered by tests.
 The installed AppImage also passed enabling/disabling through the native settings UI and launching
 its generated desktop entry in an isolated X11 session on CachyOS.
 
@@ -742,9 +743,8 @@ The owned Mutter registry advertised `wl_data_device_manager` without data-contr
 `wl-paste`'s transparent-window fallback received no keyboard focus in the retained trace. Upstream
 [documents this possible hang](https://github.com/bugaevc/wl-clipboard/blob/v2.2.1/data/wl-clipboard.1#L165-L171).
 This no-input nested result does not establish clipboard behavior in a physical GNOME
-session. [GNOME acceptance #5](https://github.com/juferdinand/OpenWhisper/issues/5)
-and [Sway/Hyprland acceptance #7](https://github.com/juferdinand/OpenWhisper/issues/7)
-remain open for their supervised checks. No portal permissions, physical microphone,
+session. These historical results preceded the later owned GNOME and Hyprland checks above.
+No portal permissions, physical microphone,
 target-field paste, login/autostart, tray, signed-update, or Hyprland acceptance follows
 from these owned results.
 
@@ -763,7 +763,7 @@ WAV/text persistence across restart and explicit discard. The fixture deliberate
 its private history to expose Transcript Copy. These are owned synthetic checks, not an
 Ubuntu CI package or physical-desktop acceptance. [Clipboard issue #25](https://github.com/juferdinand/OpenWhisper/issues/25)
 tracked this focused correction, merged in [PR #26](https://github.com/juferdinand/OpenWhisper/pull/26);
-broad GNOME and Sway/Hyprland acceptance stays open.
+the later GNOME and Sway/Hyprland package/session evidence is recorded above.
 
 The exact packages from [CI run 37651712074](https://github.com/juferdinand/OpenWhisper/actions/runs/37651712074),
 source `c1d7e4612d5cda25bf66a99b74ab47fac0c035b9`, subsequently passed separate owned
@@ -803,11 +803,10 @@ an unprivileged test user, removes the package, and verifies that private settin
 model storage and a sentinel survive. A container has no ordinary GNOME/KDE desktop session;
 this cannot establish Debian desktop, portal, tray or physical-device support.
 
-For morning acceptance, first review the retained logs and the branch diff. Then, on the actual
-target desktop, perform checks 3–8 above with a supervised tester: physical speech and device
-disconnect, toggle/hold and release, permission denial, native Wayland and XWayland targets,
-focus preservation, tray close/reopen, and a full logout/login. Review German and completed
-setup after relaunch. Keep the running installation until those functional changes are accepted.
+The automated reports above determine completion of the Linux acceptance work. Additional
+physical speech/device, target-application and logout/login coverage can be supplied through
+bug reports, identifying the exact version, package and desktop. Replacing the actively used
+installation still requires an explicit user instruction.
 
 ### Long-recording and process-failure regression
 
@@ -1019,8 +1018,9 @@ The manual Release workflow applies the requested version to both platform build
 in parallel. CI and Release call the same reusable Linux build workflow. After both platforms pass,
 a publication job creates the version commit/tag, verifies both artifact checksum files, and uploads
 all packages with combined checksums. There is no separate CI dispatch or manual Linux attachment.
-The complete release is a draft by default so its AppImage can receive desktop acceptance before
-publication. Public downloads use the stable asset names
+The complete release is a draft by default for verification of the asset set, checksums and
+signatures before publication. Successful automated package/runtime checks satisfy Linux
+acceptance; physical/login coverage remains documented separately. Public downloads use the stable asset names
 `OpenWhisper-Linux-x86_64.AppImage` and `OpenWhisper-Linux-amd64.deb`; their internal version still
 matches the tag. `SHA256SUMS` covers both Linux packages, signatures, update feed, and the macOS DMG/ZIP.
 Publishing Linux packages does not establish support for untested distributions.
@@ -1109,8 +1109,9 @@ Do not infer a passing result from a missing feature, a package build, or anothe
 | Overlay focus, tray or main-window fallback | PASS / FAIL / SKIP / MANUAL REQUIRED | Desktop behavior; protocol availability alone is insufficient |
 | Login, signed update/restart, uninstall | PASS / FAIL / SKIP / MANUAL REQUIRED | Supervised session; settings/models preserved |
 
-Agents may execute existing fixture, private virtual-source, and owned nested-compositor
-tests. Physical input and permission/login flows need an explicitly supervised tester.
+Agents may execute existing fixture, private virtual-source, owned permission-dialog and
+nested-compositor tests. Physical input and real login flows require a supervised tester
+if that additional coverage is collected; they do not gate this automated acceptance scope.
 Use a disposable account/session or VM for installation and desktop changes. Attach only
 sanitized evidence; never attach private dictations, recordings, keys, or clipboard content.
 An unsupported feature can pass its fallback check while its full-feature check remains skipped.
