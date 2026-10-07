@@ -527,13 +527,13 @@ Install Rust/Cargo, Node.js/npm, Python 3, a C++ compiler, CMake, pkg-config, an
 CachyOS / Arch build and runtime dependencies:
 
 ```bash
-sudo pacman -S --needed rust nodejs npm base-devel cmake python curl webkit2gtk-4.1 gtk3 libappindicator-gtk3 alsa-lib pipewire-alsa libxkbcommon gtk-layer-shell wl-clipboard xclip vulkan-icd-loader shaderc
+sudo pacman -S --needed rust nodejs npm base-devel cmake python curl webkit2gtk-4.1 gtk3 libappindicator-gtk3 alsa-lib pipewire-alsa libxkbcommon gtk-layer-shell wayland-protocols binutils squashfs-tools wl-clipboard xclip vulkan-icd-loader shaderc
 ```
 
 Ubuntu 22.04+ / Debian build dependencies (desktop validation is still pending):
 
 ```bash
-sudo apt install build-essential cmake ninja-build pkg-config python3 curl libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libxkbcommon-dev libgtk-layer-shell0 libvulkan-dev patchelf wl-clipboard xclip
+sudo apt install build-essential cmake ninja-build pkg-config python3 curl libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libasound2-dev librsvg2-dev libssl-dev libxkbcommon-dev libgtk-layer-shell0 libvulkan-dev patchelf binutils squashfs-tools wl-clipboard xclip
 python3 linux/scripts/build-glslc.py
 export PATH="$PWD/linux/vendor/shaderc/bin:$PATH"
 ```
@@ -554,6 +554,26 @@ make linux-install
 The local installer needs no root access. It places the executable and licenses under
 `~/.local/lib/whisperfree`, and an application launcher and the original Mac icon under
 `$XDG_DATA_HOME` (default `~/.local/share`). Open OpenWhisper from your application launcher.
+
+AppImage packaging explicitly stages `libgtk-layer-shell.so.0`: the overlay loads it at runtime,
+so automatic ELF dependency discovery cannot include it. Both npm bundle commands run
+`scripts/prepare-appimage.py` before Tauri. Staging checks the native architecture, library
+version and installed Debian/Arch package ownership before retaining the matching copyright
+and full license texts. Arch additionally needs `wayland-protocols` for its protocol notices;
+an unrecognized library version requires updating the upstream notice snapshot first.
+The library remains optional for native builds, and compositors without layer-shell keep the
+main recording control.
+
+Verify the finished image, including its actual ELF exports/build ID and notice bytes, with:
+
+```bash
+cd linux
+python3 scripts/verify-appimage.py target/release/bundle/appimage/*.AppImage
+```
+
+This uses `readelf` and `unsquashfs` without launching the AppImage. CI performs the same check
+before release signing; it requires `binutils` and `squashfs-tools`.
+
 `make linux-run` runs the build directly. Builds made on a rolling distribution are not portable
 binaries for older distributions; the CI package baseline is Ubuntu 22.04.
 

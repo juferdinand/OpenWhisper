@@ -36,6 +36,25 @@ Each dependency retains its upstream license. Linux system libraries are provide
 the distribution or package. Speech models are downloaded separately and retain their
 upstream licenses; see the repositories in shared/models.json.
 
+## GTK Layer Shell
+
+Source: https://github.com/wmww/gtk-layer-shell
+
+The optional Wayland overlay uses GTK Layer Shell through runtime loading. Debian packages
+use the distribution's library. AppImages explicitly include the build system's native
+`libgtk-layer-shell.so.0` and retain its installed Debian copyright file, or the matching
+upstream 0.10.1 source notice snapshot when an Arch package has no separate copyright file.
+The Arch snapshot retains the bundled protocol notices and adds the installed
+`wayland-protocols` copyright blocks for external protocols, with their package versions
+and input hashes. These notice inputs do not identify the distribution binary's historical
+build dependency versions.
+The library as a whole is LGPL-3.0-or-later; most individual files use MIT. Its full LGPL,
+GPL and MIT texts and component copyright notices are retained in
+`usr/share/doc/gtk-layer-shell/` inside the AppImage, alongside build-origin version/hashes.
+The upstream source reference and notice snapshot are also in `licenses/gtk-layer-shell/`.
+These library terms do not replace OpenWhisper's own MIT license. The library remains
+separate and dynamically loaded; unsupported compositors retain the main recording control.
+
 ## Inter 4.1
 
 Source: https://github.com/rsms/inter/tree/v4.1
