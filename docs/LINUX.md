@@ -293,6 +293,13 @@ and system-library evidence, not AppRun or self-contained AppImage evidence. The
 library-free image could use main recording controls but had no visible overlay; the
 combined CI AppImage's missing optional library is separately undergoing packaging correction.
 
+The same focus/Stop/manual-paste/Close gates also pass in the owned Hyprland guest using
+source `816a6d0` / CPU debug native `2c37ec27…` with system gtk-layer-shell 0.10.1. Its
+cancellation interval is one second; the complete run takes about six minutes under CPU
+emulation. This does not establish a 126-second Hyprland recording or combined-package
+portability. The original five-second startup IPC timeout is retained separately; the
+corrected fixture has bounded 20-second VM IPC calls and a bounded target-map wait.
+
 `test-wlroots-focus.py` requires the private runner and validates its Wayland endpoint before
 app/input actions. Its fixed-key `owned-wayland-keyboard.py` uses a standard virtual-keyboard
 keymap for actual GTK clear/paste shortcuts, never physical input devices. Test focus and
