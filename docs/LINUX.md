@@ -30,7 +30,7 @@ as macOS. Tauri hosts these assets on Linux; WKWebView hosts them on macOS.
 | openSUSE Tumbleweed | KDE Plasma 6 / Wayland | Same integration path | Stock nested KWin: exact CI AppImage capture/recovery/install and native trigger leases pass; patched native real keyboard portal and Wayland/XWayland paste pass |
 | Fedora 43 GNOME | GNOME / Wayland | Portals and main recording control | Owned GNOME 49 actual shortcut Activate/Deactivate and hold edges, keyboard Cancel/retry/Share/Revoke, native Wayland and inner-XWayland paste pass on integrated native source |
 | Debian 13 named desktops | Xfce, Cinnamon, MATE and KDE / X11 | Native keyboard triggers and explicit session paste; KDE adapter preferred | Actual owned named-desktop setup, toggle/hold, focused paste, conflicts, release/cleanup, persistence and capture pass on native source; physical and login-manager checks remain open |
-| Arch compositor environments | Sway / Hyprland / Wayland | Explicit user-configured command bindings and clipboard | Sway 1.12 headless command/capture/recognition/clipboard pass; Hyprland 0.56.2 owned QEMU guest toggle/hold and busy-state checks pass. Full Hyprland recognition and physical acceptance are tracked separately |
+| Arch compositor environments | Sway / Hyprland / Wayland | Explicit user-configured command bindings and clipboard | Sway 1.12 headless and Hyprland 0.56.2 owned QEMU guest command/capture/recognition/clipboard checks pass on native source; physical and exact package acceptance remain separate |
 | Other architectures | ARM64 / 32-bit | Outside the initial release scope | No Linux packages yet |
 
 Actual features depend on the desktop and its portal backend, not just the distribution name.
@@ -163,8 +163,8 @@ older backends remain supported without pretending that registration grants perm
 
 GNOME 48's tested backend returns a failed binding response even when its Shell binding
 exists. In the upstream `shell_grab_accelerators_done` success path, `response` is uninitialized;
-[version 49 initializes it to zero](https://gitlab.gnome.org/GNOME/xdg-desktop-portal-gnome/-/blob/49.0/src/globalshortcuts.c).
-This explains the observed version-specific failure; OpenWhisper continues treating failed
+[version 49 initializes it to zero](https://github.com/GNOME/xdg-desktop-portal-gnome/blob/0a3499e0e04f4f9b657bf404f9266dd23d03d2ae/src/globalshortcuts.c#L490).
+This is consistent with the observed version-specific failure; OpenWhisper continues treating failed
 responses as failures and closes the session. It does not bypass permission responses.
 GNOME's missing layer-shell protocol keeps the main-window recording controls usable.
 No-watcher Close/restart passes; host-loss recovery with a replacement test watcher is
@@ -215,10 +215,13 @@ and F9 press/release, busy refusal while an owned helper is deliberately stalled
 recognition and clipboard delivery, and preservation of the completed result.
 
 Hyprland 0.56.2 / Aquamarine 0.15.1 runs in a disposable Arch QEMU guest with software Mesa
-and a virtual GPU. Actual guest F8/F9 compositor bindings, capture, Stop acknowledgement and
-all four capture controls' bounded busy responses pass. The original debug recognition run
-did not finish within its 90-second test deadline under CPU emulation; that failure remains
-recorded and full recognition/clipboard acceptance is still pending. Exposing layer-shell or
+and a virtual GPU. All eleven control checks pass on corrected source `816a6d0`, native binary
+SHA-256 `2c37ec272f9ccf9d46c567b17ffebe02cd6589dbfa811f9ce5bcc8fd8835bca9`.
+Actual guest F8/F9 compositor bindings, capture, Stop acknowledgement, all four capture controls'
+bounded busy responses, public-fixture recognition and clipboard delivery pass. The replay
+took six minutes overall under CPU emulation with a 480-second recognition test deadline.
+The original debug recognition run did not finish within its 90-second deadline; that failure
+remains recorded separately. Exposing layer-shell or
 virtual-keyboard protocols alone does not establish overlay focus or physical support.
 The guest has no physical devices, and post-provisioning network access is disabled.
 
