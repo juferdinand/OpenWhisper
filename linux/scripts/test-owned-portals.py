@@ -109,6 +109,20 @@ class GnomeInput:
             self.call("NotifyKeyboardKeycode", GLib.Variant("(ub)", (key, pressed)))
             time.sleep(0.05)
 
+    def tap(self, key):
+        for pressed in [True, False]:
+            self.call("NotifyKeyboardKeycode", GLib.Variant("(ub)", (key, pressed)))
+            time.sleep(0.05)
+
+    def recording_mode(self, app, hold):
+        combo = wait_for(lambda: next((node for node in app.nodes()
+            if node.get_role_name() == "combo box" and node.get_name() == "Recording mode"), None), "Recording mode combobox")
+        self.focus_field(combo)
+        self.tap(102)  # Home
+        if hold:
+            self.tap(108)  # Down
+        self.tap(28)  # Enter
+
     def xwayland_environment(self):
         runtime = require_owned()
         if os.environ.get("WF_OWNED_GNOME_XWAYLAND") != "1":
@@ -446,7 +460,10 @@ def main():
                             raise
                         app.click("Discard recording")
                         wait_for(lambda: app.find("Start dictation"), "Shortcut capture cancellation")
-                        app.click("Push to talk", roles=("radio button",))
+                        stop_owned(target)
+                        target = None
+                        input_device.recording_mode(app, True)
+                        wait_for(lambda: json.loads((config / "settings.json").read_text()).get("hold_to_record"), "Push-to-talk preference saved")
                         input_device.keys(True)
                         try:
                             wait_for(lambda: app.find("Recording"), "Push-to-talk press")
@@ -455,9 +472,8 @@ def main():
                         wait_for(lambda: app.find("Start dictation"), "Push-to-talk release")
                         assert not (config / "history.json").exists() or json.loads((config / "history.json").read_text()) == []
                         print("PASS: real GNOME global shortcut press/release starts and stops silent virtual capture", flush=True)
-                        app.click("Toggle", roles=("radio button",))
-                        stop_owned(target)
-                        target = None
+                        input_device.recording_mode(app, False)
+                        wait_for(lambda: not json.loads((config / "settings.json").read_text()).get("hold_to_record"), "Toggle preference restored")
                 app.click("Paste at the cursor", roles=("radio button",))
                 if input_device is None:
                     input_device = GnomeInput()
