@@ -17,6 +17,9 @@ your text is pasted into the active text field. No account, API key, or subscrip
 [Installation](#installation) · [Features](#features) · [Privacy](#privacy) ·
 [Roadmap](docs/ROADMAP.md) · [Contributing](#contributing) · [Report an issue](https://github.com/juferdinand/OpenWhisper/issues)
 
+The [Electron migration plan](docs/ELECTRON-MIGRATION.md) records the next host architecture,
+development-profile strategy and issue/PR disposition. The released app still uses the native hosts below.
+
 ![OpenWhisper's shared dark interface](docs/images/shared-desktop.png)
 
 Both desktop apps load the same layout, original logo, and bundled font. Native window borders,
@@ -44,10 +47,9 @@ KDE integration is detected through KWin and KGlobalAccel capabilities, not a Ca
 Other distributions with the required Plasma 6 services can use that implementation, but each
 distribution and package combination still needs its own acceptance evidence.
 
-Current source and development builds also provide explicit native X11 keyboard setup,
+Version 0.2.5 also provides explicit native X11 keyboard setup,
 session-only automatic X11 paste, commands for user-configured compositor bindings, and
-detection of an available tray host that keeps a hidden app reachable. These changes are separate from
-the published 0.2.4 packages. The table below summarizes integration paths; exact builds,
+detection of an available tray host that keeps a hidden app reachable. The table below summarizes integration paths; exact builds,
 owned desktop checks, physical acceptance, and remaining gaps are recorded in
 [the Linux validation matrix](docs/LINUX.md#validation-status).
 See [trigger setup and limitations](docs/LINUX.md#first-use).
@@ -60,8 +62,8 @@ determine which features work. See the [Linux implementation and test plan](docs
 | Arch Linux and derivatives, KDE Wayland | Acceptance tracked per distribution and package | Native KDE adapter; exact session evidence is tracked in the Linux matrix |
 | Ubuntu LTS / Debian, GNOME Wayland | Owned development checks; physical acceptance separate | Shortcut and keyboard portals; native and XWayland insertion checks are recorded in the Linux matrix |
 | Fedora, GNOME or KDE Wayland | Development validation tracked in the Linux matrix | Capability-dependent portal/KDE integration; desktop and package evidence remain separate |
-| Xfce, Cinnamon, MATE, and KDE X11 | Owned desktop development checks; physical acceptance separate | Source builds provide native keyboard triggers and opt-in Ctrl+V paste; KDE keeps its own adapter. Direct X11 mouse capture is not implemented. |
-| Sway / Hyprland and other Wayland compositors | Source command bindings; validation tracked in the Linux matrix | User-configured toggle or press/release commands; overlay, clipboard, and portals depend on compositor capabilities |
+| Xfce, Cinnamon, MATE, and KDE X11 | Owned desktop checks; physical evidence separate | Version 0.2.5 provides native keyboard triggers and opt-in Ctrl+V paste; KDE keeps its own adapter. Direct X11 mouse capture is not implemented. |
+| Sway / Hyprland and other Wayland compositors | Version 0.2.5 command bindings; validation tracked in the Linux matrix | User-configured toggle or press/release commands; overlay, clipboard, and portals depend on compositor capabilities |
 | Linux ARM64 or 32-bit | Outside the initial release scope | No packages or support claim |
 
 Microphone recording, hotkeys, and automatic pasting must pass an end-to-end test on a desktop
@@ -69,7 +71,7 @@ before it is listed as tested. Clipboard output is the fallback for unavailable
 or denied input permissions. See [Linux build and setup](docs/LINUX.md#build-from-source) and
 the [feature and validation checklist](docs/LINUX.md#validation-status).
 
-In a source/development build with command control, open the app normally before binding
+In version 0.2.5 or later, open the app normally before binding
 `openwhisper-desktop --control toggle` to a desktop shortcut. Explicit `start` and `stop`
 commands support press/release bindings; `cancel` and `status` are also available.
 For an AppImage, use its permanent installed path. These commands contact the existing
@@ -83,7 +85,7 @@ English/German settings, and recording controls. Host-specific differences are c
 and in [docs/LINUX.md](docs/LINUX.md).
 
 - **System-wide dictation:** Paste text into the active text field, copy it to the clipboard, or open it in a text editor.
-- **Your preferred trigger:** macOS supports keyboard shortcuts, individual modifiers, Fn, and extra mouse buttons. Linux supports native Plasma 6 keys, KDE Wayland mouse buttons, and shortcut portals. Current source builds add native X11 keyboard triggers and user-configured compositor commands. KDE modifier-only triggers use toggle mode; regular X11 keys and explicit compositor press/release bindings provide push-to-talk.
+- **Your preferred trigger:** macOS supports keyboard shortcuts, individual modifiers, Fn, and extra mouse buttons. Linux supports native Plasma 6 keys, KDE Wayland mouse buttons, and shortcut portals. Version 0.2.5 adds native X11 keyboard triggers and user-configured compositor commands. KDE modifier-only triggers use toggle mode; regular X11 keys and explicit compositor press/release bindings provide push-to-talk.
 - **Local speech recognition:** OpenAI Whisper and NVIDIA Parakeet through [whisper.cpp](https://github.com/ggml-org/whisper.cpp), with Metal on macOS and Vulkan with CPU fallback on Linux.
 - **Model management:** Download and select catalog models on both platforms. macOS also provides deletion, custom ggml import, and hardware-based recommendations.
 - **Vocabulary and snippets:** Correct custom terms and replace spoken phrases with saved text, such as “my link” with a URL.
@@ -107,11 +109,11 @@ The packaged macOS app requires:
 
 ### Download the macOS app
 
-1. Download and open the [**0.2.4 macOS DMG**](https://github.com/juferdinand/OpenWhisper/releases/download/v0.2.4/WhisperFree-macOS.dmg).
+1. Download and open the [**0.2.5 macOS DMG**](https://github.com/juferdinand/OpenWhisper/releases/download/v0.2.5/OpenWhisper-macOS.dmg).
 2. Drag the app onto the **Applications** folder in the window.
 3. Eject the volume, open the app from **Applications**, and follow [Your first dictation](#your-first-dictation-macos).
 
-A [0.2.4 ZIP download](https://github.com/juferdinand/OpenWhisper/releases/download/v0.2.4/WhisperFree-macOS.zip) is also available.
+A [0.2.5 ZIP download](https://github.com/juferdinand/OpenWhisper/releases/download/v0.2.5/OpenWhisper-macOS.zip) is also available.
 
 Releases use a persistent, self-signed certificate and are **not notarized by Apple**.
 For these early open-source releases, this avoids the annual Apple Developer Program fee.
@@ -123,7 +125,7 @@ See [Apple's instructions](https://support.apple.com/102445).
 Each release includes `SHA256SUMS`. To verify the DMG download, place that file beside the DMG and run:
 
 ```bash
-grep '  WhisperFree-macOS[.]dmg$' SHA256SUMS | shasum -a 256 -c -
+grep '  OpenWhisper-macOS[.]dmg$' SHA256SUMS | shasum -a 256 -c -
 ```
 
 ### Build macOS from source
@@ -151,17 +153,17 @@ Alternatively, `make mac-install` builds the app, replaces an existing installat
 
 ### Install the Linux app
 
-Download the [**0.2.4 Linux AppImage**](https://github.com/juferdinand/OpenWhisper/releases/download/v0.2.4/WhisperFree-Linux-x86_64.AppImage)
+Download the [**0.2.5 Linux AppImage**](https://github.com/juferdinand/OpenWhisper/releases/download/v0.2.5/OpenWhisper-Linux-x86_64.AppImage)
 from the release page, then run:
 
 ```bash
-chmod +x WhisperFree-Linux-x86_64.AppImage
-./WhisperFree-Linux-x86_64.AppImage
+chmod +x OpenWhisper-Linux-x86_64.AppImage
+./OpenWhisper-Linux-x86_64.AppImage
 ```
 
-If FUSE is unavailable, run `APPIMAGE_EXTRACT_AND_RUN=1 ./WhisperFree-Linux-x86_64.AppImage`.
-On Debian/Ubuntu, the alternative [**0.2.4 Debian package**](https://github.com/juferdinand/OpenWhisper/releases/download/v0.2.4/WhisperFree-Linux-amd64.deb)
-can be installed with `sudo apt install ./WhisperFree-Linux-amd64.deb`.
+If FUSE is unavailable, run `APPIMAGE_EXTRACT_AND_RUN=1 ./OpenWhisper-Linux-x86_64.AppImage`.
+On Debian/Ubuntu, the alternative [**0.2.5 Debian package**](https://github.com/juferdinand/OpenWhisper/releases/download/v0.2.5/OpenWhisper-Linux-amd64.deb)
+can be installed with `sudo apt install ./OpenWhisper-Linux-amd64.deb`.
 Verify downloads with the release's `SHA256SUMS`. Linux updates use their own persistent signing key; see [signing](docs/SIGNING.md#linux-update-signatures).
 Consult the [runtime dependencies and desktop support notes](docs/LINUX.md) before installation;
 building the Debian package does not establish tested Debian/Ubuntu desktop support.
@@ -175,18 +177,18 @@ checksums come from the same version. It requires `curl`, `sha256sum`, and `apt`
 ```bash
 (
   set -eu
-  wf_version=0.2.4
+  wf_version=0.2.5
   wf_release="https://github.com/juferdinand/OpenWhisper/releases/download/v${wf_version}"
   mkdir -p "openwhisper-download-v${wf_version}"
   cd "openwhisper-download-v${wf_version}"
   curl --fail --location --proto '=https' --proto-redir '=https' \
-    --output WhisperFree-Linux-amd64.deb "$wf_release/WhisperFree-Linux-amd64.deb"
+    --output OpenWhisper-Linux-amd64.deb "$wf_release/OpenWhisper-Linux-amd64.deb"
   curl --fail --location --proto '=https' --proto-redir '=https' \
     --output SHA256SUMS "$wf_release/SHA256SUMS"
-  sed -n '/  WhisperFree-Linux-amd64[.]deb$/p' SHA256SUMS > deb.SHA256SUMS
+  sed -n '/  OpenWhisper-Linux-amd64[.]deb$/p' SHA256SUMS > deb.SHA256SUMS
   test "$(wc -l < deb.SHA256SUMS)" -eq 1
   sha256sum --check deb.SHA256SUMS
-  sudo apt install ./WhisperFree-Linux-amd64.deb
+  sudo apt install ./OpenWhisper-Linux-amd64.deb
 )
 ```
 
@@ -205,7 +207,7 @@ curl --fail --location --proto '=https' --tlsv1.2 \
   --output install-release.py \
   https://raw.githubusercontent.com/juferdinand/OpenWhisper/main/linux/scripts/install-release.py
 less install-release.py
-python3 install-release.py --version 0.2.4
+python3 install-release.py --version 0.2.5
 ```
 
 Finish dictation and quit the app before installation or uninstalling, then run the installer as
@@ -225,9 +227,9 @@ For offline/manual installation, obtain the AppImage and its `.sig` from the exa
 transfer both files with the reviewed installer, and run:
 
 ```bash
-python3 install-release.py --version 0.2.4 \
-  --appimage /absolute/path/to/WhisperFree-Linux-x86_64.AppImage \
-  --signature /absolute/path/to/WhisperFree-Linux-x86_64.AppImage.sig
+python3 install-release.py --version 0.2.5 \
+  --appimage /absolute/path/to/OpenWhisper-Linux-x86_64.AppImage \
+  --signature /absolute/path/to/OpenWhisper-Linux-x86_64.AppImage.sig
 python3 install-release.py --uninstall
 ```
 
@@ -251,7 +253,7 @@ all XDG locations for each command. These checks install files but do not launch
 ```bash
 sandbox=$(mktemp -d)
 env HOME="$sandbox" XDG_DATA_HOME="$sandbox/data" XDG_CONFIG_HOME="$sandbox/config" \
-  python3 install-release.py --version 0.2.4
+  python3 install-release.py --version 0.2.5
 desktop-file-validate "$sandbox/data/applications/io.github.whisperfree.desktop"
 env HOME="$sandbox" XDG_DATA_HOME="$sandbox/data" XDG_CONFIG_HOME="$sandbox/config" \
   python3 install-release.py --uninstall
@@ -278,6 +280,11 @@ are enabled by default and can be switched off there. Downloads and installation
 you choose **Download & install**. The app verifies the update and restarts; settings, models,
 snippets, and saved history are retained. Finish recordings and model downloads before installing.
 
+The public 0.2.4 release must be updated manually to 0.2.5 using the downloads above;
+its updater cannot apply this release. If an earlier installation cannot find or validate
+an update, install the current signed package manually. Existing settings and model data
+use the same persistent directories.
+
 Linux 0.2.1 / 0.2.2 can close after installation when started by a systemd service. If this happens,
 open OpenWhisper manually; the updated package is already installed. The restart correction in
 0.2.3 takes effect for updates initiated from 0.2.3 onward.
@@ -289,7 +296,7 @@ open OpenWhisper manually; the updated package is already installed. The restart
   installs a release for the current user with the correct desktop identity.
 - **Linux Debian package:** verified updates use the system administrator authorization dialog
   (`pkexec` and `dpkg`). Cancelling the dialog cancels installation; the app never asks for your password.
-- **Linux 0.2.0 and source/CI builds:** install the 0.2.1 release manually once to get the updater.
+- **Linux 0.2.0 and source/CI builds:** install a current signed release manually to get the updater.
   Source and CI builds do not enable in-app installation.
 
 The sidebar switches the shared interface between **English** and **Deutsch**, including recording

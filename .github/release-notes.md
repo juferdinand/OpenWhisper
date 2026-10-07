@@ -8,10 +8,13 @@
 - Acknowledge Stop before preparing captured audio for recognition. Recording still has no fixed time limit; the existing private recovery recordings, GPU/CPU retries and manual CPU choice remain available.
 - Validate the shared English/German UI and Linux desktop flows in isolated graphical sessions across KDE, GNOME, Xfce, Cinnamon, MATE, Sway and Hyprland. The validation notes identify exact packages, virtual input/audio and remaining hardware coverage.
 
-**Updating from Linux 0.2.1 or 0.2.2:** use **About → Check now**. The older updater may still
-close after installing the update when launched by a systemd service. If that happens, open OpenWhisper
-once from your application launcher; the new package is already installed. Original Linux 0.2.0
-and source/CI builds need a manual installation of a signed release to obtain the updater.
+**Updating the public 0.2.4 release:** install 0.2.5 manually from the downloads below;
+its updater cannot apply this release. For earlier installations, use the current signed package
+if **About → Check now** cannot find or validate the update. Existing settings
+and model data use the same persistent directories. Older Linux versions may close after an
+update when launched by a systemd service; reopen the app from your application launcher if
+that happens. Original Linux 0.2.0 and source/CI builds require a signed release installation
+to obtain the updater.
 
 ## macOS download and installation
 
@@ -63,3 +66,8 @@ reproducible problems with the version, package, desktop and session type.
 Known dependency risk: the Linux GTK 3 stack includes `glib 0.18.5`, affected by
 [RUSTSEC-2024-0429](https://rustsec.org/advisories/RUSTSEC-2024-0429.html). The alert remains open;
 see the [scope and source review](https://github.com/juferdinand/OpenWhisper/blob/v0.2.5/SECURITY.md#known-linux-dependency-advisory).
+
+Known Linux reports remain open for [held KDE mouse triggers](https://github.com/juferdinand/OpenWhisper/issues/21),
+[repeated secondary launches on KDE X11](https://github.com/juferdinand/OpenWhisper/issues/29), and
+[a combined GNOME shortcut/hold and paste sequence](https://github.com/juferdinand/OpenWhisper/issues/30).
+The release includes the validated fallback controls; these reports track remaining defects and unresolved interactions.
