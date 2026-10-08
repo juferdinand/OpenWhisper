@@ -23,6 +23,7 @@ for (const path of [planning, fixtures]) {
 const IMAGE = "sha256:741fe6d91a1dbbb4b371448920d6c02274a28ca3d380e7d71049da5cd666f488";
 const capture = join(planning, "p4-linux-dev-recording/native-sources/run-1/openwhisper_capture.node");
 const speech = join(planning, "p6-proposal/gpu-build-1/cpu/openwhisper_speech.node");
+const bus = join(planning, "p3-bus-opening/async-call-legacy-run-3/package/payload/dist/native/openwhisper_linux_bus.node");
 const seccomp = join(planning, "p2-owned-speech/run-4/electron-seccomp.json");
 await mkdir(output, { mode: 0o700, recursive: false });
 const payload = join(output, "payload"), app = join(payload, "app"); await mkdir(payload, { mode: 0o700 });
@@ -46,6 +47,8 @@ for (const name of ["zod", "electron", "@playwright/test", "playwright", "playwr
 }
 assert.deepEqual(await inventory(join(root, "dist")), distBefore);
 const captureRecord = await describe(capture), speechRecord = await describe(speech);
+const busRecord = await describe(bus);
+assert.equal(busRecord.sha256, "0d32cffa96fb5255bb49ec95ca6404c30887b068bf159fdcc966b7ceb7d2d0e1");
 assert.equal(captureRecord.sha256, "5a1ddfef8381d750b059f28416279557c50039161f312e3b5d4b31fdbdae3ba2"); assert.equal(captureRecord.bytes, 433280);
 assert.equal(speechRecord.sha256, "e1b4c2c738285eb50cea155e65fc0b1eb4481e80a1849ded23bb2a8a679308c3");
 assert.equal((await describe(join(planning, "p6-proposal/gpu-build-1/cpu/build-manifest.json"))).sha256, "ed87efb43797a90f8cfa7e0fb594b6237ae4c1a89b2b34e10f29c1d86f92c7bc");
@@ -57,9 +60,11 @@ const originalModule: unknown = await import(pathToFileURL(join(root, "dist/main
 const original = z.object({ DEVELOPMENT_RECORDING_BUILD: developmentRecordingDescriptorSchema }).parse(originalModule).DEVELOPMENT_RECORDING_BUILD;
 await cp(capture, join(app, "dist/native/capture/openwhisper_capture.node"));
 await cp(speech, join(app, "dist/native/speech/cpu/openwhisper_speech.node"));
+await cp(bus, join(app, "dist/native/openwhisper_linux_bus.node"));
 const graph = await buildSpeechEntryGraph(app);
 const descriptor = developmentRecordingDescriptorSchema.parse({ ...original,
   capture: captureRecord, captureEntry: await describe(join(app, "dist/workers/capture-entry.js")), speechEntryGraph: graph.graph,
+  platformServices: { entry: await describe(join(app, "dist/workers/platform-entry.js")), bus: busRecord },
   speech: { ...original.speech, entries: [{ backend: "cpu", ...speechRecord }] } });
 // Fixed fixture assembly before execution. The normal host consumes this captured
 // typed record; runtime never refreshes expected hashes from its current files.
@@ -78,7 +83,7 @@ const sources: Record<string, { bytes: number; sha256: string }> = {};
 for (const name of Object.keys(bundled.metafile.inputs)) sources[name] = await describe(resolve(root, name));
 sources["tests/owned-dev-recording/run.ts"] = await describe(fileURLToPath(import.meta.url));
 await writeFile(join(output, "assembly.json"), JSON.stringify({ image: IMAGE, sources, originalDescriptor: original, descriptor,
-  originalDist: distBefore, payload: await inventory(payload), native: { capture: { path: capture, ...captureRecord }, speech: { path: speech, ...speechRecord } },
+  originalDist: distBefore, payload: await inventory(payload), native: { capture: { path: capture, ...captureRecord }, speech: { path: speech, ...speechRecord }, bus: { path: bus, ...busRecord } },
   seccomp: { path: seccomp, ...await describe(seccomp) },
   scope: "Normal Dev main/preload/shared UI and capture utility; retained Ubuntu22 native inputs assembled before private runtime." }, null, 2), { mode: 0o600 });
 const frozen = await inventory(payload);

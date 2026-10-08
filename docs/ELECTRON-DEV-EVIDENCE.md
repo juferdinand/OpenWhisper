@@ -1,13 +1,29 @@
 # Electron development evidence
 
-Current development checkpoint: the normal Linux Dev host now wires the existing
-shared recording controls to a dedicated native capture utility, private model inventory,
-continuing speech supervisor and explicit clipboard delivery. The opt-in CPU build passes
-strict TypeScript, 785 ordinary tests (13 explicit native opt-in skips), all 56 shared UI
-tests and the recording-enabled app build. Independent review covers configuration/model
-mutation races, repeated Quit, preservation of unsaved stopped audio, complete large-output
-delivery, and exact committed recovery-removal acknowledgements. Actual recording through
-the normal shared UI now passes in the owned Ubuntu 22.04 environment described below.
+Current 0.3.0 development checkpoint: normal CPU recording is connected on Linux and
+macOS. The Mac composition uses the production process-retirement boundary, an explicit
+permission button and RAM-only Retry/Discard. Linux also connects authenticated Dev
+command control to the same recording owner used by the window. Strict TypeScript and
+827 ordinary tests pass (13 explicit native opt-in skips); the Linux recording build passes.
+The shared renderer is unchanged from its previous 56 passing UI tests.
+
+The existing owned Ubuntu 22.04 normal-UI launcher now also passes command Start → UI
+Cancel, a later UI Start → command Cancel and command Start → command Cancel. Normal UI Start/Stop, real public Tiny CPU
+recognition, exact private clipboard/history, source-loss Retry/Discard and graceful Quit
+continue to pass. The exact test container and its original commands close successfully.
+This is virtual-audio evidence, not physical microphone, global-trigger, target-app paste,
+GPU or Mac end-to-end evidence. The Mac recording composition has focused synthetic/unit
+coverage; the assembled Mac recording build is now an additional CI check.
+
+Local runtime packet: `.local/planning/electron-migration/p4-linux-dev-recording/ui-run-platform-2/`
+(kept outside Git). It reuses the existing pinned private container and cached baseline-native
+artifacts, with fixed build descriptors assembled before execution. No new test framework
+or host device access was added.
+
+[CI37755500881](https://github.com/juferdinand/OpenWhisper/actions/runs/37755500881)
+passes all six jobs at the previous pushed Linux-dictation checkpoint `426b85f`.
+The current Mac/control increment requires its own push CI; that previous result does not
+prove the new source.
 
 [CI37743916089](https://github.com/juferdinand/OpenWhisper/actions/runs/37743916089)
 passes all six jobs at `7b16af8`, including the distinct Mac production-role probe on both

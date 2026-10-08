@@ -13,8 +13,10 @@ type Refusal = "Denied" | "Busy" | "Expired" | "InvalidRequest" | "Unavailable";
 /** Each lease owns only its acquisition. Stop resolves after closure/sample fencing. */
 export interface ControlCaptureLease { stop(): Promise<void>; cancel(): Promise<void> }
 export interface ControlCapturePort {
-  status(): ControlStatus;
+  status(): ControlStatus | Promise<ControlStatus>;
   start(signal: AbortSignal): Promise<ControlCaptureLease>;
+  /** Capture the current immutable owner after authentication, never retarget a stale lease. */
+  currentLease?(): Promise<ControlCaptureLease | undefined>;
 }
 export interface ControlBus {
   readonly generation: string;
@@ -125,7 +127,8 @@ export class DevControlService {
     this.current(transaction);
     await this.bus.authorizeControl(transaction.event);
     this.current(transaction);
-    const status = controlStatusSchema.parse(this.capture.status());
+    const status = controlStatusSchema.parse(await this.capture.status());
+    this.current(transaction);
     if (transaction.event.member === "Status") {
       this.current(transaction); await this.bus.reply(transaction.event.id, status); return;
     }
@@ -154,7 +157,8 @@ export class DevControlService {
       return;
     }
     if (status === "recording") {
-      const lease = this.recording;
+      const lease = this.capture.currentLease ? await this.capture.currentLease() : this.recording;
+      this.current(transaction);
       if (!lease) throw new BusFailure("TRANSPORT_FAILED");
       // Stop/cancel finish their owned closure even if the caller subsequently leaves.
       if (action === "stop") await lease.stop(); else await lease.cancel();
@@ -162,7 +166,8 @@ export class DevControlService {
       this.current(transaction);
     }
     this.current(transaction);
-    await this.bus.reply(transaction.event.id, controlStatusSchema.parse(this.capture.status()));
+    const after = controlStatusSchema.parse(await this.capture.status());
+    this.current(transaction); await this.bus.reply(transaction.event.id, after);
   }
 
   close(): Promise<void> {

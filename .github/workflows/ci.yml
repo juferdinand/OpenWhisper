@@ -54,6 +54,10 @@ jobs:
           npm run build:native
           node --import tsx scripts/fetch-speech-fixtures.ts
           node --import tsx --test tests/native-speech.test.ts
+      - name: Assemble the normal Mac recording Dev build
+        if: runner.os == 'macOS'
+        working-directory: electron
+        run: npm run build -- --recording
       - name: Build Linux bus and check native capture without devices
         if: runner.os == 'Linux'
         working-directory: electron

@@ -70,6 +70,22 @@ export class DeliveryReceiptCache {
     this.entries.delete(key);
     return true;
   }
+  /** A fixed Mac utility confirms release of the original in-memory recording. */
+  retireConfirmedMemoryRelease(epoch: string, context: RemovalContext): boolean {
+    const parsed = removalContextSchema.safeParse(context);
+    if (!z.uuid().safeParse(epoch).success || !parsed.success) return false;
+    const key = this.key(epoch, { kind: "memory", generation: parsed.data.generation }), entry = this.entries.get(key);
+    if (!entry?.receipt || entry.removal?.epoch !== epoch || entry.removal.generation !== parsed.data.generation
+      || entry.removal.attempt !== parsed.data.attempt) return false;
+    this.entries.delete(key); return true;
+  }
+  /** Called only after the original Mac child is fully reaped and its reads settled.
+   * Its RAM can no longer replay an uncertain delivery. Linux recovery survives a child. */
+  retireMemoryEpoch(epoch: string): void {
+    z.uuid().parse(epoch);
+    const prefix = `${epoch}\0memory\0`;
+    for (const key of this.entries.keys()) if (key.startsWith(prefix)) this.entries.delete(key);
+  }
 }
 
 interface CommonRecordingEffectOptions {

@@ -1,10 +1,15 @@
-import { openLinuxBus } from "../platforms/linux/shared/bus.js";
+import { LinuxBus, openLinuxBus } from "../platforms/linux/shared/bus.js";
 import { ControlServiceError, DevControlService, type ControlCapturePort } from "../platforms/linux/shared/control.js";
-import { boundPlatformFrame, platformRequestSchema, type PlatformReply, type PlatformRequest } from "./platform-protocol.js";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { verifyDevelopmentLinuxBusArtifact } from "../services/development-artifact.js";
+import { boundPlatformFrame, platformRequestSchema, platformCaptureReplySchema, PlatformCaptureClient,
+  type PlatformReply, type PlatformRequest, type PlatformCaptureRequest } from "./platform-protocol.js";
 
 interface ParentPort {
   on(event: "message", listener: (event: { data: unknown }) => void): unknown;
-  postMessage(value: PlatformReply | { version: 1; type: "ready" }): void;
+  postMessage(value: PlatformReply | PlatformCaptureRequest | { version: 1; type: "ready" }): void;
 }
 const nativePort: unknown = Reflect.get(process, "parentPort");
 if (process.platform !== "linux" || typeof nativePort !== "object" || nativePort === null) throw new Error("Platform owner unavailable.");
@@ -22,11 +27,20 @@ let generation: string | undefined;
 let busy = false;
 let closing = false;
 let fatal = false;
+let capture: ControlCapturePort = unavailable;
+let captureClient: PlatformCaptureClient | undefined;
 
 // No bus/native addon is opened until an explicit validated initialize request.
 port.on("message", (message) => {
   let request: PlatformRequest;
-  try { boundPlatformFrame(message.data); request = platformRequestSchema.parse(message.data); }
+  try {
+    boundPlatformFrame(message.data);
+    if (platformCaptureReplySchema.safeParse(message.data).success) {
+      if (!captureClient) throw new Error("Capture unavailable.");
+      captureClient.receive(message.data); return;
+    }
+    request = platformRequestSchema.parse(message.data);
+  }
   catch { process.exitCode = 1; process.exit(1); }
   if (busy || closing) { port.postMessage({ version: 1, id: request.id, ok: false, code: "BUSY" }); return; }
   busy = true;
@@ -35,13 +49,25 @@ port.on("message", (message) => {
     switch (request.command) {
       case "initialize": {
         if (service) return { version: 1, id: request.id, ok: false, code: "BUSY" };
-        const bus = await openLinuxBus(request.address);
-        service = await DevControlService.create(bus, unavailable); generation = bus.generation;
-        return { version: 1, id: request.id, ok: true, value: { command: "initialize", generation, captureAvailable: false } };
+        let bus: LinuxBus;
+        if (request.captureBridge) {
+          if (process.type !== "utility") throw new Error("Platform owner unavailable.");
+          const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+          const path = await verifyDevelopmentLinuxBusArtifact(root, request.captureBridge.native);
+          // Bundling relocates import.meta.url. This dedicated utility consumes
+          // only the verified fixed dist destination, never an IPC-supplied path.
+          const binding: unknown = createRequire(import.meta.url)(path);
+          bus = await LinuxBus.open(binding, request.address);
+          captureClient = new PlatformCaptureClient(request.captureBridge.epoch, (frame) => { port.postMessage(frame); });
+          capture = captureClient;
+        } else bus = await openLinuxBus(request.address);
+        service = await DevControlService.create(bus, capture); generation = bus.generation;
+        return { version: 1, id: request.id, ok: true, value: { command: "initialize", generation, captureAvailable: !!captureClient } };
       }
-      case "status": return { version: 1, id: request.id, ok: true, value: { command: "status", status: "unavailable" } };
+      case "status": return { version: 1, id: request.id, ok: true, value: { command: "status", status: await capture.status() } };
       case "shutdown": {
-        await service?.close(); return { version: 1, id: request.id, ok: true, value: { command: "shutdown" } };
+        await service?.close(); captureClient?.close();
+        return { version: 1, id: request.id, ok: true, value: { command: "shutdown" } };
       }
     }
   })().then((reply) => { port.postMessage(reply); }, (error: unknown) => {

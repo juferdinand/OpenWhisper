@@ -13,7 +13,10 @@ export class DevelopmentArtifactError extends Error {
   constructor(readonly code: "INTEGRITY_FAILED" | "TEARDOWN_FAILED") { super(code); }
 }
 const failedClosures = new Map<string, FileHandle>();
-type Destination = "dist/workers/capture-entry.js" | "dist/native/capture/openwhisper_capture.node";
+type Destination = "dist/workers/capture-entry.js" | "dist/native/capture/openwhisper_capture.node"
+  | "dist/workers/macos-capture-entry.js" | "dist/native/capture/openwhisper_macos_capture.node"
+  | "dist/native/openwhisper_macos_retirement.node" | "dist/workers/platform-entry.js"
+  | "dist/native/openwhisper_linux_bus.node";
 function same(left: BigIntStats, right: BigIntStats): boolean {
   return left.dev === right.dev && left.ino === right.ino && left.size === right.size &&
     left.mode === right.mode && left.uid === right.uid && left.nlink === right.nlink &&
@@ -80,4 +83,19 @@ export function verifyDevelopmentCaptureArtifact(root: string, expected: Develop
 }
 export function verifyDevelopmentCaptureEntry(root: string, expected: DevelopmentArtifact): Promise<string> {
   return verify(root, "dist/workers/capture-entry.js", expected);
+}
+export function verifyDevelopmentMacCaptureArtifact(root: string, expected: DevelopmentArtifact): Promise<string> {
+  return verify(root, "dist/native/capture/openwhisper_macos_capture.node", expected);
+}
+export function verifyDevelopmentMacCaptureEntry(root: string, expected: DevelopmentArtifact): Promise<string> {
+  return verify(root, "dist/workers/macos-capture-entry.js", expected);
+}
+export function verifyDevelopmentMacRetirementArtifact(root: string, expected: DevelopmentArtifact): Promise<string> {
+  return verify(root, "dist/native/openwhisper_macos_retirement.node", expected);
+}
+export function verifyDevelopmentPlatformEntry(root: string, expected: DevelopmentArtifact): Promise<string> {
+  return verify(root, "dist/workers/platform-entry.js", expected);
+}
+export function verifyDevelopmentLinuxBusArtifact(root: string, expected: DevelopmentArtifact): Promise<string> {
+  return verify(root, "dist/native/openwhisper_linux_bus.node", expected);
 }

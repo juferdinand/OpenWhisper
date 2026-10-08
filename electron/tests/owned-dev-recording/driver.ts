@@ -51,7 +51,7 @@ async function state() {
   const failure = recordingHostErrorSchema.safeParse(/^Recording failed: ([A-Z_]+)\.$/u.exec(value.message)?.[1]);
   lastState = { status: value.status, recordingAvailable: value.recording_available ?? false,
     recoveryAvailable: value.recovery_available ?? false, elapsed: value.elapsed, progress: value.progress,
-    messageCategory: failure.success ? "RECORDING_ERROR" : value.message === "The action could not be completed. Saved recordings are kept for retry."
+    messageCategory: failure.success ? "RECORDING_ERROR" : value.message === "The action could not be completed. Stopped recordings are kept for retry."
       ? "ACTION_REFUSED" : value.message ? "OTHER" : "NONE", recordingError: failure.success ? failure.data : null };
   return value;
 }
@@ -126,6 +126,15 @@ async function main(): Promise<void> {
   await until(async () => (await state()).microphones.includes(source));
   await checkpoint("initial-state-and-zero-streams");
   const initial = await state(); assert.equal(initial.profile, "development"); assert.equal(initial.recording_available, true);
+  const control = async (action?: "start" | "stop" | "cancel") => {
+    const reply = await execute("/usr/bin/dbus-send", ["--session", "--type=method_call", "--print-reply",
+      "--dest=io.github.whisperfree.dev.Control", "/io/github/whisperfree/dev/Control",
+      `io.github.whisperfree.Control1.${action ? "Execute" : "Status"}`, ...(action ? [`string:${action}`] : [])],
+    { env, timeout: 10_000, maxBuffer: 4096 });
+    const value = /string "(idle|recording|transcribing|unavailable)"/u.exec(reply.stdout)?.[1];
+    assert.ok(value, "Owned control must return only its finite status."); return value;
+  };
+  assert.equal(await control(), "idle");
   assert.deepEqual(initial.installed, ["tiny"]); assert.equal(initial.preferences.gpu, false); assert.equal(initial.preferences.output, "clipboard");
   assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "", "Initialization and enumeration must open no recording stream.");
   await checkpoint("actual-ui-complete-setup");
@@ -160,6 +169,16 @@ async function main(): Promise<void> {
   assert.equal((await state()).recovery_available, false); assert.deepEqual(await readdir(profile.paths.recovery), []);
   assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
   checks.push("actual UI Cancel closes the original capture without recovery");
+  await checkpoint("actual-command-start-ui-cancel");
+  assert.equal(await control("start"), "recording"); await until(async () => (await state()).status === "recording");
+  assert.equal(await control(), "recording");
+  await page.locator("#cancel").click(); await until(async () => (await state()).status === "idle");
+  await page.locator("#record").click(); await until(async () => (await state()).status === "recording");
+  assert.equal(await control("cancel"), "idle"); await until(async () => (await state()).status === "idle");
+  assert.equal(await control("start"), "recording"); await until(async () => (await state()).status === "recording");
+  assert.equal(await control("cancel"), "idle"); await until(async () => (await state()).status === "idle");
+  assert.deepEqual(await readdir(profile.paths.recovery), []);
+  checks.push("private command Start and GUI Cancel; later GUI Start and command Cancel share exact owners");
   await checkpoint("actual-ui-start");
   await page.locator("#record").click(); await until(async () => (await state()).status === "recording");
   await until(async () => (await pactl(["list", "short", "source-outputs"])).trim().split("\n").filter(Boolean).length === 1);

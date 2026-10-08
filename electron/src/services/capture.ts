@@ -35,6 +35,17 @@ export class NativeCaptureBoundary implements CaptureBoundary<NativeCapturedHand
     const native = this.native.create(callbacks.generation, this.selection);
     return new Session(native, callbacks, this.deadlines);
   }
+  /** Reuse the same ownership/fence policy for a platform-specific verified session factory. */
+  static fromSessionFactory(factory: (generation: number) => NativeCaptureSession,
+    deadlines: CaptureDeadlines = defaultDeadlines): Readonly<{ create(callbacks: CaptureCallbacks): OwnedCaptureSession }> {
+    for (const value of [deadlines.startupMs, deadlines.closeMs]) {
+      if (!Number.isFinite(value) || value <= 0 || value > 60000) throw new Error("CAPTURE_FAILED");
+    }
+    const capturedDeadlines = Object.freeze({ ...deadlines });
+    return Object.freeze({ create(callbacks: CaptureCallbacks): OwnedCaptureSession {
+      return new Session(factory(callbacks.generation), callbacks, capturedDeadlines);
+    } });
+  }
 }
 class Session implements OwnedCaptureSession {
   private readonly handle: NativeCapturedHandle;

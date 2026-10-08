@@ -42,6 +42,7 @@ export const recordingHostReplySchema = z.discriminatedUnion("kind", [
   z.strictObject({ ...envelope, kind: z.literal("progress"), generation: sequence, attempt: sequence,
     completedSamples: sequence, gpuFallback: z.boolean() }),
   z.strictObject({ ...envelope, kind: z.literal("recovery-removed"), token: z.uuid(), generation: sequence, attempt: sequence }),
+  z.strictObject({ ...envelope, kind: z.literal("memory-released"), generation: sequence, attempt: sequence }),
   z.strictObject({ ...request, kind: z.literal("control"), command: commands, reply: control }),
   z.strictObject({ ...request, kind: z.literal("devices"), devices: z.array(recordingSourceSchema).max(128).readonly() }),
   z.strictObject({ ...request, kind: z.literal("failed"), code: recordingHostErrorSchema }),

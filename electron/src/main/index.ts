@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, session, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, session, shell, systemPreferences } from "electron";
 import type { IpcMainInvokeEvent } from "electron";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -27,6 +27,8 @@ import { DEVELOPMENT_RECORDING_BUILD } from "./development-recording-build.js";
 import { developmentRecordingDescriptorSchema } from "./development-recording-descriptor.js";
 import { DevelopmentRecordingHost, developmentPulseServer } from "./development-recording-host.js";
 import { saveDevelopmentTranscript } from "../services/development-transcripts.js";
+import { DevelopmentPlatformHost } from "./development-platform-host.js";
+import { createRecordingControlPort } from "./recording-control.js";
 
 const distribution = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let window: BrowserWindow | undefined;
@@ -109,6 +111,9 @@ async function start(): Promise<void> {
   } });
   const refreshModels = async (): Promise<void> => { installed = await inventory.installed(); };
   const descriptor = DEVELOPMENT_RECORDING_BUILD === null ? null : developmentRecordingDescriptorSchema.parse(DEVELOPMENT_RECORDING_BUILD);
+  const macRecording = descriptor?.platform === "darwin";
+  let microphoneAllowed = macRecording && systemPreferences.getMediaAccessStatus("microphone") === "granted";
+  let platformHost: DevelopmentPlatformHost | undefined;
   if (descriptor) {
     host = await DevelopmentRecordingHost.open(resolve(distribution, ".."), descriptor, inventory, {
       recoveryPath: profile.paths.recovery,
@@ -137,8 +142,10 @@ async function start(): Promise<void> {
         return { generation: context.generation, attempt: context.attempt, outcome: "clipboard", clipboardConfirmed: true };
       } },
     });
-    try { audioServer = await developmentPulseServer(); sources = await host.enumerate(audioServer); }
-    catch { message = "A local audio server is not available."; }
+    if (descriptor.platform === "linux") {
+      try { audioServer = await developmentPulseServer(); sources = await host.enumerate(audioServer); }
+      catch { message = "A local audio server is not available."; }
+    }
   }
   const version = (await readFile(join(distribution, "resources/VERSION"), "utf8")).trim();
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) {
@@ -151,7 +158,7 @@ async function start(): Promise<void> {
     updates: { configured: false, status: "idle", version: null, progress: 0, error: null, package: "development" },
     platform,
     ...(platform === "macos" ? { macos: {
-      microphone_allowed: false, recording_shortcut: false, shortcut_hint: "Not configured",
+      microphone_allowed: microphoneAllowed, recording_shortcut: false, shortcut_hint: "Not configured",
       editor: "", recommended: [], updates_configured: false, launch_at_login_pending: false,
     } } : {}),
     version, status: recording.phase === "starting" ? "recording"
@@ -173,7 +180,7 @@ async function start(): Promise<void> {
     download, progress: download ? downloadProgress : inferenceProgress,
     elapsed: Math.min(Number.MAX_SAFE_INTEGER, Math.floor(recording.elapsedMs / 1000)), level: recording.level,
     model_directory: profile.paths.models,
-    profile: "development", recording_available: !!host && (!!audioServer || recording.busy) &&
+    profile: "development", recording_available: !!host && (macRecording ? microphoneAllowed || recording.busy : !!audioServer || recording.busy) &&
       (recording.busy || installed.some((item) => item.model.id === preferences.snapshot().model)),
     development_build: `${build.commit.slice(0, 12)}${build.modified ? "+modified" : ""}`,
     local_processing: processingProfile.snapshot(),
@@ -225,11 +232,11 @@ async function start(): Promise<void> {
   };
   const action = async (operation: () => Promise<void>): Promise<void> => {
     try { await operation(); }
-    catch { message = "The action could not be completed. Saved recordings are kept for retry."; }
+    catch { message = "The action could not be completed. Stopped recordings are kept for retry."; }
     notify();
   };
-  const withRecordingControl = <T>(operation: () => Promise<T>): Promise<T> => {
-    if (recordingControl || shutdownInProgress) return Promise.reject(new Error("Recording control is busy."));
+  const withRecordingControl = <T>(operation: () => Promise<T>, duringShutdown = false): Promise<T> => {
+    if (recordingControl || (shutdownInProgress && !duringShutdown)) return Promise.reject(new Error("Recording control is busy."));
     // Reserve before the first await so configuration and request changes cannot overlap.
     recordingControl = true; cancelRequested = false;
     const task = Promise.resolve().then(operation).finally(() => {
@@ -244,17 +251,34 @@ async function start(): Promise<void> {
     const selected = preferences.snapshot(), model = installed.find((item) => item.model.id === selected.model);
     if (!model || selected.output !== "clipboard" || selected.gpu) throw new Error("Choose an installed model and CPU clipboard output.");
     // Recovery may be transcribed with the microphone disconnected; resolve sources only on Start.
-    const server = audioServer ?? `unix:${join(process.env.XDG_RUNTIME_DIR ?? profile.paths.locks, "pulse/native")}`;
     const request = recordingRequestSchema.parse({ model: { path: join(profile.paths.models, model.model.file), family: model.model.family, gpu: false },
       language: selected.language, vocabulary: selected.vocabulary, snippets: selected.snippets });
-    await host.configure({ id: model.model.id, request, server, source: selected.microphone }); configured = true;
+    await host.configure({ id: model.model.id, request,
+      ...(macRecording ? {} : { server: audioServer ?? `unix:${join(process.env.XDG_RUNTIME_DIR ?? profile.paths.locks, "pulse/native")}`,
+        source: selected.microphone }) }); configured = true;
   };
+  if (host && descriptor?.platform === "linux" && descriptor.platformServices) {
+    try {
+      platformHost = await DevelopmentPlatformHost.open({
+        descriptor: { root: resolve(distribution, ".."), ...descriptor.platformServices },
+        address: process.env.DBUS_SESSION_BUS_ADDRESS ?? "",
+        capture: createRecordingControlPort({ owner: host, snapshot: () => recording, configure: configureRecording,
+          serialize: withRecordingControl,
+          cleanupSerialize: <T>(operation: () => Promise<T>) => withRecordingControl(operation, true),
+          available: () => !shutdownInProgress && !!audioServer && installed.some((item) => item.model.id === preferences.snapshot().model) }),
+      }, new AbortController().signal);
+    } catch { message = "Desktop command control is not available. Window recording remains usable."; }
+  }
   app.on("before-quit", (event) => {
     if (shutdownComplete) return;
     event.preventDefault();
     if (shutdownInProgress) return;
+    if (macRecording && recording.recoveryAvailable) {
+      message = "Retry or discard the stopped recording before quitting. Its audio is kept in memory."; notify(); return;
+    }
     shutdownInProgress = true; cancelRequested = true; processing.close(); downloadAbort?.abort();
-    void (async () => { await recordingOperation?.catch(() => {}); await downloading; await downloads.finalize(); await host?.close(); })().then(() => {
+    void (async () => { await recordingOperation?.catch(() => {}); await downloading; await downloads.finalize();
+      await platformHost?.close(); await host?.close(); })().then(() => {
       shutdownComplete = true; app.quit();
     }, () => {
       // Preserve uncertain owners and the private recovery files for explicit review.
@@ -308,7 +332,17 @@ async function start(): Promise<void> {
       retry_transcription: () => recordingAction(async () => { await configureRecording(); if (cancelRequested) return; inferenceProgress = 0; await host?.command("retry"); }),
       discard_recovery: () => recordingAction(async () => { await configureRecording(); if (!cancelRequested) await host?.command("discard"); }),
       refresh_microphones: () => recordingAction(async () => { if (!host) throw new Error("Recording unavailable.");
+        if (macRecording) { microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted"; return; }
         audioServer = await developmentPulseServer(); sources = await host.enumerate(audioServer); }),
+      allow_microphone: () => action(async () => {
+        if (!macRecording) throw new Error("Microphone permission is unavailable.");
+        const permission = systemPreferences.getMediaAccessStatus("microphone");
+        if (permission === "not-determined") microphoneAllowed = await systemPreferences.askForMediaAccess("microphone");
+        else {
+          microphoneAllowed = permission === "granted";
+          if (!microphoneAllowed) await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone");
+        }
+      }),
       import_model: () => recordingAction(async () => {
         if (recording.busy || recording.recoveryAvailable) throw new Error("Finish the current recording first.");
         if (!window) return;
@@ -359,6 +393,9 @@ async function start(): Promise<void> {
   window.on("close", (event) => { if (!shutdownComplete) { event.preventDefault(); app.quit(); } });
   window.on("closed", () => { processing.close(); ipcMain.removeHandler("openwhisper:invoke"); window = undefined; });
   window.once("ready-to-show", () => { window?.show(); });
+  if (macRecording) window.on("focus", () => {
+    microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted"; notify();
+  });
   await window.loadURL(MAIN_URL);
 }
 

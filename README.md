@@ -19,6 +19,7 @@ your text is pasted into the active text field. No account, API key, or subscrip
 
 The [Electron migration plan](docs/ELECTRON-MIGRATION.md) records the next host architecture,
 development-profile strategy and issue/PR disposition. The released app still uses the native hosts below.
+The [implementation status](docs/ELECTRON-STATUS.md) tracks the remaining work for 0.3.0.
 
 ![OpenWhisper's shared dark interface](docs/images/shared-desktop.png)
 

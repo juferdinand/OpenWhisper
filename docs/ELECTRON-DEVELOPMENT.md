@@ -3,7 +3,8 @@
 The [migration plan](ELECTRON-MIGRATION.md) defines replacement and acceptance gates.
 The implementation starts **OpenWhisper Dev** with the existing settings UI,
 a schema-validated sandboxed bridge and private settings/session directories. An explicit
-Linux CPU recording build connects the shared controls to native capture and clipboard output.
+CPU recording build connects the shared controls to native capture and clipboard output on
+Linux and macOS. The target version is **0.3.0**; see [current status](ELECTRON-STATUS.md).
 The default lightweight preview leaves recording disabled. Global triggers, automatic paste,
 autostart and stable updates remain unavailable in this slice.
 It does not replace the released 0.2.5 application or establish desktop/speech parity.
@@ -52,7 +53,8 @@ npm run dev -- --recording --dev-profile /absolute/private/path/openwhisper-dev
 
 This opt-in build requires CMake, Ninja, a C/C++ compiler and a local Pulse-compatible
 server (PulseAudio or PipeWire-Pulse). Pinned native sources and headers are verified before
-compilation. Build-time descriptors capture the expected capture entry, native addon and speech
+compilation. Linux command control also requires the GLib/GIO development libraries and pkg-config.
+Build-time descriptors capture the expected capture entry, native addon and speech
 dependency graph; the runtime does not refresh expected hashes from whatever files it finds.
 These development descriptors are integrity checks, not release signing or publisher identity.
 
@@ -68,8 +70,35 @@ Successful output is copied completely and verified by readback before recovery 
 Large output is not cut to fit the bounded UI preview: Copy retrieves the complete text;
 with history enabled it is also saved as a private `.txt` in the Dev transcripts directory.
 History and models remain separate from the installed release. Recording is independent
-of the optional text-model preview. macOS recording and packaged/signed replacement remain
-separate migration work.
+of the optional text-model preview. Packaged/signed replacement remains separate migration work.
+
+The recording build also connects an authenticated, same-user D-Bus control service to the
+same recording owner used by the window. Its Dev name is `io.github.whisperfree.dev.Control`,
+object `/io/github/whisperfree/dev/Control`, interface `io.github.whisperfree.Control1`.
+`Status()` returns a finite status; `Execute(string)` accepts `start`, `stop`, `toggle` or
+`cancel`. An immutable recording lease prevents a delayed command from stopping a later
+recording. This Dev service is separate from the planned packaged `--control` launcher.
+
+## macOS CPU recording Dev build
+
+Use the same explicit `npm run dev -- --recording --dev-profile /absolute/private/path/openwhisper-dev`
+command on macOS 14 or later with the Xcode Command Line Tools, CMake and Ninja installed.
+The build compiles the Apple capture edge and production process-retirement addon, then
+captures their expected bytes before launch. Select a private model, CPU and clipboard output.
+The existing microphone button requests permission only when clicked. Denied permission
+opens the microphone section of System Settings; focus refreshes the current permission state.
+
+Each recording owns a fresh AVFoundation capture session in a utility process. Stopped
+audio remains in RAM for Retry/Discard; it is never written to a Mac recovery WAV. Quit is
+refused while a stopped recording still needs delivery or explicit discard. There is no
+fixed recording duration limit. CPU recognition uses the continuing supervisor with the
+actual original child identity and full process retirement before replacement.
+
+The normal Mac composition is implemented and covered by synthetic/unit tests. Physical
+microphone permission, default-device changes and signed-helper behavior still require
+their acceptance checks; do not treat native CI conversion tests as hardware validation.
+Global Fn/modifier/mouse triggers, automatic paste, non-activating overlays, Metal selection
+and signed release packages remain incomplete.
 
 ## Automated checks
 

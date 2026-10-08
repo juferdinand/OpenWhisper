@@ -134,3 +134,28 @@ test("closing during late acquisition cancels its lease before disposal complete
   const close = service.close(); assert.equal(capture.signal?.aborted, true); acquisition.resolve(); await close;
   assert.equal(capture.cancellations, 1); assert.equal(bus.replies.length, 0); await service.close();
 });
+
+test("authenticated Stop captures the exact GUI lease and awaits its original fence", async () => {
+  const bus = new FakeBus(), fence = deferred(); let stops = 0, lookups = 0;
+  let state: ControlStatus = "recording";
+  const lease: ControlCaptureLease = { async stop() { stops++; await fence.promise; state = "transcribing"; }, async cancel() {} };
+  const capture: ControlCapturePort = { status: async () => state, async start() { throw Error("GUI already acquired it."); },
+    async currentLease() { lookups++; return lease; } };
+  const service = await DevControlService.create(bus, capture);
+  bus.denied = true; bus.invoke("stop"); await wait(() => bus.refusals.length === 1);
+  assert.equal(lookups, 0); assert.equal(stops, 0);
+  bus.denied = false; const stop = bus.invoke("stop"); await wait(() => stops === 1);
+  assert.equal(bus.replies.some((reply) => reply.id === stop), false);
+  fence.resolve(); await wait(() => bus.replies.some((reply) => reply.id === stop));
+  assert.equal(bus.replies.at(-1)?.status, "transcribing"); await service.close();
+});
+
+test("implemented current lease returning none never falls back to the previous CLI owner", async () => {
+  const bus = new FakeBus(); let state: ControlStatus = "idle", oldStops = 0;
+  const original: ControlCaptureLease = { async stop() { oldStops++; }, async cancel() {} };
+  const capture: ControlCapturePort = { status: async () => state, async start() { state = "recording"; return original; },
+    async currentLease() { return undefined; } };
+  const service = await DevControlService.create(bus, capture); bus.invoke("start"); await wait(() => bus.replies.length === 1);
+  const stop = bus.invoke("stop"); await wait(() => bus.refusals.some((reply) => reply.id === stop));
+  assert.equal(oldStops, 0); assert.equal(state, "recording"); await service.close();
+});

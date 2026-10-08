@@ -2810,7 +2810,7 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "openwhisper-core"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "base64 0.23.1",
  "minisign-verify 0.3.0",
@@ -2823,7 +2823,7 @@ dependencies = [
 
 [[package]]
 name = "openwhisper-desktop"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "ashpd",
  "audioadapter-buffers",
@@ -2853,7 +2853,7 @@ dependencies = [
 
 [[package]]
 name = "openwhisper-speech"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "cc",
  "cmake",

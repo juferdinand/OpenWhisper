@@ -1,6 +1,7 @@
 # Electron migration plan
 
-Status: implementation plan, not an implemented or released Electron application.
+Status: implementation in progress on isolated draft PR #34; target release **0.3.0**.
+See [implementation status](ELECTRON-STATUS.md) for delivered behavior and remaining work.
 Prepared 2026-10-08 against signed public `v0.2.5`
 (`d69b43bf6e7017c61089e117e79af34f57f297c4`). This is the authoritative record of
 the requested architecture, research answers, development-build strategy and issue/PR disposition.
