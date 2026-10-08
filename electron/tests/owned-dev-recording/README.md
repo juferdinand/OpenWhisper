@@ -64,6 +64,24 @@ package hashes are checked before copying, in the stopped container and after
 execution. The same native-X11 recording and cleanup checks apply. This proves
 owned package execution, independently of host installation or signed releases.
 
+Append `--install-package` as the final argument after that exact package path
+to run the same recording case from a fresh installation inside the fixture's
+private home. The source package's own executable runs its compiled
+`dist/cli/install-dev.js` with `ELECTRON_RUN_AS_NODE=1`; installation does not
+use system Node or launch another application. The installer receives a fresh
+installation root, a fresh explicit profile and a fresh
+`io.github.whisperfree.dev.desktop` under the owned data directory. The test
+requires the profile to remain absent until normal profile preparation, then
+checks that the relocated packaged app uses its installed executable and
+`resources/app`. While that original app is idle, a second installation attempt
+must refuse the existing destination without closing the app or changing its
+executable, captured descriptor, launcher or stable sentinel. The normal X11,
+recognition, clipboard, recovery and cleanup checks then run unchanged.
+`result.json` labels this narrow installed-runtime evidence separately. Source,
+copied, stopped-container and returned package hashes remain checked. This
+owned fresh-copy case does not replace a host installation or prove downloads,
+updates, data migration or release signatures.
+
 Append `--stock-kde` to reuse `linux/scripts/run-owned-desktop.py` and the pinned
 cached Kubuntu 24.04 portal image. This mode opens the normal app with native
 Wayland and installed KDE portal services, never the synthetic frontend. It uses

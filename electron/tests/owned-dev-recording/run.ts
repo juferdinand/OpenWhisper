@@ -24,7 +24,8 @@ const stockKde = args[6] === "--stock-kde" || kdeLifecycle || kdePaste || kdeOve
 const portalFixture = !stockKde && !nativeX11;
 const copiedNode = stockKde || nativeX11;
 const packaged = nativeX11 && args[7] === "--package-directory";
-if (args.length !== (packaged ? 9 : copiedNode ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
+const installPackage = packaged && args[9] === "--install-package";
+if (args.length !== (packaged ? installPackage ? 10 : 9 : copiedNode ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
     || process.platform !== "linux" || process.arch !== "x64" || process.getuid?.() === 0) throw new Error("INVALID_EXECUTION");
 const output = absolute.parse(args[1]), planning = absolute.parse(args[3]), fixtures = absolute.parse(args[5]);
 const packageDirectory = packaged ? absolute.parse(args[8]) : undefined;
@@ -196,7 +197,8 @@ try {
   frozen = await inventory(payload);
   await writeFile(join(output, "assembly.json"), JSON.stringify({ image: IMAGE, sources, originalDescriptor: original, descriptor,
     originalDist: distBefore, payload: frozen,
-    ...(packageDirectory ? { packageInput: { directory: packageDirectory, files: packageBefore, capturedDescriptorPreserved: true } } : {}),
+    ...(packageDirectory ? { packageInput: { directory: packageDirectory, files: packageBefore, capturedDescriptorPreserved: true,
+      installedRuntime: installPackage } } : {}),
     native: { capture: { path: packageDirectory ? join(packageDirectory, "resources/app/dist/native/capture/openwhisper_capture.node") : capture, ...captureRecord },
       speech: { path: packageDirectory ? join(packageDirectory, "resources/app/dist/native/speech/cpu/openwhisper_speech.node") : speech, ...speechRecord },
       bus: { path: packageDirectory ? join(packageDirectory, "resources/app/dist/native/openwhisper_linux_bus.node") : bus, ...busRecord } },
@@ -234,7 +236,8 @@ try {
     ...(kdePaste ? [`OPENWHISPER_KDE_PASTE=${kdeXwaylandPaste ? "xwayland" : "wayland"}`] : []), "KWIN_COMPOSE=Q", "LP_NUM_THREADS=2", "/usr/bin/python3", "/payload/run-owned-desktop.py", "--session", "kde-wayland",
     ...(kdeXwaylandPaste || kdeOverlay ? ["--kde-xwayland"] : []),
     "--output", "/tmp/owned-desktop", "--timeout", "180", "--", "/payload/node", "/payload/driver.mjs"]
-    : nativeX11 ? ["OPENWHISPER_NATIVE_X11=1", ...(packaged ? ["OPENWHISPER_PACKAGE_DIRECTORY=/payload/package"] : []), "/payload/node", "/payload/driver.mjs"]
+    : nativeX11 ? ["OPENWHISPER_NATIVE_X11=1", ...(packaged ? ["OPENWHISPER_PACKAGE_DIRECTORY=/payload/package"] : []),
+      ...(installPackage ? ["OPENWHISPER_INSTALL_PACKAGE=1"] : []), "/payload/node", "/payload/driver.mjs"]
     : ["/opt/node/bin/node", "/payload/driver.mjs"];
   const observed = await docker(["exec", "--user", "1000:1000", container, "/usr/bin/env", "-i", "PATH=/opt/node/bin:/usr/bin:/bin", "LANG=C.UTF-8",
     "OPENWHISPER_OWNED_DEV_RECORDING=1", ...command], stockKde ? 240_000 : 210_000);
@@ -249,7 +252,9 @@ try {
       ...(kdeWaylandOverlay ? { nativeSurfaceScreenshot: z.literal(true), nativePointerStop: z.literal(true), clipboardConfirmed: z.literal(true),
         foregroundKeyboardDelivery: z.literal(true), editorBackend: z.literal("WAYLAND") } : {}) })
     : nativeX11 ? z.object({ status: z.literal("PASS"), nativeX11: z.literal(true), nativeCapture: z.literal(true), escapePreserved: z.literal(true),
-      holdStaleReleaseSafe: z.literal(true), clearedKeyInactive: z.literal(true), clipboardConfirmed: z.literal(true), historyConfirmed: z.literal(true) })
+      holdStaleReleaseSafe: z.literal(true), clearedKeyInactive: z.literal(true), clipboardConfirmed: z.literal(true), historyConfirmed: z.literal(true),
+      ...(installPackage ? { installedRuntime: z.literal(true), installation: z.object({ embeddedNode: z.literal(true), profileInitiallyAbsent: z.literal(true),
+        descriptorPreserved: z.literal(true), existingDestinationRefused: z.literal(true), originalApplicationAlive: z.literal(true), stableSentinelUnchanged: z.literal(true) }) } : {}) })
     : kdePaste ? z.object({ status: z.literal("PASS"), clipboardConfirmed: z.literal(true), recoveryRemoved: z.literal(true),
       nativeInMain: z.literal(false), pasteConfirmed: z.literal(true), permissionRevoked: z.literal(true), targetBackend: z.literal(kdeXwaylandPaste ? "XWAYLAND" : "WAYLAND") })
     : z.object({ status: z.literal("PASS"), clipboardConfirmed: z.literal(true), recoveryRemoved: z.literal(true), nativeInMain: z.literal(false) }))

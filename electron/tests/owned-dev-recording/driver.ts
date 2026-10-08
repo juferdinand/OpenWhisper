@@ -18,8 +18,10 @@ declare global { interface Window { openwhisper?: DesktopBridge } }
 const execute = promisify(execFile);
 const payload = resolve(fileURLToPath(new URL("./", import.meta.url)));
 const packaged = process.env.OPENWHISPER_PACKAGE_DIRECTORY === "/payload/package";
-const packageRoot = packaged ? "/payload/package/resources/app" : join(payload, "app"), evidence = "/evidence";
-const executable = packaged ? "/payload/package/openwhisper-dev" : join(packageRoot, "node_modules/electron/dist/electron");
+const sourcePackageRoot = packaged ? "/payload/package/resources/app" : join(payload, "app"), evidence = "/evidence";
+const sourceExecutable = packaged ? "/payload/package/openwhisper-dev" : join(sourcePackageRoot, "node_modules/electron/dist/electron");
+let packageRoot = sourcePackageRoot, executable = sourceExecutable;
+const installPackage = process.env.OPENWHISPER_INSTALL_PACKAGE === "1";
 const stockKde = process.env.OPENWHISPER_STOCK_KDE === "1";
 const kdeLifecycle = process.env.OPENWHISPER_KDE_LIFECYCLE === "1";
 const kdeOverlay = process.env.OPENWHISPER_KDE_OVERLAY === "1";
@@ -108,6 +110,7 @@ async function main(): Promise<void> {
     assert.equal(kdeLifecycle || kdePaste || kdeOverlay || kdeWaylandOverlay, false);
   }
   if (process.env.OPENWHISPER_PACKAGE_DIRECTORY !== undefined) { assert.equal(packaged, true); assert.equal(nativeX11, true); }
+  if (process.env.OPENWHISPER_INSTALL_PACKAGE !== undefined) { assert.equal(installPackage, true); assert.equal(packaged, true); assert.equal(nativeX11, true); }
   assert.ok((await lstat("/.dockerenv")).isFile());
   for (const device of ["/dev/snd", "/dev/input", "/dev/uinput", "/dev/dri"]) await assert.rejects(lstat(device), { code: "ENOENT" });
   for (const key of ["NODE_OPTIONS", "ELECTRON_RUN_AS_NODE"]) assert.equal(process.env[key], undefined);
@@ -134,16 +137,47 @@ async function main(): Promise<void> {
     DBUS_SYSTEM_BUS_ADDRESS: `unix:path=${runtime}/disabled-system-bus`,
     XDG_SESSION_TYPE: "x11", XDG_CURRENT_DESKTOP: "Owned X11", LIBGL_ALWAYS_SOFTWARE: "1", GALLIUM_DRIVER: "llvmpipe",
   };
-  const profileRoot = join(root, "dev-profile");
+  const profileRoot = join(installPackage ? home : root, "dev-profile");
+  const stable = join(env.XDG_DATA_HOME!, "whisperfree"); await mkdir(stable, { mode: 0o700 });
+  await writeFile(join(stable, "sentinel"), "Owned stable sentinel", { mode: 0o600 });
+  const stableBefore = sha(await readFile(join(stable, "sentinel")));
+  let installation: { installationRoot: string; application: string; executable: string; profile: string; desktopFile: string;
+    sourceDigest: string; version: string; source: { commit: string; modified: boolean }; launchArguments: string[];
+    embeddedNode: true; profileInitiallyAbsent: true; descriptorPreserved: true; existingDestinationRefused: boolean;
+    originalApplicationAlive: boolean; stableSentinelUnchanged: boolean } | undefined;
+  const installationRoot = join(home, "Install Slot"), desktopFile = join(env.XDG_DATA_HOME!, "applications/io.github.whisperfree.dev.desktop");
+  const installerArguments = [join(sourcePackageRoot, "dist/cli/install-dev.js"), "--source", "/payload/package", "--installation-root", installationRoot,
+    "--profile", profileRoot, "--desktop-file", desktopFile];
+  const installerEnvironment = { ...env, ELECTRON_RUN_AS_NODE: "1" };
+  let installedDescriptor: string | undefined, installedExecutable: string | undefined, installedDesktop: string | undefined;
+  if (installPackage) {
+    await checkpoint("install-fresh-owned-package");
+    await mkdir(dirname(desktopFile), { mode: 0o700 });
+    await assert.rejects(lstat(profileRoot), { code: "ENOENT" });
+    const installed = await execute(sourceExecutable, installerArguments, { env: installerEnvironment, timeout: 90_000, maxBuffer: 65_536 });
+    assert.equal(installed.stderr, "");
+    const result = z.object({ installationRoot: z.literal(installationRoot), application: z.literal(join(installationRoot, "OpenWhisper-Dev-Linux-x64")),
+      executable: z.literal(join(installationRoot, "OpenWhisper-Dev-Linux-x64/openwhisper-dev")), profile: z.literal(profileRoot), desktopFile: z.literal(desktopFile),
+      sourceDigest: z.string().regex(/^[a-f0-9]{64}$/u), version: z.string().regex(/^\d+\.\d+\.\d+$/u),
+      source: z.object({ commit: z.union([z.string().regex(/^[a-f0-9]{40}$/u), z.literal("source")]), modified: z.boolean() }),
+      launchArguments: z.tuple([z.literal("--dev-profile"), z.literal(profileRoot)]) }).parse(JSON.parse(installed.stdout));
+    await assert.rejects(lstat(profileRoot), { code: "ENOENT" });
+    executable = result.executable; packageRoot = join(result.application, "resources/app");
+    installedDescriptor = sha(await readFile(join(packageRoot, "dist/main/development-recording-build.js")));
+    assert.equal(installedDescriptor, sha(await readFile(join(sourcePackageRoot, "dist/main/development-recording-build.js"))));
+    installedExecutable = sha(await readFile(executable)); assert.equal(installedExecutable, sha(await readFile(sourceExecutable)));
+    installedDesktop = sha(await readFile(desktopFile));
+    assert.equal(sha(await readFile(join(stable, "sentinel"))), stableBefore);
+    installation = { ...result, embeddedNode: true, profileInitiallyAbsent: true, descriptorPreserved: true,
+      existingDestinationRefused: false, originalApplicationAlive: false, stableSentinelUnchanged: false };
+    checks.push("packaged embedded Node installs a fresh owned Dev directory and launcher without creating its profile; captured descriptor/source executable preserved");
+  }
   const profile = prepareDevelopmentProfile(resolveDevelopmentProfile({ home, configHome: config, dataHome: env.XDG_DATA_HOME,
     cacheHome: env.XDG_CACHE_HOME, explicitRoot: profileRoot }));
   const model = await readFile(join(payload, "fixtures/ggml-tiny.bin"));
   assert.equal(model.length, 77691713); assert.equal(sha(model), "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21");
   await copyFile(join(payload, "fixtures/ggml-tiny.bin"), join(profile.paths.models, "ggml-tiny.bin"));
   await chmod(join(profile.paths.models, "ggml-tiny.bin"), 0o600);
-  const stable = join(env.XDG_DATA_HOME!, "whisperfree"); await mkdir(stable, { mode: 0o700 });
-  await writeFile(join(stable, "sentinel"), "Owned stable sentinel", { mode: 0o600 });
-  const stableBefore = sha(await readFile(join(stable, "sentinel")));
   await checkpoint("private-session");
   if (stockKde) {
     const config = join(env.XDG_CONFIG_HOME!, "xdg-desktop-portal"); await mkdir(config, { mode: 0o700 });
@@ -355,6 +389,22 @@ async function main(): Promise<void> {
     assert.ok(value, "Owned control must return only its finite status."); return value;
   };
   assert.equal(await control(), "idle");
+  if (installation) {
+    await checkpoint("refuse-existing-owned-installation");
+    const original = application.process(), originalPid = original.pid; assert.ok(originalPid);
+    await assert.rejects(execute(sourceExecutable, installerArguments, { env: installerEnvironment, timeout: 15_000, maxBuffer: 65_536 }),
+      (error: unknown) => z.object({ code: z.literal(1), killed: z.literal(false), signal: z.null(), stdout: z.literal(""),
+        stderr: z.string().includes(`A fresh path is required: ${installationRoot}`) }).safeParse(error).success);
+    assert.equal(original.exitCode, null); assert.equal(original.signalCode, null); assert.equal(appCloseObserved, false);
+    assert.equal(await application.evaluate(() => process.pid), originalPid); assert.equal((await state()).status, "idle");
+    assert.equal(await control(), "idle");
+    assert.equal(sha(await readFile(executable)), installedExecutable);
+    assert.equal(sha(await readFile(join(packageRoot, "dist/main/development-recording-build.js"))), installedDescriptor);
+    assert.equal(sha(await readFile(desktopFile)), installedDesktop);
+    assert.equal(sha(await readFile(join(stable, "sentinel"))), stableBefore);
+    installation.existingDestinationRefused = true; installation.originalApplicationAlive = true; installation.stableSentinelUnchanged = true;
+    checks.push("repeat installation refuses the existing destination while the original installed app stays idle/alive; installed bytes, launcher and stable sentinel unchanged");
+  }
   assert.deepEqual(initial.installed, ["tiny"]); assert.equal(initial.preferences.gpu, false); assert.equal(initial.preferences.output, "clipboard");
   assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "", "Initialization and enumeration must open no recording stream.");
   await checkpoint("actual-ui-complete-setup");
@@ -1204,12 +1254,17 @@ async function main(): Promise<void> {
     sourceScope: "owned-generated-PipeWire-Pulse-monitor-only", fixtureSha256: sha(publicSpeech),
     ...(nativeX11 ? { nativeX11: true, nativeCapture: true, escapePreserved: true, holdStaleReleaseSafe: true, clearedKeyInactive: true } : {}),
     ...(packaged ? { packagedApplication: true, packageAppPath: packageRoot, executable } : {}),
+    ...(installation ? { installedRuntime: true, installation } : {}),
     physicalMicrophone: "NOT_USED", hotkeys: stockKde ? "OWNED_STOCK_KDE_KGLOBALACCEL_KEY_EDGES" : nativeX11 ? "OWNED_XVFB_NATIVE_XTEST_KEYS" : "OWNED_SYNTHETIC_PORTAL_SIGNALS_ONLY", portalResourcesClosed: true,
     automaticPaste: "NOT_TESTED", gpu: "NOT_TESTED", macos: "NOT_TESTED" }, null, 2), { mode: 0o600 });
   await checkpoint("graceful-normal-quit");
   await application.close(); await appOriginalClose; application = undefined; status = "PASS";
 }
 try { await main(); } catch (error: unknown) {
+  // Installation precedes model/profile creation and capture; retain only its bounded metadata error.
+  if (stage === "install-fresh-owned-package" && error instanceof Error && "stderr" in error && typeof error.stderr === "string") {
+    await writeFile(join(evidence, "installer-failure.txt"), error.stderr.slice(-8192), { mode: 0o600 });
+  }
   failure = { name: error instanceof Error ? error.name : "UNKNOWN",
     location: error instanceof Error ? error.stack?.split("\n").find((line) => line.includes("file:///payload/driver.mjs:"))?.trim() ?? null : null };
   process.exitCode = 1;

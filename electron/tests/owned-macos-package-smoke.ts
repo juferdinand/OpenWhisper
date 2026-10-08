@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
+import { execFileSync, spawnSync } from "node:child_process";
+import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { _electron, expect, type ElectronApplication, type Page } from "@playwright/test";
+import { z } from "zod";
 import { appStateSchema } from "../src/contracts/ui.js";
 import { pinnedRuntimeEnvironment } from "../scripts/runtime.js";
 
@@ -11,14 +13,16 @@ if (process.platform !== "darwin" || process.getuid?.() === 0 || process.env["GI
 const args = process.argv.slice(2);
 if (args.length !== 4 || args[0] !== "--package" || args[2] !== "--evidence" || !args[1] || !args[3] ||
   ![args[1], args[3]].every((path) => isAbsolute(path) && !path.includes("\0"))) throw new Error("Usage: owned-macos-package-smoke.ts --package /absolute/Dev.app --evidence /absolute/fresh/evidence");
-const bundle = resolve(args[1]), evidence = resolve(args[3]);
-if (await realpath(bundle) !== bundle || !bundle.endsWith("/OpenWhisper Dev.app") || evidence.startsWith(`${bundle}/`)) throw new Error("An existing real Dev app and separate fresh evidence directory are required.");
+const sourceBundle = resolve(args[1]), evidence = resolve(args[3]);
+if (await realpath(sourceBundle) !== sourceBundle || !sourceBundle.endsWith("/OpenWhisper Dev.app") || evidence.startsWith(`${sourceBundle}/`)) throw new Error("An existing real Dev app and separate fresh evidence directory are required.");
 await mkdir(evidence, { mode: 0o700 });
-const profile = await realpath(await mkdtemp(join(evidence, "profile-")));
-await chmod(profile, 0o700);
+const profile = join(evidence, "fresh-profile"), installationRoot = join(evidence, "Installation Slot");
+const bundle = join(installationRoot, "OpenWhisper Dev.app"), sourceExecutable = join(sourceBundle, "Contents/MacOS/OpenWhisper Dev");
 const executable = join(bundle, "Contents/MacOS/OpenWhisper Dev"), appPath = join(bundle, "Contents/Resources/app");
-assert.equal((await lstat(executable)).isSymbolicLink(), false);
-const packageMetadata: unknown = JSON.parse(await readFile(join(bundle, "Contents/Resources/notices/mac-dev-package.json"), "utf8"));
+assert.equal((await lstat(sourceExecutable)).isSymbolicLink(), false);
+const sourceDescriptorPath = join(sourceBundle, "Contents/Resources/app/dist/main/development-recording-build.js");
+const sourceDescriptor = await readFile(sourceDescriptorPath);
+const packageMetadata: unknown = JSON.parse(await readFile(join(sourceBundle, "Contents/Resources/notices/mac-dev-package.json"), "utf8"));
 assert.ok(typeof packageMetadata === "object" && packageMetadata !== null && Reflect.get(packageMetadata, "architecture") === process.arch);
 
 let application: ElectronApplication | undefined, page: Page | undefined;
@@ -27,12 +31,31 @@ let identity: { executable: string; appPath: string; packaged: boolean; name: st
 let stage = "launch", passed = false;
 let failure: { name: string; message?: string } | undefined;
 let nativeUtilityLoading: unknown;
+let installation: unknown;
 const checks: string[] = [];
 try {
   const environment: Record<string, string> = {};
   for (const [key, value] of Object.entries(pinnedRuntimeEnvironment(process.env))) if (value !== undefined) environment[key] = value;
   for (const key of Object.keys(environment)) if (key.startsWith("DYLD_") || key.startsWith("OPENWHISPER_") ||
     ["ELECTRON_FORCE_IS_PACKAGED", "DBUS_SESSION_BUS_ADDRESS", "DISPLAY", "WAYLAND_DISPLAY", "PULSE_SERVER", "PIPEWIRE_REMOTE", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"].includes(key)) delete environment[key];
+  stage = "packaged-node-cli-capability";
+  const embeddedNode = execFileSync(sourceExecutable, ["--version"], { env: { ...environment, ELECTRON_RUN_AS_NODE: "1" },
+    encoding: "utf8", timeout: 15_000, maxBuffer: 64 * 1024 });
+  assert.match(embeddedNode.trim(), /^v(?:24|25|26)\.[0-9]+\.[0-9]+$/u, "The existing package must provide its embedded Node CLI without an app launch.");
+  checks.push("Existing packaged runtime provides the embedded Node CLI without a system Node installation or fuse change");
+  stage = "fresh-dev-installation";
+  const installArguments = [join(sourceBundle, "Contents/Resources/app/dist/cli/install-dev.js"), "--source", sourceBundle,
+    "--installation-root", installationRoot, "--profile", profile];
+  const installEnvironment = { ...environment, ELECTRON_RUN_AS_NODE: "1" };
+  installation = z.object({ installationRoot: z.literal(installationRoot), application: z.literal(bundle),
+    executable: z.literal(executable), profile: z.literal(profile), desktopFile: z.null(), sourceDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+    version: z.literal("0.3.0"), launchArguments: z.tuple([z.literal("--dev-profile"), z.literal(profile)]) }).parse(JSON.parse(
+      execFileSync(sourceExecutable, installArguments, { env: installEnvironment, encoding: "utf8", timeout: 120_000, maxBuffer: 256 * 1024 })));
+  await assert.rejects(lstat(profile), { code: "ENOENT" });
+  assert.deepEqual(await readFile(sourceDescriptorPath), sourceDescriptor);
+  assert.equal((await lstat(executable)).isSymbolicLink(), false);
+  checks.push("Embedded Node CLI copies and verifies a fresh signed Dev app, preserving source inputs and leaving the explicit profile nonexistent");
+  stage = "launch";
   application = await _electron.launch({ executablePath: executable, args: ["--dev-profile", profile],
     env: environment, chromiumSandbox: true, timeout: 30_000 });
   const original = application.process();
@@ -67,6 +90,16 @@ try {
   assert.equal(initial.status, "idle"); assert.equal(initial.installed.length, 0); assert.equal(initial.microphones.length, 0);
   assert.equal(initial.preferences.macos_shortcut ?? null, null);
   checks.push("Normal production main factory initializes from signed packaged retirement/native descriptors");
+  stage = "existing-installation-refusal";
+  const refused = spawnSync(sourceExecutable, installArguments, { env: installEnvironment, encoding: "utf8", shell: false,
+    timeout: 30_000, maxBuffer: 256 * 1024 });
+  assert.equal(refused.error, undefined); assert.equal(refused.status, 1); assert.equal(refused.signal, null);
+  assert.match(refused.stderr, /A fresh path is required/u);
+  assert.equal(original.exitCode, null); assert.equal(original.signalCode, null);
+  assert.equal((await state()).status, "idle");
+  assert.deepEqual(await readFile(sourceDescriptorPath), sourceDescriptor);
+  assert.deepEqual(await readFile(join(appPath, "dist/main/development-recording-build.js")), sourceDescriptor);
+  checks.push("A second installation refuses the existing root while the original relocated app remains alive and idle");
   stage = "signed-native-utility-loading";
   nativeUtilityLoading = await application.evaluate(async ({ app, utilityProcess, session }) => {
     const path = process.getBuiltinModule("path"), modules = process.getBuiltinModule("module"), crypto = process.getBuiltinModule("crypto");
@@ -235,12 +268,12 @@ try {
   checks.push("Original packaged process exits cleanly through normal Quit and application cleanup");
   await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", architecture: process.arch, identity, checks,
     input: "CDP to owned window only; no OS global input injection", microphone: "No request, Start or audio operation",
-    nativeUtilityLoading, tccAttribution: "Permission and real microphone behavior remain pending", exit }, null, 2), { mode: 0o600 });
+    installation, nativeUtilityLoading, tccAttribution: "Permission and real microphone behavior remain pending", exit }, null, 2), { mode: 0o600 });
   passed = true;
 } catch (error: unknown) {
   failure = error instanceof Error ? { name: error.name, message: error.message.slice(0, 2000) } : { name: "UNKNOWN" };
   if (page && !page.isClosed()) await page.screenshot({ path: join(evidence, "failure.png"), fullPage: true }).catch(() => {});
-  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "FAIL", stage, identity, checks, nativeUtilityLoading,
+  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "FAIL", stage, identity, checks, installation, nativeUtilityLoading,
     error: failure }, null, 2), { mode: 0o600 });
   process.exitCode = 1;
 } finally {

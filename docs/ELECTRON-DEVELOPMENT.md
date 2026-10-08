@@ -182,6 +182,49 @@ inputs intact. A newer host build may require newer libraries; the package metad
 declares the inspected floor. Host installation, AppImage, updates and release
 acceptance remain separate checks. See the [exact evidence](ELECTRON-DEV-EVIDENCE.md).
 
+## Install a separate local Dev copy
+
+The compiled `dist/cli/install-dev.js` installs an already assembled recording Dev
+directory or `OpenWhisper Dev.app` into a fresh directory under the current user's
+home. It uses the package's embedded Node runtime; a system Node installation is
+unnecessary. Supply an absolute source, a nonexistent installation root and a
+nonexistent private profile. All destination parent directories must already exist.
+
+For Linux x64, also supply a fresh `io.github.whisperfree.dev.desktop` file:
+
+```bash
+ELECTRON_RUN_AS_NODE=1 /absolute/OpenWhisper-Dev-Linux-x64/openwhisper-dev \
+  /absolute/OpenWhisper-Dev-Linux-x64/resources/app/dist/cli/install-dev.js \
+  --source /absolute/OpenWhisper-Dev-Linux-x64 \
+  --installation-root /home/you/OpenWhisper-Dev-030 \
+  --profile /home/you/OpenWhisper-Dev-030-profile \
+  --desktop-file /home/you/.local/share/applications/io.github.whisperfree.dev.desktop
+```
+
+For a matching Apple Silicon or Intel Mac package:
+
+```bash
+ELECTRON_RUN_AS_NODE=1 "/absolute/OpenWhisper Dev.app/Contents/MacOS/OpenWhisper Dev" \
+  "/absolute/OpenWhisper Dev.app/Contents/Resources/app/dist/cli/install-dev.js" \
+  --source "/absolute/OpenWhisper Dev.app" \
+  --installation-root /Users/you/OpenWhisper-Dev-030 \
+  --profile /Users/you/OpenWhisper-Dev-030-profile
+```
+
+The command verifies captured recording inputs, locked dependencies, architecture
+and copied bytes. Mac copies use `ditto` and retain the existing signature, verified
+again after copying. Existing installations, profiles, launchers, stable storage,
+symlink ancestors and overlapping paths are refused. It does not create the profile
+or launch the app. Its JSON result supplies `executable` and `launchArguments` for
+an explicit later launch; Linux's new desktop launcher includes the profile argument.
+
+This is a local Dev copy, not a signed release download or updater. Source metadata
+and the inventory digest describe the selected local bytes; they do not authenticate
+an unsigned Linux package. Archive downloads, replacing an existing Dev version,
+stable-data migration and release updates remain separate work. The owned Mac and
+Linux package runners exercise the installed payload; see the current
+[evidence](ELECTRON-DEV-EVIDENCE.md) for actual pass or pending results.
+
 ## macOS CPU recording Dev build
 
 Use the same explicit `npm run dev -- --recording --dev-profile /absolute/private/path/openwhisper-dev`
@@ -211,9 +254,10 @@ modifier keys are held. Missing permission or a refused attempt leaves clipboard
 output available. Clipboard restoration is unavailable in this adapter; its control
 is hidden without changing the legacy Swift interface.
 
-The normal Mac composition is implemented and covered by synthetic/unit tests. Physical
-microphone permission, default-device changes and signed-helper behavior still require
-their acceptance checks; do not treat native CI conversion tests as hardware validation.
+The normal Mac composition is implemented and covered by synthetic/unit tests. Signed
+production capture and speech helpers load and exit in both actual packaged CI apps.
+Physical microphone permission and default-device changes still require their acceptance
+checks; do not treat native CI conversion tests as hardware validation.
 Global Fn/modifier/mouse triggers, actual target paste, assembled overlay behavior,
 Metal selection and signed release packages remain incomplete.
 

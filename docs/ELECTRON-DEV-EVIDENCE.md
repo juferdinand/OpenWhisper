@@ -1,5 +1,48 @@
 # Electron development evidence
 
+## Fresh local Dev installation: Linux runtime PASS, Mac runtime pending
+
+The pure Node TypeScript CLI installs a local standalone recording Dev directory
+or matching `OpenWhisper Dev.app` into an exclusively reserved fresh root under
+the user's home. It validates copied inventory/modes, locked dependencies,
+architecture and captured recording inputs without executing package modules or
+native addons. Linux exclusively creates an explicit Dev launcher; Mac uses
+`ditto` and verifies the existing bundle signature. The profile remains absent.
+Existing destinations and stable storage are refused. Rollback removes validated
+known entries individually; unexpected files survive with incomplete cleanup reported.
+
+Independent review found two defects, now corrected and covered: unexpected inner
+files during rollback and `=` in Linux executable paths. Seven focused filesystem/
+CLI tests pass. The full service suite passes 952 cases with 14 explicit skips,
+zero failures in16.75s; final strict typing and the normal build pass. The losing
+concurrent-installer assertion accepts either legitimate refusal point while
+checking that the winner's launcher survives and no losing installation remains.
+
+An actual embedded-Electron run exposed ASAR filesystem virtualization during
+raw archive copying. The standalone CLI now sets `process.noAsar` only for its
+operation and restores the previous state. This independently reviewed fix adds
+no Electron/native imports or fuse/signature changes. Both original early failures
+remain retained; they occur before app launch, profile/model creation or capture.
+
+The fresh current-TS Linux package retains verified unchanged Ubuntu22-built
+capture, CPU speech and D-Bus dependency bytes with their original producer manifest;
+current worker entries and their expectations are captured at build time. No old
+package is relabeled. The existing private Kubuntu/Xvfb runner now installs this
+package through its embedded Node CLI, then runs the relocated ordinary executable
+and its own `Resources/app`. `installed-x11-3` passes in44.08s: actual F8 setup,
+Escape/held-key handling, CPU Tiny recognition, exact clipboard/history agreement,
+source-loss Retry/Discard, original Quit, child closure and namespace removal.
+Repeated installation is refused while the original installed app remains idle/alive;
+source/returned package inventories, descriptor, launcher and owned stable sentinel
+stay unchanged. No physical device or host installation is used.
+
+The existing Apple Silicon/Intel package smoke now performs the same fresh install
+before its normal sandbox, signed-utility and shortcut checks. Those new Mac
+installation results are pending CI; the earlier Mac package passes below predate
+this installer. Archive download authenticity, existing-version replacement,
+stable migration, updates and release packaging remain separate work. See
+[Dev installation commands](ELECTRON-DEVELOPMENT.md#install-a-separate-local-dev-copy).
+
 ## Signed Mac production-utility PASS on Apple Silicon and Intel
 
 The existing actual-package smoke now also verifies and loads the unchanged
@@ -17,8 +60,8 @@ package jobs pass in CI37834933376 at branch input b42caec, PR merge tree
 finish at19:53:02UTC (arm64) and19:57:58UTC (x64). The full startup/sandbox,
 normal shortcut setup/removal and original clean Quit checks still pass. These
 are thin ad-hoc Dev packages on owned macOS15 VMs; deployment floor14.0 remains
-verified without claiming a macOS14 runtime. The current legacy Linux job is
-still running; previous CI37830955196 completed all six jobs successfully.
+verified without claiming a macOS14 runtime. CI37834933376 has completed all six
+jobs successfully, including legacy Linux.
 Microphone/TCC, inference through these entries and target insertion remain separate.
 Strict typing and 71 directly affected protocol/runtime/package cases pass. The
 full unchanged service suite passes 945 cases with 14 explicit skips in 16.79s,
