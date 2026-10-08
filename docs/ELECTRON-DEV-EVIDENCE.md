@@ -1,5 +1,26 @@
 # Electron development evidence
 
+## Actual Apple Silicon and Intel Mac Dev package PASS
+
+[Run37830955196](https://github.com/juferdinand/OpenWhisper/actions/runs/37830955196)
+passes both owned Mac jobs at branch input eebebef, PR merge tree
+3149db6242bd8b3264cd02303152445d81498209. Each job builds, ad-hoc signs, verifies
+and extracts its own architecture's Dev ZIP, then starts that exact executable
+and Resources/app with a private profile. Dev identity, isPackaged, actual renderer
+OS sandbox and normal main production retirement/native-descriptor initialization
+pass. Owned-window Command+Shift+F8 setup saves the real profile and registers the
+actual globalShortcut; Remove clears/unregisters it. Original normal Quit exits0
+without a signal. Apple Silicon passes at19:21:21UTC, Intel at19:23:45UTC.
+
+The same run passes the Mac CPU public-audio foundation check and both generated
+PCM capture/retirement roles. These are macOS15 runtimes with a verified14.0
+deployment floor. No microphone/Accessibility permission is requested and no
+OS-global input is injected. Actual global-key firing, signed capture/speech
+utility loading, physical devices, TCC attribution, target-field insertion, Metal,
+universal release signing and stable update/data transition remain open. The
+legacy Swift DMG/native UI also passes. The remaining legacy Linux job is separate;
+this receipt does not claim a completed full migration or all current CI jobs.
+
 ## Mac Dev package and Accessibility paste source
 
 Per-architecture Dev packaging preserves the pinned Electron framework links,
