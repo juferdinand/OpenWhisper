@@ -76,7 +76,10 @@ The shared UI explains toggle-only mode and disables hold selection.
 Fn, modifier-only and mouse input are not implemented by this adapter. Strict
 typing/build and 31 focused integration cases pass; the full unit suite has 929
 passes and 14 explicit skips, and all 60 shared UI cases pass. Actual assembled
-Mac shortcut/package execution remains a separate CI check.
+Mac shortcut/package execution now passes on [Apple Silicon](https://github.com/juferdinand/OpenWhisper/actions/runs/37830955196/job/113495848864)
+and [Intel](https://github.com/juferdinand/OpenWhisper/actions/runs/37830955196/job/113495849495).
+The owned VM input targets only the app's Chromium window; this does not establish
+physical global-shortcut activation, microphone access, or insertion into another app.
 
 Owner scope adjustment, 2026-10-08: finish the current genuine-X11 increment,
 then defer expanded Linux desktop/special-input matrices to existing bug reports.

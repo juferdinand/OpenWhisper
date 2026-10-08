@@ -1,5 +1,25 @@
 # Electron development evidence
 
+## Signed Mac production-utility check prepared
+
+The existing actual-package smoke now also verifies and loads the unchanged
+production capture and CPU speech entries in their original Electron utility
+processes. Expectations come from the packaged signed build descriptor. Capture
+configuration remains at generation zero without Start or session allocation;
+speech discovery follows two fresh PID/epoch challenges and does not load a model.
+Both original exits and failure cleanup are bounded and observed. The main
+process must keep capture/speech addons out of its native inventory. This changes
+only the existing TypeScript smoke, preserving package contents and signing policy.
+Actual Apple Silicon/Intel results for this extension are pending the next CI run;
+the previous package PASS below does not establish this new helper-loading claim.
+Microphone/TCC, inference through these entries and target insertion remain separate.
+Strict typing and 71 directly affected protocol/runtime/package cases pass. The
+full unchanged service suite passes 945 cases with 14 explicit skips in 16.79s,
+and the normal TypeScript/shared-UI build passes. A local inspector probe catches
+the driver's unsupported dynamic imports before CI; package-module loading uses
+the existing Node loader instead. The serialized callback has no external tsx
+function-name helper.
+
 ## Actual Apple Silicon and Intel Mac Dev package PASS
 
 [Run37830955196](https://github.com/juferdinand/OpenWhisper/actions/runs/37830955196)
