@@ -16,6 +16,17 @@ strict typing and all six focused package cases pass. Actual packaged UI remains
 pending. The separate legacy Swift DMG check also reports a corrupt image; its
 cause is unresolved. Existing package artifacts are now retained after failure.
 
+The next run, 37828376841, packages/signs/extracts the Apple Silicon Dev archive
+and opens the real shared UI. Its smoke stops at package identity: the executable
+is still named Electron, so Electron44's [actual IsPackaged implementation](https://github.com/electron/electron/blob/v44.7.0/shell/browser/api/electron_api_app.cc#L865)
+returns false. The staged executable and CFBundleExecutable now use OpenWhisper
+Dev; no environment override replaces the assertion. Intel reaches runtime
+signing but encounters unsigned nested Crashpad before the enclosing framework.
+Runtime Mach-O inputs now sign inside out. Strict typing and seven focused package
+cases pass; actual corrected package execution remains pending. The legacy Swift
+DMG/native UI passes in this run without a DMG source change; the prior failure's
+cause is not established.
+
 The strict TypeScript paste adapter lazily loads fixed Apple frameworks only after
 permission and external-target admission. It refuses held modifiers, changed focus
 and app-owned targets, posts one Command+V pair and releases native references.

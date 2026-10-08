@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
 import { SPEECH_ENTRY_FILES } from "../src/services/speech-entry-graph.js";
-import { captureSignedMacDescriptor, inspectMacBinary, inspectMacMinimumOS, stageMacPreview } from "../scripts/package-macos-preview.js";
+import { captureSignedMacDescriptor, insideOutMacCodePaths, inspectMacBinary, inspectMacMinimumOS, stageMacPreview } from "../scripts/package-macos-preview.js";
 
 async function fixture() {
   const base = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-mac-package-"))), root = join(base, "source/electron");
@@ -67,6 +67,9 @@ test("Mac preview copies exact captured inputs, architecture dependency, icon/no
   try {
     const result = await stageMacPreview({ root: input.root, output: input.output, architecture: "arm64" });
     assert.equal(await readFile(join(result.application, "package.json"), "utf8"), input.metadata);
+    assert.equal(await readFile(join(result.directory, "Contents/MacOS/OpenWhisper Dev"), "utf8"), "inert runtime fixture");
+    await assert.rejects(lstat(join(result.directory, "Contents/MacOS/Electron")), { code: "ENOENT" });
+    assert.equal(await readFile(join(input.root, input.runtime, "Contents/MacOS/Electron"), "utf8"), "inert runtime fixture");
     assert.equal(await readFile(join(result.application, "dist/resources/development-build.json"), "utf8"), input.source);
     assert.equal(await readlink(join(result.directory, "Contents/Frameworks/Electron Framework.framework/Versions/Current")), "A");
     assert.equal(await readFile(join(result.application, "node_modules/@koromix/koffi-darwin-arm64/koffi.node"), "utf8"), "inert Koffi native fixture");
@@ -132,4 +135,22 @@ test("Mac deployment inspection preserves the baseline and names unsupported or 
       new RegExp(`dist/native/speech/cpu/openwhisper_speech.node.*measured macOS ${version.replaceAll(".", "\\.")}.*14\\.0\\.0`, "u"));
   }
   assert.throws(() => inspectMacMinimumOS("cmd LC_SOURCE_VERSION\nversion 14.0\n", "koffi.node"), /koffi\.node.*no measured macOS deployment floor/u);
+});
+
+test("unsigned Intel runtime signs Crashpad, dylibs and ShipIt before enclosing framework executables", () => {
+  const root = "/private/preview/OpenWhisper Dev.app/Contents/Frameworks";
+  const electron = `${root}/Electron Framework.framework/Versions/A/Electron Framework`;
+  const crashpad = `${root}/Electron Framework.framework/Versions/A/Helpers/chrome_crashpad_handler`;
+  const ffmpeg = `${root}/Electron Framework.framework/Versions/A/Libraries/libffmpeg.dylib`;
+  const squirrel = `${root}/Squirrel.framework/Versions/A/Squirrel`;
+  const shipIt = `${root}/Squirrel.framework/Versions/A/Resources/ShipIt`;
+  const main = "/private/preview/OpenWhisper Dev.app/Contents/MacOS/OpenWhisper Dev";
+  // Lexicographic inventory starts with the framework executable that previously failed codesign.
+  const input = [electron, crashpad, ffmpeg, squirrel, shipIt, main], original = [...input];
+  const signing = insideOutMacCodePaths(input);
+  for (const [nested, enclosing] of [[crashpad, electron], [ffmpeg, electron], [shipIt, squirrel], [electron, main]]) {
+    assert.ok(signing.indexOf(nested!) < signing.indexOf(enclosing!));
+  }
+  assert.deepEqual(input, original);
+  assert.equal(new Set(signing).size, input.length);
 });

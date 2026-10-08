@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, lstat, mkdir, open, readFile, readdir, readlink, realpath, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, open, readFile, readdir, readlink, realpath, rename, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -128,6 +128,8 @@ export async function stageMacPreview(options: MacPreviewStageOptions): Promise<
   await mkdir(output, { mode: 0o700 });
   const directory = join(output, "OpenWhisper Dev.app"), application = join(directory, "Contents/Resources/app");
   await cp(runtime, directory, { recursive: true, dereference: false, verbatimSymlinks: true, force: false, errorOnExist: true });
+  // Electron44's isPackaged checks the executable basename; "Electron" remains a raw runtime.
+  await rename(join(directory, "Contents/MacOS/Electron"), join(directory, "Contents/MacOS/OpenWhisper Dev"));
   if (await exists(application) || await exists(join(directory, "Contents/Resources/app.asar"))) throw new Error("Runtime contains an unexpected application.");
   await mkdir(application);
   await cp(join(root, "dist"), join(application, "dist"), { recursive: true,
@@ -217,6 +219,12 @@ export function inspectMacMinimumOS(output: string, path: string): string {
   return floor;
 }
 
+/** The unsigned Intel runtime requires nested executables/dylibs before enclosing framework code. */
+export function insideOutMacCodePaths(paths: readonly string[]): string[] {
+  return [...paths].sort((left, right) => right.split(sep).length - left.split(sep).length ||
+    (left < right ? -1 : left > right ? 1 : 0));
+}
+
 export async function packageMacPreview(output: string, root = defaultRoot): Promise<{ directory: string; archive: string; sha256: string }> {
   if (process.platform !== "darwin" || (process.arch !== "arm64" && process.arch !== "x64") || process.getuid?.() === 0) throw new Error("Mac preview packaging requires a non-root Darwin architecture host.");
   const architecture = process.arch;
@@ -225,7 +233,7 @@ export async function packageMacPreview(output: string, root = defaultRoot): Pro
   const inventory = await machFiles(inputRuntime, architecture, true);
   const staged = await stageMacPreview({ root, output, architecture });
   const plist = join(staged.directory, "Contents/Info.plist");
-  updatePlist(plist, { CFBundleIdentifier: appId, CFBundleName: "OpenWhisper Dev", CFBundleDisplayName: "OpenWhisper Dev",
+  updatePlist(plist, { CFBundleIdentifier: appId, CFBundleExecutable: "OpenWhisper Dev", CFBundleName: "OpenWhisper Dev", CFBundleDisplayName: "OpenWhisper Dev",
     CFBundleVersion: staged.version, CFBundleShortVersionString: staged.version, CFBundleIconFile: "AppIcon", LSMinimumSystemVersion: "14.0",
     NSMicrophoneUsageDescription: "OpenWhisper Dev needs microphone access to record your voice. Everything stays on your Mac." });
   const helpers = (await readdir(join(staged.directory, "Contents/Frameworks"))).filter((name) => name.endsWith(".app"));
@@ -249,7 +257,7 @@ export async function packageMacPreview(output: string, root = defaultRoot): Pro
     limitations: ["No notarization", "No stable update channel or universal support", "No microphone/TCC or desktop runtime acceptance"],
   }, null, 2));
   const runtimeMach = (await machFiles(staged.directory, architecture, false)).filter((path) => !inside(staged.application, path));
-  for (const path of runtimeMach) run("/usr/bin/codesign", ["--force", "--sign", "-", "--timestamp=none", path]);
+  for (const path of insideOutMacCodePaths(runtimeMach)) run("/usr/bin/codesign", ["--force", "--sign", "-", "--timestamp=none", path]);
   const frameworks = (await readdir(join(staged.directory, "Contents/Frameworks"))).filter((name) => name.endsWith(".framework"));
   for (const name of [...frameworks, ...helpers]) run("/usr/bin/codesign", ["--force", "--sign", "-", "--timestamp=none", join(staged.directory, "Contents/Frameworks", name)]);
   run("/usr/bin/codesign", ["--force", "--sign", "-", "--timestamp=none", staged.directory]);

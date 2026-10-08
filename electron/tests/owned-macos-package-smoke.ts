@@ -16,19 +16,21 @@ if (await realpath(bundle) !== bundle || !bundle.endsWith("/OpenWhisper Dev.app"
 await mkdir(evidence, { mode: 0o700 });
 const profile = await realpath(await mkdtemp(join(evidence, "profile-")));
 await chmod(profile, 0o700);
-const executable = join(bundle, "Contents/MacOS/Electron"), appPath = join(bundle, "Contents/Resources/app");
+const executable = join(bundle, "Contents/MacOS/OpenWhisper Dev"), appPath = join(bundle, "Contents/Resources/app");
 assert.equal((await lstat(executable)).isSymbolicLink(), false);
 const packageMetadata: unknown = JSON.parse(await readFile(join(bundle, "Contents/Resources/notices/mac-dev-package.json"), "utf8"));
 assert.ok(typeof packageMetadata === "object" && packageMetadata !== null && Reflect.get(packageMetadata, "architecture") === process.arch);
 
 let application: ElectronApplication | undefined, page: Page | undefined;
+let identity: { executable: string; appPath: string; packaged: boolean; name: string;
+  userData: string; sessionData: string; sandbox: boolean | undefined } | undefined;
 let stage = "launch", passed = false;
 const checks: string[] = [];
 try {
   const environment: Record<string, string> = {};
   for (const [key, value] of Object.entries(pinnedRuntimeEnvironment(process.env))) if (value !== undefined) environment[key] = value;
   for (const key of Object.keys(environment)) if (key.startsWith("DYLD_") || key.startsWith("OPENWHISPER_") ||
-    ["DBUS_SESSION_BUS_ADDRESS", "DISPLAY", "WAYLAND_DISPLAY", "PULSE_SERVER", "PIPEWIRE_REMOTE", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"].includes(key)) delete environment[key];
+    ["ELECTRON_FORCE_IS_PACKAGED", "DBUS_SESSION_BUS_ADDRESS", "DISPLAY", "WAYLAND_DISPLAY", "PULSE_SERVER", "PIPEWIRE_REMOTE", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"].includes(key)) delete environment[key];
   application = await _electron.launch({ executablePath: executable, args: ["--dev-profile", profile],
     env: environment, chromiumSandbox: true, timeout: 30_000 });
   const original = application.process();
@@ -36,7 +38,8 @@ try {
   page = await application.firstWindow();
   await expect(page.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev", { timeout: 15_000 });
   assert.equal(page.url(), "app://openwhisper/index.html");
-  const identity = await application.evaluate(({ app, BrowserWindow }) => {
+  stage = "package-identity";
+  identity = await application.evaluate(({ app, BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows().find((item) => item.webContents.getURL() === "app://openwhisper/index.html");
     if (!window) throw new Error("Owned main window is missing.");
     const renderer = app.getAppMetrics().find((item) => item.pid === window.webContents.getOSProcessId());
@@ -44,16 +47,21 @@ try {
       userData: app.getPath("userData"), sessionData: app.getPath("sessionData"),
       sandbox: renderer?.sandboxed };
   });
-  assert.equal(identity.executable, executable); assert.equal(identity.appPath, appPath); assert.equal(identity.packaged, true);
-  assert.equal(identity.name, "OpenWhisper Dev"); assert.equal(identity.sandbox, true);
+  assert.equal(identity.executable, executable, "The actual Dev executable must run.");
+  assert.equal(identity.appPath, appPath, "The package must use its own Resources/app.");
+  assert.equal(identity.packaged, true, "Electron must recognize the renamed packaged executable.");
+  assert.equal(identity.name, "OpenWhisper Dev", "The app must retain the separate Dev name.");
+  assert.equal(identity.sandbox, true, "The actual Mac renderer must have its OS sandbox enabled.");
   assert.deepEqual(await page.evaluate(() => ({ node: typeof Reflect.get(window, "process"), require: typeof Reflect.get(window, "require") })),
     { node: "undefined", require: "undefined" });
   assert.ok(identity.userData.startsWith(`${profile}/`) && identity.sessionData.startsWith(`${profile}/`));
   checks.push("Actual packaged executable and Resources/app; isolated Dev profile; sandboxed shared UI");
+  stage = "native-composition";
   const state = async () => appStateSchema.parse(await page!.evaluate(() => window.openwhisper!.invoke("get_state", {})));
   const initial = await state();
   assert.equal(initial.profile, "development"); assert.equal(initial.platform, "macos");
-  assert.equal(initial.native_shortcuts, true); assert.equal(initial.macos?.shortcut_toggle_only, true);
+  assert.equal(initial.native_shortcuts, true, "The packaged normal main must enable Mac keyboard controls.");
+  assert.equal(initial.macos?.shortcut_toggle_only, true, "The Mac recording descriptor must be active.");
   assert.equal(initial.status, "idle"); assert.equal(initial.installed.length, 0); assert.equal(initial.microphones.length, 0);
   assert.equal(initial.preferences.macos_shortcut ?? null, null);
   checks.push("Normal production main factory initializes from signed packaged retirement/native descriptors");
@@ -95,7 +103,7 @@ try {
   passed = true;
 } catch (error: unknown) {
   if (page && !page.isClosed()) await page.screenshot({ path: join(evidence, "failure.png"), fullPage: true }).catch(() => {});
-  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "FAIL", stage, checks,
+  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "FAIL", stage, identity, checks,
     error: error instanceof Error ? { name: error.name, message: error.message.slice(0, 2000) } : { name: "UNKNOWN" } }, null, 2), { mode: 0o600 });
   process.exitCode = 1;
 } finally {
