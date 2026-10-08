@@ -10,7 +10,7 @@
   "scripts": {
     "setup": "tsx scripts/setup.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "tsx --test tests/*.test.ts tests/owned-retirement/*.test.ts",
     "build": "tsx scripts/build.ts",
     "build:native": "tsx scripts/build-native.ts",
     "dev": "tsx scripts/dev.ts"

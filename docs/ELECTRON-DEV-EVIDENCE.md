@@ -391,3 +391,32 @@ Rejected or synchronous close stays terminal and is never retried or certified b
 new handle. No native loader, factory, worker, package or UI consumes this catalog yet.
 This detects the tested mutations; it is not an immutable lease against later
 same-UID modification, publisher authentication, or a process-wide allocation fence.
+
+
+### Actual owned Linux process retirement
+
+The standalone owned Node fixtures pass four lifecycle cases and one held-reader case
+at their historical build-2 source. New Electron 44.7 fixtures pass the same four
+lifecycle cases and a separate real held-procfs-descriptor case at build-7. Both run
+as UID 1000 in isolated Ubuntu22 containers without network, mounts or host devices,
+with the exact recorded runtime, approved seccomp policy and parent sandbox enabled.
+Original returned child channels provide fresh nonce/birth confirmation before
+admission and before an owned termination request. Direct-parent and current-UID
+checks bind the actual kernel record. A runtime exit event alone cannot permit reuse.
+
+Electron self-exit and self-abort directly sampled matching-birth Z states before
+actual procfs absence. Other cases accurately report Z as not observed. Delayed
+termination and held-reader ambiguity keep the allocation poisoned even after later
+actual absence. The held reader uses a real procfs descriptor; its accepted queued
+observation barrier stays pending until that exact descriptor closes. Independent
+review verifies source/bundle/runtime/config hashes and complete owned container
+cleanup. The local final packet hash is
+`9db9ed375d3e849ee00e2770a7b3f342d68839f0609223189142df5f5ffadeb3`.
+
+Current 44 focused inert tests pass, including the independent initially failing
+reader-barrier regression. The fixture contract tests now run in the ordinary test
+command. Actual invocation stays explicit: its fixed runtime payload and container
+must be prepared and verified through `tests/owned-retirement/build-probe.ts` and
+`run.ts`. These standalone tests do not connect the speech factory, native addon,
+model leases or application lifecycle. Continuing main allocation ownership and
+live automatic backend fallback still require their separate integration proofs.
