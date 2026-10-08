@@ -21,7 +21,7 @@ async function retainMetadata(directory: string, project: string, binding: strin
   const owner = await lstat(evidence); assert.ok(owner.isDirectory() && !owner.isSymbolicLink());
   assert.equal(owner.uid, process.getuid?.()); assert.equal(owner.mode & 0o7777, 0o700);
   assert.equal(await realpath(evidence), resolve(evidence));
-  for (const name of ["result.json", "failure.json", "lifecycle.json", "phases.json", "retained.json"]) {
+  for (const name of ["result.json", "failure.json", "lifecycle.json", "phases.json", "retained.json", "startup.json"]) {
     try { await cp(join(directory, name), join(evidence, name)); }
     catch (error: unknown) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
   }
@@ -68,6 +68,7 @@ test("Apple capture utility preserves synthetic full streams, final tails, fence
       child.once("exit", (exit) => { clearTimeout(deadline); if (hardStop) clearTimeout(hardStop); kill("SIGKILL"); accept(exit); });
     });
     assert.equal(code, 0, "Owned synthetic Apple utility failed; no microphone fallback is permitted.");
+    z.strictObject({ stage: z.literal("ready") }).parse(JSON.parse(await readFile(join(root, "startup.json"), "utf8")));
     const result = resultSchema.parse(JSON.parse(await readFile(join(root, "result.json"), "utf8")));
     assert.equal(result.architecture, process.arch);
     assert.deepEqual(result.cases.map((item) => item.name), ["identity-tail", "format-transition", "long-ledger", "held-callback", "cancel-race",
