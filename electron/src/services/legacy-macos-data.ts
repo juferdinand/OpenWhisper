@@ -32,8 +32,8 @@ const inputSchema = z.strictObject({
 export const legacyMacosContextSchema = inputSchema.pick({ systemLanguage: true, defaults: true });
 export type LegacyMacosContext = z.infer<typeof legacyMacosContextSchema>;
 export const legacyMacosMigrationContextSchema = legacyMacosContextSchema.extend({
-  loginStatus: z.enum(["enabled", "requires-approval", "not-registered"]),
-}).refine((context) => context.defaults.launchAtLogin === (context.loginStatus !== "not-registered"));
+  loginStatus: z.enum(["enabled", "requires-approval", "not-registered", "not-found"]),
+}).refine((context) => context.defaults.launchAtLogin === (context.loginStatus === "enabled" || context.loginStatus === "requires-approval"));
 export type LegacyMacosMigrationContext = z.infer<typeof legacyMacosMigrationContextSchema>;
 const activeHistorySchema = z.array(text(MAX_USER_TEXT_BYTES)).max(20);
 const knownPlistKeys = new Set([...Object.keys(persistedSchema.shape), "overlayOrigin", "trigger"]);

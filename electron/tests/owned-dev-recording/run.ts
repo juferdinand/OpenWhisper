@@ -292,13 +292,24 @@ try {
     const allModes: Record<string, number> = {};
     assert.deepEqual(await inventory(archiveRoot, "", allModes), expected);
     for (const mode of Object.values(allModes)) assert.equal(mode & 0o7022, 0, "Archive must contain no special or writable shared entries.");
+    // UID0 has no DAC override in this container. Expose only the public archive,
+    // while the original UID1000 payload and later profile remain private.
+    const installationStage = "/tmp/openwhisper-owned-debian-install", installationArchive = `${installationStage}/package.deb`;
+    await required([...user, "/usr/bin/mkdir", "-m", "755", installationStage]);
+    await required([...user, "/usr/bin/cp", "/payload/package.deb", installationArchive]);
+    await required([...user, "/usr/bin/chmod", "0444", installationArchive]);
+    assert.equal(await required([...user, "/usr/bin/ls", "-A", installationStage]), "package.deb");
+    assert.equal(await required([...user, "/usr/bin/stat", "-c", "%u:%a", "/payload", installationStage, installationArchive]),
+      "1000:700\n1000:755\n1000:444");
+    assert.equal(await required([...user, "/usr/bin/sha256sum", installationArchive]), `${debianBefore.sha256}  ${installationArchive}`);
     // Unforced dpkg resolves versioned dependencies and legitimate Provides aliases.
-    await required(["exec", "--user", "0:0", container, "/usr/bin/dpkg", "--install", "/payload/package.deb"], 60_000);
+    await required(["exec", "--user", "0:0", container, "/usr/bin/dpkg", "--install", installationArchive], 60_000);
     assert.equal(await required([...user, "/usr/bin/dpkg-query", "-W", "-f=${db:Status-Abbrev} ${Package} ${Version} ${Architecture}", "io.github.whisperfree"]),
       `ii  io.github.whisperfree ${debianVersion} amd64`);
     await writeFile(join(output, "debian-installation.json"), JSON.stringify({ package: debianBefore, version: debianVersion,
       archiveMatchesDirectory: true, controlScriptsAbsent: true, dependenciesPresent: true,
-      applicationUid: 1000, packageManagerUid: 0, permanentExecutable: "/opt/openwhisper/openwhisper", actualLoginSession: "NOT_TESTED" }), { mode: 0o600 });
+      applicationUid: 1000, packageManagerUid: 0, packageManagerArchive: installationArchive, payloadModePreserved: true,
+      permanentExecutable: "/opt/openwhisper/openwhisper", actualLoginSession: "NOT_TESTED" }), { mode: 0o600 });
   }
   await required(["exec", "--user", "1000:1000", container, "/usr/bin/chmod", "-R", "a-w",
     ...(packaged ? ["/payload/driver.mjs", "/payload/node", "/payload/fixtures", "/payload/node_modules"] : ["/payload"])]);

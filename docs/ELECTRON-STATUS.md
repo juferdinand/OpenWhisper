@@ -75,23 +75,32 @@ are connected: Debian uses only its verified permanent `/opt` layout; Mac uses
 typed `mainAppService` facts, including pending approval. Startup only reads facts;
 registration changes require an explicit settings action. Persisted requests survive
 unavailable capabilities, and late status reads cannot overwrite newer facts.
-Strict typing and 1078 local tests pass with 25 explicit skips. The first
-[CI run at `9349566`](https://github.com/juferdinand/OpenWhisper/actions/runs/37858180435)
-fails the Ubuntu autostart test because its external desktop validator is missing;
-both normal stable Mac packages also exit during profile preparation before the
-first window. Existing Mac Dev package gates pass. The retained Mac failure lacks
-a specific category. Fixed, content-free bootstrap stages, failure categories and
-native login-state observations now preserve that diagnostic without changing
-admission. An owned Linux auth fixture additionally finds ordinary
-inspector-prefixed GUI launches rejected by the new CLI router. Narrow corrections
-restore ordinary GUI routing and install the validator before the Linux test job.
-Independent reviews, strict typing and the corrective suite pass: 1079 tests,
-25 explicit skips, zero failures in 17.78s. The existing recording harness also
-accepts a matching stable Debian archive for container-only installation, UI
-autostart and generated permanent-target restart checks; actual login-session
-launch remains explicitly untested. Fresh package/runtime acceptance remains
-required. These failures do
-not invalidate the separately attributed earlier migration and dictation evidence.
+The initial [CI at `9349566`](https://github.com/juferdinand/OpenWhisper/actions/runs/37858180435)
+finds a missing desktop validator and a Mac profile failure. Corrective
+[CI at `2003831`](https://github.com/juferdinand/OpenWhisper/actions/runs/37859812420)
+passes both TypeScript jobs and existing Dev gates; fixed diagnostics identify the
+same Mac failure on ARM/Intel: `LOGIN_STATE_UNKNOWN`, observed login `not-found`.
+Migration now preserves that known state with the old native requested=false
+mapping. Autostart control remains unavailable, unknown facts still refuse initial
+migration and completed profiles retain edits. No registration occurs.
+Independent reviews, strict typing and 1091 local tests pass with 25 explicit skips
+and zero failures in 17.81s; actual corrected Mac package acceptance remains open.
+
+Fresh Ubuntu22 packages retain clean producer `2003831`. Native auth/expiry and
+ordinary inspector-prefixed GUI startup pass in the owned bus fixture. The exact
+Dev package starts but fails to discover its private virtual audio source before
+dictation; that concrete failure remains open. The matching stable Debian harness
+verifies archive contents before container-only installation, UI autostart and
+generated permanent-target restart. Its first attempt stops at a private archive
+permission boundary before application launch; a public-archive-only stage fixes
+that harness boundary without adding container capabilities. Runtime acceptance
+is still required, and actual login-session launch remains explicitly untested.
+Earlier separately attributed migration/dictation evidence remains valid.
+
+The strict TS update policy now validates exact UInt64 versions, Mac release
+sources and fixed Linux package/feed targets. Candidates remain explicitly
+unauthenticated. It does not enable checks, downloads, installation or update UI;
+real signature and installation adapters remain required.
 
 The current checkpoint includes actual stock KDE keyboard dictation, recovery
 after a held-key/GUI cancellation sequence and same-profile crash recovery. Explicit

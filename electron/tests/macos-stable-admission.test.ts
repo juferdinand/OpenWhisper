@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { macosLoginFact, macosMigrationContext, verifyMacApplicationBundle } from "../src/main/macos-stable-admission.js";
 import { StableMigrationError } from "../src/contracts/stable-migration.js";
+import { legacyMacosMigrationContextSchema } from "../src/services/legacy-macos-data.js";
 
 const catalog: unknown = JSON.parse(readFileSync(new URL("../../shared/models.json", import.meta.url), "utf8"));
 const facts = { languages: ["de-DE"], architecture: "arm64", physicalMemory: 8 * 1_073_741_824, loginStatus: "not-registered", catalog };
@@ -24,6 +25,21 @@ test("native Mac recommendation defaults retain compile architecture memory roun
   assert.equal(intel.systemLanguage, "ja-JP");
   const pending = macosMigrationContext({ ...facts, loginStatus: "requires-approval" });
   assert.equal(pending.loginStatus, "requires-approval"); assert.equal(pending.defaults.launchAtLogin, true);
+});
+
+test("Mac migration preserves all known login states without admitting absent service control", () => {
+  for (const [loginStatus, launchAtLogin] of [["enabled", true], ["requires-approval", true], ["not-registered", false], ["not-found", false]] as const) {
+    const context = macosMigrationContext({ ...facts, loginStatus });
+    assert.equal(context.loginStatus, loginStatus); assert.equal(context.defaults.launchAtLogin, launchAtLogin);
+    assert.deepEqual(legacyMacosMigrationContextSchema.parse(context), context);
+    assert.equal(legacyMacosMigrationContextSchema.safeParse({ ...context, defaults: { ...context.defaults, launchAtLogin: !launchAtLogin } }).success, false);
+  }
+  for (const loginStatus of ["", "unavailable", "future-status", undefined, null, false]) {
+    assert.throws(() => macosMigrationContext({ ...facts, loginStatus }),
+      (error: unknown) => error instanceof StableMigrationError && error.code === "LOGIN_STATE_UNKNOWN");
+  }
+  assert.throws(() => macosLoginFact("not-found"),
+    (error: unknown) => error instanceof StableMigrationError && error.code === "LOGIN_STATE_UNKNOWN");
 });
 
 test("invalid Mac hardware and language facts cannot create a migration context", () => {

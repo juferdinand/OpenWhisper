@@ -332,6 +332,12 @@ trust/format policy. Implement the current policy in typed services with native 
 where required. [Electron updater](https://github.com/electron/electron/blob/v44.7.0/docs/api/auto-updater.md),
 [current signing policy](SIGNING.md).
 
+The initial strict TS policy projects canonical UInt64 versions and exact Mac/Linux
+release sources into explicitly unauthenticated candidates. It preserves the fixed
+asset/feed targets and bounded required metadata. Transport, signature verification,
+installation and automatic checks remain disabled until their actual adapters pass
+acceptance; matching metadata alone does not authenticate an update.
+
 On Linux, release windows, clipboard, bus/shortcut sessions, capture and workers explicitly,
 then replace the supervised process in place. Do not use `app.relaunch()` plus exit. Node
 24.21 `process.execve` is experimental and runs no cleanup handlers; test availability and

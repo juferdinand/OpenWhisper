@@ -35,7 +35,10 @@ export function macosLoginFact(status: unknown): MacosLoginFact {
 /** The admitted main supplies languages/login state; architecture preserves the native compile-architecture policy. */
 export function macosMigrationContext(input: { readonly languages: readonly string[]; readonly architecture: string;
   readonly physicalMemory?: number; readonly loginStatus: unknown; readonly catalog: unknown }): LegacyMacosMigrationContext {
-  const login = macosLoginFact(input.loginStatus), catalog = parseModelCatalog(input.catalog);
+  // Legacy requested state was true only for enabled or pending approval. A
+  // known absent service is preserved for migration, without granting control.
+  const login = input.loginStatus === "not-found" ? { status: "not-found" as const, requested: false } : macosLoginFact(input.loginStatus);
+  const catalog = parseModelCatalog(input.catalog);
   const memory = input.physicalMemory ?? totalmem();
   if (!Number.isFinite(memory) || memory <= 0 || !["arm64", "x64"].includes(input.architecture) ||
       input.languages.some((language) => typeof language !== "string" || language.length > 128)) throw new Error("Invalid Mac migration facts.");
