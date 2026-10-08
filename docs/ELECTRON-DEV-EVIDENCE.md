@@ -1,6 +1,6 @@
 # Electron development evidence
 
-## Signed Mac production-utility check prepared
+## Signed Mac production-utility PASS on Apple Silicon and Intel
 
 The existing actual-package smoke now also verifies and loads the unchanged
 production capture and CPU speech entries in their original Electron utility
@@ -10,8 +10,15 @@ speech discovery follows two fresh PID/epoch challenges and does not load a mode
 Both original exits and failure cleanup are bounded and observed. The main
 process must keep capture/speech addons out of its native inventory. This changes
 only the existing TypeScript smoke, preserving package contents and signing policy.
-Actual Apple Silicon/Intel results for this extension are pending the next CI run;
-the previous package PASS below does not establish this new helper-loading claim.
+Actual [Apple Silicon](https://github.com/juferdinand/OpenWhisper/actions/runs/37834933376/job/113509442466)
+and [Intel](https://github.com/juferdinand/OpenWhisper/actions/runs/37834933376/job/113509442542)
+package jobs pass in CI37834933376 at branch input b42caec, PR merge tree
+5f6d3c7ca3d1c5f28440e4ca0817d6f95c2e29b4. Their original actual-package smokes
+finish at19:53:02UTC (arm64) and19:57:58UTC (x64). The full startup/sandbox,
+normal shortcut setup/removal and original clean Quit checks still pass. These
+are thin ad-hoc Dev packages on owned macOS15 VMs; deployment floor14.0 remains
+verified without claiming a macOS14 runtime. The current legacy Linux job is
+still running; previous CI37830955196 completed all six jobs successfully.
 Microphone/TCC, inference through these entries and target insertion remain separate.
 Strict typing and 71 directly affected protocol/runtime/package cases pass. The
 full unchanged service suite passes 945 cases with 14 explicit skips in 16.79s,
@@ -35,11 +42,13 @@ without a signal. Apple Silicon passes at19:21:21UTC, Intel at19:23:45UTC.
 The same run passes the Mac CPU public-audio foundation check and both generated
 PCM capture/retirement roles. These are macOS15 runtimes with a verified14.0
 deployment floor. No microphone/Accessibility permission is requested and no
-OS-global input is injected. Actual global-key firing, signed capture/speech
-utility loading, physical devices, TCC attribution, target-field insertion, Metal,
+OS-global input is injected. Actual global-key firing, physical devices, TCC
+attribution, target-field insertion, Metal,
 universal release signing and stable update/data transition remain open. The
-legacy Swift DMG/native UI also passes. The remaining legacy Linux job is separate;
-this receipt does not claim a completed full migration or all current CI jobs.
+legacy Swift DMG/native UI also passes. Run37830955196 has now completed all six
+jobs successfully, including legacy Linux. This receipt does not claim a completed
+full migration. Signed utility loading was still pending at this checkpoint;
+the later receipt above establishes that narrower additional runtime claim.
 
 ## Mac Dev package and Accessibility paste source
 
