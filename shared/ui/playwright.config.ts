@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests",
+  tsconfig: "./tsconfig.json",
   fullyParallel: true,
   use: {
     viewport: { width: 960, height: 680 },
