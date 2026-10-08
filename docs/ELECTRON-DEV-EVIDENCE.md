@@ -420,3 +420,28 @@ must be prepared and verified through `tests/owned-retirement/build-probe.ts` an
 `run.ts`. These standalone tests do not connect the speech factory, native addon,
 model leases or application lifecycle. Continuing main allocation ownership and
 live automatic backend fallback still require their separate integration proofs.
+
+
+### Prepared catalog model download
+
+The host-only downloader accepts a catalog ID and optional cancellation. It streams
+bounded data into genuine private Dev staging, validates HTTPS server-linked size/SHA,
+then asks inventory to verify the copied stream before no-replace publication. Its
+opaque publication receipt binds uncertainty/finalization to that exact operation.
+Only fixed Hugging Face HTTPS authorities are permitted; credentials, proxies,
+certificate overrides and redirects to other authorities are unavailable to callers.
+Certificate verification is explicitly enabled on the private Agent and request.
+
+Independent review reproduced three premature cleanup certificates: destroy intent
+instead of actual socket close, and retried synchronous source/directory close refusal.
+An additional output-part regression reproduced the same failure. The corrected
+receipt owns its exact close Promise before invocation, retains rejection and never
+obtains a replacement certificate. Socket completion requires its observed close
+event. All 60 focused inventory/download/private-filesystem tests pass, including the
+four initially failing regressions. Ordinary imports preserve their existing behavior.
+
+This is source, injected event and actual private filesystem evidence. Real TLS,
+public provider transfer, model compatibility/license acceptance and crash recovery
+are separate gates before live UI wiring. Server integrity metadata is not a project
+signature. The same-host reservation is not an interprocess lock. The reviewed source
+manifest hash is `2dd3e886079348b6a1060ec48edbf3f90348110463737aac352f3b7740d92846`.

@@ -15,13 +15,20 @@ const idSchema = z.string().min(1).refine((value) => Buffer.byteLength(value, "u
   value !== "." && value !== ".." && !/[\/\\\u0000-\u001f\u007f-\u009f]/u.test(value));
 const sourceSchema = z.string().min(1).refine((value) => isAbsolute(value) && resolve(value) === value && !value.includes("\0"));
 const selectionSchema = z.strictObject({ gpu: z.boolean() });
-const importSchema = z.strictObject({ replace: z.boolean().default(false), signal: z.instanceof(AbortSignal).optional() });
+const receiptBrand = Symbol("owned model publication receipt");
+/** Host-only opaque operation capability. JSON/IPC copies cannot recreate it. */
+export interface ModelPublicationReceipt { readonly [receiptBrand]: true }
+const expectedSchema = z.strictObject({ bytes: z.number().int().min(1).max(MAX_MODEL_BYTES), sha256: z.string().regex(/^[a-f0-9]{64}$/u) }).readonly();
+const receiptSchema = z.custom<ModelPublicationReceipt>((value) => typeof value === "object" && value !== null && publicationReceipts.has(value));
+const importSchema = z.strictObject({ replace: z.boolean().default(false), signal: z.instanceof(AbortSignal).optional(),
+  expected: expectedSchema.optional(), receipt: receiptSchema.optional() });
 
 export type ModelInventoryFailure = "INVALID_PROFILE" | "INVALID_CATALOG" | "INVALID_ID" | "INVALID_SOURCE" |
   "UNSAFE_DIRECTORY" | "UNSAFE_FILE" | "NOT_INSTALLED" | "MODEL_CHANGED" | "SOURCE_CHANGED" |
-  "LEASED" | "RELEASE_FAILED" | "EXISTS" | "BUSY" | "CAPACITY" | "CANCELLED" | "STORAGE_FAILED" | "COMMITTED_UNCERTAIN";
+  "LEASED" | "RELEASE_FAILED" | "EXISTS" | "BUSY" | "CAPACITY" | "CANCELLED" | "STORAGE_FAILED" | "COMMITTED_UNCERTAIN" |
+  "INTEGRITY_FAILED" | "INVALID_RECEIPT";
 export class ModelInventoryError extends Error {
-  constructor(readonly code: ModelInventoryFailure) { super(code); this.name = "ModelInventoryError"; }
+  constructor(readonly code: ModelInventoryFailure, readonly receipt?: ModelPublicationReceipt) { super(code); this.name = "ModelInventoryError"; }
 }
 export interface ModelFileIdentity {
   readonly dev: bigint; readonly ino: bigint; readonly size: bigint; readonly mtimeNs: bigint; readonly ctimeNs: bigint;
@@ -54,6 +61,8 @@ interface ImportOwner { readonly token: symbol; readonly file: string; readonly 
 interface Publication {
   readonly kind: "import"; readonly model: CatalogModel; readonly identity: ModelFileIdentity;
   readonly temporary: string; readonly copiedSha256: string; needsUnlink: boolean; readyIdentity?: ModelFileIdentity;
+  readonly receipt?: ModelPublicationReceipt;
+  directoryClosing?: Promise<void>;
 }
 interface Deletion { readonly kind: "remove"; readonly model: CatalogModel }
 interface InventoryState {
@@ -61,6 +70,12 @@ interface InventoryState {
   queue: Promise<void>; readonly leases: Map<string, Set<symbol>>;
   readonly pending: Map<string, Publication | Deletion>; importing: ImportOwner | undefined;
 }
+interface ReceiptState {
+  readonly inventory: InventoryState; readonly model: CatalogModel; readonly receipt: ModelPublicationReceipt;
+  used: boolean; publication?: Publication; committed?: ImportedModel;
+  cleanup?: () => Promise<void>; cleanupComplete: boolean;
+}
+const publicationReceipts = new WeakMap<object, ReceiptState>();
 // Cooperating instances in this host process share mutation/lease ownership. This
 // is not an interprocess lock or a sandbox against another process with this UID.
 const inventories = new Map<string, InventoryState>();
@@ -99,6 +114,9 @@ async function writeAll(file: FileHandle, bytes: Buffer): Promise<void> {
   while (offset < bytes.length) { const written = await file.write(bytes, offset, bytes.length - offset, null);
     if (!written.bytesWritten) throw new ModelInventoryError("STORAGE_FAILED"); offset += written.bytesWritten; }
 }
+/** Receipt owners retain this promise before invoking close, including a
+ * synchronous refusal. A retry must not manufacture a new close certificate. */
+const receiptClose = (file: FileHandle): Promise<void> => Promise.resolve().then(() => file.close());
 
 /** Host-selected Dev profile only. No networking, renderer-selected target or native helper calls. */
 export class ModelInventory {
@@ -247,10 +265,52 @@ export class ModelInventory {
         (stats.mode & 0o7777n) !== 0o600n) throw new ModelInventoryError("MODEL_CHANGED");
     await this.io.unlink(path);
   }
+  /** The genuine host profile, not a copied/renderer-supplied path object. */
+  belongsToProfile(profile: DevelopmentProfile): boolean {
+    try { prepareDevelopmentProfile(profile); return profile.paths.models === this.directory; } catch { return false; }
+  }
+  createPublicationReceipt(input: unknown): ModelPublicationReceipt {
+    const model = this.fromId(input), receipt: ModelPublicationReceipt = Object.freeze({ [receiptBrand]: true as const });
+    publicationReceipts.set(receipt, { inventory: this.state, model, receipt, used: false, cleanupComplete: false });
+    return receipt;
+  }
+  private receipt(input: unknown): ReceiptState {
+    if (typeof input !== "object" || input === null) throw new ModelInventoryError("INVALID_RECEIPT");
+    const record = publicationReceipts.get(input);
+    if (!record || record.inventory !== this.state) throw new ModelInventoryError("INVALID_RECEIPT"); return record;
+  }
+  ensurePublicationCommitted(input: unknown): Promise<ImportedModel> {
+    return this.run(async () => {
+      const record = this.receipt(input);
+      if (!record.used || !record.publication) throw new ModelInventoryError("INVALID_RECEIPT");
+      if (record.committed) {
+        const current = await this.file(record.model);
+        if (!sameFile(current.identity, record.committed.identity)) throw new ModelInventoryError("MODEL_CHANGED"); return record.committed;
+      }
+      if (this.pending.get(record.model.id) !== record.publication) throw new ModelInventoryError("INVALID_RECEIPT");
+      const result = await this.finish(record.model.id);
+      if (!result) throw new ModelInventoryError("INVALID_RECEIPT"); return result;
+    });
+  }
+  /** Retry only this import's captured cleanup after the original operation has
+   * settled. The same descriptor-close promises are retained, never reissued. */
+  async finishImportCleanup(input: unknown): Promise<void> {
+    const record = this.receipt(input);
+    if (!record.used) return;
+    if (record.cleanupComplete) return;
+    if (!record.cleanup) throw new ModelInventoryError("BUSY");
+    await record.cleanup();
+  }
   private async finish(id: string): Promise<ImportedModel | null> {
     const pending = this.pending.get(id); if (!pending) throw new ModelInventoryError("INVALID_ID");
+    if (pending.kind === "import" && pending.receipt && pending.directoryClosing) {
+      try { await pending.directoryClosing; delete pending.directoryClosing; }
+      catch { throw new ModelInventoryError("COMMITTED_UNCERTAIN", pending.receipt); }
+    }
     const directory = await this.directoryFile();
     let closed = false;
+    const closeDirectory = (): Promise<void> => pending.kind === "import" && pending.receipt ?
+      pending.directoryClosing ??= receiptClose(directory) : directory.close();
     try {
       if (pending.kind === "remove") {
         try { await lstat(join(this.directory, pending.model.file)); throw new ModelInventoryError("MODEL_CHANGED"); }
@@ -273,10 +333,12 @@ export class ModelInventory {
       await this.io.syncDirectory(directory); await directoryIdentity(this.directory, this.parent);
       const confirmed = await this.file(pending.model);
       if (!sameFile(confirmed.identity, installed.identity)) throw new ModelInventoryError("MODEL_CHANGED");
-      await directory.close(); closed = true;
-      this.pending.delete(id); return Object.freeze({ ...confirmed, copiedSha256: pending.copiedSha256 });
-    } catch { throw new ModelInventoryError("COMMITTED_UNCERTAIN"); }
-    finally { if (!closed) { try { await directory.close(); } catch { /* The retained publication remains unavailable. */ } } }
+      await closeDirectory(); closed = true;
+      const result = Object.freeze({ ...confirmed, copiedSha256: pending.copiedSha256 });
+      if (pending.receipt) this.receipt(pending.receipt).committed = result;
+      this.pending.delete(id); return result;
+    } catch { throw new ModelInventoryError("COMMITTED_UNCERTAIN", pending.kind === "import" ? pending.receipt : undefined); }
+    finally { if (!closed) { try { await closeDirectory(); } catch { /* The retained publication remains unavailable. */ } } }
   }
   ensureCommitted(input: unknown): Promise<ImportedModel | null> { return this.run(() => this.finish(this.checkedId(input))); }
   remove(input: unknown): Promise<void> {
@@ -304,9 +366,12 @@ export class ModelInventory {
     const source = sourceParsed.data, options = optionsParsed.data;
     const name = basename(source), extension = extname(name);
     const model = this.fromFile(`${extension ? name.slice(0, -extension.length) : name}.bin`);
+    const receipt = options.receipt ? this.receipt(options.receipt) : undefined;
+    if (receipt && (receipt.used || receipt.model.id !== model.id || receipt.model.file !== model.file)) throw new ModelInventoryError("INVALID_RECEIPT");
     const target = join(this.directory, model.file), temporary = join(this.directory, `.${randomUUID()}.model.part`);
     let original: InstalledModel | undefined;
     const owner = await this.run(async () => {
+      if (receipt?.used) throw new ModelInventoryError("INVALID_RECEIPT");
       active(options.signal); await directoryIdentity(this.directory, this.parent);
       if (this.importing) throw new ModelInventoryError("BUSY");
       if (this.pending.has(model.id)) throw new ModelInventoryError("COMMITTED_UNCERTAIN"); this.held(model);
@@ -316,9 +381,11 @@ export class ModelInventory {
       if (original && !options.replace) throw new ModelInventoryError("EXISTS");
       const installed = await this.scan();
       if (!original && !this.catalog.models.some((entry) => entry.id === model.id) && this.capacity(installed) >= MAX_INVENTORY_MODELS) throw new ModelInventoryError("CAPACITY");
+      if (receipt) receipt.used = true;
       const started = { token: Symbol("owned import"), file: temporary, model }; this.importing = started; return started;
     });
     let input: FileHandle | undefined, output: FileHandle | undefined, part: ModelFileIdentity | undefined;
+    let inputClosing: Promise<void> | undefined, outputClosing: Promise<void> | undefined;
     let published = false;
     try {
       input = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -343,8 +410,12 @@ export class ModelInventory {
       }
       const complete = await output.stat({ bigint: true });
       if (!ownedFile(complete) || complete.size !== before.size) throw new ModelInventoryError("STORAGE_FAILED");
-      await output.close(); output = undefined;
+      const completeFile = output;
+      outputClosing = receipt ? receiptClose(completeFile) : completeFile.close(); await outputClosing; output = undefined;
       const copiedSha256 = digest.digest("hex");
+      if (options.expected && (options.expected.bytes !== Number(complete.size) || options.expected.sha256 !== copiedSha256)) {
+        throw new ModelInventoryError("INTEGRITY_FAILED");
+      }
       const sourceFile = input;
       return await this.run(async () => {
         active(options.signal); await directoryIdentity(this.directory, this.parent); this.held(model);
@@ -364,7 +435,7 @@ export class ModelInventory {
         }
         // No source descriptor remains to fail cleanup after publication. Its
         // final FD/path identity check above still covers the complete copy.
-        await sourceFile.close(); input = undefined;
+        inputClosing = receipt ? receiptClose(sourceFile) : sourceFile.close(); await inputClosing; input = undefined;
         try {
           if (options.replace) await this.io.rename(temporary, target); else await this.io.link(temporary, target);
         } catch (error: unknown) {
@@ -372,23 +443,48 @@ export class ModelInventory {
           try { named = await lstat(target, { bigint: true }); } catch (check: unknown) { if (!errorCode(check, "ENOENT")) throw check; }
           if (named && sameInode(named, complete)) {
             published = true;
-            this.pending.set(model.id, { kind: "import", model, identity: identity(complete), temporary, copiedSha256, needsUnlink: !options.replace });
-            throw new ModelInventoryError("COMMITTED_UNCERTAIN");
+            const publication: Publication = { kind: "import", model, identity: identity(complete), temporary, copiedSha256, needsUnlink: !options.replace,
+              ...(options.receipt ? { receipt: options.receipt } : {}) };
+            if (receipt) receipt.publication = publication;
+            this.pending.set(model.id, publication);
+            throw new ModelInventoryError("COMMITTED_UNCERTAIN", options.receipt);
           }
           if (errorCode(error, "EEXIST")) throw new ModelInventoryError("EXISTS"); throw error;
         }
         published = true;
-        this.pending.set(model.id, { kind: "import", model, identity: identity(complete), temporary, copiedSha256, needsUnlink: !options.replace });
+        const publication: Publication = { kind: "import", model, identity: identity(complete), temporary, copiedSha256, needsUnlink: !options.replace,
+          ...(options.receipt ? { receipt: options.receipt } : {}) };
+        if (receipt) receipt.publication = publication;
+        this.pending.set(model.id, publication);
         const result = await this.finish(model.id);
         if (!result) throw new ModelInventoryError("COMMITTED_UNCERTAIN"); return result;
       });
     } catch (error: unknown) {
-      if (published) throw new ModelInventoryError("COMMITTED_UNCERTAIN");
+      if (published) throw new ModelInventoryError("COMMITTED_UNCERTAIN", options.receipt);
       if (error instanceof ModelInventoryError) throw error;
       throw new ModelInventoryError(errorCode(error, "ELOOP") ? "INVALID_SOURCE" : "STORAGE_FAILED");
     } finally {
       const closing: Promise<void>[] = [];
-      if (input) closing.push(input.close()); if (output) closing.push(output.close());
+      if (input) closing.push(receipt ? inputClosing ??= receiptClose(input) : input.close());
+      if (output) closing.push(receipt ? outputClosing ??= receiptClose(output) : output.close());
+      if (receipt) {
+        const closes = Promise.allSettled(closing);
+        receipt.cleanup = async () => {
+          const closed = await closes;
+          if (closed.some((result) => result.status === "rejected")) throw new ModelInventoryError(published ? "COMMITTED_UNCERTAIN" : "STORAGE_FAILED", published ? options.receipt : undefined);
+          await this.run(async () => {
+            if (receipt.cleanupComplete) return;
+            if (!published && part) await this.removePart(temporary, part);
+            if (this.importing === owner) this.importing = undefined;
+            receipt.cleanupComplete = true;
+          });
+        };
+        try { await receipt.cleanup(); }
+        catch (error: unknown) {
+          if (published) throw new ModelInventoryError("COMMITTED_UNCERTAIN", options.receipt);
+          if (error instanceof ModelInventoryError) throw error; throw new ModelInventoryError("STORAGE_FAILED");
+        }
+      } else {
       const closed = await Promise.allSettled(closing);
       try {
         await this.run(async () => {
@@ -400,6 +496,7 @@ export class ModelInventory {
         if (error instanceof ModelInventoryError) throw error; throw new ModelInventoryError("STORAGE_FAILED");
       }
       if (closed.some((result) => result.status === "rejected")) throw new ModelInventoryError(published ? "COMMITTED_UNCERTAIN" : "STORAGE_FAILED");
+      }
     }
   }
 }
