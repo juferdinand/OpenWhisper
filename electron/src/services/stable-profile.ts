@@ -8,6 +8,9 @@ export const stableProfileInputSchema = z.strictObject({
   home: absolutePath, platform: z.enum(["linux", "darwin"]),
   configHome: absolutePath.optional(), dataHome: absolutePath.optional(), cacheHome: absolutePath.optional(),
 });
+export const stableMacosMigrationRequestSchema = z.strictObject({
+  profile: stableProfileInputSchema.extend({ platform: z.literal("darwin") }), context: z.unknown(),
+});
 export const stableProfileSchema = z.strictObject({
   appId: z.literal("io.github.whisperfree"), productName: z.literal("OpenWhisper"), platform: z.enum(["linux", "darwin"]),
   roots: developmentProfileSchema.unwrap().shape.roots,

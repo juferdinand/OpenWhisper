@@ -13,13 +13,40 @@ if (args.length !== 0 && (args.length !== 2 || args[0] !== "--app-root" || !args
   throw new Error("Usage: owned-stable-startup [--app-root /absolute/compiled/application]");
 }
 const appRoot = await realpath(args[1] ?? fileURLToPath(new URL("..", import.meta.url)));
-const { initializeStableLinuxProfile } = require(join(appRoot, "dist/main/stable-profile-startup.js")) as typeof import("../src/main/stable-profile-startup.js");
+const { initializeStableLinuxProfile, initializeStableMacosProfile } = require(join(appRoot, "dist/main/stable-profile-startup.js")) as typeof import("../src/main/stable-profile-startup.js");
 const { PreferenceStore } = require(join(appRoot, "dist/services/preferences.js")) as typeof import("../src/services/preferences.js");
 const { ModelInventory } = require(join(appRoot, "dist/services/model-inventory.js")) as typeof import("../src/services/model-inventory.js");
 const { PrivateAudioRecovery } = require(join(appRoot, "dist/workers/recovery.js")) as typeof import("../src/workers/recovery.js");
 const root = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-compiled-stable-startup-"))), home = join(root, "home");
 await mkdir(home, { mode: 0o700 });
 try {
+  if (process.platform === "darwin") {
+    if (process.env["GITHUB_ACTIONS"] !== "true" || process.env["RUNNER_ENVIRONMENT"] !== "github-hosted") {
+      throw new Error("The Mac compiled native snapshot check requires an owned GitHub-hosted account.");
+    }
+    const models = join(home, "Library/Application Support/WhisperFree/Models");
+    await mkdir(models, { recursive: true, mode: 0o700 });
+    await writeFile(join(models, "ggml-tiny.bin"), "Inert retained model", { mode: 0o644 });
+    // Host facts are synthetic here; the worker's stopped-host/CFPreferences readers are real.
+    // No legacy plist is seeded: the owned OS account must have an actually empty fixed domain.
+    const context = { systemLanguage: "de-DE", loginStatus: "not-registered",
+      defaults: { recommendedModel: "tiny", appleSilicon: process.arch === "arm64", launchAtLogin: false } };
+    const profile = await initializeStableMacosProfile({ home, platform: "darwin" }, context);
+    const store = await PreferenceStore.open(profile);
+    assert.equal(store.snapshot().model, "tiny"); assert.equal(store.snapshot().language, "de");
+    assert.equal(store.snapshot().launch_at_login, false);
+    const catalog: unknown = JSON.parse(await readFile(join(appRoot, "dist/resources/models.json"), "utf8"));
+    const inventory = await ModelInventory.open(profile, catalog);
+    assert.equal((await inventory.installed())[0]?.verification, "legacy-owned-file");
+    await store.patch({ vocabulary: "Edited private Mac state" });
+    const repeated = await initializeStableMacosProfile({ home, platform: "darwin" }, undefined);
+    assert.equal((await PreferenceStore.open(repeated)).snapshot().vocabulary, "Edited private Mac state");
+    assert.equal(await (await PrivateAudioRecovery.open(profile.paths.recovery)).latest(), null);
+    assert.equal(await readFile(join(models, "ggml-tiny.bin"), "utf8"), "Inert retained model");
+    assert.equal((await readdir(profile.roots.config)).some((name) => name.startsWith(".electron-migration-")), false);
+    console.log(JSON.stringify({ status: "PASS", scope: "compiled Mac worker, native empty-domain snapshot and production stores",
+      hostFacts: "SYNTHETIC", legacyPlist: "ABSENT", preferenceWrites: false, microphone: false }));
+  } else {
   const config = join(home, ".config/whisperfree"), recovery = join(config, "recovery"), models = join(home, ".local/share/whisperfree/models");
   await mkdir(recovery, { recursive: true, mode: 0o700 }); await mkdir(models, { recursive: true, mode: 0o700 });
   const source = JSON.stringify({ ui_language: "de", setup_completed: true, model: "tiny", gpu: false, gpu_configured: true,
@@ -56,4 +83,5 @@ try {
   await assert.rejects(initializeStableLinuxProfile({ home: join(root, "never-created"), platform: "darwin" }), { message: "UNSAFE_SOURCE" });
   await assert.rejects(readFile(join(root, "never-created")), { code: "ENOENT" });
   console.log(JSON.stringify({ status: "PASS", scope: "compiled Linux stable migration worker and production stores", microphone: false }));
+  }
 } finally { await rm(root, { recursive: true, force: true }); }

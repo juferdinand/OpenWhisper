@@ -1,5 +1,25 @@
 # Electron development evidence
 
+## Mac stable migration source; native acceptance pending
+
+The reviewed source adds a bounded CoreFoundation XML/binary decoder, read-only
+AppKit stopped-host and CFPreferences snapshot admission, and exclusive APFS
+configuration publication. Exact plist/snippet backups and unsupported native
+values remain private; source models and archives stay in place. The normal main
+checks actual stable bundle metadata and signature before collecting login and
+hardware facts. Dev packaging retains its separate identity.
+
+Independent review found and corrected a publication-order bug: the final native
+snapshot query must precede the final filesystem/source identity checks. A source
+change during that query now refuses publication. Local strict typing, normal
+build and the compiled Linux startup fixture pass. The full suite passes 1050
+tests, skips 25 explicitly and fails zero in 18.25s. Darwin tests are pending CI:
+archival decoder/filesystem cases use owned fixtures and synthetic cache access;
+the compiled worker uses read-only actual native admission on an empty hosted
+runner preference domain, with synthetic host facts. Neither establishes nonempty
+0.2.5 preference-cache, persistent-signature, login replacement or stable GUI
+acceptance. Current installations are unchanged.
+
 ## Ordinary stable Linux package startup PASS
 
 P27 captures stable identity only in a fresh Linux x64 build. Its unsigned

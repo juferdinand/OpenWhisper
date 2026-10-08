@@ -1,14 +1,28 @@
 import { Worker } from "node:worker_threads";
 import { stableMigrationReplySchema, type StableMigrationReply } from "../contracts/stable-migration.js";
-import { resolveStableProfile, stableProfileInputSchema, validateStableProfile, type StableProfile } from "../services/stable-profile.js";
+import { resolveStableProfile, stableProfileInputSchema, stableMacosMigrationRequestSchema, validateStableProfile, type StableProfile } from "../services/stable-profile.js";
 
 /** Select only after the host's packaged stable identity is verified. Never runs in Dev bootstrap. */
 export async function initializeStableLinuxProfile(options: unknown): Promise<StableProfile> {
   const input = stableProfileInputSchema.parse(options);
   if (process.platform !== "linux" || input.platform !== "linux") throw new Error("UNSAFE_SOURCE");
   const profile = resolveStableProfile(input);
+  await runMigrationWorker(input);
+  return validateStableProfile(profile);
+}
+
+/** The selected stable main supplies read-only hardware/login facts; the worker owns native snapshot admission. */
+export async function initializeStableMacosProfile(options: unknown, context: unknown): Promise<StableProfile> {
+  const input = stableProfileInputSchema.parse(options);
+  if (process.platform !== "darwin" || input.platform !== "darwin") throw new Error("UNSAFE_SOURCE");
+  const profile = resolveStableProfile(input);
+  await runMigrationWorker(stableMacosMigrationRequestSchema.parse({ profile: input, context }));
+  return validateStableProfile(profile);
+}
+
+async function runMigrationWorker(workerData: unknown): Promise<void> {
   // The worker resolves its own trusted profile; a serialized WeakMap capability is never accepted.
-  const worker = new Worker(new URL("../workers/stable-migration-entry.js", import.meta.url), { workerData: input, execArgv: [] });
+  const worker = new Worker(new URL("../workers/stable-migration-entry.js", import.meta.url), { workerData, execArgv: [] });
   await new Promise<void>((accept, reject) => {
     let reply: StableMigrationReply | undefined, failure: Error | undefined;
     let exitTimer: NodeJS.Timeout | undefined;
@@ -34,5 +48,4 @@ export async function initializeStableLinuxProfile(options: unknown): Promise<St
       else accept();
     });
   });
-  return validateStableProfile(profile);
 }

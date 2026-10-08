@@ -13,8 +13,9 @@ function run(command: string, args: readonly string[], cwd: string): void {
 }
 
 export async function buildApplication(options: { readonly recording?: boolean; readonly stable?: boolean } = {}): Promise<void> {
-  if (options.stable && (process.platform !== "linux" || process.arch !== "x64")) {
-    throw new Error("A fresh stable validation build requires Linux x64.");
+  if (options.stable && !((process.platform === "linux" && process.arch === "x64") ||
+      (process.platform === "darwin" && (process.arch === "arm64" || process.arch === "x64")))) {
+    throw new Error("A fresh stable validation build requires Linux x64 or Darwin arm64/x64.");
   }
   const identity = buildIdentitySchema.parse(options.stable ? { version: 1, kind: "stable", appId: "io.github.whisperfree", productName: "OpenWhisper" }
     : { version: 1, kind: "development", appId: "io.github.whisperfree.dev", productName: "OpenWhisper Dev" });

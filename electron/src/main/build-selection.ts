@@ -12,6 +12,18 @@ function hasFlag(argv: readonly string[], flag: string): boolean {
   return argv.some((value) => value === flag || value.startsWith(`${flag}=`));
 }
 
+/** Check captured identity against fields read from the actual bundle; signature authenticity is a separate host gate. */
+export function validateMacBundleMetadata(build: unknown, projectVersion: string, metadata: unknown): void {
+  const identity = buildIdentitySchema.parse(build);
+  const expected = { CFBundleIdentifier: identity.appId, CFBundleExecutable: identity.productName,
+    CFBundleName: identity.productName, CFBundleDisplayName: identity.productName,
+    CFBundleVersion: projectVersion, CFBundleShortVersionString: projectVersion };
+  if (!version.test(projectVersion) || typeof metadata !== "object" || metadata === null || Array.isArray(metadata) ||
+      Object.entries(expected).some(([key, value]) => !Object.hasOwn(metadata, key) || Reflect.get(metadata, key) !== value)) {
+    throw new Error("The Mac bundle metadata differs from its captured build.");
+  }
+}
+
 /** The host supplies canonical runtime paths. This consistency gate performs no filesystem effects and proves no signing authenticity. */
 export function selectApplicationBuild(options: ApplicationBuildSelectionOptions): BuildIdentity {
   const identity = buildIdentitySchema.parse(options.build);
@@ -22,14 +34,17 @@ export function selectApplicationBuild(options: ApplicationBuildSelectionOptions
       options.distribution !== join(options.appPath, "dist")) throw new Error("Application build inputs are inconsistent.");
   if (identity.kind === "development") {
     if (hasFlag(options.argv, "--stable") || hasFlag(options.argv, "--production")) throw new Error("A Dev build cannot open stable storage.");
-  } else if (options.platform !== "linux" || !options.packaged ||
+  } else if (!options.packaged ||
       ["--dev", "--dev-profile", "--control"].some((flag) => hasFlag(options.argv, flag))) {
-    throw new Error("The stable build requires its packaged Linux GUI identity.");
+    throw new Error("The stable build requires its packaged GUI identity.");
   }
   if (options.packaged) {
     const executable = options.platform === "darwin" ? identity.productName : identity.kind === "stable" ? "openwhisper" : "openwhisper-dev";
     const resources = options.platform === "darwin" ? resolve(dirname(options.executable), "../Resources") : join(dirname(options.executable), "resources");
-    if (basename(options.executable) !== executable || options.resourcesPath !== resources ||
+    const contents = dirname(dirname(options.executable));
+    if ((options.platform === "darwin" && (basename(dirname(options.executable)) !== "MacOS" ||
+        basename(contents) !== "Contents" || basename(dirname(contents)) !== `${identity.productName}.app`)) ||
+        basename(options.executable) !== executable || options.resourcesPath !== resources ||
         options.appPath !== join(resources, "app")) throw new Error("The packaged application identity differs from its build.");
   } else if (basename(options.executable) !== (options.platform === "darwin" ? "Electron" : "electron")) {
     throw new Error("Development source startup requires the raw Electron runtime.");

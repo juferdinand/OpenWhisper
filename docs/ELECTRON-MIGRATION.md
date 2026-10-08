@@ -148,6 +148,12 @@ sync ideas remain private planning; this migration creates no Enterprise feature
 
 ## Target structure and contracts
 
+The transitional application lives in `electron/` while the existing hosts remain.
+The final application directory will be `app/`, as requested. Rename it together
+with P6 host retirement and path consumers, rather than changing package roots in
+the middle of the data/update transition. Windows remains separate follow-up work
+in [issue #35](https://github.com/juferdinand/OpenWhisper/issues/35).
+
 ```text
 electron/
   src/main/                 App lifecycle, trusted windows, tray and service wiring
@@ -172,6 +178,63 @@ shared/
   models.json               Existing authoritative model catalog
   test-vectors.json         Existing multilingual text-processing fixtures
 ```
+
+### Code quality and final repository layout
+
+Track the reviewed cleanup in [issue #36](https://github.com/juferdinand/OpenWhisper/issues/36)
+alongside the original P6 replacement scope.
+
+The bounded Luna review at `40805be` counted tracked authored files from Git,
+excluding vendored/generated inputs: 104 application TypeScript files with
+14,791 lines, 262 test/harness/fixture TypeScript files with 30,418 lines,
+18 TypeScript build scripts with 1,702 lines, and nine Markdown guides with
+4,156 lines. These counts distinguish application code from test infrastructure;
+they do not make file count or test count a quality target.
+
+Keep process boundaries (`main`, `preload`, `workers`, runtime contracts) explicit.
+Within `core`, `services`, `contracts` and ordinary tests, group cohesive existing
+features such as recording, speech, models, preferences and optional integrations.
+Mirror those feature folders under `tests/` so tests are easy to find and excluded
+from production compilation. Keep owned desktop/package harnesses distinct from
+unit tests. Do not add empty platform/feature folders.
+
+The concrete cleanup order is:
+
+1. Move the platform-neutral recording lease/port currently imported by
+   `main/macos-shortcut.ts` from `platforms/linux/shared` into a common recording
+   area. Update both Mac and Linux consumers together.
+2. Keep `main/index.ts` as the single composition entry, but extract focused
+   recording/platform/UI setup functions. Move Mac and Linux adapters to their
+   respective `platforms/` folders, preserving their APIs and fixed worker entry
+   names. Group ordinary tests alongside the corresponding feature hierarchy.
+3. At P6, rename `electron/` to `app/`, move the sole renderer/assets/locales to
+   `app/ui/` and catalog/fixtures to `app/data/`, and remove the unused top-level
+   `shared/` after all consumers migrate. Preserve the existing icon/font/model
+   licenses before removing the old `macos/` and `linux/` source directories.
+4. Update manifest/entry graphs, build paths, CI caches, version tooling,
+   installers, release inputs and documentation in the same reviewed changes.
+   Validate fresh packages; imports compiling alone do not establish package
+   correctness.
+
+Use small interfaces for genuine platform/process boundaries and stateful
+services. Retain pure functions for text and model rules. Apply the Rule of Three
+to demonstrated duplication; an abstract base class is justified only when its
+implementations share behavior, rather than just method names. Avoid generic
+repositories, DTO wrappers and dependency-injection frameworks that add no
+required behavior.
+
+README remains the documentation entry. Keep operational development, signing
+and platform instructions through the transition; after acceptance, consolidate
+durable instructions and replace the growing migration status/evidence diary
+with the final result and exact CI/package references. Preserve evidence before
+removing obsolete descriptions. Keep AGENTS/CLAUDE synchronized and concise.
+
+Renovate already discovers the exact Electron/npm dependencies. Its custom
+whisper.cpp manager currently watches the old Mac script, leaving the Electron
+native source JSON pins outside that manager. Extend coverage for actual native
+pins and coordinate their tag/commit/checksum/header expectations through human
+review and package checks. Do not add a duplicate Electron npm regex manager,
+enable automerge, or remove Cargo/Tauri rules before their manifests disappear.
 
 The renderer invokes a fixed schema-derived command map, never arbitrary command strings,
 shell commands or paths. Validate sender frame/origin, arguments, responses and events;

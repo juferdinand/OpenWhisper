@@ -17,7 +17,9 @@ import type { HostProfile } from "../services/host-profile.js";
 import type { BuildIdentity } from "../contracts/build-identity.js";
 import { APPLICATION_BUILD } from "./application-build.js";
 import { selectApplicationBuild } from "./build-selection.js";
-import { initializeStableLinuxProfile } from "./stable-profile-startup.js";
+import { initializeStableLinuxProfile, initializeStableMacosProfile } from "./stable-profile-startup.js";
+import { verifyMacApplicationBundle, macosMigrationContext } from "./macos-stable-admission.js";
+import { StableMigrationError } from "../contracts/stable-migration.js";
 import { PrivateStateStore } from "../services/private-state.js";
 import { LocalProcessingService, LocalProcessingError } from "../services/local-processing.js";
 import {
@@ -93,8 +95,8 @@ async function prepareApplication(): Promise<ApplicationBootstrap> {
   if (descriptor && (descriptor.platform !== process.platform || descriptor.architecture !== process.arch)) {
     throw new Error("The recording build does not match this runtime.");
   }
-  if (identity.kind === "stable" && (!descriptor || descriptor.platform !== "linux" || !descriptor.platformServices)) {
-    throw new Error("The stable build requires its matching Linux recording services.");
+  if (identity.kind === "stable" && (!descriptor || descriptor.platform === "linux" && !descriptor.platformServices)) {
+    throw new Error("The stable build requires its matching recording services.");
   }
   const buildRaw: unknown = JSON.parse(await readFile(join(distribution, "resources/development-build.json"), "utf8"));
   const build = z.strictObject({ commit: z.string().regex(/^([a-f0-9]{40}|source)$/), modified: z.boolean() }).parse(buildRaw);
@@ -105,7 +107,22 @@ async function prepareApplication(): Promise<ApplicationBootstrap> {
     ...(process.env["XDG_CACHE_HOME"] ? { cacheHome: process.env["XDG_CACHE_HOME"] } : {}),
   };
   let profile: HostProfile;
-  if (identity.kind === "stable") {
+  if (identity.kind === "stable" && process.platform === "darwin") {
+    verifyMacApplicationBundle(identity, version, await realpath(process.execPath));
+    let loginStatus: unknown;
+    try { loginStatus = app.getLoginItemSettings({ type: "mainAppService" }).status; }
+    catch { /* Preserve an unknown service fact instead of treating it as disabled. */ }
+    let context: unknown;
+    try {
+      context = macosMigrationContext({ languages: app.getPreferredSystemLanguages(), architecture: process.arch,
+        loginStatus,
+        catalog: JSON.parse(await readFile(join(distribution, "resources/models.json"), "utf8")) as unknown });
+    } catch (error: unknown) {
+      // A completed migration can retain edited state without querying unavailable initial login facts.
+      if (!(error instanceof StableMigrationError && error.code === "LOGIN_STATE_UNKNOWN")) throw error;
+    }
+    profile = await initializeStableMacosProfile({ home: storage.home, platform: "darwin" }, context);
+  } else if (identity.kind === "stable") {
     profile = await initializeStableLinuxProfile({ ...storage, platform: "linux" });
   } else {
     const explicitRoot = selectedProfile();
@@ -165,7 +182,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   } });
   const refreshModels = async (): Promise<void> => { installed = await inventory.installed(); };
   const macRecording = descriptor?.platform === "darwin";
-  if (macRecording && preferences.snapshot().hold_to_record) await preferences.patch({ hold_to_record: false });
+  if (macRecording && identity.kind === "development" && preferences.snapshot().hold_to_record) await preferences.patch({ hold_to_record: false });
   const waylandClipboard = descriptor?.platform === "linux" && process.env["XDG_SESSION_TYPE"] === "wayland"
     ? new WaylandClipboard() : undefined;
   const clipboardOutput = waylandClipboard ?? clipboard;
@@ -230,7 +247,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     de: localeSchema.parse(JSON.parse(await readFile(join(distribution, "resources/locales/de.json"), "utf8")) as unknown),
   };
   const state = (): AppState => appStateSchema.parse({
-    updates: { configured: false, status: "idle", version: null, progress: 0, error: null, package: identity.kind === "stable" ? "deb" : "development" },
+    updates: { configured: false, status: "idle", version: null, progress: 0, error: null, package: identity.kind === "stable" ? platform === "macos" ? "macos" : "deb" : "development" },
     launch_at_login_available: false,
     platform,
     ...(platform === "macos" ? { macos: {

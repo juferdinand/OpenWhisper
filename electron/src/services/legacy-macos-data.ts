@@ -29,6 +29,12 @@ const inputSchema = z.strictObject({
   // MacHardware.isAppleSilicon and SMAppService requested/pending login state.
   defaults: z.strictObject({ recommendedModel: preferencesSchema.shape.model, appleSilicon: z.boolean(), launchAtLogin: z.boolean() }),
 });
+export const legacyMacosContextSchema = inputSchema.pick({ systemLanguage: true, defaults: true });
+export type LegacyMacosContext = z.infer<typeof legacyMacosContextSchema>;
+export const legacyMacosMigrationContextSchema = legacyMacosContextSchema.extend({
+  loginStatus: z.enum(["enabled", "requires-approval", "not-registered"]),
+}).refine((context) => context.defaults.launchAtLogin === (context.loginStatus !== "not-registered"));
+export type LegacyMacosMigrationContext = z.infer<typeof legacyMacosMigrationContextSchema>;
 const activeHistorySchema = z.array(text(MAX_USER_TEXT_BYTES)).max(20);
 const knownPlistKeys = new Set([...Object.keys(persistedSchema.shape), "overlayOrigin", "trigger"]);
 type MacosReview = "MAC_NATIVE_TRIGGER" | "MAC_DEFAULT_TRIGGER" | "MAC_EDITOR_OUTPUT" | "MAC_EDITOR_PATH" |

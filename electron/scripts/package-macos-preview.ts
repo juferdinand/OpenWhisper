@@ -6,11 +6,11 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { z } from "zod";
 import { developmentRecordingDescriptorSchema, type DevelopmentRecordingDescriptor } from "../src/main/development-recording-descriptor.js";
-import { parseApplicationBuildModule } from "../src/contracts/build-identity.js";
+import { buildIdentitySchema, parseApplicationBuildModule, type BuildIdentity } from "../src/contracts/build-identity.js";
+import { validateMacBundleMetadata } from "../src/main/build-selection.js";
 import { installedElectronExecutable } from "./runtime.js";
 
 const defaultRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const appId = "io.github.whisperfree.dev";
 const metadataSchema = z.object({ name: z.literal("openwhisper-electron"), version: z.string().regex(/^\d+\.\d+\.\d+$/u),
   main: z.literal("dist/main/index.js"), type: z.literal("module"), dependencies: z.record(z.string(), z.string()),
   devDependencies: z.object({ electron: z.literal("44.7.0") }) });
@@ -103,7 +103,20 @@ export async function captureSignedMacDescriptor(root: string, original: Develop
 
 export interface MacPreviewStageOptions { readonly root: string; readonly output: string; readonly architecture: Architecture }
 export interface MacPreviewStage { readonly directory: string; readonly application: string; readonly version: string;
-  readonly source: z.infer<typeof buildSchema>; readonly recording: DevelopmentRecordingDescriptor }
+  readonly identity: BuildIdentity; readonly source: z.infer<typeof buildSchema>; readonly recording: DevelopmentRecordingDescriptor }
+
+export function macPreviewPlistValues(build: BuildIdentity, version: string): Readonly<Record<string, string>> {
+  const identity = buildIdentitySchema.parse(build);
+  const values = { CFBundleIdentifier: identity.appId, CFBundleExecutable: identity.productName,
+    CFBundleName: identity.productName, CFBundleDisplayName: identity.productName,
+    CFBundleVersion: version, CFBundleShortVersionString: version, CFBundleIconFile: "AppIcon", LSMinimumSystemVersion: "14.0",
+    NSMicrophoneUsageDescription: `${identity.productName} needs microphone access to record your voice. Everything stays on your Mac.` };
+  validateMacBundleMetadata(identity, version, values); return values;
+}
+
+export function macHelperBundleIdentifier(build: BuildIdentity, name: string): string {
+  return `${buildIdentitySchema.parse(build).appId}.helper.${name.replace(/[^a-z0-9]+/giu, "-").replace(/-$/u, "").toLowerCase()}`;
+}
 
 /** Copy existing inputs only; fixture tests exercise this without Mac tools or app execution. */
 export async function stageMacPreview(options: MacPreviewStageOptions): Promise<MacPreviewStage> {
@@ -111,9 +124,8 @@ export async function stageMacPreview(options: MacPreviewStageOptions): Promise<
   if (!isAbsolute(options.output) || options.output.includes("\0") || inside(root, output) || inside(output, root) || await exists(output) ||
     await realpath(root) !== root || await realpath(dirname(output)) !== dirname(output)) throw new Error("A fresh absolute output outside the real source tree is required.");
   const metadata = metadataSchema.parse(await json(join(root, "package.json"))), source = buildSchema.parse(await json(join(root, "dist/resources/development-build.json")));
-  if (parseApplicationBuildModule(await readFile(join(root, "dist/main/application-build.js"), "utf8")).kind !== "development") {
-    throw new Error("Mac preview packaging requires its captured Dev build identity.");
-  }
+  const identity = parseApplicationBuildModule(await readFile(join(root, "dist/main/application-build.js"), "utf8"));
+  macPreviewPlistValues(identity, metadata.version);
   if ((await readFile(join(root, "dist/resources/VERSION"), "utf8")).trim() !== metadata.version) throw new Error("Source and build versions differ.");
   const recording = await descriptor(root);
   if (recording.architecture !== options.architecture) throw new Error("Recording architecture differs from the package.");
@@ -130,10 +142,10 @@ export async function stageMacPreview(options: MacPreviewStageOptions): Promise<
   const icon = resolve(root, "../macos/Resources/AppIcon.icns");
   for (const [path] of [...notices, [icon]]) { if (!path) throw new Error("Missing notice input."); await files(path); }
   await mkdir(output, { mode: 0o700 });
-  const directory = join(output, "OpenWhisper Dev.app"), application = join(directory, "Contents/Resources/app");
+  const directory = join(output, `${identity.productName}.app`), application = join(directory, "Contents/Resources/app");
   await cp(runtime, directory, { recursive: true, dereference: false, verbatimSymlinks: true, force: false, errorOnExist: true });
   // Electron44's isPackaged checks the executable basename; "Electron" remains a raw runtime.
-  await rename(join(directory, "Contents/MacOS/Electron"), join(directory, "Contents/MacOS/OpenWhisper Dev"));
+  await rename(join(directory, "Contents/MacOS/Electron"), join(directory, "Contents/MacOS", identity.productName));
   if (await exists(application) || await exists(join(directory, "Contents/Resources/app.asar"))) throw new Error("Runtime contains an unexpected application.");
   await mkdir(application);
   await cp(join(root, "dist"), join(application, "dist"), { recursive: true,
@@ -146,9 +158,9 @@ export async function stageMacPreview(options: MacPreviewStageOptions): Promise<
   const noticeDirectory = join(directory, "Contents/Resources/notices"); await mkdir(noticeDirectory);
   for (const [path, name] of notices) { if (!path || !name) throw new Error("Missing notice input."); await cp(path, join(noticeDirectory, name)); }
   await cp(icon, join(directory, "Contents/Resources/AppIcon.icns"));
-  await writeFile(join(noticeDirectory, "README.txt"), "OpenWhisper Dev. Per-architecture, non-hardened ad-hoc development signing; no notarization or stable update channel.\nOriginal source metadata and unsigned native build manifests are preserved. The final recording descriptor captures signed native bytes.\nNo models included. Package checks do not establish microphone/TCC, desktop input or stable updater acceptance.\n");
+  await writeFile(join(noticeDirectory, "README.txt"), `${identity.productName}. Per-architecture, non-hardened ad-hoc ${identity.kind === "stable" ? "validation" : "development"} signing; no notarization or stable update channel.\nOriginal source metadata and unsigned native build manifests are preserved. The final recording descriptor captures signed native bytes.\nNo models included. Package checks do not establish microphone/TCC, desktop input or stable updater acceptance.\n`);
   await verifyDescriptor(application, recording);
-  return { directory, application, version: metadata.version, source, recording };
+  return { directory, application, version: metadata.version, identity, source, recording };
 }
 
 function run(command: string, args: readonly string[]): string {
@@ -229,6 +241,21 @@ export function insideOutMacCodePaths(paths: readonly string[]): string[] {
     (left < right ? -1 : left > right ? 1 : 0));
 }
 
+function verifyBundleMetadata(directory: string, identity: BuildIdentity, version: string, helpers: readonly string[]): void {
+  const plist = join(directory, "Contents/Info.plist"), actual: Record<string, string> = {};
+  for (const [key, expected] of Object.entries(macPreviewPlistValues(identity, version))) {
+    actual[key] = run("/usr/bin/plutil", ["-extract", key, "raw", "-o", "-", plist]).trim();
+    if (actual[key] !== expected) throw new Error(`Mac bundle metadata differs: ${key}.`);
+  }
+  validateMacBundleMetadata(identity, version, actual);
+  for (const name of helpers) {
+    const helper = join(directory, "Contents/Frameworks", name, "Contents/Info.plist");
+    if (run("/usr/bin/plutil", ["-extract", "CFBundleIdentifier", "raw", "-o", "-", helper]).trim() !== macHelperBundleIdentifier(identity, name)) {
+      throw new Error("Mac helper bundle identity differs from its build.");
+    }
+  }
+}
+
 export async function packageMacPreview(output: string, root = defaultRoot): Promise<{ directory: string; archive: string; sha256: string }> {
   if (process.platform !== "darwin" || (process.arch !== "arm64" && process.arch !== "x64") || process.getuid?.() === 0) throw new Error("Mac preview packaging requires a non-root Darwin architecture host.");
   const architecture = process.arch;
@@ -237,12 +264,10 @@ export async function packageMacPreview(output: string, root = defaultRoot): Pro
   const inventory = await machFiles(inputRuntime, architecture, true);
   const staged = await stageMacPreview({ root, output, architecture });
   const plist = join(staged.directory, "Contents/Info.plist");
-  updatePlist(plist, { CFBundleIdentifier: appId, CFBundleExecutable: "OpenWhisper Dev", CFBundleName: "OpenWhisper Dev", CFBundleDisplayName: "OpenWhisper Dev",
-    CFBundleVersion: staged.version, CFBundleShortVersionString: staged.version, CFBundleIconFile: "AppIcon", LSMinimumSystemVersion: "14.0",
-    NSMicrophoneUsageDescription: "OpenWhisper Dev needs microphone access to record your voice. Everything stays on your Mac." });
+  updatePlist(plist, macPreviewPlistValues(staged.identity, staged.version));
   const helpers = (await readdir(join(staged.directory, "Contents/Frameworks"))).filter((name) => name.endsWith(".app"));
   for (const name of helpers) updatePlist(join(staged.directory, "Contents/Frameworks", name, "Contents/Info.plist"), {
-    CFBundleIdentifier: `${appId}.helper.${name.replace(/[^a-z0-9]+/giu, "-").replace(/-$/u, "").toLowerCase()}`,
+    CFBundleIdentifier: macHelperBundleIdentifier(staged.identity, name),
   });
   const appMach = await machFiles(staged.application, architecture, false);
   const addons = (await files(staged.application)).filter((path) => path.endsWith(".node"));
@@ -253,9 +278,10 @@ export async function packageMacPreview(output: string, root = defaultRoot): Pro
   // The source build keeps a second capture copy. Keep both signed copies identical.
   await cp(join(staged.application, "dist/native/capture/openwhisper_macos_capture.node"), join(staged.application, "dist/native/openwhisper_macos_capture.node"));
   const signed = await captureSignedMacDescriptor(staged.application, staged.recording);
-  await writeFile(join(staged.directory, "Contents/Resources/notices/mac-dev-package.json"), JSON.stringify({
+  await writeFile(join(staged.directory, "Contents/Resources/notices", staged.identity.kind === "stable" ? "mac-stable-validation-package.json" : "mac-dev-package.json"), JSON.stringify({
     version: 1, architecture, sourceVersion: staged.version, source: staged.source, runtimeVersion: "44.7.0",
-    signing: "non-hardened ad-hoc Dev; no entitlements", runtimeMachFiles: inventory.map((path) => relative(inputRuntime, path)),
+    applicationBuild: staged.identity, signing: staged.identity.kind === "stable" ? "non-hardened ad-hoc validation; no entitlements" : "non-hardened ad-hoc Dev; no entitlements",
+    runtimeMachFiles: inventory.map((path) => relative(inputRuntime, path)),
     unsignedRecording: staged.recording, signedRecording: signed,
     native: await Promise.all(nativeInputs.map(async (entry) => ({ ...entry, signed: await digest(join(staged.application, entry.path)) }))),
     limitations: ["No notarization", "No stable update channel or universal support", "No microphone/TCC or desktop runtime acceptance"],
@@ -269,15 +295,16 @@ export async function packageMacPreview(output: string, root = defaultRoot): Pro
   run("/usr/bin/codesign", ["--verify", "--deep", "--strict", staged.directory]);
   await machFiles(staged.directory, architecture, true);
   await verifyDescriptor(staged.application, await descriptor(staged.application));
-  if (run("/usr/bin/plutil", ["-extract", "CFBundleIdentifier", "raw", "-o", "-", plist]).trim() !== appId) throw new Error("Dev bundle identity verification failed.");
-  const archive = join(output, `OpenWhisper-Dev-macOS-${architecture}_${staged.version}_${staged.source.commit.slice(0, 12)}${staged.source.modified ? ".modified" : ""}.zip`);
+  verifyBundleMetadata(staged.directory, staged.identity, staged.version, helpers);
+  const archive = join(output, `OpenWhisper-${staged.identity.kind === "stable" ? "validation" : "Dev"}-macOS-${architecture}_${staged.version}_${staged.source.commit.slice(0, 12)}${staged.source.modified ? ".modified" : ""}.zip`);
   run("/usr/bin/ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", staged.directory, archive]);
   const extracted = join(output, "archive-check");
   run("/usr/bin/ditto", ["-x", "-k", archive, extracted]);
-  const extractedApp = join(extracted, "OpenWhisper Dev.app"), extractedRoot = join(extractedApp, "Contents/Resources/app");
+  const extractedApp = join(extracted, `${staged.identity.productName}.app`), extractedRoot = join(extractedApp, "Contents/Resources/app");
   run("/usr/bin/codesign", ["--verify", "--deep", "--strict", extractedApp]);
+  verifyBundleMetadata(extractedApp, staged.identity, staged.version, helpers);
   await verifyDescriptor(extractedRoot, signed);
-  for (const path of ["package.json", "package-lock.json", "dist/resources/development-build.json"]) {
+  for (const path of ["package.json", "package-lock.json", "dist/resources/development-build.json", "dist/main/application-build.js"]) {
     if (JSON.stringify(await digest(join(extractedRoot, path))) !== JSON.stringify(await digest(join(root, path)))) throw new Error("Archived source metadata changed.");
   }
   await files(extractedApp, true);

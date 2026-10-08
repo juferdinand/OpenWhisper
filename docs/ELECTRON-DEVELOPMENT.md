@@ -210,9 +210,21 @@ package from the same frozen source passes the X11 regression in 43.22s.
 The tested `.deb` is unsigned `0.3.0~dev.58169b3a8cc1.modified`; producer metadata
 remains 58169b3a8cc167e7538f434e02f95fe437f46d68+modified. This is a validation build,
 with no installer, release/update channel or changes to current installations.
-Mac stable filesystem data, autostart, stable command control, updater and release
-continuity remain pending. The [evidence](ELECTRON-DEV-EVIDENCE.md) retains the first
+Mac stable migration source is implemented with native acceptance pending;
+autostart, stable command control, updater and release continuity remain pending.
+The [evidence](ELECTRON-DEV-EVIDENCE.md) retains the first
 failed saved-WAV startup attempt and the corrected package result.
+
+## Mac stable validation package
+
+On macOS arm64 or x64, a fresh `npm run build -- --stable --recording` followed by
+`node --import tsx scripts/package-macos-preview.ts --output /absolute/fresh/output`
+selects `OpenWhisper.app` and the persistent `io.github.whisperfree` identity.
+These are thin ad-hoc validation packages with their own validation receipt;
+they do not provide release signing, notarization or an update channel. The Dev
+installer refuses them. Normal startup opens stable storage and performs migration,
+so assembly does not authorize replacing or launching against a live installation.
+Actual stable GUI and native migration acceptance remain pending.
 
 ## Install a separate local Dev copy
 
@@ -314,7 +326,7 @@ cd electron
 npm run typecheck
 npm test
 npm run build
-node --import tsx tests/owned-stable-startup.ts # Linux only; compiled worker, disposable legacy home
+node --import tsx tests/owned-stable-startup.ts # Linux; Darwin requires an owned GitHub-hosted runner
 cd ../shared/ui
 npm run test:ui
 ```
@@ -420,7 +432,8 @@ Bounded copying, exact names, private file identity and durable publication are 
 The recording Dev host now exposes catalog downloads and host-owned imports through the
 shared UI; the renderer never selects an arbitrary destination or native model path.
 The later Linux stable bootstrap retains safe legacy models in place; this Dev
-import service does not perform migration. Mac stable filesystem migration remains open.
+import service does not perform migration. Mac stable migration source is implemented;
+actual native and replacement acceptance remains open.
 
 An opt-in Apple capture edge uses AVAudioEngine/AVAudioConverter behind Node-API 8.
 The shared Linux capture implementation is unchanged. Its owned CI fixture feeds generated

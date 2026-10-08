@@ -100,6 +100,9 @@ jobs:
           npm run build
       - name: Install native capture build tools
         run: brew list cmake ninja >/dev/null 2>&1 || brew install cmake ninja
+      - name: Check compiled Mac migration with owned paths and read-only native admission
+        working-directory: electron
+        run: node --import tsx tests/owned-stable-startup.ts
       - name: Build the Apple capture edge and test generated PCM without devices
         working-directory: electron
         env:

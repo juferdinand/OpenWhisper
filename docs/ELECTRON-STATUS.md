@@ -4,6 +4,8 @@ Target version: **0.3.0**, replacing the existing Swift/Rust application hosts.
 Implementation: [draft PR #34](https://github.com/juferdinand/OpenWhisper/pull/34),
 tracked by [issue #33](https://github.com/juferdinand/OpenWhisper/issues/33).
 The installed stable application is still 0.2.5.
+Windows is separate follow-up work in [issue #35](https://github.com/juferdinand/OpenWhisper/issues/35).
+Folder/documentation cleanup is tracked in [issue #36](https://github.com/juferdinand/OpenWhisper/issues/36).
 
 Track completion by the functional milestones below. The full migration is still
 incomplete; the table distinguishes runnable behavior from remaining replacement work.
@@ -16,7 +18,7 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | macOS dictation | CPU recording, microphone permission, RAM Retry/Discard, shared tray/overlay and guarded Accessibility paste are connected. Actual Apple Silicon/Intel Dev apps pass startup, sandbox, signed production utilities, real CPU recognition of pinned public audio, keyboard setup/removal and original Quit in CI37842623817 | Physical microphone/TCC, actual target insertion and device changes; Metal selection remains open |
 | Linux desktop integration | Stock KDE 5.27 native Wayland F8, cancellation, binding Quit/crash recovery and paste into Wayland/XWayland editors pass. The guarded native overlay passes pointer Cancel/Stop and foreground editor keyboard delivery. Genuine X11 native F8 capture, held/repeated keys, CPU dictation, clipboard/history and Retry/Discard pass in private Xvfb, including the stable package | Stable command control; expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
-| Packaging and updates | Ubuntu22-built Dev directory/.deb and a freshly compiled unsigned stable Linux package pass exact-package X11 dictation/recovery/cleanup. Stable profile migration, saved-WAV Retry and restart pass in 47.29s. Fresh local Dev installation through embedded Node passes the relocated Linux X11 case and signed Mac package checks on both architectures | Archive download, existing-version replacement/upgrade, Electron AppImage/universal DMG+ZIP, Mac stable data transition, autostart, release signing and old-client update checks |
+| Packaging and updates | Ubuntu22-built Dev directory/.deb and a freshly compiled unsigned stable Linux package pass exact-package X11 dictation/recovery/cleanup. Stable profile migration, saved-WAV Retry and restart pass in 47.29s. Fresh local Dev installation through embedded Node passes Linux X11 and Mac package checks on both architectures. Mac stable selection, archival plist migration and read-only native admission are implemented | Actual Mac migration/runtime acceptance, archive download, existing-version replacement/upgrade, Electron AppImage/universal DMG+ZIP, autostart, release signing and old-client update checks |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 Stable data services now accept resolved stable profiles while retaining Dev
@@ -43,10 +45,24 @@ The unsigned `.deb` remains `0.3.0~dev.58169b3a8cc1.modified`, preserving produc
 the tested HOME/XDG roots were disposable. Current installations remain untouched.
 The retained first attempt failed because saved-WAV recovery was invisible until
 recording configuration; pre-UI worker configuration fixes that without opening a
-capture stream. Mac plist/filesystem migration, autostart/updater, installation
-transitions and release continuity remain open. Final local source checks pass
+capture stream. Autostart/updater, installation
+transitions and release continuity remain open. P27 local source checks pass
 1023 tests with 14 explicit skips and 62 shared UI tests; independent reviews pass.
-Committed CI37848603092 passes all six P26 jobs and does not validate the P27 source increment.
+Committed [CI37852647513](https://github.com/juferdinand/OpenWhisper/actions/runs/37852647513)
+passes all six jobs for P27 at `40805be`.
+
+The next Mac increment decodes binary/XML plist bytes with fixed CoreFoundation
+APIs, preserves exact raw backups and unsupported native values, and publishes
+private configuration exclusively. It checks that the old host is stopped and
+that the preference-service snapshot agrees with the archival bytes. Completed
+migration retains later edits without querying or replaying the old profile.
+Stable bundle metadata/signature admission and factual login/hardware context are
+connected before startup migration. Independent review passes; local typing,
+build, compiled Linux regression and 1050 tests pass with 25 explicit skips.
+Actual CF/AppKit/APFS behavior and the compiled Mac worker remain pending ARM/Intel
+CI. The owned worker uses an empty OS preference domain and synthetic host facts;
+it cannot establish a nonempty 0.2.5 cache or persistent-signature/login transition.
+Ad-hoc thin stable packages are validation artifacts, not releases.
 
 The current checkpoint includes actual stock KDE keyboard dictation, recovery
 after a held-key/GUI cancellation sequence and same-profile crash recovery. Explicit
