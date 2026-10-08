@@ -8,6 +8,7 @@ import { build } from "esbuild";
 import { z } from "zod";
 import { buildSpeechEntryGraph } from "../../scripts/build-speech-entry-graph.js";
 import { developmentRecordingDescriptorSchema } from "../../src/main/development-recording-descriptor.js";
+import { parseApplicationBuildModule, type BuildIdentity } from "../../src/contracts/build-identity.js";
 import { waitForOriginalCommandClose } from "../owned-supervisor/run.js";
 
 const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
@@ -25,7 +26,8 @@ const portalFixture = !stockKde && !nativeX11;
 const copiedNode = stockKde || nativeX11;
 const packaged = nativeX11 && args[7] === "--package-directory";
 const installPackage = packaged && args[9] === "--install-package";
-if (args.length !== (packaged ? installPackage ? 10 : 9 : copiedNode ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
+const stablePackage = packaged && args[9] === "--stable-package";
+if (args.length !== (packaged ? installPackage || stablePackage ? 10 : 9 : copiedNode ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
     || process.platform !== "linux" || process.arch !== "x64" || process.getuid?.() === 0) throw new Error("INVALID_EXECUTION");
 const output = absolute.parse(args[1]), planning = absolute.parse(args[3]), fixtures = absolute.parse(args[5]);
 const packageDirectory = packaged ? absolute.parse(args[8]) : undefined;
@@ -56,6 +58,7 @@ type Artifact = { bytes: number; sha256: string };
 let distBefore: Record<string, Artifact>, original: z.infer<typeof developmentRecordingDescriptorSchema>, descriptor: z.infer<typeof developmentRecordingDescriptorSchema>;
 let captureRecord: Artifact, speechRecord: Artifact, busRecord: Artifact;
 let packageBefore: Record<string, Artifact> | undefined;
+let applicationBuild: BuildIdentity | undefined;
 if (packageDirectory) {
   const directory = await lstat(packageDirectory); assert.ok(directory.isDirectory() && !directory.isSymbolicLink());
   assert.ok(output !== packageDirectory && !output.startsWith(`${packageDirectory}/`) && !packageDirectory.startsWith(`${output}/`));
@@ -63,6 +66,8 @@ if (packageDirectory) {
   await cp(packageDirectory, join(payload, "package"), { recursive: true, errorOnExist: true, force: false });
   assert.deepEqual(await inventory(join(payload, "package")), packageBefore);
   distBefore = await inventory(join(app, "dist"));
+  applicationBuild = parseApplicationBuildModule(await readFile(join(app, "dist/main/application-build.js"), "utf8"));
+  assert.equal(applicationBuild.kind, stablePackage ? "stable" : "development");
   const module: unknown = await import(pathToFileURL(join(app, "dist/main/development-recording-build.js")).href);
   original = z.object({ DEVELOPMENT_RECORDING_BUILD: developmentRecordingDescriptorSchema }).parse(module).DEVELOPMENT_RECORDING_BUILD;
   descriptor = original;
@@ -73,7 +78,7 @@ if (packageDirectory) {
   assert.deepEqual(captureRecord, descriptor.capture); assert.deepEqual(busRecord, descriptor.platformServices?.bus);
   const cpu = descriptor.speech.entries.find((entry) => entry.backend === "cpu"); assert.ok(cpu);
   assert.deepEqual(speechRecord, { bytes: cpu.bytes, sha256: cpu.sha256 });
-  assert.equal((await describe(join(payload, "package/openwhisper-dev"))).sha256, "10a14d05c6ff4f94075cfb3eeb6ed6571be33ebcc08cbd675b5ce9ff84706564");
+  assert.equal((await describe(join(payload, "package", stablePackage ? "openwhisper" : "openwhisper-dev"))).sha256, "10a14d05c6ff4f94075cfb3eeb6ed6571be33ebcc08cbd675b5ce9ff84706564");
 } else {
 distBefore = await inventory(join(root, "dist"));
 await cp(join(root, "dist"), join(app, "dist"), { recursive: true, errorOnExist: true, force: false });
@@ -198,14 +203,15 @@ try {
   await writeFile(join(output, "assembly.json"), JSON.stringify({ image: IMAGE, sources, originalDescriptor: original, descriptor,
     originalDist: distBefore, payload: frozen,
     ...(packageDirectory ? { packageInput: { directory: packageDirectory, files: packageBefore, capturedDescriptorPreserved: true,
-      installedRuntime: installPackage } } : {}),
+      installedRuntime: installPackage, stableRuntime: stablePackage, applicationBuild } } : {}),
     native: { capture: { path: packageDirectory ? join(packageDirectory, "resources/app/dist/native/capture/openwhisper_capture.node") : capture, ...captureRecord },
       speech: { path: packageDirectory ? join(packageDirectory, "resources/app/dist/native/speech/cpu/openwhisper_speech.node") : speech, ...speechRecord },
       bus: { path: packageDirectory ? join(packageDirectory, "resources/app/dist/native/openwhisper_linux_bus.node") : bus, ...busRecord } },
     portalFixture: portalFixture ? { compilerImage, binary: await describe(join(payload, "owned-bus/owned-portal")) } : null,
     ...(copiedNode ? { nodeRuntime: { sourceImage: compilerImage, ...await describe(join(payload, "node")) } } : {}),
     seccomp: { path: seccomp, ...await describe(seccomp) },
-    scope: nativeX11 ? "Normal Dev UI against private Xvfb with actual XTEST native X11 keys; no compositor, portal fixture or synthetic signals."
+    scope: stablePackage ? "Normal stable package migration/shared UI/CPU recording against private Xvfb/Pulse with actual XTEST native X11 keys; no host profile, installation or release claim."
+      : nativeX11 ? "Normal Dev UI against private Xvfb with actual XTEST native X11 keys; no compositor, portal fixture or synthetic signals."
       : stockKde ? "Normal native Wayland Dev UI with retained Ubuntu22 native inputs against stock Kubuntu KDE portal; no synthetic portal signals."
       : "Normal Dev UI/capture/platform utilities with retained Ubuntu22 native inputs and a synthetic portal frontend assembled before private runtime." }, null, 2), { mode: 0o600 });
   const image = await required(["image", "inspect", IMAGE]); z.array(z.object({ Id: z.literal(IMAGE) })).length(1).parse(JSON.parse(image));
@@ -237,7 +243,7 @@ try {
     ...(kdeXwaylandPaste || kdeOverlay ? ["--kde-xwayland"] : []),
     "--output", "/tmp/owned-desktop", "--timeout", "180", "--", "/payload/node", "/payload/driver.mjs"]
     : nativeX11 ? ["OPENWHISPER_NATIVE_X11=1", ...(packaged ? ["OPENWHISPER_PACKAGE_DIRECTORY=/payload/package"] : []),
-      ...(installPackage ? ["OPENWHISPER_INSTALL_PACKAGE=1"] : []), "/payload/node", "/payload/driver.mjs"]
+      ...(installPackage ? ["OPENWHISPER_INSTALL_PACKAGE=1"] : []), ...(stablePackage ? ["OPENWHISPER_STABLE_PACKAGE=1"] : []), "/payload/node", "/payload/driver.mjs"]
     : ["/opt/node/bin/node", "/payload/driver.mjs"];
   const observed = await docker(["exec", "--user", "1000:1000", container, "/usr/bin/env", "-i", "PATH=/opt/node/bin:/usr/bin:/bin", "LANG=C.UTF-8",
     "OPENWHISPER_OWNED_DEV_RECORDING=1", ...command], stockKde ? 240_000 : 210_000);
@@ -254,7 +260,9 @@ try {
     : nativeX11 ? z.object({ status: z.literal("PASS"), nativeX11: z.literal(true), nativeCapture: z.literal(true), escapePreserved: z.literal(true),
       holdStaleReleaseSafe: z.literal(true), clearedKeyInactive: z.literal(true), clipboardConfirmed: z.literal(true), historyConfirmed: z.literal(true),
       ...(installPackage ? { installedRuntime: z.literal(true), installation: z.object({ embeddedNode: z.literal(true), profileInitiallyAbsent: z.literal(true),
-        descriptorPreserved: z.literal(true), existingDestinationRefused: z.literal(true), originalApplicationAlive: z.literal(true), stableSentinelUnchanged: z.literal(true) }) } : {}) })
+        descriptorPreserved: z.literal(true), existingDestinationRefused: z.literal(true), originalApplicationAlive: z.literal(true), stableSentinelUnchanged: z.literal(true) }) } : {}),
+      ...(stablePackage ? { stableRuntime: z.literal(true), stableMigration: z.object({ legacyRetry: z.literal(true), cpuFallback: z.literal(true),
+        editedStateRetained: z.literal(true), discardNotReplayed: z.literal(true), originalsPreserved: z.literal(true), devSentinelUnchanged: z.literal(true), devControlAbsent: z.literal(true) }) } : {}) })
     : kdePaste ? z.object({ status: z.literal("PASS"), clipboardConfirmed: z.literal(true), recoveryRemoved: z.literal(true),
       nativeInMain: z.literal(false), pasteConfirmed: z.literal(true), permissionRevoked: z.literal(true), targetBackend: z.literal(kdeXwaylandPaste ? "XWAYLAND" : "WAYLAND") })
     : z.object({ status: z.literal("PASS"), clipboardConfirmed: z.literal(true), recoveryRemoved: z.literal(true), nativeInMain: z.literal(false) }))

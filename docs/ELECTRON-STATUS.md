@@ -12,11 +12,11 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | --- | --- | --- |
 | Plan and architecture | Reviewed plan, repository research answers and issue/PR review recorded | Keep decisions aligned with final implementation |
 | Shared interface and services | Existing design, strict TS bridge, isolated Dev profile, settings, models/history and localized shared-owner tray actions; sandboxed recording overlay connected | Native tray presentation, assembled Mac overlay and remaining platform behaviors |
-| Linux dictation | Normal UI, CPU recognition, clipboard, Retry/Discard and graceful Quit pass on private Ubuntu22 and stock Kubuntu/KDE 5.27 native Wayland with virtual audio; background Wayland publication and actual GTK target insertion also pass | Startup-failure cleanup under resource pressure; remaining desktop control, overlays and accelerated inference in normal Dev |
+| Linux dictation | Normal UI, CPU recognition, clipboard, Retry/Discard and graceful Quit pass on private Ubuntu22 and stock Kubuntu/KDE 5.27 native Wayland with virtual audio; background Wayland publication and actual GTK target insertion also pass. The normal stable package passes migration, saved-WAV Retry, X11 dictation and restart in an owned profile | Startup-failure cleanup under resource pressure; remaining desktop control, overlays and accelerated inference |
 | macOS dictation | CPU recording, microphone permission, RAM Retry/Discard, shared tray/overlay and guarded Accessibility paste are connected. Actual Apple Silicon/Intel Dev apps pass startup, sandbox, signed production utilities, real CPU recognition of pinned public audio, keyboard setup/removal and original Quit in CI37842623817 | Physical microphone/TCC, actual target insertion and device changes; Metal selection remains open |
-| Linux desktop integration | Stock KDE 5.27 native Wayland F8, cancellation, binding Quit/crash recovery and paste into Wayland/XWayland editors pass. The guarded native overlay passes pointer Cancel/Stop and foreground editor keyboard delivery. Genuine X11 native F8 capture, held/repeated keys, CPU dictation, clipboard/history and Retry/Discard pass in private Xvfb | Basic packaged controls remain required; expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
+| Linux desktop integration | Stock KDE 5.27 native Wayland F8, cancellation, binding Quit/crash recovery and paste into Wayland/XWayland editors pass. The guarded native overlay passes pointer Cancel/Stop and foreground editor keyboard delivery. Genuine X11 native F8 capture, held/repeated keys, CPU dictation, clipboard/history and Retry/Discard pass in private Xvfb, including the stable package | Stable command control; expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
-| Packaging and updates | Ubuntu22-built Dev directory/.deb passes layout and exact-package X11 dictation/recovery/cleanup. Fresh local Dev installation through embedded Node passes the relocated Linux X11 dictation/recovery case in44.08s and actual signed Mac package/utility/shortcut checks on Apple Silicon and Intel in CI37840925558 | Archive download, existing-version replacement/upgrade, Electron AppImage/universal DMG+ZIP, release signing, stable data continuity and old-client update checks |
+| Packaging and updates | Ubuntu22-built Dev directory/.deb and a freshly compiled unsigned stable Linux package pass exact-package X11 dictation/recovery/cleanup. Stable profile migration, saved-WAV Retry and restart pass in 47.29s. Fresh local Dev installation through embedded Node passes the relocated Linux X11 case and signed Mac package checks on both architectures | Archive download, existing-version replacement/upgrade, Electron AppImage/universal DMG+ZIP, Mac stable data transition, autostart, release signing and old-client update checks |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 Stable data services now accept resolved stable profiles while retaining Dev
@@ -27,10 +27,26 @@ an owned filesystem fixture: complete initial migration, production preferences/
 model reads, actual saved-WAV recovery, repeat after settings edits, Discard without
 replay, original-data preservation and partial-state refusal. Publication cannot
 replace existing data, and audio copying uses bounded memory without a recording
-duration limit. This proves the Node worker and services, not ordinary GUI startup.
-The same fixture also passes through a fresh Dev package's own embedded Node.
-Verified stable package selection and ordinary GUI/browser-host execution,
-Mac plist/filesystem migration, autostart/updater and release continuity remain open.
+duration limit. The same fixture also passes through a fresh Dev package's own
+embedded Node. P27 now verifies a fresh stable Linux package's normal main/shared
+UI: migration precedes private path/service setup, the saved WAV is retried through
+the UI, CPU dictation confirms clipboard/history, and restart retains edits and
+Discard without replay. Legacy originals, in-place models and the separate Dev
+sentinel remain unchanged; no Dev control owner appears. Actual X11 WM_CLASS
+matches `io.github.whisperfree`. The owned case passes in 47.29s with original
+application/server closes and container removal confirmed.
+The exact stable package also passes the embedded Node startup fixture; a fresh
+default Dev package from the same frozen source passes the X11 regression in 43.22s.
+
+The unsigned `.deb` remains `0.3.0~dev.58169b3a8cc1.modified`, preserving producer
+58169b3a8cc167e7538f434e02f95fe437f46d68+modified. It opens the real stable profile;
+the tested HOME/XDG roots were disposable. Current installations remain untouched.
+The retained first attempt failed because saved-WAV recovery was invisible until
+recording configuration; pre-UI worker configuration fixes that without opening a
+capture stream. Mac plist/filesystem migration, autostart/updater, installation
+transitions and release continuity remain open. Final local source checks pass
+1023 tests with 14 explicit skips and 62 shared UI tests; independent reviews pass.
+Committed CI37848603092 passes all six P26 jobs and does not validate the P27 source increment.
 
 The current checkpoint includes actual stock KDE keyboard dictation, recovery
 after a held-key/GUI cancellation sequence and same-profile crash recovery. Explicit
@@ -119,7 +135,7 @@ dispatching replacements. Do not restart broad agent reviews; delegate only a
 bounded task with a specific deliverable when it materially shortens delivery.
 
 The measured bottleneck is implementation and fixture diagnosis, not normal test
-execution: the current full unit suite takes about 17 seconds. Use
+execution: the current full unit suite takes about 18 seconds. Use
 `npm run test:platform` and directly affected test files during development, then
 one matching owned desktop scenario. Stock KDE no longer builds an unused synthetic
 C++ portal. Its runner records command and total durations; the selected lifecycle

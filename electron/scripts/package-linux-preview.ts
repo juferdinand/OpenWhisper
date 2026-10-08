@@ -5,10 +5,10 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
+import { parseApplicationBuildModule, type BuildIdentity } from "../src/contracts/build-identity.js";
 import { installedElectronExecutable } from "./runtime.js";
 
 const defaultRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const packageName = "io-github-whisperfree-dev", appId = "io.github.whisperfree.dev";
 const packageSchema = z.object({ name: z.string(), version: z.string(), main: z.literal("dist/main/index.js"),
   type: z.literal("module"), dependencies: z.record(z.string(), z.string()) });
 const dependencySchema = z.object({ name: z.string(), version: z.string(),
@@ -53,15 +53,19 @@ async function dependencies(root: string, initial: Readonly<Record<string, strin
   return [...selected].sort();
 }
 
-async function recordingDescriptor(root: string): Promise<boolean> {
+async function recordingDescriptor(root: string, identity: BuildIdentity): Promise<boolean> {
   const raw = await readFile(join(root, "dist/main/development-recording-build.js"), "utf8");
   // This build-generated module contains only a JSON literal and its fixed export.
   // Read its captured data without executing a worker or native module.
   const literal = /(?:export\s+)?const DEVELOPMENT_RECORDING_BUILD(?:\s*:\s*unknown)?\s*=\s*(null|\{[^]*?\});/u.exec(raw)?.[1];
   if (!literal) throw new Error("Missing captured recording build descriptor.");
-  if (literal === "null") return false;
+  if (literal === "null") {
+    if (identity.kind === "stable") throw new Error("Stable validation packaging requires its captured recording build.");
+    return false;
+  }
   const descriptor = developmentRecordingDescriptorSchema.parse(JSON.parse(literal));
   if (descriptor.platform !== "linux" || descriptor.architecture !== "x64") throw new Error("Preview requires the Linux x64 recording descriptor.");
+  if (identity.kind === "stable" && !descriptor.platformServices) throw new Error("Stable validation packaging requires captured Linux platform services.");
   const expected = [
     ...descriptor.speechEntryGraph.entries,
     { path: "dist/native/capture/openwhisper_capture.node", ...descriptor.capture },
@@ -122,6 +126,11 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
   if (inside(root, output) || inside(output, root) || await exists(output)) throw new Error("The output must be a fresh directory outside the application source.");
   if (await realpath(root) !== root || await realpath(dirname(output)) !== dirname(output)) throw new Error("Source and output parent must have real paths without symlinks.");
   const metadata = packageSchema.parse(await json(join(root, "package.json")));
+  const identity = parseApplicationBuildModule(await readFile(join(root, "dist/main/application-build.js"), "utf8"));
+  const stable = identity.kind === "stable", appId = identity.appId;
+  const packageName = stable ? "io.github.whisperfree" : "io-github-whisperfree-dev";
+  const executableName = stable ? "openwhisper" : "openwhisper-dev";
+  const directoryName = stable ? "OpenWhisper-Linux-x64" : "OpenWhisper-Dev-Linux-x64";
   const build = buildSchema.parse(await json(join(root, "dist/resources/development-build.json")));
   const sourceVersion = (await readFile(join(root, "dist/resources/VERSION"), "utf8")).trim();
   if (!/^\d+\.\d+\.\d+$/u.test(sourceVersion) || sourceVersion !== metadata.version) throw new Error("Existing build and package versions differ.");
@@ -132,7 +141,7 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
   await checkTree(runtime);
   await checkTree(join(runtime, "LICENSE"));
   await checkTree(join(runtime, "LICENSES.chromium.html"));
-  const recording = await recordingDescriptor(root);
+  const recording = await recordingDescriptor(root, identity);
   const libcFloor = await nativeLibcFloor(root, recording);
   const noticeInputs = [[resolve(root, "../LICENSE"), "OpenWhisper-LICENSE"],
     [join(root, "dist/ui/fonts/LICENSE.txt"), "Inter-LICENSE.txt"],
@@ -147,9 +156,9 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
   }
   if (!options.directoryOnly) runDpkg(["--version"]);
   await mkdir(output, { mode: 0o700 });
-  const directory = join(output, "OpenWhisper-Dev-Linux-x64"), application = join(directory, "resources/app");
+  const directory = join(output, directoryName), application = join(directory, "resources/app");
   await cp(runtime, directory, { recursive: true, errorOnExist: true, force: false });
-  await rename(join(directory, "electron"), join(directory, "openwhisper-dev"));
+  await rename(join(directory, "electron"), join(directory, executableName));
   await mkdir(application, { recursive: true });
   await cp(join(root, "dist"), join(application, "dist"), { recursive: true });
   // The speech-entry descriptor hashes this file. Changing its version/name breaks native startup.
@@ -167,14 +176,14 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
     await cp(source, join(notices, name));
   }
   await writeFile(join(notices, "README.txt"), [
-    "OpenWhisper Dev Linux preview. Unsigned; no stable update channel.",
+    `${identity.productName} Linux ${stable ? "stable-profile validation package" : "preview"}. Unsigned; no stable update channel.`,
     "Source provenance remains in resources/app/dist/resources/development-build.json.",
     "Electron LICENSE and LICENSES.chromium.html remain beside the executable.",
     "Production dependency licenses remain inside resources/app/node_modules.",
     "Capture notices remain in resources/app/dist/native/capture-notices when included.",
     "Models are not included. System libraries and desktop acceptance require separate validation.", "",
   ].join("\n"));
-  const debianRoot = join(output, "debian-root"), payload = join(debianRoot, "opt/openwhisper-dev");
+  const debianRoot = join(output, "debian-root"), payload = join(debianRoot, "opt", executableName);
   await mkdir(dirname(payload), { recursive: true });
   await cp(directory, payload, { recursive: true });
   const desktopDirectory = join(debianRoot, "usr/share/applications");
@@ -184,9 +193,9 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
   await mkdir(iconDirectory, { recursive: true });
   await mkdir(docDirectory, { recursive: true });
   await writeFile(join(desktopDirectory, `${appId}.desktop`), [
-    "[Desktop Entry]", "Type=Application", "Name=OpenWhisper Dev", "Comment=Isolated local development preview",
-    "Exec=/opt/openwhisper-dev/openwhisper-dev --dev", `Icon=${appId}`, "Terminal=false",
-    "Categories=AudioVideo;Audio;", "StartupWMClass=openwhisper-dev", "",
+    "[Desktop Entry]", "Type=Application", `Name=${identity.productName}`, `Comment=${stable ? "Local dictation validation package" : "Isolated local development preview"}`,
+    `Exec=/opt/${executableName}/${executableName}${stable ? "" : " --dev"}`, `Icon=${appId}`, "Terminal=false",
+    "Categories=AudioVideo;Audio;", `StartupWMClass=${stable ? appId : executableName}`, "",
   ].join("\n"));
   await cp(join(root, "dist/ui/app-icon.png"), join(iconDirectory, `${appId}.png`));
   await cp(join(notices, "OpenWhisper-LICENSE"), join(docDirectory, "copyright"));
@@ -197,15 +206,16 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
     `Package: ${packageName}`, `Version: ${version}`, "Architecture: amd64", "Section: utils", "Priority: optional",
     "Maintainer: OpenWhisper Contributors <noreply@openwhisper.invalid>", `Installed-Size: ${installedSize}`,
     `Depends: libc6 (>= ${libcFloor}), libstdc++6, libgcc-s1, libgtk-3-0, libnss3, libnspr4, libasound2, libgbm1, libdrm2, libx11-6, libx11-xcb1, libxcb1, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxrandr2, libxkbcommon0, libdbus-1-3, libatomic1, libpulse0, libsystemd0`,
-    "Description: OpenWhisper Dev isolated Electron preview", " Unsigned development package with a separate Dev identity and data profile.", "",
+    `Description: ${identity.productName} ${stable ? "stable-profile validation package" : "isolated Electron preview"}`,
+    stable ? " Unsigned validation package; no public release or stable update channel." : " Unsigned development package with a separate Dev identity and data profile.", "",
   ].join("\n"));
-  const debianPackage = options.directoryOnly ? null : join(output, `OpenWhisper-Dev-Linux-amd64_${version}.deb`);
+  const debianPackage = options.directoryOnly ? null : join(output, `OpenWhisper${stable ? "" : "-Dev"}-Linux-amd64_${version}.deb`);
   if (debianPackage) {
     runDpkg(["--root-owner-group", "-Zgzip", "-z1", "--build", debianRoot, debianPackage]);
     if (runDpkg(["--field", debianPackage, "Package", "Version", "Architecture"]).trim() !==
       `Package: ${packageName}\nVersion: ${version}\nArchitecture: amd64`) throw new Error("Unexpected preview Debian metadata.");
     const contents = runDpkg(["--contents", debianPackage]);
-    if (!contents.includes(`./usr/share/applications/${appId}.desktop`) || !contents.includes("./opt/openwhisper-dev/resources/app/dist/main/index.js")) {
+    if (!contents.includes(`./usr/share/applications/${appId}.desktop`) || !contents.includes(`./opt/${executableName}/resources/app/dist/main/index.js`)) {
       throw new Error("Preview Debian package is missing its launcher or application.");
     }
   }

@@ -1,7 +1,7 @@
 # Isolated Electron development
 
 The [migration plan](ELECTRON-MIGRATION.md) defines replacement and acceptance gates.
-The implementation starts **OpenWhisper Dev** with the existing settings UI,
+The default build starts **OpenWhisper Dev** with the existing settings UI,
 a schema-validated sandboxed bridge and private settings/session directories. An explicit
 CPU recording build connects the shared controls to native capture and clipboard output on
 Linux and macOS. The target version is **0.3.0**; see [current status](ELECTRON-STATUS.md).
@@ -182,6 +182,38 @@ inputs intact. A newer host build may require newer libraries; the package metad
 declares the inspected floor. Host installation, AppImage, updates and release
 acceptance remain separate checks. See the [exact evidence](ELECTRON-DEV-EVIDENCE.md).
 
+## Linux stable validation package
+
+A fresh Linux x64 build can capture the persistent stable identity explicitly:
+
+```bash
+cd electron
+npm run build -- --stable --recording
+node --import tsx scripts/package-linux-preview.ts --output /absolute/fresh/output
+```
+
+Use the intended native distribution baseline, as for the recording Dev build.
+The captured `APPLICATION_BUILD` selects `OpenWhisper`, executable `openwhisper`
+and `io.github.whisperfree`; the package requires matching recording inputs and
+launches normally without Dev flags. It opens existing stable data. Use disposable
+owned HOME/XDG roots for this validation package; the Dev installer does not handle it.
+
+The normal main awaits Linux migration before Electron path/readiness/service setup.
+Exact legacy JSON and WAV originals are preserved, existing models remain in place,
+and new Electron state is private. Pre-UI recording configuration restores saved
+Retry without resolving/opening a microphone. The owned package passes saved-WAV
+Retry, native X11 CPU dictation/clipboard/history and restart after edits/Discard
+in 47.29s, with no Dev control owner and an unchanged separate Dev sentinel. The
+same stable package passes the embedded Node startup fixture; a fresh default Dev
+package from the same frozen source passes the X11 regression in 43.22s.
+
+The tested `.deb` is unsigned `0.3.0~dev.58169b3a8cc1.modified`; producer metadata
+remains 58169b3a8cc167e7538f434e02f95fe437f46d68+modified. This is a validation build,
+with no installer, release/update channel or changes to current installations.
+Mac stable filesystem data, autostart, stable command control, updater and release
+continuity remain pending. The [evidence](ELECTRON-DEV-EVIDENCE.md) retains the first
+failed saved-WAV startup attempt and the corrected package result.
+
 ## Install a separate local Dev copy
 
 The compiled `dist/cli/install-dev.js` installs an already assembled recording Dev
@@ -223,7 +255,7 @@ and both Apple Silicon/Intel Mac startup, sandbox, signed-utility and shortcut c
 This is a local Dev copy, not a signed release download or updater. Source metadata
 and the inventory digest describe the selected local bytes; they do not authenticate
 an unsigned Linux package. Archive downloads, replacing an existing Dev version,
-stable-data migration and release updates remain separate work. The owned Mac and
+stable installation/update transitions and Mac stable-data migration remain separate work. The owned Mac and
 Linux package runners exercise the installed payload; see the current
 [evidence](ELECTRON-DEV-EVIDENCE.md) for actual pass or pending results.
 
@@ -313,9 +345,9 @@ seccomp filter, nested PID namespace, zero effective capabilities and enabled sa
 validated the isolated preload, denied network/navigation/popups, preserved focused
 fields and switch nodes, and checked EN/DE persistence, Dev build/profile identification
 and unchanged synthetic stable settings/models/history/recovery/autostart files.
-These checks cover P1. Native macOS permissions, Linux compositor adapters and complete
-recording/recognition/package/update behavior remain unproven for Electron.
-The later P2/P5 checks and exact candidate provenance are in the
+These historical checks cover P1 only. Later recording, platform and package checks,
+including the owned Linux stable bootstrap above, have their own retained scope.
+The later checks and exact candidate provenance are in the
 [development evidence record](ELECTRON-DEV-EVIDENCE.md).
 
 ## CPU speech and lifecycle work
@@ -387,7 +419,8 @@ Bounded copying, exact names, private file identity and durable publication are 
 `private-file` verification means safe storage, not publisher authenticity or valid weights.
 The recording Dev host now exposes catalog downloads and host-owned imports through the
 shared UI; the renderer never selects an arbitrary destination or native model path.
-Stable-data migration remains separate work.
+The later Linux stable bootstrap retains safe legacy models in place; this Dev
+import service does not perform migration. Mac stable filesystem migration remains open.
 
 An opt-in Apple capture edge uses AVAudioEngine/AVAudioConverter behind Node-API 8.
 The shared Linux capture implementation is unchanged. Its owned CI fixture feeds generated

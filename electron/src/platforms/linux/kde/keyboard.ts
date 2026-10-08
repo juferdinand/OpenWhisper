@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { BusFailure, type BusEvent } from "../shared/bus.js";
 import type { BusValue } from "../shared/bus-values.js";
-import type { ShortcutBus } from "../shared/portal-shortcuts.js";
+import { linuxApplicationIdSchema, type LinuxApplicationId, type ShortcutBus } from "../shared/portal-shortcuts.js";
 import type { ControlCapturePort } from "../shared/control.js";
 import { ShortcutRecording } from "../shared/shortcut-recording.js";
 
 const serviceName = "org.kde.kglobalaccel", iface = "org.kde.KGlobalAccel", path = "/kglobalaccel";
-const action = "_k_session:dictate", prefix = "io.github.whisperfree.dev.trigger.";
+const action = "_k_session:dictate";
 const text = (value: string): BusValue => ({ type: "s", value });
 const strings = (values: string[]): BusValue => ({ type: "a", element: "s", value: values.map(text) });
 const sequence = (key: number): BusValue => ({ type: "r", value: [{ type: "a", element: "i",
@@ -37,7 +37,7 @@ export function keyLabel(key: number): string {
     [0x10000000, "Super"], [0x20000000, "Numpad"]] as const) if (key & mask) parts.push(name);
   parts.push(keyName(key & ~modifiers)!); return parts.join("+");
 }
-export const kdeJournalSchema = z.array(z.strictObject({ component: z.string().regex(/^io\.github\.whisperfree\.dev\.trigger\.[a-f0-9]{32}$/),
+export const kdeJournalSchema = z.array(z.strictObject({ component: z.string().regex(/^io\.github\.whisperfree(?:\.dev)?\.trigger\.[a-f0-9]{32}$/),
   connection: z.string().regex(/^:[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+$/) })).max(2);
 type JournalEntry = z.infer<typeof kdeJournalSchema>[number];
 export interface KdeJournal { snapshot(): JournalEntry[]; update(reducer: (current: JournalEntry[]) => unknown): Promise<JournalEntry[]> }
@@ -60,10 +60,11 @@ export class KdeKeyboard {
   private hold = false;
   private cleanupFailed = false;
   private constructor(private readonly bus: ShortcutBus, private readonly capture: ControlCapturePort,
-    private readonly journal: KdeJournal, private readonly changed: (state: KdeKeyboardState) => void) {}
+    private readonly journal: KdeJournal, private readonly changed: (state: KdeKeyboardState) => void,
+    private readonly appId: LinuxApplicationId) {}
   static async create(bus: ShortcutBus, capture: ControlCapturePort, journal: KdeJournal,
-    changed: (state: KdeKeyboardState) => void): Promise<KdeKeyboard> {
-    const keyboard = new KdeKeyboard(bus, capture, journal, changed);
+    changed: (state: KdeKeyboardState) => void, appId: LinuxApplicationId = "io.github.whisperfree.dev"): Promise<KdeKeyboard> {
+    const keyboard = new KdeKeyboard(bus, capture, journal, changed, linuxApplicationIdSchema.parse(appId));
     keyboard.watcher = await bus.subscribe({ sender: "org.freedesktop.DBus", path: "/org/freedesktop/DBus",
       interface: "org.freedesktop.DBus", member: "NameOwnerChanged" }, (event) => {
       const [name, before, after] = event.body;
@@ -94,7 +95,11 @@ export class KdeKeyboard {
       body, timeoutMs: 1500 }, signal)).body;
   }
   private async recover(owner: string): Promise<void> {
-    for (const entry of this.journal.snapshot()) {
+    const entries = kdeJournalSchema.parse(this.journal.snapshot());
+    if (entries.some((entry) => !entry.component.startsWith(`${this.appId}.trigger.`))) {
+      throw new Error("The KDE journal belongs to a different application.");
+    }
+    for (const entry of entries) {
       if (entry.component === this.active?.component) continue;
       if (await this.hasOwner(entry.connection)) throw new Error("Another KDE trigger owner is running.");
       await this.remove(owner, entry.component);
@@ -153,11 +158,11 @@ export class KdeKeyboard {
       const available = await this.call(owner, "globalShortcutAvailable", "(ai)s", "b", [sequence(key), text("")], signal);
       if (available[0]?.type !== "b") throw new BusFailure("INVALID_FRAME");
       if (!available[0].value) { this.publish({ result: "CONFLICT" }); return; }
-      const component = `${prefix}${randomUUID().replaceAll("-", "")}`;
+      const component = `${this.appId}.trigger.${randomUUID().replaceAll("-", "")}`;
       pending = { component, owner, componentPath: "", key, subscriptions: [],
         recording: new ShortcutRecording(this.capture, () => this.hold, () => this.publish({ result: "FAILED" })) };
       await this.journal.update((entries) => [...entries, { component, connection: this.bus.uniqueName }]); journaled = true;
-      const description = strings([component, action, "OpenWhisper Dev", "Start or stop dictation"]);
+      const description = strings([component, action, this.appId === "io.github.whisperfree.dev" ? "OpenWhisper Dev" : "OpenWhisper", "Start or stop dictation"]);
       await this.call(owner, "doRegister", "as", "", [description], signal);
       const result = await this.call(owner, "getComponent", "s", "o", [text(component)], signal);
       if (result[0]?.type !== "o") throw new BusFailure("INVALID_FRAME"); pending.componentPath = result[0].value;

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { z } from "zod";
 import { developmentRecordingDescriptorSchema, type DevelopmentRecordingDescriptor } from "../src/main/development-recording-descriptor.js";
+import { parseApplicationBuildModule } from "../src/contracts/build-identity.js";
 import { installedElectronExecutable } from "./runtime.js";
 
 const defaultRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -110,6 +111,9 @@ export async function stageMacPreview(options: MacPreviewStageOptions): Promise<
   if (!isAbsolute(options.output) || options.output.includes("\0") || inside(root, output) || inside(output, root) || await exists(output) ||
     await realpath(root) !== root || await realpath(dirname(output)) !== dirname(output)) throw new Error("A fresh absolute output outside the real source tree is required.");
   const metadata = metadataSchema.parse(await json(join(root, "package.json"))), source = buildSchema.parse(await json(join(root, "dist/resources/development-build.json")));
+  if (parseApplicationBuildModule(await readFile(join(root, "dist/main/application-build.js"), "utf8")).kind !== "development") {
+    throw new Error("Mac preview packaging requires its captured Dev build identity.");
+  }
   if ((await readFile(join(root, "dist/resources/VERSION"), "utf8")).trim() !== metadata.version) throw new Error("Source and build versions differ.");
   const recording = await descriptor(root);
   if (recording.architecture !== options.architecture) throw new Error("Recording architecture differs from the package.");

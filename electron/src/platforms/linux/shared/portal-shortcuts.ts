@@ -10,6 +10,8 @@ const desktop = "/org/freedesktop/portal/desktop";
 const portalName = "org.freedesktop.portal.Desktop";
 const shortcuts = "org.freedesktop.portal.GlobalShortcuts";
 const daemon = "org.freedesktop.DBus";
+export const linuxApplicationIdSchema = z.enum(["io.github.whisperfree.dev", "io.github.whisperfree"]);
+export type LinuxApplicationId = z.infer<typeof linuxApplicationIdSchema>;
 export const portalShortcutStateSchema = z.strictObject({ available: z.boolean(), configuring: z.boolean(),
   label: z.string().max(1024).nullable(), nativeAvailable: z.boolean().default(false), nativeKey: z.int().nullable().default(null),
   nativeX11: z.boolean().optional(), x11Trigger: x11TriggerSchema.nullable().optional(),
@@ -61,10 +63,11 @@ export class PortalShortcuts {
   private lastTimestamp = 0n;
   private current = portalShortcutStateSchema.parse({ available: false, configuring: false, label: null, result: "NONE" });
   private constructor(private readonly bus: ShortcutBus, private readonly capture: ControlCapturePort,
-    private readonly changed: (state: PortalShortcutState) => void, private readonly responseMs: number) {}
+    private readonly changed: (state: PortalShortcutState) => void, private readonly responseMs: number,
+    private readonly appId: LinuxApplicationId) {}
   static async create(bus: ShortcutBus, capture: ControlCapturePort, changed: (state: PortalShortcutState) => void,
-    responseMs = 120_000): Promise<PortalShortcuts> {
-    const service = new PortalShortcuts(bus, capture, changed, responseMs);
+    responseMs = 120_000, appId: LinuxApplicationId = "io.github.whisperfree.dev"): Promise<PortalShortcuts> {
+    const service = new PortalShortcuts(bus, capture, changed, responseMs, linuxApplicationIdSchema.parse(appId));
     service.watcher = await bus.subscribe({ sender: daemon, path: "/org/freedesktop/DBus", interface: daemon,
       member: "NameOwnerChanged" }, (event) => {
       const [name, before, after] = event.body;
@@ -117,7 +120,7 @@ export class PortalShortcuts {
         if (this.registeredOwner !== owner) {
           // Registry is optional on older frontends. It grants no input permission.
           try { await this.bus.call({ destination: owner, path: desktop, interface: "org.freedesktop.host.portal.Registry", member: "Register",
-            inputSignature: "sa{sv}", outputSignature: "", body: [string("io.github.whisperfree.dev"), dictionary()], timeoutMs: 2000 }, setup.signal); }
+            inputSignature: "sa{sv}", outputSignature: "", body: [string(this.appId), dictionary()], timeoutMs: 2000 }, setup.signal); }
           catch (error: unknown) { if (!(error instanceof BusFailure) || error.code !== "REMOTE_ERROR") throw error; }
           this.registeredOwner = owner;
         }

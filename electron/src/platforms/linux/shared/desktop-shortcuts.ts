@@ -1,5 +1,6 @@
 import { KdeKeyboard, keyLabel, type KdeJournal, type KdeKeyboardState } from "../kde/keyboard.js";
-import { PortalShortcuts, portalShortcutStateSchema, type PortalShortcutState, type ShortcutBus } from "./portal-shortcuts.js";
+import { PortalShortcuts, portalShortcutStateSchema, linuxApplicationIdSchema, type LinuxApplicationId,
+  type PortalShortcutState, type ShortcutBus } from "./portal-shortcuts.js";
 import type { ControlCapturePort } from "./control.js";
 import { X11Keyboard, type X11KeyboardState } from "../x11/keyboard.js";
 
@@ -16,13 +17,14 @@ export class DesktopShortcuts {
   private preparing = false;
   private constructor(private readonly changed: (state: PortalShortcutState) => void) {}
   static async create(bus: ShortcutBus, capture: ControlCapturePort, changed: (state: PortalShortcutState) => void,
-    journal?: KdeJournal): Promise<DesktopShortcuts> {
+    journal?: KdeJournal, appId: LinuxApplicationId = "io.github.whisperfree.dev"): Promise<DesktopShortcuts> {
+    linuxApplicationIdSchema.parse(appId);
     const desktop = new DesktopShortcuts(changed);
-    desktop.portal = await PortalShortcuts.create(bus, capture, (state) => { desktop.portalState = state; desktop.publish(); });
+    desktop.portal = await PortalShortcuts.create(bus, capture, (state) => { desktop.portalState = state; desktop.publish(); }, undefined, appId);
     desktop.x11 = await X11Keyboard.create(process.env["DISPLAY"] ?? "", capture,
       (state) => { desktop.x11State = state; desktop.publish(); });
     if (desktop.x11) { desktop.x11State = desktop.x11.state(); desktop.publish(); }
-    if (journal && !desktop.x11) desktop.kde = await KdeKeyboard.create(bus, capture, journal, (state) => { desktop.kdeState = state; desktop.publish(); });
+    if (journal && !desktop.x11) desktop.kde = await KdeKeyboard.create(bus, capture, journal, (state) => { desktop.kdeState = state; desktop.publish(); }, appId);
     return desktop;
   }
   state(): PortalShortcutState {

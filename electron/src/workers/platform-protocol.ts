@@ -2,7 +2,7 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { controlStatusSchema, ControlCaptureLeaseError, type ControlCaptureLease, type ControlCapturePort, type ControlStatus } from "../platforms/linux/shared/control.js";
 import { developmentArtifactSchema } from "../services/development-artifact.js";
-import { portalShortcutStateSchema } from "../platforms/linux/shared/portal-shortcuts.js";
+import { linuxApplicationIdSchema, portalShortcutStateSchema } from "../platforms/linux/shared/portal-shortcuts.js";
 import { kdeKeySchema } from "../platforms/linux/kde/keyboard.js";
 import { portalPasteStateSchema } from "../platforms/linux/shared/portal-paste.js";
 
@@ -10,6 +10,7 @@ const envelope = { version: z.literal(1), id: z.uuid() };
 const address = z.string().max(1024).regex(/^unix:(?:path=\/[A-Za-z0-9_./%\-]+|abstract=[A-Za-z0-9_./%\-]+)(?:,guid=[a-fA-F0-9]{32})?$/);
 export const platformRequestSchema = z.discriminatedUnion("command", [
   z.strictObject({ ...envelope, command: z.literal("initialize"), address,
+    appId: linuxApplicationIdSchema.optional(),
     kdeLeasePath: z.string().min(1).max(4096).regex(/^\//).optional(),
     captureBridge: z.strictObject({ epoch: z.uuid(), native: developmentArtifactSchema }).optional() }),
   z.strictObject({ ...envelope, command: z.literal("status") }),

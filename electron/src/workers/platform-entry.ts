@@ -30,7 +30,11 @@ const subscribe = portMethod("on"), send = portMethod("postMessage");
 const port: ParentPort = { on: (event, listener) => subscribe(event, listener), postMessage: (value) => { send(value); } };
 const unavailable: ControlCapturePort = { status: () => "unavailable", start: async () => { throw new Error("Capture unavailable."); } };
 let service: DevControlService | undefined;
+let ownedBus: LinuxBus | undefined;
+let initializeTask: Promise<void> | undefined;
 let generation: string | undefined;
+let initializeStarted = false;
+let closeTask: Promise<void> | undefined;
 let busy = false;
 let closing = false;
 let fatal = false;
@@ -38,6 +42,24 @@ let capture: ControlCapturePort = unavailable;
 let captureClient: PlatformCaptureClient | undefined;
 let shortcuts: DesktopShortcuts | undefined;
 let paste: PortalPaste | undefined;
+
+function closeResources(): Promise<void> {
+  closeTask ??= Promise.resolve().then(async () => {
+    // Retain the original setup until each pending acquisition has settled.
+    // Setup checks retirement after storing every acquired resource; it never
+    // awaits cleanup itself, so this join cannot cycle with its failure handler.
+    await initializeTask?.catch(() => {});
+    // Release input/capture leases while their original bus and RPC are live.
+    const input = await Promise.allSettled([paste?.close(), shortcuts?.close()]);
+    const control = await Promise.allSettled([service?.close()]);
+    // Stable has no control service. Retain every bus acquired during setup,
+    // including a bus whose later portal or control initialization failed.
+    const bus = await Promise.allSettled([ownedBus?.close()]);
+    captureClient?.close();
+    if ([...input, ...control, ...bus].some((result) => result.status === "rejected")) throw new BusFailure("TEARDOWN_FAILED");
+  });
+  return closeTask;
+}
 
 // No bus/native addon is opened until an explicit validated initialize request.
 port.on("message", (message) => {
@@ -50,34 +72,62 @@ port.on("message", (message) => {
     }
     request = platformRequestSchema.parse(message.data);
   }
-  catch { process.exitCode = 1; process.exit(1); }
+  catch {
+    closing = true; fatal = true;
+    void closeResources().then(() => { process.exit(1); }, () => { process.exit(1); });
+    return;
+  }
   if (busy || closing) { port.postMessage({ version: 1, id: request.id, ok: false, code: "BUSY" }); return; }
   busy = true;
   if (request.command === "shutdown") closing = true;
   void (async (): Promise<PlatformReply> => {
     switch (request.command) {
       case "initialize": {
-        if (service) return { version: 1, id: request.id, ok: false, code: "BUSY" };
-        let bus: LinuxBus;
-        if (request.captureBridge) {
-          if (process.type !== "utility") throw new Error("Platform owner unavailable.");
-          const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-          const path = await verifyDevelopmentLinuxBusArtifact(root, request.captureBridge.native);
-          // Bundling relocates import.meta.url. This dedicated utility consumes
-          // only the verified fixed dist destination, never an IPC-supplied path.
-          const binding: unknown = createRequire(import.meta.url)(path);
-          bus = await LinuxBus.open(binding, request.address);
-          captureClient = new PlatformCaptureClient(request.captureBridge.epoch, (frame) => { port.postMessage(frame); });
-          capture = captureClient;
-        } else bus = await openLinuxBus(request.address);
-        service = await DevControlService.create(bus, capture); generation = bus.generation;
-        const journal = request.kdeLeasePath ? await PrivateStateStore.open(request.kdeLeasePath, kdeJournalSchema, [], 4096) : undefined;
-        if (captureClient) shortcuts = await DesktopShortcuts.create(bus, capture, (state) => {
-          port.postMessage({ version: 1, type: "shortcuts", state });
-        }, journal);
-        paste = await PortalPaste.create(bus, (state) => port.postMessage({ version: 1, type: "paste-state", state }), undefined,
-          () => { fatal = true; closing = true; port.postMessage({ version: 1, type: "failure", code: "TEARDOWN_FAILED" }); });
-        return { version: 1, id: request.id, ok: true, value: { command: "initialize", generation, captureAvailable: !!captureClient } };
+        if (initializeStarted) return { version: 1, id: request.id, ok: false, code: "BUSY" };
+        initializeStarted = true;
+        const appId = request.appId ?? "io.github.whisperfree.dev";
+        const current = (): void => { if (closing || closeTask) throw new BusFailure("CLOSED"); };
+        initializeTask = Promise.resolve().then(async () => {
+          current();
+          if (request.captureBridge) {
+            if (process.type !== "utility") throw new Error("Platform owner unavailable.");
+            const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+            const path = await verifyDevelopmentLinuxBusArtifact(root, request.captureBridge.native);
+            current();
+            // Bundling relocates import.meta.url. This dedicated utility consumes
+            // only the verified fixed dist destination, never an IPC-supplied path.
+            const binding: unknown = createRequire(import.meta.url)(path);
+            ownedBus = await LinuxBus.open(binding, request.address);
+            current();
+            captureClient = new PlatformCaptureClient(request.captureBridge.epoch, (frame) => { port.postMessage(frame); });
+            capture = captureClient;
+          } else {
+            ownedBus = await openLinuxBus(request.address);
+            current();
+          }
+          generation = ownedBus.generation;
+          if (appId === "io.github.whisperfree.dev") {
+            service = await DevControlService.create(ownedBus, capture); current();
+          }
+          const journal = request.kdeLeasePath ? await PrivateStateStore.open(request.kdeLeasePath, kdeJournalSchema, [], 4096) : undefined;
+          current();
+          if (captureClient) {
+            shortcuts = await DesktopShortcuts.create(ownedBus, capture, (state) => {
+              port.postMessage({ version: 1, type: "shortcuts", state });
+            }, journal, appId); current();
+          }
+          paste = await PortalPaste.create(ownedBus, (state) => port.postMessage({ version: 1, type: "paste-state", state }), undefined,
+            () => {
+              fatal = true; closing = true; port.postMessage({ version: 1, type: "failure", code: "TEARDOWN_FAILED" });
+              void closeResources().catch(() => {});
+            }, appId);
+          current();
+        });
+        try {
+          await initializeTask; current();
+          if (!generation) throw new BusFailure("INVALID_FRAME");
+          return { version: 1, id: request.id, ok: true, value: { command: "initialize", generation, captureAvailable: !!captureClient } };
+        } catch (error: unknown) { await closeResources(); throw error; }
       }
       case "status": return { version: 1, id: request.id, ok: true, value: { command: "status", status: await capture.status() } };
       case "shortcut": {
@@ -108,9 +158,7 @@ port.on("message", (message) => {
         return { version: 1, id: request.id, ok: true, value: { command: "paste", accepted: await paste.paste() } };
       }
       case "shutdown": {
-        const closed = await Promise.allSettled([paste?.close(), shortcuts?.close()]);
-        for (const result of closed) if (result.status === "rejected") throw result.reason;
-        await service?.close(); captureClient?.close();
+        await closeResources();
         return { version: 1, id: request.id, ok: true, value: { command: "shutdown" } };
       }
     }

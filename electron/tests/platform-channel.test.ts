@@ -127,3 +127,14 @@ test("abort and active close share the held-owner request and exit fence", async
     child.emit("exit"); await refused; await closing;
   }
 });
+test("platform initialize accepts only the two fixed application identities and preserves omitted Dev frames", () => {
+  const request = { version: 1, id: randomUUID(), command: "initialize", address: "unix:path=/owned/bus" };
+  assert.equal(Object.hasOwn(platformRequestSchema.parse(request), "appId"), false);
+  for (const appId of ["io.github.whisperfree.dev", "io.github.whisperfree"]) {
+    assert.equal(platformRequestSchema.parse({ ...request, appId }).command, "initialize");
+  }
+  for (const appId of ["", "OpenWhisper", "io.github.whisperfree.dev.Control", "io.github.whisperfree.other", null]) {
+    assert.equal(platformRequestSchema.safeParse({ ...request, appId }).success, false);
+  }
+  assert.equal(platformRequestSchema.safeParse({ version: 1, id: randomUUID(), command: "status", appId: "io.github.whisperfree" }).success, false);
+});

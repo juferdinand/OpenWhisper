@@ -67,6 +67,40 @@ test("KDE probe has no registration, journal mutation, or recording side effect"
   const { bus, capture, journal, keyboard } = await fixture(); assert.equal(keyboard.state().available, true);
   assert.deepEqual(bus.calls, []); assert.deepEqual(journal.entries, []); assert.equal(capture.started, 0); await keyboard.close();
 });
+test("stable KDE bindings use persistent components and the stable display name", async () => {
+  const bus = new Bus(), capture = new Capture(), journal = new Journal();
+  const keyboard = await KdeKeyboard.create(bus, capture, journal, () => {}, "io.github.whisperfree");
+  await keyboard.bind(0x01000037, false);
+  assert.match(bus.component, /^io\.github\.whisperfree\.trigger\.[a-f0-9]{32}$/);
+  const description = parseBusValues(bus.calls.find((call) => call.member === "doRegister")!.body)[0];
+  assert.ok(description?.type === "a"); assert.deepEqual(description.value[2], text("OpenWhisper"));
+  assert.equal(journal.entries[0]?.component, bus.component);
+  bus.edge(true); await until(() => capture.started === 1);
+  await keyboard.close(); assert.deepEqual(capture.cancels, [1]);
+  assert.deepEqual(journal.entries, []); assert.equal(bus.subscriptions.size, 0);
+});
+test("KDE recovery refuses a foreign app journal before unregistering any component", async () => {
+  for (const appId of ["io.github.whisperfree.dev", "io.github.whisperfree"] as const) {
+    const bus = new Bus(), capture = new Capture(), journal = new Journal();
+    const keyboard = await KdeKeyboard.create(bus, capture, journal, () => {}, appId);
+    const foreign = appId === "io.github.whisperfree.dev" ? "io.github.whisperfree" : "io.github.whisperfree.dev";
+    journal.entries = [appId, foreign].map((id) => ({ component: `${id}.trigger.${randomUUID().replaceAll("-", "")}`, connection: ":1.90" }));
+    const original = journal.snapshot();
+    await assert.rejects(keyboard.prepareCapture(), /different application/);
+    assert.deepEqual(journal.snapshot(), original); assert.deepEqual(bus.calls, []);
+    assert.equal(capture.started, 0); await keyboard.close();
+  }
+});
+test("stable KDE recovery removes its own crashed component after explicit setup", async () => {
+  const bus = new Bus(), capture = new Capture(), journal = new Journal();
+  const keyboard = await KdeKeyboard.create(bus, capture, journal, () => {}, "io.github.whisperfree");
+  const component = `io.github.whisperfree.trigger.${randomUUID().replaceAll("-", "")}`;
+  journal.entries = [{ component, connection: ":1.90" }];
+  await keyboard.prepareCapture();
+  assert.deepEqual(bus.calls.map((call) => call.member), ["NameHasOwner", "unregister"]);
+  assert.deepEqual(parseBusValues(bus.calls[1]!.body), [text(component), text("_k_session:dictate")]);
+  assert.deepEqual(journal.entries, []); await keyboard.close();
+});
 test("KDE confirms Qt four-entry sequences and handles toggle edges on the shared owner", async () => {
   const { bus, capture, journal, keyboard } = await fixture(); await keyboard.bind(0x0c000020, false);
   assert.equal(keyboard.state().key, 0x0c000020); assert.equal(keyLabel(keyboard.state().key!), "Ctrl+Alt+Space");

@@ -139,6 +139,7 @@ export const appStateSchema = z.strictObject({
   macos: macStateSchema.optional(),
   version: utf8(128).min(1),
   development_build: utf8(128).optional(),
+  launch_at_login_available: z.boolean().optional(),
   status: z.enum(["idle", "recording", "transcribing", "done", "error"]),
   message: userText,
   transcript: userText,

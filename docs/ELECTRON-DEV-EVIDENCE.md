@@ -1,5 +1,46 @@
 # Electron development evidence
 
+## Ordinary stable Linux package startup PASS
+
+P27 captures stable identity only in a fresh Linux x64 build. Its unsigned
+`OpenWhisper-Linux-amd64_0.3.0~dev.58169b3a8cc1.modified.deb` retains producer
+`58169b3a8cc167e7538f434e02f95fe437f46d68`, modified true. The actual `openwhisper`
+executes its own `resources/app` and normal main/shared UI with unchanged captured
+recording inputs. It opens `io.github.whisperfree` stable storage after the P26
+migration worker completes, with private Electron userData/session paths and a
+sandboxed renderer. Actual X11 WM_CLASS matches the stable desktop identity.
+
+The existing owned Xvfb/private Pulse case `stable-package-2` passes in 47.288866512s.
+It seeds legacy settings/history, pinned Tiny0644 and a valid saved JFK WAV. UI
+Retry recognizes that recording without a capture stream; saved GPU opt-in stays
+enabled while the actual helper uses CPU. Native F8 Start/Stop then confirms
+virtual-source dictation, clipboard/history, hold/cancel safety and trigger removal.
+The existing source-loss Retry/Discard checks also pass. Normal Quit/restart retains
+edited settings/history and Discard without replay, with exact legacy originals,
+in-place model identity/mode and a separate Dev sentinel unchanged. No Dev control
+owner appears. Original app/server closes and namespace removal pass. Results are
+retained under `.local/planning/electron-migration/p4-linux-dev-recording/stable-package-2/`.
+The exact stable package also passes the existing compiled-startup fixture through
+its embedded Node. A fresh default Dev package from the same frozen source passes
+the existing native X11 recording/recovery regression in 43.21501415s, with original
+app/server closes, no forced termination and namespace removal confirmed; its
+receipts remain in `p4-linux-dev-recording/dev-package-p27/`.
+
+The retained `stable-package-1` fails in 33.1s with cleanup confirmed: normal startup
+and migration worked, but saved recovery remained invisible because configuration
+was deferred until Start. Configuring the existing recording worker before UI load
+restores saved-WAV Retry without resolving a source or opening a capture stream.
+The corrected package was freshly built; the failed artifact remains unchanged.
+
+Final local source checks pass 1023 tests with 14 explicit skips and zero failures
+in 18.272s, strict typing and 62 shared UI tests in 6.2s. Independent reviews pass.
+[Committed CI37848603092](https://github.com/juferdinand/OpenWhisper/actions/runs/37848603092)
+passes all six P26 jobs; it does not cover the P27 source increment. This is
+owned stable-package runtime evidence using disposable HOME/XDG roots and virtual
+audio, with no physical microphone, host sockets/devices or installation changes.
+Mac stable data, stable command control, autostart/updater, installation transitions
+and signed release continuity remain open; no public release was produced.
+
 ## Stable data services and compiled Linux migration worker PASS
 
 Stable profiles now work with the existing preference, model/download and complete
@@ -22,16 +63,16 @@ filesystem fixture, including actual saved-WAV read, edits/repeat, Discard witho
 replay, exact original bytes, partial-state refusal and clean original worker exit.
 The existing Ubuntu CI job runs this same check after its normal build. Independent
 review passes for conversion, profile/storage, model consumers, preferences and
-startup boundaries. The full service suite passes1005 cases with14 explicit skips,
+startup boundaries. The P26 service checkpoint passes1005 cases with14 explicit skips,
 zero failures in17.57s; strict typing and the normal shared-UI/app build pass.
 An actual fresh non-recording Dev directory also passes the same bundled fixture
 through its own embedded Electron44.7.0/Node24.21.0 runtime in0.57s. The worker,
 Koffi and production stores load from that package's own resources/app; packaged
 dist, manifest and lock match the frozen inputs. Producer metadata remains
 85db6e5+modified with a null recording descriptor; no old artifact is relabeled.
-This is owned filesystem/embedded-Node worker evidence. Stable GUI selection,
-normal browser-host execution, Mac native data transition, autostart, signed updates and
-release packaging remain unproven by this fixture.
+This fixture establishes owned filesystem/embedded-Node worker behavior. Ordinary
+stable GUI/browser-host execution is covered by the later P27 receipt above.
+Mac native data transition, autostart, signed updates and release continuity remain open.
 
 ## Packaged Mac CPU inference PASS on Apple Silicon and Intel
 

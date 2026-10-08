@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { BusFailure, type BusEvent } from "./bus.js";
 import { signatureOf, type BusValue } from "./bus-values.js";
-import type { ShortcutBus } from "./portal-shortcuts.js";
+import { linuxApplicationIdSchema, type LinuxApplicationId, type ShortcutBus } from "./portal-shortcuts.js";
 
 const desktop = "/org/freedesktop/portal/desktop", portalName = "org.freedesktop.portal.Desktop";
 const remote = "org.freedesktop.portal.RemoteDesktop", daemon = "org.freedesktop.DBus";
@@ -35,10 +35,10 @@ export class PortalPaste {
   private cleanupFailed = false;
   private current: PortalPasteState = { available: false, configuring: false, ready: false, result: "NONE" };
   private constructor(private readonly bus: ShortcutBus, private readonly changed: (state: PortalPasteState) => void,
-    private readonly responseMs: number, private readonly failed: () => void) {}
+    private readonly responseMs: number, private readonly failed: () => void, private readonly appId: LinuxApplicationId) {}
   static async create(bus: ShortcutBus, changed: (state: PortalPasteState) => void, responseMs = 120_000,
-    failed: () => void = () => {}): Promise<PortalPaste> {
-    const paste = new PortalPaste(bus, changed, responseMs, failed);
+    failed: () => void = () => {}, appId: LinuxApplicationId = "io.github.whisperfree.dev"): Promise<PortalPaste> {
+    const paste = new PortalPaste(bus, changed, responseMs, failed, linuxApplicationIdSchema.parse(appId));
     paste.watcher = await bus.subscribe({ sender: daemon, path: "/org/freedesktop/DBus", interface: daemon,
       member: "NameOwnerChanged" }, (event) => {
       const [name, before, after] = event.body;
@@ -78,7 +78,7 @@ export class PortalPaste {
         if (!this.owner) await this.probe(); const owner = this.owner;
         if (!owner || !this.current.available) throw new BusFailure("REMOTE_ERROR");
         try { await this.bus.call({ destination: owner, path: desktop, interface: "org.freedesktop.host.portal.Registry",
-          member: "Register", inputSignature: "sa{sv}", outputSignature: "", body: [text("io.github.whisperfree.dev"), dict()], timeoutMs: 2000 }, setup.signal); }
+          member: "Register", inputSignature: "sa{sv}", outputSignature: "", body: [text(this.appId), dict()], timeoutMs: 2000 }, setup.signal); }
         catch (error: unknown) { if (!(error instanceof BusFailure) || error.code !== "REMOTE_ERROR") throw error; }
         const token = `openwhisper_${randomUUID().replaceAll("-", "")}`;
         const path = `${desktop}/session/${this.bus.uniqueName.slice(1).replaceAll(".", "_")}/${token}`;

@@ -529,6 +529,25 @@ for (const platform of ["linux", "macos"] as const) {
 }
 
 for (const platform of ["linux", "macos"] as const) {
+  test(`${platform}: unavailable login capability preserves the saved preference`, async ({ page }) => {
+    await start(page, platform);
+    await page.evaluate(() => {
+      const host = window as Window & { testState: { launch_at_login_available?: boolean; preferences: { launch_at_login?: boolean } }; publishState(): void };
+      host.testState.preferences.launch_at_login = true;
+      host.testState.launch_at_login_available = false;
+      host.publishState();
+    });
+    const login = page.getByRole("checkbox", { name: "Launch at login", exact: true });
+    await expect(login).toBeChecked();
+    await expect(login).toBeDisabled();
+    await page.evaluate(() => {
+      const host = window as Window & { testState: { launch_at_login_available?: boolean }; publishState(): void };
+      host.testState.launch_at_login_available = true;
+      host.publishState();
+    });
+    await expect(login).toBeEnabled();
+    await expect(login).toBeChecked();
+  });
   test(`${platform}: login and idle overlay switches remain independent through delayed saves and restart`, async ({ page }) => {
     await start(page, platform);
     await page.setViewportSize({ width: 800, height: 560 });

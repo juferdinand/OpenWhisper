@@ -6,7 +6,7 @@ import { controlStatusSchema, ControlCaptureLeaseError, type ControlCaptureLease
 import { boundPlatformFrame, platformCaptureRequestSchema, platformCaptureReplySchema,
   type PlatformCaptureRequest, type PlatformCaptureReply } from "../workers/platform-protocol.js";
 import { createUtilityPlatformChannelFactory, PlatformChannelError, type PlatformChannel } from "./platform-channel.js";
-import type { PortalShortcutState } from "../platforms/linux/shared/portal-shortcuts.js";
+import { linuxApplicationIdSchema, type LinuxApplicationId, type PortalShortcutState } from "../platforms/linux/shared/portal-shortcuts.js";
 import type { PortalPasteState } from "../platforms/linux/shared/portal-paste.js";
 
 export const developmentPlatformHostDescriptorSchema = z.strictObject({
@@ -133,9 +133,10 @@ export class DevelopmentPlatformHost {
   private closeTask: Promise<void> | undefined;
   private constructor(private readonly bridge: DevelopmentPlatformCaptureBridge, private readonly channel: PlatformChannel) {}
   static async open(options: { descriptor: DevelopmentPlatformDescriptor; address: string; capture: ControlCapturePort;
-    shortcuts?: (state: PortalShortcutState) => void; paste?: (state: PortalPasteState) => void; kdeLeasePath?: string },
+    shortcuts?: (state: PortalShortcutState) => void; paste?: (state: PortalPasteState) => void; kdeLeasePath?: string; appId?: LinuxApplicationId },
     signal: AbortSignal): Promise<DevelopmentPlatformHost> {
     const descriptor = developmentPlatformHostDescriptorSchema.parse(options.descriptor);
+    const appId = options.appId === undefined ? undefined : linuxApplicationIdSchema.parse(options.appId);
     const bridge = new DevelopmentPlatformCaptureBridge(options.capture);
     const factory = createUtilityPlatformChannelFactory({ artifacts: descriptor, capture: (request) => bridge.handle(request),
       ...(options.shortcuts ? { shortcuts: options.shortcuts } : {}), ...(options.paste ? { paste: options.paste } : {}) });
@@ -143,6 +144,7 @@ export class DevelopmentPlatformHost {
     try {
       channel = await factory(signal);
       const reply = await channel.request({ version: 1, id: randomUUID(), command: "initialize", address: options.address,
+        ...(appId === undefined ? {} : { appId }),
         ...(options.kdeLeasePath ? { kdeLeasePath: options.kdeLeasePath } : {}),
         captureBridge: { epoch: bridge.epoch, native: descriptor.bus } });
       if (!reply.ok || reply.value.command !== "initialize" || !reply.value.captureAvailable) throw new PlatformChannelError("UNAVAILABLE");

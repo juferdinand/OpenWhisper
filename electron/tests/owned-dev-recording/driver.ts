@@ -9,6 +9,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { _electron, expect, type ElectronApplication, type Page } from "@playwright/test";
 import { z } from "zod";
 import { prepareDevelopmentProfile, resolveDevelopmentProfile } from "../../src/services/profiles.js";
+import { resolveStableProfile } from "../../src/services/stable-profile.js";
+import { recoveryWavHeader } from "../../src/workers/recovery.js";
 import { validateCommandOutput } from "../../src/contracts/ui.js";
 import type { DesktopBridge } from "../../src/contracts/bridge.js";
 import { recordingHostErrorSchema } from "../../src/workers/recording-host-protocol.js";
@@ -18,8 +20,9 @@ declare global { interface Window { openwhisper?: DesktopBridge } }
 const execute = promisify(execFile);
 const payload = resolve(fileURLToPath(new URL("./", import.meta.url)));
 const packaged = process.env.OPENWHISPER_PACKAGE_DIRECTORY === "/payload/package";
+const stablePackage = process.env.OPENWHISPER_STABLE_PACKAGE === "1";
 const sourcePackageRoot = packaged ? "/payload/package/resources/app" : join(payload, "app"), evidence = "/evidence";
-const sourceExecutable = packaged ? "/payload/package/openwhisper-dev" : join(sourcePackageRoot, "node_modules/electron/dist/electron");
+const sourceExecutable = packaged ? `/payload/package/${stablePackage ? "openwhisper" : "openwhisper-dev"}` : join(sourcePackageRoot, "node_modules/electron/dist/electron");
 let packageRoot = sourcePackageRoot, executable = sourceExecutable;
 const installPackage = process.env.OPENWHISPER_INSTALL_PACKAGE === "1";
 const stockKde = process.env.OPENWHISPER_STOCK_KDE === "1";
@@ -111,6 +114,7 @@ async function main(): Promise<void> {
   }
   if (process.env.OPENWHISPER_PACKAGE_DIRECTORY !== undefined) { assert.equal(packaged, true); assert.equal(nativeX11, true); }
   if (process.env.OPENWHISPER_INSTALL_PACKAGE !== undefined) { assert.equal(installPackage, true); assert.equal(packaged, true); assert.equal(nativeX11, true); }
+  if (process.env.OPENWHISPER_STABLE_PACKAGE !== undefined) { assert.equal(stablePackage, true); assert.equal(packaged && nativeX11, true); assert.equal(installPackage, false); }
   assert.ok((await lstat("/.dockerenv")).isFile());
   for (const device of ["/dev/snd", "/dev/input", "/dev/uinput", "/dev/dri"]) await assert.rejects(lstat(device), { code: "ENOENT" });
   for (const key of ["NODE_OPTIONS", "ELECTRON_RUN_AS_NODE"]) assert.equal(process.env[key], undefined);
@@ -172,12 +176,35 @@ async function main(): Promise<void> {
       existingDestinationRefused: false, originalApplicationAlive: false, stableSentinelUnchanged: false };
     checks.push("packaged embedded Node installs a fresh owned Dev directory and launcher without creating its profile; captured descriptor/source executable preserved");
   }
-  const profile = prepareDevelopmentProfile(resolveDevelopmentProfile({ home, configHome: config, dataHome: env.XDG_DATA_HOME,
-    cacheHome: env.XDG_CACHE_HOME, explicitRoot: profileRoot }));
+  const profile = stablePackage ? resolveStableProfile({ home, platform: "linux", configHome: config, dataHome: env.XDG_DATA_HOME, cacheHome: env.XDG_CACHE_HOME })
+    : prepareDevelopmentProfile(resolveDevelopmentProfile({ home, configHome: config, dataHome: env.XDG_DATA_HOME, cacheHome: env.XDG_CACHE_HOME, explicitRoot: profileRoot }));
   const model = await readFile(join(payload, "fixtures/ggml-tiny.bin"));
   assert.equal(model.length, 77691713); assert.equal(sha(model), "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21");
-  await copyFile(join(payload, "fixtures/ggml-tiny.bin"), join(profile.paths.models, "ggml-tiny.bin"));
-  await chmod(join(profile.paths.models, "ggml-tiny.bin"), 0o600);
+  if (stablePackage) await mkdir(profile.paths.models, { recursive: true, mode: 0o755 });
+  const modelPath = join(profile.paths.models, "ggml-tiny.bin");
+  await copyFile(join(payload, "fixtures/ggml-tiny.bin"), modelPath); await chmod(modelPath, stablePackage ? 0o644 : 0o600);
+  const modelIdentity = await lstat(modelPath), legacyHistory = ["Owned legacy history"];
+  const devSentinel = join(config, "io.github.whisperfree.dev/sentinel"), originals: Record<string, string> = {};
+  if (stablePackage) {
+    assert.equal("legacy" in profile, true); if (!("legacy" in profile)) throw new Error("MISSING_STABLE_PROFILE");
+    await mkdir(profile.legacy.recovery!, { recursive: true, mode: 0o700 });
+    const publicBytes = await readFile(join(payload, "fixtures/jfk.f32"));
+    assert.equal(publicBytes.length, 704000); assert.equal(sha(publicBytes), "ebd52851100536db02d12c49fddd010372dcdc70243562e057553d476b706ae0");
+    const paths = [profile.legacy.settings, profile.legacy.history, join(profile.legacy.recovery!, "recording-00000001791410537123-12345678-1234-4567-8123-123456789abc.wav")];
+    await writeFile(paths[0]!, JSON.stringify({ ui_language: "en", setup_completed: true, model: "tiny", language: "en", output: "clipboard",
+      gpu: true, gpu_configured: true, keep_history: true, launch_at_login: false, auto_check_updates: false }), { mode: 0o600 });
+    await writeFile(paths[1]!, JSON.stringify(legacyHistory), { mode: 0o600 });
+    await writeFile(paths[2]!, Buffer.concat([recoveryWavHeader(BigInt(publicBytes.length / 4)), publicBytes]), { mode: 0o600 });
+    await mkdir(dirname(devSentinel), { recursive: true, mode: 0o700 }); await writeFile(devSentinel, "Owned separate Dev sentinel", { mode: 0o600 });
+    for (const path of [...paths, devSentinel]) originals[path] = sha(await readFile(path));
+    await assert.rejects(lstat(dirname(profile.paths.settings)), { code: "ENOENT" });
+    checks.push("private legacy settings/history, Tiny0644 and pinned JFK WAV seeded before ordinary stable startup; config/electron remains absent; separate Dev sentinel");
+  }
+  const assertStableOriginals = async () => {
+    for (const [path, expected] of Object.entries(originals)) assert.equal(sha(await readFile(path)), expected);
+    const current = await lstat(modelPath); assert.equal(current.dev, modelIdentity.dev); assert.equal(current.ino, modelIdentity.ino);
+    assert.equal(current.mode & 0o777, stablePackage ? 0o644 : 0o600); assert.equal(sha(await readFile(modelPath)), sha(model));
+  };
   await checkpoint("private-session");
   if (stockKde) {
     const config = join(env.XDG_CONFIG_HOME!, "xdg-desktop-portal"); await mkdir(config, { mode: 0o700 });
@@ -323,7 +350,7 @@ async function main(): Promise<void> {
   }, 10_000);
   try {
     application = await _electron.launch({ executablePath: executable,
-      args: [...(packaged ? [] : [packageRoot]), "--dev", "--dev-profile", profileRoot,
+      args: [...(packaged ? [] : [packageRoot]), ...(stablePackage ? [] : ["--dev", "--dev-profile", profileRoot]),
         ...(kdeWaylandOverlay ? ["--experimental-wayland-overlay"] : []),
         ...(stockKde ? [kdeOverlay ? "--ozone-platform=x11" : "--ozone-platform=wayland"] : nativeX11 ? ["--ozone-platform=x11"] : [])],
       env: applicationEnvironment, chromiumSandbox: true, timeout: 30_000 });
@@ -356,8 +383,17 @@ async function main(): Promise<void> {
     }
   });
   page = await application.firstWindow();
-  await expect(page.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev");
+  await expect(page.locator(".sidebar-brand strong")).toHaveText(stablePackage ? "OpenWhisper" : "OpenWhisper Dev");
   assert.equal(page.url(), "app://openwhisper/index.html");
+  if (stablePackage) {
+    const actual = await application.evaluate(({ app }) => ({ name: app.getName(), path: app.getAppPath(), executable: process.execPath,
+      packaged: app.isPackaged, userData: app.getPath("userData"), session: app.getPath("sessionData"), argv: process.argv }));
+    assert.equal(actual.name, "OpenWhisper"); assert.equal(actual.path, packageRoot); assert.equal(actual.executable, executable); assert.equal(actual.packaged, true);
+    assert.equal(actual.userData, dirname(profile.paths.settings)); assert.equal(actual.session, profile.paths.session);
+    assert.equal(actual.argv.some((argument) => argument === "--dev" || argument.startsWith("--dev-profile")), false);
+    await writeFile(join(evidence, "stable-application.json"), JSON.stringify({ ...actual, argv: undefined }), { mode: 0o600 });
+  }
+  return { application, page };
   };
   await launchApplication();
   assert.ok(application && page);
@@ -365,21 +401,26 @@ async function main(): Promise<void> {
     const actual = await application.evaluate(({ app }) => ({ path: app.getAppPath(), packaged: app.isPackaged, executable: process.execPath }));
     await writeFile(join(evidence, "packaged-application.json"), JSON.stringify(actual), { mode: 0o600 });
     assert.equal(actual.path, packageRoot); assert.equal(actual.packaged, true); assert.equal(actual.executable, executable);
-    checks.push("actual packaged openwhisper-dev executes its own resources/app with unchanged captured descriptor/native inputs; test dependencies separate");
+    checks.push(`actual packaged ${stablePackage ? "openwhisper" : "openwhisper-dev"} executes its own resources/app with unchanged captured descriptor/native inputs; test dependencies separate`);
   }
   if (stockKde) await writeFile(join(evidence, "window.json"), JSON.stringify(await application.evaluate(({ BrowserWindow, app }) => {
     const window = BrowserWindow.getAllWindows()[0];
     return { visible: window?.isVisible(), loading: window?.webContents.isLoading(), gpu: app.getGPUFeatureStatus() };
   })), { mode: 0o600 });
-  await expect(page.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev");
+  await expect(page.locator(".sidebar-brand strong")).toHaveText(stablePackage ? "OpenWhisper" : "OpenWhisper Dev");
   assert.equal(page.url(), "app://openwhisper/index.html");
   const firstSources = await state();
   await writeFile(join(evidence, "initial-source-enumeration.json"), JSON.stringify({ count: firstSources.microphones.length,
     fixturePresent: firstSources.microphones.includes(source) }), { mode: 0o600 });
   if (!firstSources.microphones.includes(source)) await page.evaluate(() => window.openwhisper?.invoke("refresh_microphones", {}));
   await until(async () => (await state()).microphones.includes(source));
+  if (stablePackage) await until(async () => !!(await state()).recording_available && !!(await state()).recovery_available);
   await checkpoint("initial-state-and-zero-streams");
-  const initial = await state(); assert.equal(initial.profile, "development"); assert.equal(initial.recording_available, true);
+  const initial = await state(); assert.equal(initial.profile, stablePackage ? undefined : "development"); assert.equal(initial.recording_available, true);
+  if (stablePackage) {
+    assert.equal(initial.development_build, undefined); assert.equal(initial.preferences.setup_completed, true);
+    assert.deepEqual(initial.history, legacyHistory); assert.equal(initial.recovery_available, true); await assertStableOriginals();
+  }
   const control = async (action?: "start" | "stop" | "cancel") => {
     const reply = await execute("/usr/bin/dbus-send", ["--session", "--type=method_call", "--print-reply",
       "--dest=io.github.whisperfree.dev.Control", "/io/github/whisperfree/dev/Control",
@@ -388,7 +429,12 @@ async function main(): Promise<void> {
     const value = /string "(idle|recording|transcribing|unavailable)"/u.exec(reply.stdout)?.[1];
     assert.ok(value, "Owned control must return only its finite status."); return value;
   };
-  assert.equal(await control(), "idle");
+  const assertNoDevControl = async () => {
+    const reply = await execute("/usr/bin/dbus-send", ["--session", "--type=method_call", "--print-reply", "--dest=org.freedesktop.DBus",
+      "/org/freedesktop/DBus", "org.freedesktop.DBus.NameHasOwner", "string:io.github.whisperfree.dev.Control"], { env, timeout: 5000, maxBuffer: 4096 });
+    assert.match(reply.stdout, /boolean false/u);
+  };
+  if (stablePackage) await assertNoDevControl(); else assert.equal(await control(), "idle");
   if (installation) {
     await checkpoint("refuse-existing-owned-installation");
     const original = application.process(), originalPid = original.pid; assert.ok(originalPid);
@@ -405,11 +451,11 @@ async function main(): Promise<void> {
     installation.existingDestinationRefused = true; installation.originalApplicationAlive = true; installation.stableSentinelUnchanged = true;
     checks.push("repeat installation refuses the existing destination while the original installed app stays idle/alive; installed bytes, launcher and stable sentinel unchanged");
   }
-  assert.deepEqual(initial.installed, ["tiny"]); assert.equal(initial.preferences.gpu, false); assert.equal(initial.preferences.output, "clipboard");
+  assert.deepEqual(initial.installed, ["tiny"]); assert.equal(initial.preferences.gpu, stablePackage); assert.equal(initial.preferences.output, "clipboard");
   assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "", "Initialization and enumeration must open no recording stream.");
   await checkpoint("actual-ui-complete-setup");
   if (stockKde) await page.screenshot({ path: join(evidence, "initial-ui.png"), timeout: 5000 });
-  await page.locator('[data-command="complete_setup"]').click();
+  if (!stablePackage) await page.locator('[data-command="complete_setup"]').click();
   await page.locator('[data-tab="general"]').click();
   await checkpoint("actual-ui-language");
   await page.locator('[data-pref="language"]').selectOption("en");
@@ -434,6 +480,17 @@ async function main(): Promise<void> {
   assert.deepEqual(await page.evaluate(() => ({ process: "process" in globalThis, require: "require" in globalThis,
     bridge: typeof window.openwhisper?.invoke })), { process: false, require: false, bridge: "function" });
   checks.push("normal main/shared UI/preload; private Tiny inventory; enumeration with zero streams; sandboxed renderer");
+  if (stablePackage) {
+    await checkpoint("actual-stable-migrated-recording-retry");
+    await expect(page.locator("#record-label")).toHaveText("Retry transcription"); await page.locator("#record").click();
+    await until(async () => (await state()).status === "done", 120_000); const retried = await state();
+    assert.match(retried.transcript.toLowerCase(), /country/u); assert.equal(retried.preferences.gpu, true); assert.equal(retried.gpu_available, false);
+    assert.equal(await application.evaluate(async ({ clipboard }, expected) => await clipboard.readText() === expected, retried.transcript), true);
+    assert.equal(retried.history[0], retried.transcript); assert.equal(retried.history.at(-1), legacyHistory[0]);
+    assert.equal(retried.recovery_available, false); assert.deepEqual(await readdir(profile.paths.recovery), []);
+    assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), ""); await assertStableOriginals(); await assertNoDevControl();
+    checks.push("normal stable startup migrates before private paths/services; UI Retry uses in-place Tiny CPU with saved GPU opt-in, clipboard/history and no capture stream; originals retained");
+  }
   await checkpoint("owned-portal-cancel-and-retry");
   if (!nativeX11) assert.equal((await state()).shortcut_portal, true);
   assert.equal((await state()).shortcut, null);
@@ -1066,6 +1123,13 @@ async function main(): Promise<void> {
       const handle = main.getNativeWindowHandle(); return handle.length === 8 ? Number(handle.readBigUInt64LE()) : handle.readUInt32LE();
     });
     assert.ok(Number.isSafeInteger(nativeWindow) && nativeWindow > 1 && nativeWindow <= 0xffffffff);
+    if (stablePackage) {
+      const property = await execute("/usr/bin/xprop", ["-id", String(nativeWindow), "WM_CLASS"], { env, timeout: 3000, maxBuffer: 4096 });
+      const names = /^WM_CLASS\(STRING\) = "([^"]*)", "([^"]*)"\s*$/u.exec(property.stdout); assert.ok(names);
+      const classes = names.slice(1); await writeFile(join(evidence, "stable-desktop-identity.json"),
+        JSON.stringify({ executable: "openwhisper", desktopFile: "io.github.whisperfree.desktop", startupWMClass: "io.github.whisperfree", actualWMClass: classes }), { mode: 0o600 });
+      assert.ok(classes.includes("io.github.whisperfree"), "Stable X11 WM_CLASS must match the package desktop StartupWMClass.");
+    }
     // Bare private Xvfb has no EWMH window manager. Focus only the original
     // owned main XID before explicit capture, never a foreign target/window.
     await execute("/usr/bin/xdotool", ["windowfocus", "--sync", String(nativeWindow)], { env, timeout: 3000, maxBuffer: 4096 });
@@ -1094,7 +1158,7 @@ async function main(): Promise<void> {
       (await state()).preferences.x11_trigger?.keysym === 0xffc5);
     const trigger = (await state()).preferences.x11_trigger; assert.ok(trigger);
     assert.equal(trigger.modifiers, 0); assert.equal(trigger.group, 0); assert.equal((await state()).preferences.native_trigger ?? null, null);
-    assert.equal((await state()).status, "idle"); assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
+    assert.equal((await state()).status, stablePackage ? "done" : "idle"); assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
     await writeFile(join(evidence, "native-x11-capture.json"), JSON.stringify({ display: env.DISPLAY, profile: trigger,
       source: "ACTUAL_PRIVATE_XTEST", platform: "X11", portalSignals: false }), { mode: 0o600 });
     await page.locator('[data-portal="enable_shortcut"]').click(); await until(async () => !!(await state()).recording_shortcut);
@@ -1139,6 +1203,7 @@ async function main(): Promise<void> {
   assert.equal((await state()).recovery_available, false); assert.deepEqual(await readdir(profile.paths.recovery), []);
   assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
   checks.push("actual UI Cancel closes the original capture without recovery");
+  if (!stablePackage) {
   await checkpoint("actual-command-start-ui-cancel");
   assert.equal(await control("start"), "recording"); await until(async () => (await state()).status === "recording");
   assert.equal(await control(), "recording");
@@ -1149,6 +1214,7 @@ async function main(): Promise<void> {
   assert.equal(await control("cancel"), "idle"); await until(async () => (await state()).status === "idle");
   assert.deepEqual(await readdir(profile.paths.recovery), []);
   checks.push("private command Start and GUI Cancel; later GUI Start and command Cancel share exact owners");
+  } else await assertNoDevControl();
   await checkpoint("actual-ui-start");
   if (stockKde) await stockPress();
   else if (nativeX11) await nativePress();
@@ -1175,7 +1241,7 @@ async function main(): Promise<void> {
     return value.status === "done";
   }, 120_000);
   const result = await state(); assert.match(result.transcript.toLowerCase(), /country/u);
-  assert.equal(result.gpu_available, false); assert.equal(result.preferences.gpu, false); assert.equal(result.recovery_available, false);
+  assert.equal(result.gpu_available, false); assert.equal(result.preferences.gpu, stablePackage); assert.equal(result.recovery_available, false);
   assert.equal(await application.evaluate(async ({ clipboard }, expected) => await clipboard.readText() === expected, result.transcript), true);
   await until(async () => (await state()).history[0] === result.transcript);
   assert.deepEqual(await readdir(profile.paths.recovery), []);
@@ -1242,6 +1308,24 @@ async function main(): Promise<void> {
   await page.locator("#cancel").click(); await until(async () => (await state()).status === "idle" && !(await state()).recovery_available);
   assert.deepEqual(await readdir(profile.paths.recovery), []); assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
   checks.push("actual Discard removes retained private WAV and releases failed capture ownership");
+  if (stablePackage) {
+    await checkpoint("stable-edited-state-discard-restart");
+    await page.evaluate(() => window.openwhisper?.invoke("save_preferences", { changes: { vocabulary: "Owned edited stable setting" } }));
+    await until(async () => (await state()).preferences.vocabulary === "Owned edited stable setting");
+    const historyBeforeRestart = (await state()).history;
+    appOwners.at(-1)!.termination = "quit"; await application.close(); await appOriginalClose;
+    assert.equal(appOwners.at(-1)!.closeObserved, true); application = undefined; page = undefined;
+    const reopened = await launchApplication(); application = reopened.application; page = reopened.page;
+    await until(async () => !!(await state()).recording_available); const restarted = await state();
+    assert.equal(restarted.profile, undefined); assert.equal(restarted.preferences.vocabulary, "Owned edited stable setting");
+    assert.equal(restarted.preferences.gpu, true); assert.deepEqual(restarted.history, historyBeforeRestart);
+    assert.equal(restarted.recovery_available, false); assert.deepEqual(await readdir(profile.paths.recovery), []);
+    assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), ""); await assertStableOriginals(); await assertNoDevControl();
+    assert.equal(sha(await readFile(join(stable, "sentinel"))), stableBefore);
+    const restartedPid = await application.evaluate(() => process.pid), restartedMaps = await readFile(`/proc/${restartedPid}/maps`, "utf8");
+    assert.equal(restartedMaps.includes("openwhisper_capture.node"), false); assert.equal(restartedMaps.includes("openwhisper_speech.node"), false);
+    checks.push("original stable app quits and normal package restarts with edited settings/history and no replay after Discard; legacy originals/in-place model/Dev sentinel retained; no Dev control owner");
+  }
   if (stockKde) {
     const resources = await recordResources("resources.json");
     assert.match(resources["pids.events"] ?? "", /(?:^|\n)max 0(?:\n|$)/u);
@@ -1255,6 +1339,8 @@ async function main(): Promise<void> {
     ...(nativeX11 ? { nativeX11: true, nativeCapture: true, escapePreserved: true, holdStaleReleaseSafe: true, clearedKeyInactive: true } : {}),
     ...(packaged ? { packagedApplication: true, packageAppPath: packageRoot, executable } : {}),
     ...(installation ? { installedRuntime: true, installation } : {}),
+    ...(stablePackage ? { stableRuntime: true, stableMigration: { legacyRetry: true, cpuFallback: true, editedStateRetained: true,
+      discardNotReplayed: true, originalsPreserved: true, devSentinelUnchanged: true, devControlAbsent: true } } : {}),
     physicalMicrophone: "NOT_USED", hotkeys: stockKde ? "OWNED_STOCK_KDE_KGLOBALACCEL_KEY_EDGES" : nativeX11 ? "OWNED_XVFB_NATIVE_XTEST_KEYS" : "OWNED_SYNTHETIC_PORTAL_SIGNALS_ONLY", portalResourcesClosed: true,
     automaticPaste: "NOT_TESTED", gpu: "NOT_TESTED", macos: "NOT_TESTED" }, null, 2), { mode: 0o600 });
   await checkpoint("graceful-normal-quit");

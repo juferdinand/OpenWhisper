@@ -93,6 +93,7 @@ test("portal absence preserves button recording and never binds or starts captur
 test("binding consumes the early Response signal and renders only the confirmed desktop description", async () => {
   const { bus, capture, service } = await enabled();
   assert.deepEqual(bus.methods.map((value) => value.member), ["Get", "Register", "CreateSession", "BindShortcuts"]);
+  assert.deepEqual(parseBusValues(bus.methods.find((value) => value.member === "Register")!.body)[0], text("io.github.whisperfree.dev"));
   assert.equal(service.state().result, "ENABLED"); assert.equal(capture.started, 0);
   bus.edge("Activated", bus.session, ":1.99"); bus.edge("Activated", "/foreign/session"); await delay(5);
   assert.equal(capture.started, 0);
@@ -100,6 +101,15 @@ test("binding consumes the early Response signal and renders only the confirmed 
   bus.edge("Deactivated"); await delay(5); assert.deepEqual(capture.stopped, []);
   bus.edge("Activated", bus.session, bus.portalOwner, "2"); await until(() => capture.stopped.length === 1);
   await service.close(); assert.equal(bus.subscriptions.size, 0);
+});
+test("stable shortcuts register the persistent portal identity only on explicit enable", async () => {
+  const bus = new FakeBus(), capture = new Capture();
+  const service = await PortalShortcuts.create(bus, capture, () => {}, 1000, "io.github.whisperfree");
+  assert.equal(bus.methods.some((value) => value.member === "Register"), false);
+  service.command("enable", false); await until(() => !service.state().configuring);
+  assert.equal(service.state().result, "ENABLED");
+  assert.deepEqual(parseBusValues(bus.methods.find((value) => value.member === "Register")!.body)[0], text("io.github.whisperfree"));
+  assert.equal(capture.started, 0); await service.close(); assert.equal(bus.subscriptions.size, 0);
 });
 test("hold mode uses one real release edge and keeps the acquired owner immutable", async () => {
   const { bus, capture, service } = await enabled(true);

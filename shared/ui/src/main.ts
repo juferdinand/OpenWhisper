@@ -294,6 +294,7 @@ function render() {
     state.updates,
     state.overlay_available,
     state.gpu_supported, state.gpu_available, state.gpu_device, state.gpu_fallback,
+    state.launch_at_login_available,
     state.local_processing !== undefined,
     portalBusy,
   ], (_key, value) => {
@@ -471,7 +472,7 @@ function render() {
                   t("Floating recording indicator"),
                   `<span class="warning">${esc(t("Not supported by this desktop"))}</span>`,
                 )) +
-          toggle(t("Launch at login"), "launch_at_login", !!p.launch_at_login) +
+          toggle(t("Launch at login"), "launch_at_login", !!p.launch_at_login, state.launch_at_login_available === false) +
           (state.macos?.launch_at_login_pending
             ? `<div class="row approval"><span>${esc(t("Allow OpenWhisper in System Settings to finish enabling launch at login."))}</span><button data-command="open_login_settings">${esc(t("System Settings"))}</button></div>`
             : "") +

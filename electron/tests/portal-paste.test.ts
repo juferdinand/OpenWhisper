@@ -77,10 +77,18 @@ test("paste capability probing requests no consent or input and requires keyboar
 });
 test("keyboard-only grant handles responses before method replies and releases each paste key", async () => {
   const { bus, paste } = await fixture(); await enable(paste); assert.equal(await paste.paste(), true);
+  assert.deepEqual(parseBusValues(bus.calls.find((call) => call.member === "Register")!.body)[0], text("io.github.whisperfree.dev"));
   const keys = bus.calls.filter((call) => call.member === "NotifyKeyboardKeycode").map((call) => parseBusValues(call.body).slice(2));
   assert.deepEqual(keys, [[29, 1], [47, 1], [47, 0], [29, 0]].map(([key, state]) => [{ type: "i", value: key }, { type: "u", value: state }]));
   assert.equal(bus.calls.some((call) => call.interface.includes("ScreenCast")), false);
   await paste.close(); assert.equal(bus.subscriptions.size, 0);
+});
+test("stable paste uses the persistent portal identity after explicit keyboard consent", async () => {
+  const bus = new Bus(), paste = await PortalPaste.create(bus, () => {}, 1000, undefined, "io.github.whisperfree");
+  assert.equal(bus.calls.some((call) => call.member === "Register"), false);
+  await enable(paste);
+  assert.deepEqual(parseBusValues(bus.calls.find((call) => call.member === "Register")!.body)[0], text("io.github.whisperfree"));
+  assert.equal(await paste.paste(), true); await paste.close(); assert.equal(bus.subscriptions.size, 0);
 });
 test("pending keyboard grant ignores foreign owners and generations and can be cancelled and retried", async () => {
   const { bus, paste } = await fixture(); bus.pendingStart = true; paste.enable();

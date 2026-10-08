@@ -3,7 +3,7 @@ import { deliverClipboard } from "../services/clipboard-output.js";
 import { WaylandClipboard } from "../services/wayland-clipboard.js";
 import { portalPasteStateSchema } from "../platforms/linux/shared/portal-paste.js";
 import type { IpcMainInvokeEvent } from "electron";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,7 +12,12 @@ import {
   appStateSchema, modelSchema, validateEvent, MAX_USER_TEXT_BYTES,
   type AppState, type EventName, type EventPayload,
 } from "../contracts/ui.js";
-import { DevelopmentPreferenceStore } from "../services/preferences.js";
+import { PreferenceStore } from "../services/preferences.js";
+import type { HostProfile } from "../services/host-profile.js";
+import type { BuildIdentity } from "../contracts/build-identity.js";
+import { APPLICATION_BUILD } from "./application-build.js";
+import { selectApplicationBuild } from "./build-selection.js";
+import { initializeStableLinuxProfile } from "./stable-profile-startup.js";
 import { PrivateStateStore } from "../services/private-state.js";
 import { LocalProcessingService, LocalProcessingError } from "../services/local-processing.js";
 import {
@@ -27,9 +32,9 @@ import { recordingRequestSchema } from "../core/recording.js";
 import type { RecordingSource } from "../workers/recording-host-protocol.js";
 import { recordingSnapshotSchema } from "../workers/recording-host-protocol.js";
 import { DEVELOPMENT_RECORDING_BUILD } from "./development-recording-build.js";
-import { developmentRecordingDescriptorSchema } from "./development-recording-descriptor.js";
+import { developmentRecordingDescriptorSchema, type DevelopmentRecordingDescriptor } from "./development-recording-descriptor.js";
 import { DevelopmentRecordingHost, developmentPulseServer } from "./development-recording-host.js";
-import { saveDevelopmentTranscript } from "../services/development-transcripts.js";
+import { saveTranscript } from "../services/development-transcripts.js";
 import { DevelopmentPlatformHost } from "./development-platform-host.js";
 import { createRecordingControlPort } from "./recording-control.js";
 import { portalShortcutStateSchema } from "../platforms/linux/shared/portal-shortcuts.js";
@@ -62,30 +67,61 @@ function sender(event: IpcMainInvokeEvent): UiSender {
   };
 }
 
-async function start(): Promise<void> {
-  // This first slice can only start an isolated Dev host, never the stable profile.
-  if (process.argv.includes("--production") || process.argv.includes("--stable")) {
-    throw new Error("The production host is not implemented yet.");
-  }
-  const explicitRoot = selectedProfile();
-  const profile = resolveDevelopmentProfile({
-    home: homedir(),
-    ...(process.env["XDG_CONFIG_HOME"] ? { configHome: process.env["XDG_CONFIG_HOME"] } : {}),
-    ...(process.env["XDG_DATA_HOME"] ? { dataHome: process.env["XDG_DATA_HOME"] } : {}),
-    ...(process.env["XDG_CACHE_HOME"] ? { cacheHome: process.env["XDG_CACHE_HOME"] } : {}),
-    ...(explicitRoot ? { explicitRoot } : {}),
-  });
-  prepareDevelopmentProfile(profile);
-  app.setName(profile.productName);
-  app.setPath("userData", profile.roots.config);
-  app.setPath("sessionData", profile.paths.session);
-  app.setAppLogsPath(profile.paths.logs);
-  app.commandLine.appendSwitch("disk-cache-dir", profile.paths.cache);
-  if (process.platform === "linux") app.setDesktopName(`${profile.appId}.desktop`);
+interface ApplicationBootstrap {
+  readonly identity: BuildIdentity;
+  readonly profile: HostProfile;
+  readonly version: string;
+  readonly build: { readonly commit: string; readonly modified: boolean };
+  readonly descriptor: DevelopmentRecordingDescriptor | null;
+}
+
+/** Awaited at module scope so profile migration and path setup finish before Electron becomes ready. */
+async function prepareApplication(): Promise<ApplicationBootstrap> {
   app.enableSandbox();
   protocol.registerSchemesAsPrivileged([
     { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true } },
   ]);
+  const version = (await readFile(join(distribution, "resources/VERSION"), "utf8")).trim();
+  const appPath = await realpath(app.getAppPath());
+  const manifest: unknown = JSON.parse(await readFile(join(appPath, "package.json"), "utf8"));
+  const packageVersion = z.object({ version: z.string() }).parse(manifest).version;
+  const identity = selectApplicationBuild({ build: APPLICATION_BUILD, argv: process.argv,
+    platform: process.platform, architecture: process.arch, packaged: app.isPackaged,
+    executable: await realpath(process.execPath), appPath, resourcesPath: await realpath(process.resourcesPath),
+    distribution: await realpath(distribution), projectVersion: version, packageVersion });
+  const descriptor = DEVELOPMENT_RECORDING_BUILD === null ? null : developmentRecordingDescriptorSchema.parse(DEVELOPMENT_RECORDING_BUILD);
+  if (descriptor && (descriptor.platform !== process.platform || descriptor.architecture !== process.arch)) {
+    throw new Error("The recording build does not match this runtime.");
+  }
+  if (identity.kind === "stable" && (!descriptor || descriptor.platform !== "linux" || !descriptor.platformServices)) {
+    throw new Error("The stable build requires its matching Linux recording services.");
+  }
+  const buildRaw: unknown = JSON.parse(await readFile(join(distribution, "resources/development-build.json"), "utf8"));
+  const build = z.strictObject({ commit: z.string().regex(/^([a-f0-9]{40}|source)$/), modified: z.boolean() }).parse(buildRaw);
+  const storage = {
+    home: homedir(),
+    ...(process.env["XDG_CONFIG_HOME"] ? { configHome: process.env["XDG_CONFIG_HOME"] } : {}),
+    ...(process.env["XDG_DATA_HOME"] ? { dataHome: process.env["XDG_DATA_HOME"] } : {}),
+    ...(process.env["XDG_CACHE_HOME"] ? { cacheHome: process.env["XDG_CACHE_HOME"] } : {}),
+  };
+  let profile: HostProfile;
+  if (identity.kind === "stable") {
+    profile = await initializeStableLinuxProfile({ ...storage, platform: "linux" });
+  } else {
+    const explicitRoot = selectedProfile();
+    profile = prepareDevelopmentProfile(resolveDevelopmentProfile({ ...storage, ...(explicitRoot ? { explicitRoot } : {}) }));
+  }
+  if (app.isReady()) throw new Error("Application profile setup must precede Electron readiness.");
+  app.setName(profile.productName);
+  app.setPath("userData", identity.kind === "stable" ? dirname(profile.paths.settings) : profile.roots.config);
+  app.setPath("sessionData", profile.paths.session);
+  app.setAppLogsPath(profile.paths.logs);
+  app.commandLine.appendSwitch("disk-cache-dir", profile.paths.cache);
+  if (process.platform === "linux") app.setDesktopName(`${profile.appId}.desktop`);
+  return { identity, profile, version, build, descriptor };
+}
+
+async function start({ identity, profile, version, build, descriptor }: ApplicationBootstrap): Promise<void> {
   if (!app.requestSingleInstanceLock()) { app.quit(); return; }
   app.on("second-instance", () => {
     if (window && !window.isDestroyed()) { window.show(); window.focus(); }
@@ -95,7 +131,7 @@ async function start(): Promise<void> {
   });
   app.on("window-all-closed", () => { app.quit(); });
   await app.whenReady();
-  const preferences = await DevelopmentPreferenceStore.open(profile);
+  const preferences = await PreferenceStore.open(profile);
   const processingProfile = await PrivateStateStore.open(
     join(profile.paths.settings, "local-processing.json"), localProcessingProfileSchema, defaultLocalProcessingProfile(),
     1024 * 1024, { invalidContent: "preserve-and-default" },
@@ -128,7 +164,6 @@ async function start(): Promise<void> {
     downloadProgress = value.total > 0 ? Math.min(1, value.received / value.total) : 0; notify();
   } });
   const refreshModels = async (): Promise<void> => { installed = await inventory.installed(); };
-  const descriptor = DEVELOPMENT_RECORDING_BUILD === null ? null : developmentRecordingDescriptorSchema.parse(DEVELOPMENT_RECORDING_BUILD);
   const macRecording = descriptor?.platform === "darwin";
   if (macRecording && preferences.snapshot().hold_to_record) await preferences.patch({ hold_to_record: false });
   const waylandClipboard = descriptor?.platform === "linux" && process.env["XDG_SESSION_TYPE"] === "wayland"
@@ -156,7 +191,7 @@ async function start(): Promise<void> {
         if (context.signal.aborted) return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
         const oversized = Buffer.byteLength(text, "utf8") > MAX_USER_TEXT_BYTES;
         if (oversized && preferences.snapshot().keep_history) {
-          try { await saveDevelopmentTranscript(profile, text); }
+          try { await saveTranscript(profile, text); }
           catch { return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false }; }
         }
         if (context.signal.aborted) return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
@@ -188,12 +223,6 @@ async function start(): Promise<void> {
       catch { message = "A local audio server is not available."; }
     }
   }
-  const version = (await readFile(join(distribution, "resources/VERSION"), "utf8")).trim();
-  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) {
-    throw new Error("The development build has an invalid project version.");
-  }
-  const buildRaw: unknown = JSON.parse(await readFile(join(distribution, "resources/development-build.json"), "utf8"));
-  const build = z.strictObject({ commit: z.string().regex(/^([a-f0-9]{40}|source)$/), modified: z.boolean() }).parse(buildRaw);
   const platform = process.platform === "darwin" ? "macos" : "linux";
   const localeSchema = z.record(z.string(), z.string());
   const trayLocales = {
@@ -201,7 +230,8 @@ async function start(): Promise<void> {
     de: localeSchema.parse(JSON.parse(await readFile(join(distribution, "resources/locales/de.json"), "utf8")) as unknown),
   };
   const state = (): AppState => appStateSchema.parse({
-    updates: { configured: false, status: "idle", version: null, progress: 0, error: null, package: "development" },
+    updates: { configured: false, status: "idle", version: null, progress: 0, error: null, package: identity.kind === "stable" ? "deb" : "development" },
+    launch_at_login_available: false,
     platform,
     ...(platform === "macos" ? { macos: {
       microphone_allowed: microphoneAllowed, recording_shortcut: macShortcut?.state().configuring ?? false,
@@ -227,14 +257,14 @@ async function start(): Promise<void> {
     native_x11: shortcut.nativeX11 ?? false, native_paste: !!macPaste, native_mouse: false, native_middle_mouse: false,
     recording_shortcut: (macShortcut?.state().configuring ?? false) || !!keyCapture || !!shortcut.nativeX11 && shortcut.configuring,
     paste_ready: macPaste ? accessibilityAllowed : pasteState.ready, paste_configuring: pasteState.configuring, gpu_available: false, gpu_supported: false,
-    gpu_device: null, gpu_fallback: false, recovery_available: recording.recoveryAvailable,
+    gpu_device: null, gpu_fallback: identity.kind === "stable" && preferences.snapshot().gpu, recovery_available: recording.recoveryAvailable,
     overlay_available: !!overlay && !overlay.isDestroyed() && (!waylandOverlay || waylandOverlay.available),
     download, progress: download ? downloadProgress : inferenceProgress,
     elapsed: Math.min(Number.MAX_SAFE_INTEGER, Math.floor(recording.elapsedMs / 1000)), level: recording.level,
     model_directory: profile.paths.models,
-    profile: "development", recording_available: !!host && (macRecording ? microphoneAllowed || recording.busy : !!audioServer || recording.busy) &&
+    ...(identity.kind === "development" ? { profile: "development", development_build: `${build.commit.slice(0, 12)}${build.modified ? "+modified" : ""}` } : {}),
+    recording_available: !!host && (macRecording ? microphoneAllowed || recording.busy : !!audioServer || recording.busy) &&
       (recording.busy || installed.some((item) => item.model.id === preferences.snapshot().model)),
-    development_build: `${build.commit.slice(0, 12)}${build.modified ? "+modified" : ""}`,
     local_processing: processingProfile.snapshot(),
     local_processing_invalid_profile: processingProfile.invalidContent,
   });
@@ -345,8 +375,8 @@ async function start(): Promise<void> {
     if (configured && host?.isConfigured()) return;
     if (!host) throw new Error("Recording unavailable.");
     const selected = preferences.snapshot(), model = installed.find((item) => item.model.id === selected.model);
-    if (!model || selected.output !== "clipboard" && !(selected.output === "paste" && (descriptor?.platform === "linux" || macPaste)) || selected.gpu) {
-      throw new Error("Choose an installed model, CPU inference and supported output.");
+    if (!model || selected.output !== "clipboard" && !(selected.output === "paste" && (descriptor?.platform === "linux" || macPaste)) || selected.gpu && identity.kind === "development") {
+      throw new Error("Choose an installed model and supported output.");
     }
     // Recovery may be transcribed with the microphone disconnected; resolve sources only on Start.
     const request = recordingRequestSchema.parse({ model: { path: join(profile.paths.models, model.model.file), family: model.model.family, gpu: false },
@@ -390,6 +420,7 @@ async function start(): Promise<void> {
       platformHost = await DevelopmentPlatformHost.open({
         descriptor: { root: resolve(distribution, ".."), ...descriptor.platformServices },
         address: process.env.DBUS_SESSION_BUS_ADDRESS ?? "",
+        appId: profile.appId,
         kdeLeasePath: join(profile.paths.settings, "kde-keyboard-lease.json"),
         paste: (value) => {
           pasteState = value;
@@ -507,6 +538,9 @@ async function start(): Promise<void> {
     handlers: {
       get_state: () => state(),
       save_preferences: ({ changes }) => withRecordingControl(async () => {
+        if (changes.launch_at_login !== undefined || changes.auto_check_updates === true) {
+          throw new Error("Login and update services are not configured in this build.");
+        }
         if (changes.model && !catalog.models.some((model) => model.id === changes.model) && !installed.some((item) => item.model.id === changes.model)) {
           throw new Error("Unknown catalog model.");
         }
@@ -515,9 +549,9 @@ async function start(): Promise<void> {
           throw new Error("Finish or discard the current recording before changing its request.");
         }
         if (changes.output && changes.output !== "clipboard" && !(changes.output === "paste" && (descriptor?.platform === "linux" || macPaste))) {
-          throw new Error("The recording Dev build does not support this output.");
+          throw new Error("The recording build does not support this output.");
         }
-        if (changes.gpu) throw new Error("The recording Dev build uses CPU inference.");
+        if (changes.gpu) throw new Error("The recording build uses CPU inference.");
         if (macRecording && changes.hold_to_record) throw new Error("Regular keyboard shortcuts use toggle mode in this build.");
         if (changes.hold_to_record && shortcut.nativeKey !== null && modifierOnly(shortcut.nativeKey)) {
           throw new Error("Modifier-only KDE triggers use toggle mode.");
@@ -657,6 +691,11 @@ async function start(): Promise<void> {
     microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted";
     accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(false); notify();
   });
+  // Configure the saved request to discover private stopped audio before showing
+  // the controls. Source resolution, capture and inference remain explicit actions.
+  if (host && descriptor?.platform === "linux" && installed.some((item) => item.model.id === preferences.snapshot().model)) {
+    await action(() => withRecordingControl(configureRecording));
+  }
   await window.loadURL(MAIN_URL);
   // A hidden Wayland surface may wait for mapping before producing its first
   // frame. Do not make initial visibility depend only on ready-to-show.
@@ -674,8 +713,13 @@ async function start(): Promise<void> {
   notify();
 }
 
-void start().catch(() => {
+const bootstrap = await prepareApplication().catch(() => {
   // Startup diagnostics are categorical: no preferences, paths, audio or user text.
-  console.error("OpenWhisper Dev could not initialize its isolated profile or UI.");
+  console.error("OpenWhisper could not initialize its application profile.");
+  app.exit(1);
+  return undefined;
+});
+if (bootstrap) void start(bootstrap).catch(() => {
+  console.error("OpenWhisper could not initialize its application services or UI.");
   app.exit(1);
 });

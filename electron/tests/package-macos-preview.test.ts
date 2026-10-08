@@ -42,6 +42,7 @@ async function fixture() {
   });
   await write("dist/main/development-recording-build.js", `export const DEVELOPMENT_RECORDING_BUILD = ${JSON.stringify(recording)};\n`);
   await write("dist/main/index.js", "inert app fixture");
+  await write("dist/main/application-build.js", 'export const APPLICATION_BUILD = {"version":1,"kind":"development","appId":"io.github.whisperfree.dev","productName":"OpenWhisper Dev"};');
   const source = '{"commit":"0123456789abcdef0123456789abcdef01234567","modified":true}';
   await write("dist/resources/development-build.json", source); await write("dist/resources/VERSION", "0.3.0\n");
   await write("dist/ui/fonts/LICENSE.txt", "fixture font license");
@@ -78,6 +79,16 @@ test("Mac preview copies exact captured inputs, architecture dependency, icon/no
     await assert.rejects(lstat(join(result.application, "dist/native/openwhisper_macos_retirement_probe.node")), { code: "ENOENT" });
     await assert.rejects(lstat(join(result.application, "node_modules/electron")), { code: "ENOENT" });
     await assert.rejects(stageMacPreview({ root: input.root, output: input.output, architecture: "arm64" }), /fresh absolute output/);
+  } finally { await rm(input.base, { recursive: true, force: true }); }
+});
+
+test("Mac preview refuses a captured stable identity before creating output", async () => {
+  const input = await fixture();
+  try {
+    await writeFile(join(input.root, "dist/main/application-build.js"),
+      'export const APPLICATION_BUILD = {"version":1,"kind":"stable","appId":"io.github.whisperfree","productName":"OpenWhisper"};');
+    await assert.rejects(stageMacPreview({ root: input.root, output: input.output, architecture: "arm64" }), /captured Dev build identity/);
+    await assert.rejects(lstat(input.output), { code: "ENOENT" });
   } finally { await rm(input.base, { recursive: true, force: true }); }
 });
 
