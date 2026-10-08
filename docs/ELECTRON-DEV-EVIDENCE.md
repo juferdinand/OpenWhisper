@@ -1,6 +1,24 @@
 # Electron development evidence
 
-## Fresh local Dev installation: Linux runtime PASS, Mac runtime pending
+## Packaged Mac CPU inference prepared; actual runtime pending
+
+The existing signed-production-utility smoke now requires the existing pinned
+Tiny/JFK fixture directory. The same verified CPU helper receives one normal
+transcription request after its fresh identity challenges and capability check.
+It checks model/audio byte sizes and hashes, copies176000 contiguous Float32
+samples, verifies the public phrase, then shuts down and observes the original
+exit. Results retain only recognition, hashes and sample count. Capture remains
+at generation zero; no permission request, capture Start or microphone operation
+occurs. Original signed expectations and main's native inventory checks remain.
+
+Independent review passes after correcting the evidence wording to distinguish
+public fixture inference from microphone capture. Strict typing,49 directly
+affected protocol/bootstrap/Mac-host/entry-graph cases and serialized-callback
+checks pass. The existing Apple Silicon/Intel jobs fetch the same checksum-pinned
+fixtures and run the augmented smoke. Actual per-architecture results are pending;
+the earlier package passes below establish discovery, not transcription.
+
+## Fresh local Dev installation PASS on Linux, Apple Silicon and Intel
 
 The pure Node TypeScript CLI installs a local standalone recording Dev directory
 or matching `OpenWhisper Dev.app` into an exclusively reserved fresh root under
@@ -36,10 +54,17 @@ Repeated installation is refused while the original installed app remains idle/a
 source/returned package inventories, descriptor, launcher and owned stable sentinel
 stay unchanged. No physical device or host installation is used.
 
-The existing Apple Silicon/Intel package smoke now performs the same fresh install
-before its normal sandbox, signed-utility and shortcut checks. Those new Mac
-installation results are pending CI; the earlier Mac package passes below predate
-this installer. Archive download authenticity, existing-version replacement,
+The existing [Apple Silicon](https://github.com/juferdinand/OpenWhisper/actions/runs/37840925558/job/113529789851)
+and [Intel](https://github.com/juferdinand/OpenWhisper/actions/runs/37840925558/job/113529789925)
+package jobs pass the same fresh embedded-Node install before the relocated app's
+normal sandbox, signed-utility and shortcut checks at branch input0cd12a1. Their
+actual smokes finish at20:41:34UTC (arm64) and20:44:32UTC (x64). Both copied bundles
+pass strict signature checks, the explicit profile starts nonexistent, and repeated
+installation is refused while the original app remains alive/idle. The complete
+original Quit/cleanup checks pass. Legacy Linux in the same CI remains running.
+These are owned macOS15 thin ad-hoc Dev packages; physical permissions/devices,
+packaged transcription and release signing remain separate. Archive download
+authenticity, existing-version replacement,
 stable migration, updates and release packaging remain separate work. See
 [Dev installation commands](ELECTRON-DEVELOPMENT.md#install-a-separate-local-dev-copy).
 

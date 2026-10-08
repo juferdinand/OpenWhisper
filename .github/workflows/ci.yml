@@ -165,8 +165,9 @@ jobs:
           OPENWHISPER_OWNED_MAC_PACKAGE_SMOKE: '1'
         run: |
           npm run build -- --recording
+          node --import tsx scripts/fetch-speech-fixtures.ts
           node --import tsx scripts/package-macos-preview.ts --output "$RUNNER_TEMP/openwhisper-mac-dev" > "$RUNNER_TEMP/openwhisper-mac-dev-result.json"
-          node --import tsx tests/owned-macos-package-smoke.ts --package "$RUNNER_TEMP/openwhisper-mac-dev/OpenWhisper Dev.app" --evidence "$RUNNER_TEMP/openwhisper-mac-smoke"
+          node --import tsx tests/owned-macos-package-smoke.ts --package "$RUNNER_TEMP/openwhisper-mac-dev/OpenWhisper Dev.app" --evidence "$RUNNER_TEMP/openwhisper-mac-smoke" --fixtures "$PWD/.local/speech-fixtures"
       - name: Upload the isolated ad-hoc Mac Dev package
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

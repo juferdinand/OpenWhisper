@@ -11,9 +11,9 @@ import { pinnedRuntimeEnvironment } from "../scripts/runtime.js";
 if (process.platform !== "darwin" || process.getuid?.() === 0 || process.env["GITHUB_ACTIONS"] !== "true" ||
   process.env["OPENWHISPER_OWNED_MAC_PACKAGE_SMOKE"] !== "1") throw new Error("Mac package smoke requires explicit owned non-root Mac CI execution.");
 const args = process.argv.slice(2);
-if (args.length !== 4 || args[0] !== "--package" || args[2] !== "--evidence" || !args[1] || !args[3] ||
-  ![args[1], args[3]].every((path) => isAbsolute(path) && !path.includes("\0"))) throw new Error("Usage: owned-macos-package-smoke.ts --package /absolute/Dev.app --evidence /absolute/fresh/evidence");
-const sourceBundle = resolve(args[1]), evidence = resolve(args[3]);
+if (args.length !== 6 || args[0] !== "--package" || args[2] !== "--evidence" || args[4] !== "--fixtures" || !args[1] || !args[3] || !args[5] ||
+  ![args[1], args[3], args[5]].every((path) => isAbsolute(path) && !path.includes("\0"))) throw new Error("Usage: owned-macos-package-smoke.ts --package /absolute/Dev.app --evidence /absolute/fresh/evidence --fixtures /absolute/pinned/fixtures");
+const sourceBundle = resolve(args[1]), evidence = resolve(args[3]), fixtures = resolve(args[5]);
 if (await realpath(sourceBundle) !== sourceBundle || !sourceBundle.endsWith("/OpenWhisper Dev.app") || evidence.startsWith(`${sourceBundle}/`)) throw new Error("An existing real Dev app and separate fresh evidence directory are required.");
 await mkdir(evidence, { mode: 0o700 });
 const profile = join(evidence, "fresh-profile"), installationRoot = join(evidence, "Installation Slot");
@@ -101,16 +101,17 @@ try {
   assert.deepEqual(await readFile(join(appPath, "dist/main/development-recording-build.js")), sourceDescriptor);
   checks.push("A second installation refuses the existing root while the original relocated app remains alive and idle");
   stage = "signed-native-utility-loading";
-  nativeUtilityLoading = await application.evaluate(async ({ app, utilityProcess, session }) => {
+  nativeUtilityLoading = await application.evaluate(async ({ app, utilityProcess, session }, fixtureRoot: string) => {
     const path = process.getBuiltinModule("path"), modules = process.getBuiltinModule("module"), crypto = process.getBuiltinModule("crypto");
-    if (!path || !modules || !crypto || !app.isPackaged) throw new Error("Packaged utility inputs unavailable.");
-    const root = app.getAppPath(), deadline = Date.now() + 45_000;
+    const fs = process.getBuiltinModule("fs/promises");
+    if (!path || !modules || !crypto || !fs || !app.isPackaged) throw new Error("Packaged utility inputs unavailable.");
+    const root = app.getAppPath(), deadline = Date.now() + 90_000;
     let phase = "packaged-inputs";
     // Object methods avoid tsx's external function-name helper in Playwright's serialized callback.
-    const bounded = { async call<T>(operation: Promise<T>, until = deadline): Promise<T> {
+    const bounded = { async call<T>(operation: Promise<T>, until = deadline, maximum = 8000): Promise<T> {
       let timer: NodeJS.Timeout | undefined;
       try { return await Promise.race([operation, new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${phase}: deadline`)), Math.max(1, Math.min(8000, until - Date.now())));
+        timer = setTimeout(() => reject(new Error(`${phase}: deadline`)), Math.max(1, Math.min(maximum, until - Date.now())));
       })]); } finally { if (timer) clearTimeout(timer); }
     } }.call;
     const requireCondition = { call(value: unknown, message: string): void { if (!value) throw new Error(`${phase}: ${message}`); } }.call;
@@ -126,6 +127,7 @@ try {
     const owners: Owner[] = [];
     let capture: { pid: number; generation: number; exitCode: number } | undefined;
     let speech: { pid: number; gpu: null; exitCode: number } | undefined;
+    let inference: { recognized: boolean; modelSha256: string; audioSha256: string; sampleCount: number } | undefined;
     let error: string | undefined;
     try {
       requireCondition(!mainInventory(), "capture/speech loaded in main before utility test");
@@ -157,10 +159,10 @@ try {
         child.once("exit", (code) => { owner.exited = true; acceptExit(code); rejectSpawn(new Error("Original utility exited")); owner.wake?.(); });
         return owner;
       } }.call;
-      const next = { async call(owner: Owner): Promise<unknown> {
+      const next = { async call(owner: Owner, maximum = 8000): Promise<unknown> {
         while (!owner.frames.length) {
           requireCondition(!owner.failed && !owner.exited, "original utility failed/exited before reply");
-          await bounded(new Promise<void>((accept) => { owner.wake = accept; })); owner.wake = undefined;
+          await bounded(new Promise<void>((accept) => { owner.wake = accept; }), deadline, maximum); owner.wake = undefined;
         }
         requireCondition(!owner.failed, "original utility channel failed"); return owner.frames.shift();
       } }.call;
@@ -209,6 +211,27 @@ try {
         if (reply.ok && reply.value.command === "discover") requireCondition(reply.value.gpu === null, "CPU package capability");
       } }.call;
       phase = "speech-discover-native-load"; await speechRequest("discover");
+      phase = "speech-pinned-fixtures";
+      requireCondition(await bounded(fs.realpath(fixtureRoot)) === fixtureRoot, "real pinned fixture directory");
+      const modelPath = path.join(fixtureRoot, "ggml-tiny.bin"), audioPath = path.join(fixtureRoot, "jfk.f32");
+      const modelFile = await bounded(fs.lstat(modelPath)), audioFile = await bounded(fs.lstat(audioPath));
+      requireCondition(modelFile.isFile() && !modelFile.isSymbolicLink() && modelFile.size === 77_691_713 &&
+        audioFile.isFile() && !audioFile.isSymbolicLink() && audioFile.size === 704_000, "pinned fixture file identities/sizes");
+      const [modelBytes, audioBytes] = await bounded(Promise.all([fs.readFile(modelPath), fs.readFile(audioPath)]));
+      const modelSha256 = crypto.createHash("sha256").update(modelBytes).digest("hex"), audioSha256 = crypto.createHash("sha256").update(audioBytes).digest("hex");
+      requireCondition(modelBytes.length === 77_691_713 && modelSha256 === "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21" &&
+        audioBytes.length === 704_000 && audioSha256 === "ebd52851100536db02d12c49fddd010372dcdc70243562e057553d476b706ae0", "pinned fixture byte hashes");
+      const samples = new Float32Array(audioBytes.length / Float32Array.BYTES_PER_ELEMENT);
+      new Uint8Array(samples.buffer).set(audioBytes); // Copy the exact public Float32 fixture bytes.
+      inference = { recognized: false, modelSha256, audioSha256, sampleCount: samples.length };
+      phase = "speech-transcribe-cpu-fixture";
+      const transcriptionId = crypto.randomUUID();
+      speechOwner.child.postMessage(protocol.speechRequestSchema.parse({ version: 1, id: transcriptionId, command: "transcribe",
+        model: { path: modelPath, family: "whisper", gpu: false }, samples, language: "en", vocabulary: "" }));
+      const transcription = protocol.speechReplySchema.parse(await next(speechOwner, 30_000));
+      requireCondition(transcription.id === transcriptionId && transcription.ok && transcription.value.command === "transcribe", "speech transcription reply identity/result");
+      inference.recognized = transcription.ok && transcription.value.command === "transcribe" && /ask not what your country can do for you/iu.test(transcription.value.text);
+      requireCondition(inference.recognized, "pinned public phrase recognition");
       phase = "speech-shutdown"; await speechRequest("shutdown");
       requireCondition(speechOwner.child.kill(), "original speech termination request");
       const speechExit = await bounded(speechOwner.exit); requireCondition(speechExit === 0, "speech original exit");
@@ -225,14 +248,14 @@ try {
     let mainCaptureSpeechFree = false;
     try { mainCaptureSpeechFree = !mainInventory(); }
     catch (failure: unknown) { error ??= failure instanceof Error ? failure.message.slice(0, 1000) : "Main inventory unavailable after cleanup"; }
-    return { status: error || !cleanupPassed || !mainCaptureSpeechFree ? "FAIL" : "PASS", phase, error, capture, speech, cleanupPassed, mainCaptureSpeechFree,
+    return { status: error || !cleanupPassed || !mainCaptureSpeechFree ? "FAIL" : "PASS", phase, error, capture, speech, inference, cleanupPassed, mainCaptureSpeechFree,
       cleanupErrors: cleanup.filter((item) => item.status === "rejected").map((item) => item.reason instanceof Error ? item.reason.message : "Original exit not observed"),
       originalExitsObserved: owners.map((owner) => ({ pid: owner.pid, exited: owner.exited })),
-      scope: "Signed production capture configure + CPU speech discovery only; no Start, TCC, model load, audio or full retirement claim" };
-  });
+      scope: "Signed production capture configure + CPU Tiny/JFK inference; no Start, TCC, microphone audio or full retirement claim" };
+  }, fixtures);
   assert.ok(typeof nativeUtilityLoading === "object" && nativeUtilityLoading !== null);
   assert.equal(Reflect.get(nativeUtilityLoading, "status"), "PASS", JSON.stringify(nativeUtilityLoading));
-  checks.push("Signed production capture configure and CPU speech discovery load in original utilities; original cleanup exits observed; no main capture/speech addon");
+  checks.push("Signed production capture configure and pinned CPU Tiny/JFK inference in original utilities; original cleanup exits observed; no main capture/speech addon");
   const accelerator = "Command+Shift+F8";
   assert.equal(await application.evaluate(({ globalShortcut }, key) => globalShortcut.isRegistered(key), accelerator), false);
   stage = "shortcut-setup";
@@ -267,7 +290,7 @@ try {
   assert.equal(exit.code, 0); assert.equal(exit.signal, null);
   checks.push("Original packaged process exits cleanly through normal Quit and application cleanup");
   await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", architecture: process.arch, identity, checks,
-    input: "CDP to owned window only; no OS global input injection", microphone: "No request, Start or audio operation",
+    input: "CDP to owned window only; no OS global input injection", microphone: "No permission request, capture Start or microphone operation; pinned public inference fixture only",
     installation, nativeUtilityLoading, tccAttribution: "Permission and real microphone behavior remain pending", exit }, null, 2), { mode: 0o600 });
   passed = true;
 } catch (error: unknown) {

@@ -217,6 +217,8 @@ again after copying. Existing installations, profiles, launchers, stable storage
 symlink ancestors and overlapping paths are refused. It does not create the profile
 or launch the app. Its JSON result supplies `executable` and `launchArguments` for
 an explicit later launch; Linux's new desktop launcher includes the profile argument.
+The ordinary installed package passes the owned Linux X11 recording/recovery check
+and both Apple Silicon/Intel Mac startup, sandbox, signed-utility and shortcut checks.
 
 This is a local Dev copy, not a signed release download or updater. Source metadata
 and the inventory digest describe the selected local bytes; they do not authenticate
@@ -267,6 +269,9 @@ bytes, bundle identity and the extracted archive. An owned CI driver launches th
 actual package with a private profile, checks the sandboxed shared UI, exercises
 regular-key setup/removal and exits through normal Quit. It requests no microphone
 or Accessibility permission and sends input only to its own Chromium window.
+The next smoke also passes checksum-pinned public audio and Tiny to the same signed
+CPU speech helper for real recognition; its actual per-architecture result remains
+pending and does not replace microphone/device acceptance.
 These artifacts are Dev previews; universal/release signing and stable updates
 remain separate work. See the [evidence](ELECTRON-DEV-EVIDENCE.md).
 
