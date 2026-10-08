@@ -1,5 +1,31 @@
 # Electron development evidence
 
+Stock Kubuntu dictation now passes in `ui-run-stock-kde-11`: the ordinary native
+Wayland app performs real Tiny CPU recognition, exact clipboard/history delivery,
+GUI/command cancellation, source-loss Retry/Discard and graceful original app close.
+No startup interception or synthetic portal is used. The application source is
+unchanged from `96790f2`; the correction is confined to the owned desktop fixture.
+
+The retained stock failure was resource starvation in that fixture. Attempt 9
+records `pids.max=256`, `pids.peak=256`, `pids.events: max 1`, no OOM event, and a
+speech-child exit during startup. The same native module loads with the verified
+Node runtime in the cached image. Limiting only the nested desktop's software
+renderer with `LP_NUM_THREADS=2` keeps the same 256-task cap and actual inference
+path. [Mesa documents this rendering-thread setting](https://docs.mesa3d.org/envvars.html#lp-num-threads).
+Attempt 11 records a 215-task peak, zero cap rejections and no OOM. Its original
+commands, application and exact container close without forced app termination.
+The earlier pressure failures remain retained; robust application cleanup after
+early worker death under pressure is still a separate lifecycle check.
+
+The installed KDE 5.27 portal still returns no assigned shortcut. Stock key edges,
+target-app paste, overlays, GPU, GNOME and release/data/update gates remain open.
+All six CI jobs at application predecessor `96790f2` pass in
+[CI37772826379](https://github.com/juferdinand/OpenWhisper/actions/runs/37772826379).
+Strict TS, 843 unit tests and 57 UI tests remain valid for unchanged application/UI
+source; fixture changes have their own strict check and fresh owned runtime.
+
+Previous checkpoints follow for their retained scope and provenance.
+
 The latest correction preserves confirmed shortcuts when a version-1 portal
 cannot open configuration, retains release edges and binding changes during
 reconfiguration, and keeps unassigned sessions visibly unassigned. The main

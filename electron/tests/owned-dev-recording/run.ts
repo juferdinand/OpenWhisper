@@ -161,7 +161,9 @@ try {
   const copied = join(output, "stopped-payload"); await required(["cp", "-a", `${container}:/payload`, copied]); assert.deepEqual(await inventory(copied), frozen);
   await required(["start", container]);
   await required(["exec", "--user", "1000:1000", container, "/usr/bin/chmod", "-R", "a-w", "/payload"]);
-  const command = stockKde ? ["OPENWHISPER_STOCK_KDE=1", "KWIN_COMPOSE=Q", "/usr/bin/python3", "/payload/run-owned-desktop.py", "--session", "kde-wayland",
+  // Bound software rendering threads in the owned desktop, not application
+  // inference. Keep the same process cap and genuine compositor/portal path.
+  const command = stockKde ? ["OPENWHISPER_STOCK_KDE=1", "KWIN_COMPOSE=Q", "LP_NUM_THREADS=2", "/usr/bin/python3", "/payload/run-owned-desktop.py", "--session", "kde-wayland",
     "--output", "/tmp/owned-desktop", "--timeout", "180", "--", "/payload/node", "/payload/driver.mjs"]
     : ["/opt/node/bin/node", "/payload/driver.mjs"];
   const observed = await docker(["exec", "--user", "1000:1000", container, "/usr/bin/env", "-i", "PATH=/opt/node/bin:/usr/bin:/bin", "LANG=C.UTF-8",

@@ -29,6 +29,13 @@ const diagnostics: { stdoutBytes: number; stderrBytes: number } = { stdoutBytes:
 async function checkpoint(value: string): Promise<void> {
   stage = value; await writeFile(join(evidence, "checkpoint.json"), JSON.stringify({ stage, checks }), { mode: 0o600 });
 }
+async function recordResources(name: string): Promise<Record<string, string>> {
+  const resources: Record<string, string> = {};
+  for (const field of ["pids.current", "pids.max", "pids.peak", "pids.events", "memory.events"]) {
+    try { resources[field] = (await readFile(`/sys/fs/cgroup/${field}`, "utf8")).slice(0, 1024); } catch {}
+  }
+  await writeFile(join(evidence, name), JSON.stringify(resources), { mode: 0o600 }); return resources;
+}
 function child(command: string, args: string[], env: NodeJS.ProcessEnv, display = false) {
   const process = spawn(command, args, { env, shell: false, stdio: display ? ["ignore", "ignore", "pipe", "pipe"] : "ignore" });
   const owner = { child: process, closeObserved: false, closed: Promise.resolve() };
@@ -349,6 +356,11 @@ async function main(): Promise<void> {
   await page.locator("#cancel").click(); await until(async () => (await state()).status === "idle" && !(await state()).recovery_available);
   assert.deepEqual(await readdir(profile.paths.recovery), []); assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
   checks.push("actual Discard removes retained private WAV and releases failed capture ownership");
+  if (stockKde) {
+    const resources = await recordResources("resources.json");
+    assert.match(resources["pids.events"] ?? "", /(?:^|\n)max 0(?:\n|$)/u);
+    assert.equal(resources["pids.max"]?.trim(), "256");
+  }
   await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", checks, architecture: process.arch, uid: process.getuid?.(),
     transcriptCharacters: result.transcript.length, transcriptSha256: sha(Buffer.from(result.transcript)), countryRecognized: true,
     clipboardConfirmed: true, historyConfirmed: true, recoveryRemoved: true, cancelConfirmed: true, retryConfirmed: true, discardConfirmed: true,
@@ -364,6 +376,7 @@ try { await main(); } catch (error: unknown) {
     location: error instanceof Error ? error.stack?.split("\n").find((line) => line.includes("file:///payload/driver.mjs:"))?.trim() ?? null : null };
   process.exitCode = 1;
   await writeFile(join(evidence, "failure.json"), JSON.stringify({ stage, lastState, failure }), { mode: 0o600 });
+  if (stockKde) await recordResources("failure-resources.json");
   if (page && stockKde) {
     try {
       const controls = await page.locator("button").evaluateAll((buttons) => buttons.slice(0, 40).map((button) => ({

@@ -12,16 +12,16 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | --- | --- | --- |
 | Plan and architecture | Reviewed plan, repository research answers and issue/PR review recorded | Keep decisions aligned with final implementation |
 | Shared interface and services | Existing design, strict TS bridge, isolated Dev profile, settings, models and history | Tray and complete platform behaviors |
-| Linux dictation | Normal Dev UI Start/Stop/Cancel, real CPU recognition, clipboard, Retry/Discard passed in an owned virtual-audio container | Resolve the stock Kubuntu speech/cleanup failure; global desktop control, paste, overlays and accelerated inference in normal Dev |
+| Linux dictation | Normal UI, CPU recognition, clipboard, Retry/Discard and graceful Quit pass on private Ubuntu22 and stock Kubuntu/KDE 5.27 native Wayland with virtual audio | Startup-failure cleanup under resource pressure; global desktop control, paste, overlays and accelerated inference in normal Dev |
 | macOS dictation | Normal CPU Dev recording, explicit permission button and RAM Retry/Discard are now connected; focused synthetic tests pass | Validate the assembled Mac build and physical permission/device behavior; add Metal selection |
-| Linux desktop integration | Same-user Dev commands and portal sessions share recording ownership; protocol grant/cancel/revoke and toggle/hold pass. Native Wayland UI/setup runs against stock KDE 5.27, whose portal returns no assigned shortcut | Stock KDE binding/key delivery and recognition; GNOME validation, specialized KDE/X11 triggers, packaged CLI, paste/overlays and wlroots replacement behavior |
+| Linux desktop integration | Dev commands and portal sessions share recording ownership; protocol grant/cancel/revoke and toggle/hold pass. Stock KDE 5.27 native Wayland dictation/setup passes; its portal returns no assigned shortcut | Stock KDE binding/key delivery; GNOME validation, specialized KDE/X11 triggers, packaged CLI, paste/overlays and wlroots replacement behavior |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
 | Packaging and updates | Architecture and compatibility requirements documented | Electron AppImage/.deb/universal DMG+ZIP, signing, stable data continuity and actual old-client update checks |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
-The current increment fixes shortcut reconfiguration and initial Wayland window
-visibility, with an explicit retained stock KDE failure alongside passing private
-protocol/recognition checks. It does not change the installed application or publish
+The current checkpoint includes shortcut reconfiguration, initial Wayland window
+visibility and passing stock KDE dictation after correcting the owned software
+renderer's thread budget. Prior pressure failures remain retained. It does not change the installed application or publish
 a release. [Dev instructions](ELECTRON-DEVELOPMENT.md) explain the currently runnable
 build; [automated evidence](ELECTRON-DEV-EVIDENCE.md) records its exact tested scope.
 

@@ -42,9 +42,12 @@ release signing are separate gates.
 Append `--stock-kde` to reuse `linux/scripts/run-owned-desktop.py` and the pinned
 cached Kubuntu 24.04 portal image. This mode opens the normal app with native
 Wayland and installed KDE portal services, never the synthetic frontend. It uses
-QPainter only for the nested compositor without GPU devices, and copies the same
+QPainter and two Mesa rendering threads only for the nested desktop without GPU devices, and copies the same
 verified Node runtime into the stopped payload. It records the actual setup
 response and uses GUI recording; it does not generate compositor key edges.
-The current stock run remains a failure: the portal returns no assigned binding,
-recognition reports `SPEECH_FAILED`, and graceful application shutdown does not
-finish before the desktop deadline. See [the retained evidence](../../../docs/ELECTRON-DEV-EVIDENCE.md).
+The current stock run passes recognition, clipboard/history, recovery and graceful
+Quit. It records cgroup counters and requires zero process-cap rejections while
+keeping the 256-task limit. Before bounding rendering threads, the stock desktop
+exhausted that cap and the speech helper died during startup. Those failures remain
+retained. The portal still returns no assigned binding; no real key delivery or
+automatic paste is claimed. See [the retained evidence](../../../docs/ELECTRON-DEV-EVIDENCE.md).
