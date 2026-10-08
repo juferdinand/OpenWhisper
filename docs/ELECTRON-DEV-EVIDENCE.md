@@ -609,9 +609,9 @@ allocation; full kernel retirement and accepted read closure remain required.
 
 The reviewed source manifest is
 `43a1121b6c7f653355550bf6e5bf5119f9d6a28cf23f080197b375dbc456883d`.
-Actual composition of this factory, the continuing supervisor, private model
-leases and native inference remains the next separately checked gate. Ordinary
-recording/UI wiring and automatic application fallback are not established.
+The subsequent owned manual-CPU composition now passes as recorded below.
+Ordinary recording/UI wiring and automatic application fallback remain separate
+gates.
 
 ### Retained Linux bus opening and environment cleanup
 
@@ -675,3 +675,37 @@ registered in ordinary CI. They preserve the exact original nineteen assertions
 and compile receipts and provide a closed active-operation/completed-prefix
 ledger. The separate actual legacy-only runner reuses both previously verified
 binaries; importing these inert tests starts no bus, process, container or build.
+
+### Actual continuing Linux manual-CPU composition
+
+One reviewed actual invocation now composes the normal continuing supervisor,
+canonical Linux host, original transport/bootstrap and genuine procfs retirement
+boundary with private model inventory and the retained native CPU addon. Two
+consecutive jobs recognize the exact pinned public Tiny/JFK fixture. Both return
+the same 107-byte output hash; transcript text is absent from the evidence.
+Each helper completes two distinct original-channel challenges and matching
+UID/direct-parent/birth admission before inference. After each job, kernel
+retirement, final reaped observation, accepted read closure and final reaped
+state precede release of the actual model lease. The first exact job.close
+promise releases its lease before the second job starts. Generic exit remains
+a separate observation. Manual CPU performs no GPU verification or discovery.
+
+The immutable Ubuntu22 container runs UID1000, network none, private PID/IPC
+and Xvfb, zero host mounts/devices, dropped capabilities, no-new-privileges and
+the reviewed seccomp policy. Raw Electron44.7.0 runtime bytes are checked with
+original-fs. No native compilation or download occurs. The original browser
+PID/birth is absent after its CLI closes, and the exact container is removed
+and absent. All17 original commands close successfully. Independent review
+checks all1844 retained artifacts, all92 current/frozen source/provenance files
+and all872 payload records against the original build and stopped-container
+round trip. The result SHA is
+`8e10daf3ce1167c65b60bd85a52dd9b6a62bcf393d4d5460d2608899c89eed11`;
+the actual manifest SHA is
+`7f5e89d3827a5865f81fe516a112b701604c4dcd24eb6118a32856ef6d62f894`.
+
+This establishes owned Linux manual-CPU inventory/supervisor/inference/process
+composition on these public inputs. Automatic GPU selection/fallback, capture,
+clipboard delivery, actual desktops, macOS and signed package parity remain
+unestablished by this run. The ten closed runner/receipt/private-file contract
+cases are registered in ordinary CI; importing them starts no container,
+native addon, inference, audio or application.
