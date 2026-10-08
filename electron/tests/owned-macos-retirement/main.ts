@@ -64,10 +64,25 @@ async function run(root: string, distribution: string): Promise<void> {
   let native: MacProbeNative | undefined, worker: Worker | undefined;
   const cases: ProbeResult["cases"] = [], phases: string[] = [];
   type CaseName = ProbeResult["cases"][number]["name"] | "synthetic-environment-cleanup";
-  type Stage = "spawn" | "bind" | "retire" | "kill" | "kill-returned" | "post-kill-observe" | "wait-reap" | "exit" | "close" | "worker";
+  type Stage = "spawn" | "bind" | "retire" | "kill" | "kill-returned" | "post-kill-observe" | "wait-reap" | "exit" | "close" |
+    "worker-sdk-before" | "worker-load" | "worker-barrier" | "worker-terminate" | "worker-after-terminate" | "worker-sdk-read" |
+    "worker-assert-cleanup" | "worker-assert-suppressed" | "worker-assert-disposal" | "worker-assert-reservation";
   let checkpoint: Readonly<{ case: CaseName; stage: Stage; configuredHandler: "default" | "delayed" | "ignore";
     killReturnedMilliseconds: number | null; helperExitObserved: boolean | null; observedLevel: "running" | "non-running" | "reaped" | null }> | undefined;
   const checkpoints: NonNullable<typeof checkpoint>[] = [];
+  type WorkerFailure = "WORKER_LOAD_FAILED" | "WORKER_ERROR" | "WORKER_EXIT_BEFORE_BARRIER" | "WORKER_REPLY_INVALID" |
+    "WORKER_TERMINATE_FAILED" | "WORKER_SDK_FAILED" | "WORKER_ASSERTION_FAILED";
+  let workerFailure: WorkerFailure | undefined, workerBefore: z.infer<typeof sdkSchema> | undefined, workerAfter: z.infer<typeof sdkSchema> | undefined;
+  let workerBarrierState: z.infer<typeof probeStateSchema> | undefined;
+  let workerBarrierObserved = false, workerExitObserved = false, workerTerminationRequested = false;
+  let workerTerminateMilliseconds: number | undefined;
+  const workerDiagnostic = async (): Promise<void> => {
+    if (checkpoint?.case !== "synthetic-environment-cleanup") return;
+    await writeFile(join(root, "worker-state.json"), JSON.stringify({ stage: checkpoint.stage, code: workerFailure ?? null,
+      before: workerBefore ?? null, after: workerAfter ?? null, barrierObserved: workerBarrierObserved, exitObserved: workerExitObserved,
+      terminationRequested: workerTerminationRequested, terminateMilliseconds: workerTerminateMilliseconds ?? null,
+      syntheticOnly: true, barrierState: workerBarrierState ?? null }), { mode: 0o600 });
+  };
   const record = async (caseName: CaseName, stage: Stage, handler: "default" | "delayed" | "ignore" = "default",
     values: Readonly<{ killReturnedMilliseconds?: number; helperExitObserved?: boolean; observedLevel?: "running" | "non-running" | "reaped" }> = {}): Promise<void> => {
     checkpoint = Object.freeze({ case: caseName, stage, configuredHandler: handler,
@@ -195,18 +210,45 @@ async function run(root: string, distribution: string): Promise<void> {
         deadlineRetainedOwner: true, refusedSecondOwner: true, retirementMilliseconds: performance.now() - started });
       phases.push("held-observation"); await writeFile(join(root, "phases.json"), JSON.stringify(phases), { mode: 0o600 });
     }
-    await record("synthetic-environment-cleanup", "worker");
+    workerFailure = "WORKER_SDK_FAILED";
+    await record("synthetic-environment-cleanup", "worker-sdk-before");
     const before = sdkSchema.parse(edge.sdk());
+    workerBefore = before; await workerDiagnostic();
+    workerFailure = "WORKER_LOAD_FAILED";
+    await record("synthetic-environment-cleanup", "worker-load");
     worker = new Worker(join(root, "worker.mjs"), { workerData: { binding: join(distribution, "native/openwhisper_macos_retirement_probe.node") } });
     const barrier = await bounded(new Promise<unknown>((accept, reject) => {
-      worker?.once("message", accept); worker?.once("error", reject); worker?.once("exit", () => { reject(new Error("PROBE_FAILED")); });
+      worker?.once("message", accept);
+      worker?.once("error", () => { workerFailure = "WORKER_ERROR"; reject(new Error("PROBE_FAILED")); });
+      worker?.once("exit", () => {
+        workerExitObserved = true;
+        if (!workerTerminationRequested) workerFailure = "WORKER_EXIT_BEFORE_BARRIER";
+        reject(new Error("PROBE_FAILED"));
+      });
     }));
-    z.strictObject({ kind: z.literal("barrier-entered"), state: probeStateSchema }).parse(barrier);
+    workerFailure = "WORKER_REPLY_INVALID";
+    workerBarrierState = z.strictObject({ kind: z.literal("barrier-entered"), state: probeStateSchema }).parse(barrier).state;
+    workerBarrierObserved = true;
+    await record("synthetic-environment-cleanup", "worker-barrier"); await workerDiagnostic();
+    workerFailure = "WORKER_TERMINATE_FAILED";
+    await record("synthetic-environment-cleanup", "worker-terminate"); workerTerminationRequested = true;
     const started = performance.now(); await bounded(worker.terminate()); const milliseconds = performance.now() - started;
+    workerTerminateMilliseconds = milliseconds;
+    await record("synthetic-environment-cleanup", "worker-after-terminate"); await workerDiagnostic();
+    workerFailure = "WORKER_SDK_FAILED";
+    await record("synthetic-environment-cleanup", "worker-sdk-read");
     const after = sdkSchema.parse(edge.sdk());
+    workerAfter = after; await workerDiagnostic();
+    workerFailure = "WORKER_ASSERTION_FAILED";
+    await record("synthetic-environment-cleanup", "worker-assert-cleanup");
     assert.equal(after.environmentCleanups, before.environmentCleanups + 1);
+    await record("synthetic-environment-cleanup", "worker-assert-suppressed");
     assert.equal(after.suppressedCompletions, before.suppressedCompletions + 1);
-    assert.equal(after.totalDisposals, before.totalDisposals + 1); assert.equal(after.reserved, 0);
+    await record("synthetic-environment-cleanup", "worker-assert-disposal");
+    assert.equal(after.totalDisposals, before.totalDisposals + 1);
+    await record("synthetic-environment-cleanup", "worker-assert-reservation");
+    assert.equal(after.reserved, 0);
+    workerFailure = undefined; await workerDiagnostic();
     const result = resultSchema.parse({ fixture: "macos-retirement-probe", architecture: process.arch, sdk: after, cases,
       runtime: { node: process.versions.node, electron: process.versions.electron },
       workerCleanup: { syntheticOnly: true, kernelQueries: 0, watchAllocations: 0, barrierEntered: true, workerExitObserved: true,
@@ -231,6 +273,7 @@ async function run(root: string, distribution: string): Promise<void> {
     await writeFile(join(root, "lifecycle.json"), JSON.stringify({ helperExitObserved: children.every((child) => child.state.exited),
       reservedNativeOwners: native ? sdkSchema.parse(native.sdk()).reserved : null, rendererCreated: webContents.getAllWebContents().length !== 0,
       productionFactoriesChanged: false, syntheticWorkerKernelQueries: 0 }), { mode: 0o600 });
+    await workerDiagnostic();
     clearTimeout(watchdog); app.exit(process.exitCode === 1 ? 1 : 0);
   }
 }

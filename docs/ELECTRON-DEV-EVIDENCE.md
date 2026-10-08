@@ -445,3 +445,29 @@ public provider transfer, model compatibility/license acceptance and crash recov
 are separate gates before live UI wiring. Server integrity metadata is not a project
 signature. The same-host reservation is not an interprocess lock. The reviewed source
 manifest hash is `2dd3e886079348b6a1060ec48edbf3f90348110463737aac352f3b7740d92846`.
+
+### Resource-directory ownership and Apple cleanup diagnostics
+
+[CI 37725513947](https://github.com/juferdinand/OpenWhisper/actions/runs/37725513947)
+completed with three successful jobs and three failures. Both existing host builds
+and the macOS Electron foundation passed. The Ubuntu Electron job exposed an idle
+physical-root identity conflict; both Apple process probes completed all seven
+owned child phases before failing the separate synthetic Worker cleanup gate.
+Their generated-PCM capture tests also passed. This is partial process evidence,
+not complete Apple retirement acceptance.
+
+The catalog now permits an unrelated idle inode to be reused while synchronously
+reserving accepted work, including operations submitted through old handles. It
+opens and stat-matches a genuine NOFOLLOW directory descriptor before the artifact,
+and retains that directory until artifact closure and final consistency checks
+finish. Failed file closure retains both descriptors; failed directory closure
+retains its exact rejected Promise. All cleanup remains inside the pending fence.
+Twenty-three focused tests pass, including ten new independent cases and a genuine
+unlinked directory whose descriptor retains its original inode after file-close
+refusal. Synthetic alias identities are distinguished from that filesystem test.
+No birth-time heuristic, native load or application allocation is involved.
+
+The Apple fixture now records bounded categorical Worker stages, validated native
+counters and termination state. Its four original cleanup assertions, native
+source, ownership guards and production deadlines are unchanged. Fresh CI is
+required to identify the failed assertion before changing cleanup behavior.

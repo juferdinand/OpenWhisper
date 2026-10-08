@@ -36,6 +36,11 @@ export interface SpeechResourceFiles {
   lstat(path: string): Promise<BigIntStats>;
   realpath(path: string): Promise<string>;
   open(path: string, flags: number): Promise<Pick<FileHandle, "stat" | "read" | "close">>;
+  openDirectory?(path: string, flags: number): Promise<SpeechResourceDirectory>;
+}
+export interface SpeechResourceDirectory {
+  stat(options: { bigint: true }): Promise<BigIntStats>;
+  close(): Promise<void>;
 }
 const actualFiles: SpeechResourceFiles = { lstat: (path) => lstat(path, { bigint: true }), realpath, open };
 interface RootOwner {
@@ -43,8 +48,10 @@ interface RootOwner {
   readonly identity: BigIntStats;
   readonly files: SpeechResourceFiles;
   queue: Promise<void>;
+  pending: number;
   failedClosure?: Promise<void>;
   heldFile?: Pick<FileHandle, "stat" | "read" | "close">;
+  heldDirectory?: SpeechResourceDirectory;
 }
 interface CatalogState {
   readonly owner: RootOwner;
@@ -67,6 +74,15 @@ function sameFile(left: BigIntStats, right: BigIntStats): boolean {
   return sameIdentity(left, right) && left.size === right.size && left.nlink === right.nlink &&
     left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs;
 }
+function physicalKey(identity: BigIntStats): string { return `${identity.dev}:${identity.ino}`; }
+function claimPhysical(owner: RootOwner): void {
+  const current = roots.get(physicalKey(owner.identity));
+  if (current && current !== owner) {
+    if (current.failedClosure) throw failure("TEARDOWN_FAILED");
+    if (current.pending !== 0) throw failure();
+  }
+  roots.set(physicalKey(owner.identity), owner);
+}
 
 /** Input originates in trusted host code; a mutable sidecar never establishes release authenticity. */
 export async function prepareSpeechResources(root: string, input: unknown,
@@ -81,16 +97,25 @@ export async function prepareSpeechResources(root: string, input: unknown,
     if (previous?.failedClosure) throw failure("TEARDOWN_FAILED");
     const identity = await files.lstat(root);
     if (!safeDirectory(identity) || await files.realpath(root) !== root) throw failure();
-    const key = `${identity.dev}:${identity.ino}`;
+    const key = physicalKey(identity);
     // Another preparation may register an owner while filesystem checks await.
     // Re-read the logical fence in this synchronous lookup/registration turn.
-    let owner = rootPaths.get(root) ?? roots.get(key);
+    const physical = roots.get(key), logical = rootPaths.get(root);
+    if (physical && physical !== logical) {
+      if (physical.failedClosure) throw failure("TEARDOWN_FAILED");
+      if (physical.pending !== 0) throw failure();
+    }
+    // Filesystems may reuse an inode after an unrelated root is deleted. Only
+    // active or failed physical ownership survives that reuse; logical fences
+    // still bind each previously prepared path to its original identity.
+    let owner = logical ?? (physical?.root === root ? physical : undefined);
     if (owner) {
       if (owner.failedClosure) throw failure("TEARDOWN_FAILED");
       if (owner.root !== root || owner.files !== files || !sameIdentity(owner.identity, identity)) throw failure();
     } else {
-      owner = { root, identity, files, queue: Promise.resolve() }; roots.set(key, owner);
+      owner = { root, identity, files, queue: Promise.resolve(), pending: 0 };
     }
+    claimPhysical(owner);
     rootPaths.set(root, owner);
     const token = Object.freeze({ [catalogBrand]: true as const });
     prepared.set(token, { owner, entries: new Map(catalog.entries.map((entry) => [entry.backend, Object.freeze(entry)])) });
@@ -119,45 +144,62 @@ export async function verifySpeechResource(handle: PreparedSpeechResources, inpu
   const entry = state.entries.get(backend);
   if (!entry) throw failure();
   const owner = state.owner;
+  if (owner.failedClosure) throw failure("TEARDOWN_FAILED");
+  claimPhysical(owner); owner.pending++;
   const result = owner.queue.then(async () => {
     if (owner.failedClosure) throw failure("TEARDOWN_FAILED");
     const beforeAncestors = await ancestors(owner, backend), path = join(owner.root, "native", "speech", backend, "openwhisper_speech.node");
     const before = await owner.files.lstat(path);
     if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n || (before.mode & 0o022n) !== 0n ||
       before.size !== BigInt(entry.bytes) || await owner.files.realpath(path) !== path) throw failure();
-    const file = await owner.files.open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    let hash: string;
+    const directory = await (owner.files.openDirectory ?? open)(owner.root,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    let fileFailed = false;
     try {
-      const opened = await file.stat({ bigint: true });
-      if (!sameFile(before, opened)) throw failure();
-      const digest = createHash("sha256"), buffer = Buffer.alloc(64 * 1024);
-      let count = 0;
-      for (;;) {
-        const read = await file.read(buffer, 0, buffer.length, null);
-        if (read.bytesRead === 0) break;
-        count += read.bytesRead;
-        if (count > entry.bytes) throw failure();
-        digest.update(buffer.subarray(0, read.bytesRead));
+      const rootIdentity = await directory.stat({ bigint: true });
+      if (!safeDirectory(rootIdentity) || !sameIdentity(rootIdentity, owner.identity)) throw failure();
+      const file = await owner.files.open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      let hash: string;
+      try {
+        const opened = await file.stat({ bigint: true });
+        if (!sameFile(before, opened)) throw failure();
+        const digest = createHash("sha256"), buffer = Buffer.alloc(64 * 1024);
+        let count = 0;
+        for (;;) {
+          const read = await file.read(buffer, 0, buffer.length, null);
+          if (read.bytesRead === 0) break;
+          count += read.bytesRead;
+          if (count > entry.bytes) throw failure();
+          digest.update(buffer.subarray(0, read.bytesRead));
+        }
+        if (count !== entry.bytes || !sameFile(before, await file.stat({ bigint: true }))) throw failure();
+        hash = digest.digest("hex");
+        if (hash !== entry.sha256) throw failure();
+      } finally {
+        const closing = Promise.resolve().then(() => file.close());
+        try { await closing; }
+        catch {
+          fileFailed = true; owner.heldFile = file; owner.failedClosure = closing;
+          // Retain the exact rejected close; another handle cannot retry an unconfirmed descriptor.
+          throw failure("TEARDOWN_FAILED");
+        }
       }
-      if (count !== entry.bytes || !sameFile(before, await file.stat({ bigint: true }))) throw failure();
-      hash = digest.digest("hex");
-      if (hash !== entry.sha256) throw failure();
+      if (!sameFile(before, await owner.files.lstat(path))) throw failure();
+      const afterAncestors = await ancestors(owner, backend);
+      if (afterAncestors.some((value, index) => !sameIdentity(value, beforeAncestors[index]!))) throw failure();
+      return Object.freeze({ backend, path, bytes: entry.bytes, sha256: hash });
     } finally {
-      let closing: Promise<void>;
-      try { closing = Promise.resolve(file.close()); }
-      catch { closing = Promise.reject(failure("TEARDOWN_FAILED")); }
-      try { await closing; }
-      catch {
-        owner.heldFile = file; owner.failedClosure = closing;
-        // Retain the exact rejected close; another handle cannot retry an unconfirmed descriptor.
-        throw failure("TEARDOWN_FAILED");
+      // Pin the actual root inode while any file closure is unconfirmed. It
+      // cannot be reused for an unrelated directory during that obligation.
+      if (fileFailed) owner.heldDirectory = directory;
+      else {
+        const closing = Promise.resolve().then(() => directory.close());
+        try { await closing; }
+        catch { owner.heldDirectory = directory; owner.failedClosure = closing; throw failure("TEARDOWN_FAILED"); }
       }
     }
-    if (!sameFile(before, await owner.files.lstat(path))) throw failure();
-    const afterAncestors = await ancestors(owner, backend);
-    if (afterAncestors.some((value, index) => !sameIdentity(value, beforeAncestors[index]!))) throw failure();
-    return Object.freeze({ backend, path, bytes: entry.bytes, sha256: hash });
-  }).catch((error: unknown) => { if (error instanceof SpeechWorkerError) throw error; throw failure(); });
+  }).catch((error: unknown) => { if (error instanceof SpeechWorkerError) throw error; throw failure(); })
+    .finally(() => { owner.pending--; });
   owner.queue = result.then(() => {}, () => {});
   return result;
 }

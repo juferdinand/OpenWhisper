@@ -22,7 +22,7 @@ async function retain(root: string, project: string): Promise<void> {
   const owner = await lstat(evidence);
   assert.ok(owner.isDirectory() && !owner.isSymbolicLink()); assert.equal(owner.uid, process.getuid?.());
   assert.equal(owner.mode & 0o7777, 0o700); assert.equal(await realpath(evidence), resolve(evidence));
-  for (const name of ["result.json", "failure.json", "lifecycle.json", "phases.json", "retained.json", "startup.json", "checkpoint.json"]) {
+  for (const name of ["result.json", "failure.json", "lifecycle.json", "phases.json", "retained.json", "startup.json", "checkpoint.json", "worker-state.json"]) {
     try { await cp(join(root, name), join(evidence, name)); }
     catch (error: unknown) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
   }
