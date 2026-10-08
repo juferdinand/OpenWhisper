@@ -709,3 +709,29 @@ clipboard delivery, actual desktops, macOS and signed package parity remain
 unestablished by this run. The ten closed runner/receipt/private-file contract
 cases are registered in ordinary CI; importing them starts no container,
 native addon, inference, audio or application.
+
+### Recording broker and private model-lease composition source
+
+The asynchronous main recording broker now accepts a host-owned speech factory
+that captures one selected model ID/GPU choice and acquires the real private
+inventory lease. It delegates bounded inference windows to a job of the existing
+continuing supervisor. Every window must match the leased path/family and cannot
+promote a manual CPU selection; a GPU-permitted selection may retry on CPU.
+The gate is shared by the exact continuing supervisor across new factories,
+selections and recording-helper epochs. Another inventory binding refuses.
+Accepted acquisition, original job close and lease release stay owned; the exact
+original job.close promise is passed to lease.release. Held release blocks new
+work, and failed cleanup remains terminal even after the job itself has closed.
+
+Cancel during opening waits for the accepted original transaction and retires
+a late returned client without sending inference. Opening teardown failure is
+fatal to broker reuse and shutdown. Native/model integrity and invalid authority
+remain nonretryable ownership failures through the worker/adaptive boundary.
+The historical synchronous speech seam remains only for existing inert fixtures.
+Thirteen added broker/private-inventory lifecycle cases pass, including deletion
+refusal while leased and original close-promise identity. The complete isolated
+source overlay passes strict checking,689 ordinary tests,10 opt-in skips and
+the source/UI build; independent source review passes. These are policy and
+private-filesystem results. Actual recording through this new factory, utility
+controls, microphone/permission enumeration, clipboard/history, model actions,
+shutdown and development UI wiring remain subsequent composition gates.

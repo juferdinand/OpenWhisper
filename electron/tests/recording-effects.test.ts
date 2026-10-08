@@ -93,6 +93,44 @@ test("main broker refuses arbitrary model files and wrong helper epochs before o
   assert.deepEqual(f.counts(), { creates: 0, inferences: 0, closes: 0, deliveries: 0 }); await f.broker.close();
 });
 
+test("async speech opening stays owned through cancellation and late original client retirement", async () => {
+  const f = fixture(), opening = deferred<import("../src/services/recording-speech.js").RecordingInferenceClient>();
+  const retired = deferred<void>(); let opens = 0, inferences = 0, closes = 0, replied = false, ended = false;
+  const broker = new MainRecordingEffects({ epoch: envelope.epoch, platform: "linux", receipts: f.receipts,
+    delivery: f.options.delivery, speech: { open: async (_model, signal) => {
+      opens++; assert.equal(signal.aborted, false); return opening.promise;
+    } } });
+  const accepted = broker.handle(inference).then((reply) => { replied = true; return reply; });
+  await until(() => opens === 1); await broker.handle({ ...envelope, command: "cancel" });
+  const busy = await broker.handle({ ...inference, id: randomUUID() });
+  assert.equal(busy?.kind, "failed"); if (busy?.kind === "failed") assert.equal(busy.code, "BUSY");
+  const closing = broker.close().then(() => { ended = true; });
+  await setImmediate(); assert.equal(replied, false); assert.equal(ended, false);
+  opening.resolve({ transcribeWindow: async () => { inferences++; return "Must not infer"; },
+    close: () => { closes++; return retired.promise; } });
+  await until(() => closes === 1); assert.equal(inferences, 0); assert.equal(replied, false); assert.equal(ended, false);
+  retired.resolve(); const reply = await accepted; await closing;
+  assert.equal(reply?.kind, "failed"); if (reply?.kind === "failed") assert.equal(reply.code, "CANCELLED");
+  assert.deepEqual({ opens, inferences, closes }, { opens: 1, inferences: 0, closes: 1 });
+});
+
+test("opening teardown refusal remains fatal to broker reuse and shutdown", async () => {
+  const f = fixture(); let opens = 0;
+  const broker = new MainRecordingEffects({ epoch: envelope.epoch, platform: "linux", receipts: f.receipts,
+    delivery: f.options.delivery, speech: { open: async () => { opens++; throw { code: "TEARDOWN_FAILED" }; } } });
+  for (const id of [envelope.id, randomUUID()]) {
+    const reply = await broker.handle({ ...inference, id });
+    assert.equal(reply?.kind, "failed"); if (reply?.kind === "failed") assert.equal(reply.code, "TEARDOWN_FAILED");
+  }
+  assert.equal(opens, 1); await assert.rejects(broker.close(), { code: "TEARDOWN_FAILED" });
+});
+
+test("native integrity and invalid model authority are never rewritten as retryable worker failures", () => {
+  for (const code of ["INTEGRITY_FAILED", "INVALID_INPUT", "BACKEND_UNAVAILABLE"]) {
+    assert.equal(safeRecordingEffectError({ code, message: "Private diagnostic" }).code, "OWNERSHIP_FAILED");
+  }
+});
+
 test("cancelled inference acknowledges only after confirmed helper cleanup and never overlaps a new owner", async () => {
   const f = fixture(); const cleanup = deferred<void>();
   f.closing(() => cleanup.promise);

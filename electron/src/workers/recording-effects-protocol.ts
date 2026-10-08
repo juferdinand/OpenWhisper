@@ -44,6 +44,9 @@ export function safeRecordingEffectError(input: unknown): RecordingEffectError {
   if (input instanceof RecordingEffectError) return input;
   if (typeof input === "object" && input !== null) {
     const code: unknown = Reflect.get(input, "code");
+    if (code === "INTEGRITY_FAILED" || code === "INVALID_INPUT" || code === "BACKEND_UNAVAILABLE") {
+      return new RecordingEffectError("OWNERSHIP_FAILED");
+    }
     const parsed = recordingEffectFailureSchema.safeParse(code);
     if (parsed.success) return new RecordingEffectError(parsed.data);
   }

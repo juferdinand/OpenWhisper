@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { DeliveryBoundary, DeliveryIdentity, DeliveryReceipt, WorkContext } from "../core/recording.js";
-import type { SpeechClient } from "../services/speech-client.js";
+import type { RecordingInferenceClient, RecordingSpeechFactory } from "../services/recording-speech.js";
 import type { SpeechModel } from "../workers/native-speech.js";
 import { deliveryIdentitySchema, deliveryReceiptSchema, recordingEffectReplySchema,
   recordingEffectRequestSchema, RecordingEffectError, safeRecordingEffectError,
@@ -8,7 +8,7 @@ import { deliveryIdentitySchema, deliveryReceiptSchema, recordingEffectReplySche
 } from "../workers/recording-effects-protocol.js";
 
 type OperationRequest = Exclude<RecordingEffectRequest, { command: "cancel" }>;
-type InferenceClient = Pick<SpeechClient, "transcribeWindow" | "close">;
+type InferenceClient = RecordingInferenceClient;
 type CommittedReceipt = Exclude<DeliveryReceipt, { outcome: "failed" }>;
 type ReceiptEntry = { readonly reservation: string; readonly receipt?: CommittedReceipt };
 
@@ -48,15 +48,18 @@ export class DeliveryReceiptCache {
   }
 }
 
-export interface MainRecordingEffectOptions {
+interface CommonRecordingEffectOptions {
   readonly epoch: string;
   readonly platform: "linux" | "macos";
-  readonly createSpeech: () => InferenceClient;
   readonly delivery: DeliveryBoundary;
   readonly receipts: DeliveryReceiptCache;
-  /** Resolve against the host's model inventory; helper/renderer input never selects arbitrary files. */
-  readonly approveModel: (model: SpeechModel) => boolean;
 }
+export type MainRecordingEffectOptions = CommonRecordingEffectOptions & (
+  | { readonly speech: RecordingSpeechFactory; readonly createSpeech?: never; readonly approveModel?: never }
+  /** Historical synchronous inert-fixture seam; actual composition uses speech.open. */
+  | { readonly speech?: never; readonly createSpeech: () => InferenceClient;
+      readonly approveModel: (model: SpeechModel) => boolean }
+);
 interface Pending {
   readonly request: OperationRequest;
   readonly controller: AbortController;
@@ -114,9 +117,23 @@ export class MainRecordingEffects {
     const envelope = { version: 1, epoch: request.epoch, id: request.id, generation: request.generation, attempt: request.attempt };
     if (controller.signal.aborted) throw new RecordingEffectError("CANCELLED");
     if (request.command === "infer") {
-      if (!this.options.approveModel(request.model)) throw new RecordingEffectError("OWNERSHIP_FAILED");
-      const client = this.speech ??= this.options.createSpeech();
+      if (!this.options.speech && !this.options.approveModel(request.model)) throw new RecordingEffectError("OWNERSHIP_FAILED");
+      let client = this.speech;
+      if (!client) {
+        try {
+          client = this.options.speech ? await this.options.speech.open(request.model, controller.signal)
+            : this.options.createSpeech();
+          this.speech = client;
+        } catch (error: unknown) {
+          const checked = safeRecordingEffectError(error);
+          if (checked.code === "TEARDOWN_FAILED") this.fatal = checked.code;
+          throw checked;
+        }
+      }
       try {
+        // A cancelled accepted opening may still return a real owner. Retire
+        // that exact client before replying; never send a late inference.
+        if (controller.signal.aborted) throw new RecordingEffectError("CANCELLED");
         const text = await client.transcribeWindow(request.model, request.samples, request.language, request.vocabulary, context.signal);
         if (controller.signal.aborted) throw new RecordingEffectError("CANCELLED");
         return recordingEffectReplySchema.parse({ ...envelope, kind: "infer", text });
