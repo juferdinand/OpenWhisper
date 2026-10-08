@@ -256,15 +256,45 @@ test("synchronous cancellation before the first microtask starts no effects", as
 test("utility effects have finite deadlines and observe late rejection without raw-error leakage", async () => {
   for (const phase of ["plan", "read", "process"] as const) {
     const blocked = deferred<unknown>();
+    // Observe the fixture promise even if an earlier assertion prevents entry.
+    // The async effect's separate promise still exercises boundary containment.
+    void blocked.promise.catch(() => {});
     const f = fixture(1);
-    const effects: AdaptiveSpeechEffects = { ...f.effects, [phase]: async () => await blocked.promise };
+    let entered = false;
+    // Preparation must not yield and time out before the selected effect is reached.
+    const effects: AdaptiveSpeechEffects = { ...f.effects,
+      plan: async () => ({ generation: 1, attempt: 1, range: { start: 0, end: 1 } }),
+      read: async () => ({ generation: 1, attempt: 1, samples: new Float32Array([0.2]) }),
+      process: async () => ({ generation: 1, attempt: 1, text: "text" }),
+      [phase]: async () => { entered = true; return await blocked.promise; },
+    };
     await assert.rejects(new AdaptiveSpeechBoundary(effects, { effectTimeoutMs: 10 })
       .transcribe(f.audio, f.request, f.context), code("EFFECT_TIMEOUT"));
+    assert.equal(entered, true, `The intended blocked ${phase} effect must be entered.`);
     blocked.reject(new Error("private worker body")); await nextTurn();
   }
   for (const deadline of [0, -1, NaN, Infinity, 600001, 1.5]) {
     assert.throws(() => new AdaptiveSpeechBoundary(fixture(0).effects, { effectTimeoutMs: deadline }), code("INVALID_INPUT"));
   }
+});
+
+test("utility effects time out during delayed preparation before a later phase is entered", async () => {
+  const preparation = deferred<unknown>(), later = deferred<unknown>();
+  void later.promise.catch(() => {});
+  const f = fixture(1);
+  let preparationEntered = false, laterEntered = false;
+  const effects: AdaptiveSpeechEffects = { ...f.effects,
+    plan: async () => ({ generation: 1, attempt: 1, range: { start: 0, end: 1 } }),
+    read: async () => { preparationEntered = true; return await preparation.promise; },
+    process: async () => { laterEntered = true; return await later.promise; },
+  };
+  await assert.rejects(new AdaptiveSpeechBoundary(effects, { effectTimeoutMs: 10 })
+    .transcribe(f.audio, f.request, f.context), code("EFFECT_TIMEOUT"));
+  assert.equal(preparationEntered, true); assert.equal(laterEntered, false);
+  later.reject(new Error("private worker body"));
+  preparation.resolve({ generation: 1, attempt: 1, samples: new Float32Array([0.2]) });
+  await nextTurn();
+  assert.equal(laterEntered, false);
 });
 
 test("malformed ranges, owners, samples and processing replies fail before publishing", async () => {
