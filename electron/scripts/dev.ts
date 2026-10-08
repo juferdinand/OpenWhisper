@@ -6,8 +6,10 @@ import { installedElectronExecutable, pinnedRuntimeEnvironment } from "./runtime
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const executable = await installedElectronExecutable(root);
-await buildApplication();
-const child = spawn(executable, [root, "--dev", ...process.argv.slice(2)], {
+const args = process.argv.slice(2), recording = args.includes("--recording");
+if (args.filter((value) => value === "--recording").length > 1) throw new Error("Only one recording build flag is allowed.");
+await buildApplication({ recording });
+const child = spawn(executable, [root, "--dev", ...args.filter((value) => value !== "--recording")], {
   cwd: root,
   stdio: "inherit",
   shell: false,

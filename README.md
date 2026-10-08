@@ -411,7 +411,8 @@ These are plans, not promised release dates.
 The isolated TypeScript Electron preview has its own [development instructions](docs/ELECTRON-DEVELOPMENT.md).
 Its optional [manual LM Studio/Ollama preview](docs/LOCAL_MODELS.md) is development work;
 the installed 0.2.5 release remains unchanged.
-It keeps the current UI and separate Dev data; recording and platform parity are still being implemented.
+It keeps the current UI and separate Dev data. An explicit Linux CPU recording build supports
+the shared controls, clipboard output and private recovery; complete platform parity is still being implemented.
 
 ```bash
 make test                      # Test text processing and the model catalog

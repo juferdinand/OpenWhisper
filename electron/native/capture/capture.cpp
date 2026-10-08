@@ -11,6 +11,8 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <vector>
 
 extern "C" void wf_capture_install_read_guard(ma_device* device);
@@ -122,6 +124,108 @@ Shared owner(napi_env env, napi_value v) {
 }
 napi_value failure(napi_env env) noexcept {
     napi_throw_error(env, "CAPTURE_FAILED", "The native capture operation failed."); return nullptr;
+}
+struct SourceInfo { std::string id, name; bool is_default; };
+struct SourceWork {
+    napi_async_work work = nullptr;
+    napi_deferred deferred = nullptr;
+    std::string server;
+    std::vector<SourceInfo> sources;
+    bool failed = false;
+};
+struct SourceContext {
+    ma_context context{};
+    ma_log log{};
+    bool initialized = false, log_initialized = false;
+    ~SourceContext() {
+        if (initialized) ma_context_uninit(&context);
+        if (log_initialized) ma_log_uninit(&log);
+    }
+};
+void quiet_source_log(void *, ma_uint32, const char *) {} // Device names/server diagnostics never leave enumeration.
+bool valid_source_server(const std::string & server) {
+    if (server.compare(0, 6, "unix:/") != 0 || server.size() > 4096 || getuid() == 0) return false;
+    // Pulse accepts server lists; only a single explicit owned local socket is permitted.
+    if (server.find_first_of(",;{}") != std::string::npos ||
+        std::any_of(server.begin(), server.end(), [](unsigned char c) { return c <= 32 || c == 127; })) return false;
+    const std::string path = server.substr(5);
+    if (path.find("//") != std::string::npos || path.find("/../") != std::string::npos ||
+        path.find("/./") != std::string::npos || path.back() == '/' ||
+        (path.size() >= 3 && path.compare(path.size() - 3, 3, "/..") == 0) ||
+        (path.size() >= 2 && path.compare(path.size() - 2, 2, "/.") == 0)) return false;
+    struct stat info{};
+    return lstat(path.c_str(), &info) == 0 && S_ISSOCK(info.st_mode) && info.st_uid == getuid();
+}
+ma_bool32 source_callback(ma_context *, ma_device_type type, const ma_device_info * info, void * data) noexcept {
+    auto & w = *static_cast<SourceWork *>(data);
+    if (type != ma_device_type_capture) return MA_TRUE;
+    try {
+        // Pinned miniaudio: source name is the concrete ID; description/default index are metadata.
+        // Stop at the first excess source rather than building an unbounded context device array.
+        const size_t id_length = strnlen(info->id.pulse, sizeof(info->id.pulse));
+        const size_t name_length = strnlen(info->name, sizeof(info->name));
+        if (w.sources.size() >= 128 || id_length == 0 || id_length > 255 || name_length > 255)
+            throw std::runtime_error("CAPTURE_SOURCE_FAILED");
+        w.sources.push_back({std::string(info->id.pulse, id_length), std::string(info->name, name_length), info->isDefault != MA_FALSE});
+        return MA_TRUE;
+    } catch (...) { w.failed = true; return MA_FALSE; }
+}
+void enumerate_sources(napi_env, void * data) noexcept {
+    auto & w = *static_cast<SourceWork *>(data);
+    try {
+        if (!valid_source_server(w.server)) throw std::runtime_error("CAPTURE_SOURCE_FAILED");
+        SourceContext owned;
+        if (ma_log_init(nullptr, &owned.log) != MA_SUCCESS) throw std::runtime_error("CAPTURE_SOURCE_FAILED");
+        owned.log_initialized = true;
+        if (ma_log_register_callback(&owned.log, ma_log_callback_init(quiet_source_log, nullptr)) != MA_SUCCESS)
+            throw std::runtime_error("CAPTURE_SOURCE_FAILED");
+        ma_context_config config = ma_context_config_init();
+        config.pLog = &owned.log;
+        config.pulse.pApplicationName = "OpenWhisper Dev Sources";
+        config.pulse.pServerName = w.server.c_str();
+        config.pulse.tryAutoSpawn = MA_FALSE;
+        const ma_backend backend = ma_backend_pulseaudio;
+        if (ma_context_init(&backend, 1, &config, &owned.context) != MA_SUCCESS)
+            throw std::runtime_error("CAPTURE_SOURCE_FAILED");
+        owned.initialized = true;
+        w.sources.reserve(128);
+        if (ma_context_enumerate_devices(&owned.context, source_callback, &w) != MA_SUCCESS || w.failed)
+            throw std::runtime_error("CAPTURE_SOURCE_FAILED");
+        // No device/stream is initialized. Metadata is copied before the owned context closes.
+    } catch (...) { w.failed = true; }
+}
+void complete_sources(napi_env env, napi_status status, void * data) noexcept {
+    std::unique_ptr<SourceWork> w(static_cast<SourceWork *>(data));
+    try {
+        if (w->failed || status != napi_ok) {
+            napi_value error;
+            check(napi_create_error(env, text(env, "CAPTURE_SOURCE_FAILED"), text(env, "The capture sources are unavailable."), &error));
+            check(napi_reject_deferred(env, w->deferred, error));
+        } else {
+            napi_value list; check(napi_create_array_with_length(env, w->sources.size(), &list));
+            for (size_t index = 0; index < w->sources.size(); index++) {
+                const auto & source = w->sources[index]; napi_value value = object(env);
+                set(env, value, "id", text(env, source.id)); set(env, value, "name", text(env, source.name));
+                set(env, value, "isDefault", boolean(env, source.is_default));
+                check(napi_set_element(env, list, uint32_t(index), value));
+            }
+            check(napi_resolve_deferred(env, w->deferred, list));
+        }
+    } catch (...) { napi_fatal_error("capture", NAPI_AUTO_LENGTH, "Invalid source completion.", NAPI_AUTO_LENGTH); }
+    napi_delete_async_work(env, w->work);
+}
+napi_value enumerate_call(napi_env env, napi_callback_info info) noexcept {
+    std::unique_ptr<SourceWork> w;
+    try {
+        w = std::make_unique<SourceWork>();
+        w->server = string(env, args(env, info, 1)[0], 4096);
+        napi_value promise; check(napi_create_promise(env, &w->deferred, &promise));
+        check(napi_create_async_work(env, nullptr, text(env, "OpenWhisperSources"), enumerate_sources, complete_sources, w.get(), &w->work));
+        check(napi_queue_async_work(env, w->work)); w.release(); return promise;
+    } catch (...) {
+        if (w && w->work) napi_delete_async_work(env, w->work);
+        napi_throw_error(env, "CAPTURE_SOURCE_FAILED", "The capture sources are unavailable."); return nullptr;
+    }
 }
 napi_value metadata(napi_env env, const Shared & s) {
     napi_value v = object(env);
@@ -444,6 +548,7 @@ napi_value read_chunk(napi_env env, napi_callback_info info) noexcept {
 napi_value initialize(napi_env env, napi_value exports) noexcept {
     try {
         const napi_property_descriptor properties[] = {
+            {"enumerate", nullptr, enumerate_call, nullptr, nullptr, nullptr, napi_default, nullptr},
             {"create", nullptr, create, nullptr, nullptr, nullptr, napi_default, nullptr},
             {"start", nullptr, start_call, nullptr, nullptr, nullptr, napi_default, nullptr},
             {"closeAndFence", nullptr, operation_call<Operation::close>, nullptr, nullptr, nullptr, napi_default, nullptr},

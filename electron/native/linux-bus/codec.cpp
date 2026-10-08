@@ -377,6 +377,7 @@ static napi_value to_js(napi_env env, GVariant *value, size_t depth,
     check(fds && g_unix_fd_list_get_length(fds) <= static_cast<int>(max_fds));
     int index = g_variant_get_handle(value);
     check(index >= 0 && index < g_unix_fd_list_get_length(fds));
+    tag("h"); // Complete throwing JS metadata conversion before owning a duplicate.
     GError *error = nullptr;
     int fd = g_unix_fd_list_get(fds, index, &error);
     if (error) {
@@ -384,7 +385,6 @@ static napi_value to_js(napi_env env, GVariant *value, size_t depth,
       throw Invalid();
     }
     check(fd >= 0);
-    tag("h");
     // retain consumes the duplicate on both success and failure.
     put(env, result, "token", string(env, retain(fd)));
     return result;

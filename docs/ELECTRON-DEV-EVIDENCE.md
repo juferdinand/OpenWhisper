@@ -1,13 +1,21 @@
 # Electron development evidence
 
-Current source checkpoint: real Linux CPU inventory/pool composition is verified,
-and recording uses that same host-owned factory in source. The isolated source
-passes strict checking, 710 tests (11 explicit opt-in skips) and the shared UI/app
-build. [CI37736411869](https://github.com/juferdinand/OpenWhisper/actions/runs/37736411869)
-passes all six jobs at `4b7137a`; later source changes require their own CI.
-The distinct Mac production-role build and owned fixture are now explicitly
-scheduled on both Apple architectures. Their source/inert evidence is complete;
-actual production-role execution and normal UI recording remain pending.
+Current development checkpoint: the normal Linux Dev host now wires the existing
+shared recording controls to a dedicated native capture utility, private model inventory,
+continuing speech supervisor and explicit clipboard delivery. The opt-in CPU build passes
+strict TypeScript, 785 ordinary tests (13 explicit native opt-in skips), all 56 shared UI
+tests and the recording-enabled app build. Independent review covers configuration/model
+mutation races, repeated Quit, preservation of unsaved stopped audio, complete large-output
+delivery, and exact committed recovery-removal acknowledgements. Actual recording through
+the normal shared UI now passes in the owned Ubuntu 22.04 environment described below.
+
+[CI37743916089](https://github.com/juferdinand/OpenWhisper/actions/runs/37743916089)
+passes all six jobs at `7b16af8`, including the distinct Mac production-role probe on both
+architectures and the existing Linux/macOS packages. Each Apple production-role probe passes
+five real process cases with original kernel retirement and read completion. These are
+macOS 15 runner results with a macOS 14 deployment target; ordinary Mac recording, Metal,
+macOS 14 runtime and signed-helper loading remain separate gates. Later source changes
+require their own CI.
 
 [CI37741940367](https://github.com/juferdinand/OpenWhisper/actions/runs/37741940367)
 at `cccde7a` passed Ubuntu Electron checks and both existing packages. Its three
@@ -15,17 +23,67 @@ Mac Electron jobs failed during inert test preparation, before the native gates.
 Source inspection identifies noncanonical temporary roots as the cause; the
 failure logs do not retain their actual resolved paths.
 The test-only correction resolves each newly created temporary root before use;
-production guards are unchanged. An isolated committed-source snapshot with this
-correction passes strict TypeScript and 65 focused tests, with one explicit native
-opt-in skip. Native Mac production-role execution still requires its own result.
+production guards are unchanged. The subsequent green CI above verifies the correction
+and reaches both actual Mac production-role probes.
 
 The first owned automatic loader-present fallback run reached three completed-job
 checkpoints, then failed its final composition validation. The exact container was
 removed, but the failed predicate and main birth were not retained before failure.
-This does not establish automatic fallback acceptance; bounded diagnostic metadata
-must be retained before that validation in a separately reviewed fixture.
+The failed run remains preserved. A later source-only fixture correction distinguishes
+an incidental detached Electron exit listener from the authoritative original kernel
+retirement/read barrier. Its owned loader-present run now passes three jobs across four
+native owners: manual CPU, requested Vulkan with no GPU followed by CPU, then manual CPU.
+All 1,857 artifact hashes and original command/namespace closure receipts were independently
+verified. The separate loader-absent run also passes: actual Vulkan discovery returns
+`START_FAILED`/unavailable, then full retirement/read completion precedes separate CPU
+verification. Three public-input jobs and all 19 original commands pass; 1,857 retained
+artifact hashes and 75 passive frozen source records were independently verified. Neither
+profile establishes physical GPU execution or GPU support in the CPU-only normal Dev build.
+
+The actual recording/pool fixture also passes three capture/recovery epochs with one
+continuing supervisor and full original speech-process retirement. A deliberately failed
+delivery retains the WAV; a later confirmed delivery with a lost reply is replayed from
+the same-main receipt cache without copying twice. The private clipboard has one exact
+commit; audio removal and model deletion follow their owned completion barriers.
+
+The Linux asynchronous native bus candidate passes its opening, cleanup, async-call and
+all 19 retained original tests, including genuine UID 1001 refusal. The final original-19
+run takes 7.33 seconds and reuses the accepted native ELF; 165 artifact hashes were
+independently verified. Its utility witness observes a same-birth zombie as non-running,
+which is distinct from full reaping. Device enumeration separately passes without opening
+any capture stream; generated-source capture then preserves 18,062 samples. Neither result
+establishes physical-device, desktop shortcut, target-app paste or release-package parity.
 
 The sections below retain historical evidence with their original source scope.
+
+## Normal Linux recording UI checkpoint
+
+Local packet `p4-linux-dev-recording/ui-run-4` uses the actual normal main, preload, shared
+renderer and recording capture entry. Only its captured native artifacts/descriptor are
+assembled for the existing Ubuntu 22.04 baseline before execution; runtime expectations
+are not refreshed. The private container uses UID 1000, no network/host mounts/devices,
+private Xvfb and a generated PipeWire-Pulse monitor source. Linux renderer kernel checks
+verify sandboxing, no effective capabilities and no Node in the renderer main world.
+
+| Actual path | Result |
+| --- | --- |
+| Startup and device enumeration | No capture stream is opened; the private Tiny inventory is selectable |
+| Cancel | Original native stream closes without a recovery file |
+| Start/Stop | Public JFK playback is captured; real Tiny CPU inference produces complete output |
+| Delivery | Exact private clipboard readback and history confirm output before recovery WAV removal |
+| Selected-source loss and Retry | Private WAV remains after loss; Retry recognizes and copies without reopening capture, then removes recovery |
+| Discard | Actual shared control removes the retained WAV and returns to idle |
+| Quit | Original main and private servers close; all 12 Docker commands close; exact container is removed and absent |
+
+The main process loads neither native capture nor speech. Independent review rehashes
+1,450 payload files and the same stopped-container roundtrip, and matches the 14 current
+reviewed source hashes. Three earlier failed attempts remain retained: two pre-recording
+fixture failures from a platform-inapplicable sandbox metric and one source-loss fixture
+with a blind button click across the automatic Stop/Retry transition. The final
+fixture follows actual button intent and kernel sandbox evidence without changing production.
+No physical microphone, running installation, hotkey, target-app paste, GPU, macOS recording
+or signed package is tested here. See the [owned UI procedure](../electron/tests/owned-dev-recording/README.md)
+and [Dev commands](ELECTRON-DEVELOPMENT.md#linux-cpu-recording-dev-build).
 
 This records the isolated P2/P5 implementation committed on 2026-10-08 at
 `05170a1770843f34695d774f7b804dd84be3f0bf`, following the foundation commit

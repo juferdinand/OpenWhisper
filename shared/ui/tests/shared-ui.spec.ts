@@ -7,6 +7,27 @@ const catalog = JSON.parse(
   readFileSync(resolve("../models.json"), "utf8"),
 ).models;
 
+test("an omitted large transcript preview still exposes complete Copy in both interface languages", async ({ page }) => {
+  await start(page, "linux");
+  await page.evaluate(() => {
+    const host = window as any;
+    host.testState.status = "done";
+    host.testState.transcript_preview_omitted = true;
+    host.testState.transcript = "";
+    host.publishState();
+  });
+  await page.getByRole("button", { name: "History", exact: true }).click();
+  await expect(page.getByText("The complete transcript is available with Copy; its preview is too large.")).toBeVisible();
+  await page.locator("#copy-latest").click();
+  await expect.poll(() => page.evaluate(() => (window as any).calls.at(-1).command)).toBe("copy_transcript");
+  await page.evaluate(() => {
+    const host = window as any;
+    host.testState.preferences.ui_language = "de"; host.publishState();
+  });
+  await expect(page.getByText("Das vollständige Transkript ist über Kopieren verfügbar; seine Vorschau ist zu groß.")).toBeVisible();
+  await expect(page.locator("#copy-latest")).toHaveText("Kopieren");
+});
+
 test("saved Linux recordings can be retried or discarded without starting capture", async ({ page }) => {
   await start(page, "linux");
   await page.evaluate(() => {

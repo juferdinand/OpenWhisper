@@ -10,7 +10,13 @@ import { deliveryIdentitySchema, deliveryReceiptSchema, recordingEffectReplySche
 type OperationRequest = Exclude<RecordingEffectRequest, { command: "cancel" }>;
 type InferenceClient = RecordingInferenceClient;
 type CommittedReceipt = Exclude<DeliveryReceipt, { outcome: "failed" }>;
-type ReceiptEntry = { readonly reservation: string; readonly receipt?: CommittedReceipt };
+const removalContextSchema = z.strictObject({
+  generation: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  attempt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+});
+type RemovalContext = z.infer<typeof removalContextSchema>;
+type ReceiptEntry = { readonly reservation: string; readonly receipt?: CommittedReceipt;
+  readonly removal?: Readonly<RemovalContext & { readonly epoch: string }> };
 
 /** Content-free receipts scoped by one running main/private profile, not durable app-restart state. */
 export class DeliveryReceiptCache {
@@ -23,8 +29,13 @@ export class DeliveryReceiptCache {
     return parsed.kind === "recovery" ? `recovery\0${parsed.token}` : `${epoch}\0memory\0${parsed.generation}`;
   }
   get(epoch: string, identity: DeliveryIdentity, context: WorkContext): DeliveryReceipt | undefined {
-    const receipt = this.entries.get(this.key(epoch, identity))?.receipt;
-    return receipt ? { ...receipt, generation: context.generation, attempt: context.attempt } : undefined;
+    const key = this.key(epoch, identity), entry = this.entries.get(key);
+    if (!entry?.receipt) return undefined;
+    const issued = removalContextSchema.parse({ generation: context.generation, attempt: context.attempt });
+    // A replay transfers removal authority to its exact current helper/context.
+    // Losing this reply still retains the commit; it never repeats external output.
+    this.entries.set(key, Object.freeze({ ...entry, removal: Object.freeze({ epoch, ...issued }) }));
+    return { ...entry.receipt, ...issued };
   }
   reserve(epoch: string, identity: DeliveryIdentity, reservation: string): void {
     z.uuid().parse(reservation);
@@ -44,7 +55,20 @@ export class DeliveryReceiptCache {
     if (checked.outcome === "failed") throw new RecordingEffectError("DELIVERY_FAILED");
     const entry = this.entries.get(key);
     if (!entry || entry.reservation !== reservation || entry.receipt) throw new RecordingEffectError("OWNERSHIP_FAILED");
-    this.entries.set(key, Object.freeze({ reservation, receipt: Object.freeze(checked) }));
+    this.entries.set(key, Object.freeze({ reservation, receipt: Object.freeze(checked),
+      removal: Object.freeze({ epoch, generation: checked.generation, attempt: checked.attempt }) }));
+  }
+  /** Host-only acknowledgment after confirmed removal of this recovery token.
+   * No eviction, unconfirmed receipt, or previous helper/context can retire a commit. */
+  retireConfirmedRemoval(epoch: string, identity: DeliveryIdentity, context: RemovalContext): boolean {
+    const parsed = removalContextSchema.safeParse(context), parsedIdentity = deliveryIdentitySchema.safeParse(identity);
+    if (!z.uuid().safeParse(epoch).success || !parsed.success || !parsedIdentity.success || parsedIdentity.data.kind !== "recovery") return false;
+    const key = this.key(epoch, parsedIdentity.data), entry = this.entries.get(key);
+    if (!entry?.receipt || !entry.removal ||
+      entry.removal.epoch !== epoch || entry.removal.generation !== parsed.data.generation ||
+      entry.removal.attempt !== parsed.data.attempt) return false;
+    this.entries.delete(key);
+    return true;
   }
 }
 

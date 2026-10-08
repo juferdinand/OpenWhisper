@@ -11,7 +11,7 @@ function run(command: string, args: readonly string[], cwd: string): void {
   if (result.error || result.status !== 0) throw new Error("Application build failed.");
 }
 
-export async function buildApplication(): Promise<void> {
+export async function buildApplication(options: { readonly recording?: boolean } = {}): Promise<void> {
   await rm(join(root, "dist"), { recursive: true, force: true });
   run(join(root, "node_modules", ".bin", "tsc"), ["-p", "tsconfig.build.json"], root);
   run("npm", ["run", "build"], resolve(root, "../shared/ui"));
@@ -36,8 +36,14 @@ export async function buildApplication(): Promise<void> {
   await writeFile(join(root, "dist/resources/development-build.json"), JSON.stringify({
     commit, modified: changes.status !== 0 || changes.stdout.length > 0,
   }));
+  if (options.recording) {
+    const { buildDevelopmentRecording } = await import("./build-development-recording.js");
+    await buildDevelopmentRecording();
+  }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  await buildApplication();
+  const args = process.argv.slice(2);
+  if (args.length !== 0 && (args.length !== 1 || args[0] !== "--recording")) throw new Error("Usage: build.ts [--recording]");
+  await buildApplication({ recording: args.length === 1 });
 }

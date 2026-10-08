@@ -2,8 +2,10 @@
 
 The [migration plan](ELECTRON-MIGRATION.md) defines replacement and acceptance gates.
 The implementation starts **OpenWhisper Dev** with the existing settings UI,
-a schema-validated sandboxed bridge and private settings/session directories. Recording,
-global triggers, automatic paste, autostart and stable updates are unavailable in this slice.
+a schema-validated sandboxed bridge and private settings/session directories. An explicit
+Linux CPU recording build connects the shared controls to native capture and clipboard output.
+The default lightweight preview leaves recording disabled. Global triggers, automatic paste,
+autostart and stable updates remain unavailable in this slice.
 It does not replace the released 0.2.5 application or establish desktop/speech parity.
 The About view shows the Dev build's source commit and whether the checkout was modified;
 the Models view exposes the selected private model directory.
@@ -38,6 +40,36 @@ preferences use `0600`. Stable storage, overlapping bases, symlink paths and uns
 existing directories are refused. No stable preferences, models or recovery files are
 imported automatically. Closing the last window quits this early preview so it stays
 reachable without assuming a working tray host.
+
+## Linux CPU recording Dev build
+
+Build and start the normal shared UI with recording explicitly enabled:
+
+```bash
+cd electron
+npm run dev -- --recording --dev-profile /absolute/private/path/openwhisper-dev
+```
+
+This opt-in build requires CMake, Ninja, a C/C++ compiler and a local Pulse-compatible
+server (PulseAudio or PipeWire-Pulse). Pinned native sources and headers are verified before
+compilation. Build-time descriptors capture the expected capture entry, native addon and speech
+dependency graph; the runtime does not refresh expected hashes from whatever files it finds.
+These development descriptors are integrity checks, not release signing or publisher identity.
+
+In **Models**, download a catalog model or import a local compatible `.bin` file into the
+private Dev inventory. Select CPU and clipboard output. Choose a microphone in **General**,
+or leave the system default; the current concrete default is resolved on each Start. Opening
+settings and enumerating devices does not open an audio stream. Start/Stop and Cancel use
+the shared controls. The speech engine runs in a separately supervised utility, with retained
+stopped audio saved privately before inference. Retry does not reopen a microphone; explicit
+Discard removes its recovery WAV. There is no fixed recording duration limit.
+
+Successful output is copied completely and verified by readback before recovery removal.
+Large output is not cut to fit the bounded UI preview: Copy retrieves the complete text;
+with history enabled it is also saved as a private `.txt` in the Dev transcripts directory.
+History and models remain separate from the installed release. Recording is independent
+of the optional text-model preview. macOS recording and packaged/signed replacement remain
+separate migration work.
 
 ## Automated checks
 
@@ -92,7 +124,7 @@ Stop-error followup artifact are distinguished in the evidence record.
 
 The native CPU binding uses checksum-pinned whisper.cpp/Parakeet source and Node-API 8
 headers. It is loaded in a disposable worker, never in the application main. No new native
-module is loaded when the ordinary Dev UI starts. CPU remains the default distribution
+module is loaded when the default lightweight Dev preview starts. CPU remains the default distribution
 artifact. Explicit CPU/Vulkan/Metal build profiles have separate output directories and
 artifact manifests; GPU profiles are acceptance inputs, without automatic runtime selection
 or release packaging. The owned Linux probes exercise real public Whisper and Parakeet
@@ -148,8 +180,9 @@ immutable CPU/GPU preference with a file lease and imports complete files atomic
 Mutation is refused while a lease is held; a failed process-retirement Promise retains it.
 Bounded copying, exact names, private file identity and durable publication are tested.
 `private-file` verification means safe storage, not publisher authenticity or valid weights.
-This service has no network or renderer wiring; persistent import recovery and stable-data
-migration remain separate work.
+The recording Dev host now exposes catalog downloads and host-owned imports through the
+shared UI; the renderer never selects an arbitrary destination or native model path.
+Stable-data migration remains separate work.
 
 An opt-in Apple capture edge uses AVAudioEngine/AVAudioConverter behind Node-API 8.
 The shared Linux capture implementation is unchanged. Its owned CI fixture feeds generated

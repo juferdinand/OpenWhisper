@@ -138,6 +138,7 @@ export const appStateSchema = z.strictObject({
   status: z.enum(["idle", "recording", "transcribing", "done", "error"]),
   message: userText,
   transcript: userText,
+  transcript_preview_omitted: z.boolean().optional(),
   history: z.array(userText).max(20),
   preferences: preferencesSchema,
   models: z.array(modelSchema).max(128),

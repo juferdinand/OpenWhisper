@@ -653,11 +653,11 @@ function render() {
               .join("")
           : `<div class="empty-state">${symbol(microphoneIcon)}<strong>${esc(t("Your next thought belongs here."))}</strong><p>${esc(t("Start a dictation and your words will appear here."))}</p></div>`,
       ) +
-      (!p.keep_history && state.transcript
+      (state.transcript_preview_omitted || (!p.keep_history && state.transcript)
         ? section(
             t("Latest transcript"),
-            `<p class="transcript">${esc(state.transcript)}</p><button id="copy-latest">${esc(t("Copy"))}</button>`,
-            t("Kept in memory only while this app is running."),
+            `<p class="transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</p><button id="copy-latest">${esc(t("Copy"))}</button>`,
+            p.keep_history ? t("Saved in the transcripts folder.") : t("Kept in memory only while this app is running."),
           )
         : "") +
       (state.history.length || state.transcript

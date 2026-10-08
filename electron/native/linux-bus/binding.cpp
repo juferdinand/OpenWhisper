@@ -97,6 +97,11 @@ struct State : std::enable_shared_from_this<State> {
   std::mutex mutex;
   std::recursive_mutex lifecycle;
   std::map<std::string, GCancellable *> calls;
+  // Native start/completion holders drain without waiting for JS finalizers.
+  // Admission increments before scheduling; the final native holder decrements.
+  std::atomic<size_t> context_calls{0};
+  std::atomic<bool> drain_requested{false};
+  std::atomic<bool> call_disposal_failed{false};
   std::map<std::string, int> fds;
   // Subscriptions/exports/invocations belong exclusively to the GLib context.
   std::map<std::string, std::pair<guint, Callback *>> subscriptions;
@@ -108,6 +113,10 @@ struct State : std::enable_shared_from_this<State> {
   std::map<std::string, GSource *> expiries;
   ~State();
   void stop();
+  void context_call_finished() {
+    if (context_calls.fetch_sub(1) == 1 && drain_requested)
+      g_main_loop_quit(loop); // Thread-safe; no JS callback is awaited.
+  }
   void fail() {
     closing = true;
     g_cancellable_cancel(opening);
@@ -131,15 +140,22 @@ struct State : std::enable_shared_from_this<State> {
     return result;
   }
   std::string retain(int fd) {
-    std::lock_guard<std::mutex> guard(mutex);
-    if (closing || fds.size() >= max_fds ||
-        fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) {
-      ::close(fd);
-      throw Failure("INVALID_FD");
+    bool transferred = false;
+    try {
+      std::lock_guard<std::mutex> guard(mutex);
+      if (closing || fds.size() >= max_fds ||
+          fcntl(fd, F_SETFD, FD_CLOEXEC) < 0)
+        throw Failure("INVALID_FD");
+      auto token = uuid();
+      if (!fds.emplace(token, fd).second)
+        throw Failure("INVALID_FD");
+      transferred = true;
+      return token;
+    } catch (...) {
+      if (!transferred)
+        ::close(fd); // UUID/map allocation refusal still owns the incoming FD.
+      throw;
     }
-    auto token = uuid();
-    fds.emplace(token, fd);
-    return token;
   }
   void drop(const std::string &token) {
     std::lock_guard<std::mutex> guard(mutex);
@@ -247,7 +263,9 @@ void State::stop() {
         g_source_unref(item.second);
       }
       expiries.clear();
-      g_main_loop_quit(loop);
+      drain_requested = true;
+      if (context_calls == 0)
+        g_main_loop_quit(loop);
     });
     thread.join();
   }
@@ -270,7 +288,7 @@ void State::stop() {
   for (auto &item : fds)
     ::close(item.second);
   fds.clear();
-  if (!disposed)
+  if (!disposed || call_disposal_failed)
     throw Failure("TEARDOWN_FAILED");
 }
 State::~State() {
@@ -738,6 +756,8 @@ struct CallData {
   std::shared_ptr<State> owner;
   std::string id, destination, path, interface, member, expected;
   int timeout = 0;
+  gint64 expires_at = 0;
+  const char *failure = nullptr; // Closed native categories only.
   Variant body;
   GUnixFDList *input = g_unix_fd_list_new();
   GCancellable *cancel = g_cancellable_new();
@@ -755,6 +775,112 @@ struct CallData {
     g_object_unref(cancel);
   }
 };
+struct CallCompletion {
+  std::shared_ptr<CallData> task;
+  std::shared_ptr<Retirement> retirement;
+  napi_deferred deferred = nullptr;
+  napi_threadsafe_function function = nullptr;
+  std::atomic<bool> finished{false};
+  std::atomic<bool> disposal_failed{false};
+  bool settled = false; // JS thread only.
+};
+// This lease belongs only to queued GLib starts and GIO callback holders, never
+// the JS completion holder. Its destruction permits context shutdown even when
+// the JS thread is busy or the environment is cleaning up.
+struct ContextCall {
+  std::shared_ptr<State> owner;
+  bool admitted = false;
+  explicit ContextCall(std::shared_ptr<State> value)
+      : owner(std::move(value)) {}
+  ~ContextCall() {
+    if (admitted)
+      owner->context_call_finished();
+  }
+};
+struct ContextCallJob {
+  // Reverse member destruction releases completion/resources before the lease.
+  std::shared_ptr<ContextCall> lifetime;
+  std::shared_ptr<CallCompletion> completion;
+};
+static void finish_call(const std::shared_ptr<CallCompletion> &completion,
+                        const char *failure = nullptr) noexcept {
+  if (completion->finished.exchange(true)) {
+    completion->disposal_failed = true;
+    completion->task->owner->call_disposal_failed = true;
+    try {
+      completion->task->owner->fail();
+    } catch (...) { /* No certificate. */
+    }
+    return;
+  }
+  completion->task->failure = failure;
+  const auto queued = napi_call_threadsafe_function(
+      completion->function, nullptr, napi_tsfn_nonblocking);
+  if (queued == napi_ok) {
+    if (napi_release_threadsafe_function(completion->function,
+                                         napi_tsfn_release) == napi_ok)
+      return;
+  } else if (queued == napi_queue_full) {
+    // One producer/one frame makes this impossible in the normal transaction.
+    // Abort a valid full queue, but never release after napi_closing: Push has
+    // already surrendered this producer's thread count in that case.
+    napi_release_threadsafe_function(completion->function, napi_tsfn_abort);
+  }
+  completion->disposal_failed = true;
+  completion->task->owner->call_disposal_failed = true;
+  try {
+    completion->task->owner->fail();
+  } catch (...) { /* No certificate. */
+  }
+}
+static void drop_call_fds(const std::shared_ptr<CallData> &task,
+                          std::vector<std::string> &retained) noexcept {
+  for (auto &token : retained) {
+    try {
+      task->owner->drop(token);
+    } catch (...) { /* Close may own the FD. */
+    }
+  }
+  retained.clear();
+}
+static napi_value call_result(napi_env env,
+                              const std::shared_ptr<CallData> &task,
+                              std::vector<std::string> &retained) {
+  if (task->failure)
+    throw Failure(task->failure);
+  if (task->owner->closing || g_cancellable_is_cancelled(task->cancel))
+    throw Failure("CANCELLED");
+  if (g_get_monotonic_time() >= task->expires_at)
+    throw Failure("TIMEOUT");
+  try {
+    auto result = object(env);
+    put(env, result, "connection", string(env, task->owner->id));
+    put(env, result, "id", string(env, task->id));
+    put(env, result, "sender",
+        string(env, g_dbus_message_get_sender(task->response)));
+    put(env, result, "signature", string(env, task->expected));
+    put(env, result, "body",
+        body_to_js(env, g_dbus_message_get_body(task->response),
+                   g_dbus_message_get_unix_fd_list(task->response),
+                   [&](int fd) {
+                     auto token = task->owner->retain(fd);
+                     try {
+                       retained.push_back(token);
+                     } catch (...) {
+                       try {
+                         task->owner->drop(token);
+                       } catch (...) { /* Close may already own the FD. */
+                       }
+                       throw;
+                     }
+                     return token;
+                   }));
+    return result;
+  } catch (...) {
+    drop_call_fds(task, retained);
+    throw;
+  }
+}
 static napi_value call(napi_env env, napi_callback_info info) {
   return guarded(env, [&] {
     auto args = arguments(env, info, 2);
@@ -795,75 +921,190 @@ static napi_value call(napi_env env, napi_callback_info info) {
         throw Failure("CLOSED");
       check(task->owner->calls.size() < 8 &&
             !task->owner->calls.count(task->id));
+      task->expires_at = g_get_monotonic_time() + task->timeout * 1000LL;
       task->owner->calls.emplace(task->id, task->cancel);
     }
-    return async(
-        env,
-        [task] {
-          GDBusMessage *message = g_dbus_message_new_method_call(
-              task->destination.c_str(), task->path.c_str(),
-              task->interface.c_str(), task->member.c_str());
-          if (!message) {
-            throw Invalid();
-          }
-          g_dbus_message_set_flags(message, G_DBUS_MESSAGE_FLAGS_NO_AUTO_START);
-          g_dbus_message_set_body(message, task->body.get());
-          if (g_unix_fd_list_get_length(task->input))
-            g_dbus_message_set_unix_fd_list(message, task->input);
-          GError *failure = nullptr;
-          task->response = g_dbus_connection_send_message_with_reply_sync(
-              task->owner->connection, message, G_DBUS_SEND_MESSAGE_FLAGS_NONE,
-              task->timeout, nullptr, task->cancel, &failure);
-          g_object_unref(message);
-          if (failure) {
-            bool cancelled =
-                     g_error_matches(failure, G_IO_ERROR, G_IO_ERROR_CANCELLED),
-                 timeout =
-                     g_error_matches(failure, G_IO_ERROR, G_IO_ERROR_TIMED_OUT);
-            g_error_free(failure);
-            throw Failure(cancelled ? "CANCELLED"
-                          : timeout ? "TIMEOUT"
-                                    : "TRANSPORT_FAILED");
-          }
-          if (!task->response || task->owner->closing)
-            throw Failure("CLOSED");
-          if (g_dbus_message_get_message_type(task->response) ==
-              G_DBUS_MESSAGE_TYPE_ERROR)
-            throw Failure("REMOTE_ERROR");
-          check(g_dbus_message_get_message_type(task->response) ==
-                G_DBUS_MESSAGE_TYPE_METHOD_RETURN);
-          const char *sender = g_dbus_message_get_sender(task->response);
-          check(sender && task->destination == sender);
-          check(body_signature(g_dbus_message_get_body(task->response)) ==
-                task->expected);
-          check(g_dbus_message_get_num_unix_fds(task->response) <= max_fds);
+    napi_value promise;
+    auto completion = std::make_shared<CallCompletion>();
+    completion->task = task;
+    completion->retirement = task->owner->retirement;
+    ok(napi_create_promise(env, &completion->deferred, &promise));
+    auto holder = std::make_unique<std::shared_ptr<CallCompletion>>(completion);
+    ok(napi_create_threadsafe_function(
+        env, nullptr, nullptr, string(env, "OpenWhisperLinuxBusCall"), 1, 1,
+        holder.get(),
+        [](napi_env, void *pointer, void *) {
+          std::unique_ptr<std::shared_ptr<CallCompletion>> holder(
+              static_cast<std::shared_ptr<CallCompletion> *>(pointer));
+          auto retirement = (*holder)->retirement;
+          const bool failed = (*holder)->disposal_failed || !(*holder)->settled;
+          holder.reset(); // Release JS holder/resources before certification.
+          if (failed && !retirement->environment->cleaning)
+            retirement->failed = true;
+          --retirement->callbacks;
+          finish_retirement(retirement);
         },
-        [env, task] {
-          if (task->owner->closing || g_cancellable_is_cancelled(task->cancel))
-            throw Failure("CANCELLED");
+        completion.get(),
+        [](napi_env current, napi_value, void *pointer, void *) {
+          auto *completion = static_cast<CallCompletion *>(pointer);
+          auto environment = completion->retirement->environment;
+          if (!current || environment->cleaning || !environment->module)
+            return;
           std::vector<std::string> retained;
           try {
-            auto result = object(env);
-            put(env, result, "connection", string(env, task->owner->id));
-            put(env, result, "id", string(env, task->id));
-            put(env, result, "sender",
-                string(env, g_dbus_message_get_sender(task->response)));
-            put(env, result, "signature", string(env, task->expected));
-            put(env, result, "body",
-                body_to_js(env, g_dbus_message_get_body(task->response),
-                           g_dbus_message_get_unix_fd_list(task->response),
-                           [&](int fd) {
-                             auto token = task->owner->retain(fd);
-                             retained.push_back(token);
-                             return token;
-                           }));
-            return result;
+            auto value = call_result(current, completion->task, retained);
+            if (completion->task->owner->closing ||
+                g_cancellable_is_cancelled(completion->task->cancel))
+              throw Failure("CANCELLED");
+            if (g_get_monotonic_time() >= completion->task->expires_at)
+              throw Failure("TIMEOUT");
+            ok(napi_resolve_deferred(current, completion->deferred, value));
+            completion->settled = true;
+          } catch (const Failure &failure) {
+            drop_call_fds(completion->task, retained);
+            try {
+              completion->settled =
+                  napi_reject_deferred(current, completion->deferred,
+                                       error(current, failure.what())) ==
+                  napi_ok;
+            } catch (...) {
+              completion->disposal_failed = true;
+            }
           } catch (...) {
-            for (auto &token : retained)
-              task->owner->drop(token);
-            throw;
+            drop_call_fds(completion->task, retained);
+            try {
+              completion->settled =
+                  napi_reject_deferred(current, completion->deferred,
+                                       error(current, "INVALID_FRAME")) ==
+                  napi_ok;
+            } catch (...) {
+              completion->disposal_failed = true;
+            }
           }
-        });
+        },
+        &completion->function));
+    ++completion->retirement->callbacks;
+    holder.release(); // Successful TSFN finalization owns this shared holder.
+    try {
+      auto lifetime = std::make_shared<ContextCall>(task->owner);
+      {
+        std::lock_guard<std::mutex> guard(task->owner->mutex);
+        if (task->owner->closing)
+          throw Failure("CLOSED");
+        ++task->owner->context_calls;
+        lifetime->admitted = true;
+      }
+      auto start = std::make_unique<ContextCallJob>(
+          ContextCallJob{lifetime, completion});
+      // No lifecycle lock/future or libuv response-wait job on the JS thread.
+      g_main_context_invoke_full(
+          task->owner->context, G_PRIORITY_DEFAULT,
+          [](gpointer pointer) -> gboolean {
+            auto *job = static_cast<ContextCallJob *>(pointer);
+            auto completion = job->completion;
+            auto task = completion->task;
+            try {
+              if (task->owner->closing)
+                throw Failure("CLOSED");
+              if (g_cancellable_is_cancelled(task->cancel))
+                throw Failure("CANCELLED");
+              const gint64 remaining =
+                  task->expires_at - g_get_monotonic_time();
+              if (remaining <= 0)
+                throw Failure("TIMEOUT");
+              const int timeout = static_cast<int>((remaining + 999) / 1000);
+              auto response = std::make_unique<ContextCallJob>(
+                  ContextCallJob{job->lifetime, completion});
+              GDBusMessage *message = g_dbus_message_new_method_call(
+                  task->destination.c_str(), task->path.c_str(),
+                  task->interface.c_str(), task->member.c_str());
+              if (!message)
+                throw Invalid();
+              g_dbus_message_set_flags(message,
+                                       G_DBUS_MESSAGE_FLAGS_NO_AUTO_START);
+              g_dbus_message_set_body(message, task->body.get());
+              if (g_unix_fd_list_get_length(task->input))
+                g_dbus_message_set_unix_fd_list(message, task->input);
+              g_dbus_connection_send_message_with_reply(
+                  task->owner->connection, message,
+                  G_DBUS_SEND_MESSAGE_FLAGS_NONE, timeout, nullptr,
+                  task->cancel,
+                  [](GObject *connection, GAsyncResult *result,
+                     gpointer pointer) {
+                    std::unique_ptr<ContextCallJob> job(
+                        static_cast<ContextCallJob *>(pointer));
+                    auto completion = job->completion;
+                    auto task = completion->task;
+                    const char *failure = nullptr;
+                    GError *error = nullptr;
+                    task->response =
+                        g_dbus_connection_send_message_with_reply_finish(
+                            G_DBUS_CONNECTION(connection), result, &error);
+                    if (error) {
+                      failure = g_error_matches(error, G_IO_ERROR,
+                                                G_IO_ERROR_CANCELLED)
+                                    ? "CANCELLED"
+                                : g_error_matches(error, G_IO_ERROR,
+                                                  G_IO_ERROR_TIMED_OUT)
+                                    ? "TIMEOUT"
+                                    : "TRANSPORT_FAILED";
+                      g_error_free(error);
+                    } else {
+                      try {
+                        if (!task->response || task->owner->closing)
+                          throw Failure("CLOSED");
+                        if (g_get_monotonic_time() >= task->expires_at)
+                          throw Failure("TIMEOUT");
+                        if (g_dbus_message_get_message_type(task->response) ==
+                            G_DBUS_MESSAGE_TYPE_ERROR)
+                          throw Failure("REMOTE_ERROR");
+                        check(g_dbus_message_get_message_type(task->response) ==
+                              G_DBUS_MESSAGE_TYPE_METHOD_RETURN);
+                        const char *sender =
+                            g_dbus_message_get_sender(task->response);
+                        check(sender && task->destination == sender);
+                        check(body_signature(g_dbus_message_get_body(
+                                  task->response)) == task->expected);
+                        check(g_dbus_message_get_num_unix_fds(task->response) <=
+                              max_fds);
+                      } catch (const Failure &value) {
+                        failure = !std::strcmp(value.what(), "TIMEOUT")
+                                      ? "TIMEOUT"
+                                  : !std::strcmp(value.what(), "REMOTE_ERROR")
+                                      ? "REMOTE_ERROR"
+                                      : "CLOSED";
+                      } catch (...) {
+                        failure = "INVALID_FRAME";
+                      }
+                    }
+                    finish_call(completion, failure);
+                    // Locals release before job; job releases completion before
+                    // its lease. Context drain therefore needs no JS
+                    // settlement.
+                  },
+                  response.release());
+              g_object_unref(message);
+            } catch (const Failure &value) {
+              finish_call(completion, !std::strcmp(value.what(), "TIMEOUT")
+                                          ? "TIMEOUT"
+                                      : !std::strcmp(value.what(), "CANCELLED")
+                                          ? "CANCELLED"
+                                          : "CLOSED");
+            } catch (...) {
+              finish_call(completion, "TRANSPORT_FAILED");
+            }
+            return G_SOURCE_REMOVE;
+          },
+          start.release(), // GLib owns the holder before it may invoke/destroy it.
+          [](gpointer pointer) {
+            delete static_cast<ContextCallJob *>(pointer);
+          });
+    } catch (const Failure &) {
+      finish_call(completion, "CLOSED");
+    } catch (...) {
+      finish_call(completion, "TRANSPORT_FAILED");
+    }
+    return promise;
   });
 }
 static napi_value cancel(napi_env env, napi_callback_info info) {
