@@ -108,9 +108,13 @@ separate native layer-shell requirement.
 
 Use `--stock-kde-wayland-overlay` for the native Wayland surface case. This mode
 passes the application's explicit `--experimental-wayland-overlay` switch.
-It currently fails the post-click focus check on the pinned stock KWin desktop;
-Cancel itself and exact native pixel matching are verified, while Stop/recognition
-is not reached. Normal Dev does not enable this prototype by default. This mode
+Earlier runs failed the post-click Electron main-window focus check on the pinned
+stock KWin desktop; Cancel itself and exact native pixel matching were verified,
+while Stop/recognition was not reached. The revised case measures actual foreground
+editor keyboard delivery, as described below. With KWin's dock role, case2 passes
+all four markers, actual Cancel/Stop and recognition in 28.50 seconds. DockLayer
+stacks below keep-above/fullscreen windows, which this case does not validate.
+Normal Dev does not enable this prototype by default. This mode
 does not enable inner XWayland or change the app's Wayland backend. The same
 trusted, sandboxed overlay renderer stays offscreen; the owned GTK/layer-shell
 utility paints its frames with keyboard mode NONE. The driver identifies that
@@ -120,10 +124,24 @@ Koffi 3.3.2. These desktop PNGs include the native surface, rather than only the
 offscreen renderer. Pointer coordinates combine the 360×64 bottom-centered
 surface with the existing shared buttons' actual DOM bounds.
 
-The case checks default-hidden and idle visibility, unchanged main focus,
-overlay preference refusal, real F8/private capture and actual pointer Cancel.
+The case checks default-hidden and idle visibility, overlay preference refusal,
+real F8/private capture and actual pointer Cancel. After configuring F8 and the
+idle preference through the normal UI, it starts the same private native Wayland
+GTK editor used by the paste case. The exact-caption KWin script focuses that
+editor once. Fixed lowercase ASCII markers enter through the already grabbed
+outer XTEST route before and after Cancel, and before and after Stop. No window
+is refocused after either pointer action; the editor must receive the exact
+cumulative bytes at its cursor. The main Electron window must be unfocused while
+the editor is active, and the overlay must remain unfocused. A missing marker
+fails this gate rather than substituting Electron's focus flag. The private text
+file and bounded byte/hash receipts preserve the outcome without arbitrary text
+in logs. The existing original-child ledger awaits editor cleanup.
+
 A second public-fixture capture ends with actual native pointer Stop and CPU
 recognition, independent Wayland clipboard/history readback and recovery removal.
+The post-Stop marker follows the stopped capture fence and precedes waiting for
+recognition. Only after all four keyboard gates may the case change the idle
+preference through the main UI again.
 Normal Quit must close the original app and leave the observed surface process
 absent. Existing sandbox, private audio, task cap and exact namespace cleanup
 guards remain unchanged. The runner copies the exact pinned Koffi package and

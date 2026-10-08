@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import type { LibraryHandle } from "koffi";
+import { kdeRecordingSurfaceNamespace } from "../kde/recording-surface.js";
 import { HEIGHT, WIDTH, surfaceHostMessageSchema, surfaceReplySchema,
   type SurfaceRegion, type SurfaceReply } from "../../../contracts/wayland-surface.js";
 
@@ -199,7 +200,7 @@ export function createNativeSurface(emitPointer: Parameters<SurfaceNativeFactory
     }
     closePartial = close;
     f.layerInit(window);
-    f.namespace(window, "openwhisper-recording");
+    f.namespace(window, kdeRecordingSurfaceNamespace(process.env["XDG_CURRENT_DESKTOP"]) ?? "openwhisper-recording");
     f.layer(window, 3); f.keyboard(window, 0); f.exclusive(window, 0);
     for (const edge of [0, 1, 2, 3]) f.anchor(window, edge, edge === 3 ? 1 : 0);
     f.margin(window, 3, 24);

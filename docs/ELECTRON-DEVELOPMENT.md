@@ -61,6 +61,14 @@ and the real KDE probe lost focus. The known unsafe path is guarded, without glo
 forcing XWayland. A native layer-shell surface using shared renderer output remains
 required by the full migration plan; GNOME needs usable fallback controls.
 
+The isolated `--experimental-wayland-overlay` switch tests a strict TypeScript
+GTK/layer-shell utility that paints the existing offscreen shared renderer.
+On stock KDE 5.27, its dock role passes actual pointer Cancel/Stop and foreground
+editor keyboard delivery without refocusing. That role stacks below active
+fullscreen and keep-above windows; those cases and other compositors remain
+open, so the prototype is not enabled by default. See the
+[exact owned evidence](ELECTRON-DEV-EVIDENCE.md).
+
 ## Linux CPU recording Dev build
 
 Build and start the normal shared UI with recording explicitly enabled:

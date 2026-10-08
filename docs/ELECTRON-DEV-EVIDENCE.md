@@ -1,5 +1,36 @@
 # Electron development evidence
 
+**`stock-kde-wayland-editor-focus-2` passes in 28.50 seconds.** The preceding
+case1 fails at the actual editor's post-Cancel keyboard marker in 15.93 seconds:
+the editor retains only its initial 14 bytes, while both Electron focus flags
+remain false. The revised gate uses the existing private native Wayland GTK
+editor, focuses it once, and checks cumulative marker bytes before/after real
+Cancel and Stop. It never restores focus after a pointer action.
+
+The small KDE-specific change selects the layer-shell namespace `dock`.
+[KWin's scope mapping](https://github.com/KDE/kwin/blob/v5.27.11/src/layershellv1window.cpp#L22)
+and [Dock activation guard](https://github.com/KDE/kwin/blob/v5.27.11/src/activation.cpp#L383)
+motivated that fix. On the pinned stock Plasma 5.27.12 runner all four markers
+match exactly (14/27/39/50 cumulative bytes), with the main and overlay unfocused.
+Actual desktop crops still match all 12,501 idle and 12,206 recording samples.
+Real F8/private public-fixture capture, actual GTK Cancel/Stop, CPU recognition,
+independent clipboard/history, recovery removal, graceful original Quit, surface
+process absence and exact namespace removal pass. Peak 248/cap 256 has no task
+rejection or OOM. Automatic target paste is separate evidence below.
+
+Strict TS and recording build pass; the 19 directly affected overlay/surface tests
+pass in 0.21 seconds. Unchanged full-suite/UI evidence below is reused. Frozen
+artifact metadata is `da74568+modified`, not a later commit. The whole-image IPC
+transfer now uses base64 instead of an array of millions of JSON numbers; actual
+pixel checks are unchanged. Failed case1 and the earlier packets remain retained.
+
+KWin gives this role DockLayer stacking, below keep-above and active fullscreen
+windows. Those cases and other compositors remain open; the prototype retains
+`--experimental-wayland-overlay` and ordinary Dev retains its main-control
+fallback. This partial result does not close L-OVERLAY or #21/#29/#30.
+
+## Previous native surface checkpoint
+
 The native Wayland layer-shell prototype uses strict TypeScript and pinned
 Koffi 3.3.2 against the existing GTK3 libraries; it adds no authored C/C++ or second
 frontend. Its trusted sandboxed renderer stays unmapped. An empty initial paint
@@ -28,9 +59,9 @@ The earlier failed packets are retained separately: attempt1's screenshot hash
 comparison could not establish actual native visibility; attempts2/3 identify an
 empty 0×0 initial Electron paint. The corrected pixel gate and first-frame handling
 establish real native presentation in attempts4/5. No failed packet is overwritten.
-The unresolved post-click focus boundary keeps the prototype behind the explicit
-`--experimental-wayland-overlay` switch. Ordinary native Wayland Dev keeps its main
-control fallback; no global XWayland selection or focus restoration is added.
+At that checkpoint the unresolved post-click focus boundary kept the prototype
+behind the explicit switch. The later foreground-editor result above supersedes
+that diagnosis only for the tested KDE role and ordinary-window case.
 
 At committed `97e473f`, [CI37808051769](https://github.com/juferdinand/OpenWhisper/actions/runs/37808051769)
 finishes with all six jobs passing. This does not certify the later local prototype

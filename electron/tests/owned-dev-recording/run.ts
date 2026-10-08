@@ -102,7 +102,7 @@ if (stockKde) {
   await cp(launcher, join(payload, "run-owned-desktop.py"));
   sources["linux/scripts/run-owned-desktop.py"] = await describe(launcher);
 }
-if (kdePaste) {
+if (kdePaste || kdeWaylandOverlay) {
   const helper = resolve(root, "../linux/scripts/test-owned-portals.py");
   await cp(helper, join(payload, "test-owned-portals.py"));
   sources["linux/scripts/test-owned-portals.py"] = await describe(helper);
@@ -208,7 +208,8 @@ try {
       focusRetained: z.literal(true), preferenceMutationRefused: z.literal(true), overlaySandbox: z.literal(true),
       privateCaptureCancelled: z.literal(true), originalApplicationClosed: z.literal(true), nativeInMain: z.literal(false),
       applicationBackend: z.literal(kdeWaylandOverlay ? "WAYLAND" : "XWAYLAND"),
-      ...(kdeWaylandOverlay ? { nativeSurfaceScreenshot: z.literal(true), nativePointerStop: z.literal(true), clipboardConfirmed: z.literal(true) } : {}) })
+      ...(kdeWaylandOverlay ? { nativeSurfaceScreenshot: z.literal(true), nativePointerStop: z.literal(true), clipboardConfirmed: z.literal(true),
+        foregroundKeyboardDelivery: z.literal(true), editorBackend: z.literal("WAYLAND") } : {}) })
     : kdePaste ? z.object({ status: z.literal("PASS"), clipboardConfirmed: z.literal(true), recoveryRemoved: z.literal(true),
       nativeInMain: z.literal(false), pasteConfirmed: z.literal(true), permissionRevoked: z.literal(true), targetBackend: z.literal(kdeXwaylandPaste ? "XWAYLAND" : "WAYLAND") })
     : z.object({ status: z.literal("PASS"), clipboardConfirmed: z.literal(true), recoveryRemoved: z.literal(true), nativeInMain: z.literal(false) }))

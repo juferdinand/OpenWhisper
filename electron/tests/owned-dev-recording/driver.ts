@@ -468,11 +468,11 @@ async function main(): Promise<void> {
           }
           const reference = matchTrustedFrame ? await overlay.screenshot({ timeout: 5000 }) : Buffer.alloc(0);
           const rendered = await application!.evaluate(({ nativeImage }, input) => {
-            const image = nativeImage.createFromBitmap(Buffer.from(input.bitmap), { width: 1100, height: 750 });
+            const image = nativeImage.createFromBitmap(Buffer.from(input.bitmap, "base64"), { width: 1100, height: 750 });
             const surface = image.crop(input.bounds);
             return { desktop: Array.from(image.toPNG()), surface: Array.from(surface.toPNG()), bitmap: Array.from(surface.toBitmap()),
-              reference: input.reference.length ? Array.from(nativeImage.createFromBuffer(Buffer.from(input.reference)).toBitmap()) : [] };
-          }, { bitmap: Array.from(bitmap), bounds: surfaceBounds, reference: Array.from(reference) });
+              reference: input.reference.length ? Array.from(nativeImage.createFromBuffer(Buffer.from(input.reference, "base64")).toBitmap()) : [] };
+          }, { bitmap: bitmap.toString("base64"), bounds: surfaceBounds, reference: reference.toString("base64") });
           await writeFile(join(evidence, name), Buffer.from(rendered.desktop), { mode: 0o600 });
           await writeFile(join(evidence, name.replace(/\.png$/u, "-surface.png")), Buffer.from(rendered.surface), { mode: 0o600 });
           if (matchTrustedFrame) {
@@ -524,10 +524,46 @@ async function main(): Promise<void> {
       assert.deepEqual(await overlay.evaluate(() => ({ process: "process" in globalThis, require: "require" in globalThis,
         bridge: typeof window.openwhisper?.invoke })), { process: false, require: false, bridge: "function" });
       const overlayState = async () => validateCommandOutput("get_state", await overlay.evaluate(() => window.openwhisper?.invoke("get_state", {})));
+      let nativeEditor: ReturnType<typeof child> | undefined;
+      const editorPath = join(evidence, "native-overlay-editor.txt");
+      let expectedEditorText = "";
+      const keyboardMarkers = { beforeCancel: "owbeforecancel", afterCancel: "owaftercancel",
+        beforeStop: "owbeforestop", afterStop: "owafterstop" } as const;
+      const keyboardReceipts: { phase: keyof typeof keyboardMarkers; expectedBytes: number; expectedSha256: string;
+        actualBytes: number; actualSha256: string; matches: boolean; mainFocused: boolean; overlayFocused: boolean }[] = [];
       const assertFocusRetained = async () => {
         const current = await windowState();
-        assert.equal(current.mainFocused, true); assert.equal(current.overlayFocused, false); assert.equal(current.overlayFocusable, false);
+        // Once the separate editor owns keyboard focus, the main window is
+        // expected to be unfocused. Real marker delivery is the decisive gate.
+        assert.equal(current.mainFocused, nativeEditor === undefined);
+        assert.equal(current.overlayFocused, false); assert.equal(current.overlayFocusable, false);
         return current;
+      };
+      const verifyEditorKeyboard = async (phase: keyof typeof keyboardMarkers) => {
+        assert.ok(nativeEditor); assert.equal(nativeEditor.closeObserved, false);
+        await checkpoint(`native-editor-${phase}`);
+        const marker = keyboardMarkers[phase]; assert.match(marker, /^[a-z]+$/u);
+        expectedEditorText += marker;
+        // Control_R above is a complete press/release used only to grab the
+        // private outer surface. Clear other modifiers for this fixed marker;
+        // never focus a window or send directly to the editor's X11 identity.
+        await execute("/usr/bin/xdotool", ["type", "--clearmodifiers", "--delay", "15", "--", marker],
+          { env, timeout: 3000, maxBuffer: 4096 });
+        try {
+          await until(async () => {
+            assert.equal(nativeEditor?.closeObserved, false);
+            return await readFile(editorPath, "utf8") === expectedEditorText;
+          }, 3000);
+        } finally {
+          const actual = await readFile(editorPath), current = await windowState();
+          keyboardReceipts.push({ phase, expectedBytes: Buffer.byteLength(expectedEditorText),
+            expectedSha256: sha(Buffer.from(expectedEditorText)), actualBytes: actual.byteLength, actualSha256: sha(actual),
+            matches: actual.toString("utf8") === expectedEditorText, mainFocused: current.mainFocused, overlayFocused: current.overlayFocused });
+          await writeFile(join(evidence, "native-overlay-editor-keyboard.json"), JSON.stringify({ editorBackend: "WAYLAND",
+            markerSource: "FIXED_LOWERCASE_ASCII", route: "OWNED_OUTER_XTEST", refocusedAfterPointer: false,
+            editorPid: nativeEditor.child.pid, receipts: keyboardReceipts }, null, 2), { mode: 0o600 });
+        }
+        await assertFocusRetained();
       };
       assert.equal((await overlayState()).status, "idle");
       const defaultSurface = kdeWaylandOverlay ? await nativeScreenshot("native-overlay-default-hidden.png") : undefined;
@@ -551,6 +587,48 @@ async function main(): Promise<void> {
       }
       await overlay.screenshot({ path: join(evidence, "overlay-idle.png"), timeout: 5000 });
       checks.push("shared-UI idle-overlay preference shows the real nonfocusable window without taking main focus; overlay preference mutation refused");
+
+      if (kdeWaylandOverlay) {
+        await checkpoint("native-overlay-owned-wayland-editor");
+        assert.equal(env.WF_OWNED_DESKTOP_TEST, env.XDG_RUNTIME_DIR);
+        assert.equal(env.WAYLAND_DISPLAY, "openwhisper-owned");
+        assert.ok(env.AT_SPI_BUS_ADDRESS?.startsWith(`unix:path=${env.XDG_RUNTIME_DIR}/accessibility-bus`));
+        const targetHelper = join(payload, "test-owned-portals.py"), focusScript = join(payload, "focus-target.js");
+        for (const path of [targetHelper, focusScript]) {
+          const value = await lstat(path); assert.ok(value.isFile() && !value.isSymbolicLink());
+        }
+        nativeEditor = child("/usr/bin/python3", [targetHelper, "--typing-target", editorPath], { ...env, GDK_BACKEND: "wayland" });
+        await until(async () => {
+          assert.equal(nativeEditor?.closeObserved, false);
+          try { const value = await lstat(editorPath); return value.isFile() && value.uid === 1000 && !(value.mode & 0o077); }
+          catch { return false; }
+        });
+        assert.equal(await readFile(editorPath, "utf8"), "");
+        await delay(250);
+        const kwinCall = async (path: string, method: string, args: string[] = []) =>
+          (await execute("/usr/bin/gdbus", ["call", "--session", "--dest", "org.kde.KWin", "--object-path", path,
+            "--method", method, ...args], { env, timeout: 3000, maxBuffer: 16_384 })).stdout.trim();
+        const scriptName = "openwhisper-owned-overlay-editor-focus";
+        const loaded = /^\((?:int32 )?(\d+),\)$/u.exec(await kwinCall("/Scripting", "org.kde.kwin.Scripting.loadScript", [focusScript, scriptName]));
+        assert.ok(loaded); const scriptNumber = Number(loaded[1]);
+        assert.ok(Number.isSafeInteger(scriptNumber) && scriptNumber >= 0 && scriptNumber <= 2_147_483_647);
+        try {
+          let scriptPath: string | undefined;
+          for (const candidate of [`/Scripting/Script${scriptNumber}`, `/${scriptNumber}`]) {
+            try {
+              if ((await kwinCall(candidate, "org.freedesktop.DBus.Introspectable.Introspect")).includes('name="org.kde.kwin.Script"')) {
+                scriptPath = candidate; break;
+              }
+            } catch (error: unknown) {
+              if (!(error instanceof Error) || !error.message.includes("UnknownObject")) throw error;
+            }
+          }
+          assert.ok(scriptPath); await kwinCall(scriptPath, "org.kde.kwin.Script.run");
+        } finally { await kwinCall("/Scripting", "org.kde.kwin.Scripting.unloadScript", [scriptName]); }
+        await until(async () => !(await windowState()).mainFocused);
+        await verifyEditorKeyboard("beforeCancel");
+        checks.push("one original private native Wayland GTK editor focused once by exact caption; actual outer XTEST marker reaches its cursor before Cancel");
+      }
 
       await checkpoint("actual-f8-overlay-cancel");
       await stockPress();
@@ -587,6 +665,7 @@ async function main(): Promise<void> {
       };
       await pointerButton("#cancel");
       await until(async () => (await state()).status === "idle" && (await overlayState()).status === "idle");
+      if (kdeWaylandOverlay) await verifyEditorKeyboard("afterCancel");
       assert.equal(await control(), "idle");
       assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
       assert.deepEqual(await readdir(profile.paths.recovery), []);
@@ -596,6 +675,7 @@ async function main(): Promise<void> {
 
       if (kdeWaylandOverlay) {
         await checkpoint("native-wayland-overlay-pointer-stop");
+        await verifyEditorKeyboard("beforeStop");
         await stockPress(); await until(async () => (await state()).status === "recording" && (await overlayState()).status === "recording");
         const publicSpeech = await readFile(join(payload, "fixtures/jfk.f32"));
         assert.equal(publicSpeech.length, 704000); assert.equal(sha(publicSpeech), "ebd52851100536db02d12c49fddd010372dcdc70243562e057553d476b706ae0");
@@ -607,6 +687,12 @@ async function main(): Promise<void> {
           { env, timeout: 30_000, maxBuffer: 1024 });
         await delay(200); await assertFocusRetained();
         await pointerButton("#record");
+        await until(async () => {
+          const value = await state(); if (value.status === "error") throw new Error("OWNED_TRANSCRIPTION_FAILED");
+          return value.status === "transcribing" || value.status === "done";
+        });
+        assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
+        await verifyEditorKeyboard("afterStop");
         await until(async () => {
           const value = await state(); if (value.status === "error") throw new Error("OWNED_TRANSCRIPTION_FAILED");
           return value.status === "done";
@@ -623,7 +709,12 @@ async function main(): Promise<void> {
       await checkpoint("actual-overlay-idle-hidden-again");
       await page.locator('[data-pref="show_idle_overlay"]').uncheck();
       await until(async () => (await state()).preferences.show_idle_overlay === false && !(await windowState()).overlayVisible);
-      await assertFocusRetained();
+      if (!kdeWaylandOverlay) await assertFocusRetained();
+      else {
+        // This explicit main-settings action follows all four keyboard gates;
+        // it is not a refocus used to repair an overlay pointer transition.
+        const current = await windowState(); assert.equal(current.overlayFocused, false); assert.equal(current.overlayFocusable, false);
+      }
       if (kdeWaylandOverlay) {
         await delay(200); await nativeScreenshot("native-overlay-hidden-again.png");
         assert.equal((await windowState()).overlayVisible, false);
@@ -631,7 +722,7 @@ async function main(): Promise<void> {
       const maps = await readFile(`/proc/${security.pid}/maps`, "utf8");
       assert.equal(maps.includes("openwhisper_capture.node"), false); assert.equal(maps.includes("openwhisper_speech.node"), false);
       assert.equal(sha(await readFile(join(stable, "sentinel"))), stableBefore);
-      checks.push("turning off the idle preference hides the actual idle overlay; main remains focused and usable; stable sentinel unchanged");
+      checks.push("turning off the idle preference hides the actual idle overlay; normal settings remain usable; stable sentinel unchanged");
 
       await checkpoint("graceful-normal-quit-after-overlay");
       const owner = appOwners.at(-1)!; owner.termination = "quit";
@@ -653,7 +744,8 @@ async function main(): Promise<void> {
       for (const field of ["oom", "oom_kill"]) assert.match(resources["memory.events"] ?? "", new RegExp(`(?:^|\\n)${field} 0(?:\\n|$)`, "u"));
       await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", checks,
         applicationBackend: kdeWaylandOverlay ? "WAYLAND" : "XWAYLAND",
-        ...(kdeWaylandOverlay ? { nativeSurfaceScreenshot: true, nativePointerStop: true, clipboardConfirmed: true, surfaceProcessAbsentAfterQuit: true } : {}),
+        ...(kdeWaylandOverlay ? { nativeSurfaceScreenshot: true, nativePointerStop: true, clipboardConfirmed: true, surfaceProcessAbsentAfterQuit: true,
+          foregroundKeyboardDelivery: true, editorBackend: "WAYLAND", editorMarkers: keyboardReceipts.length } : {}),
         overlayUrl, defaultHidden: true, idlePreferenceVisibility: true, focusRetained: true, preferenceMutationRefused: true,
         overlaySandbox: true, privateCaptureCancelled: true, originalApplicationClosed: true, nativeInMain: false,
         overlayInput: "OWNED_OUTER_XTEST_CANCEL", hotkeys: "OWNED_STOCK_KDE_KGLOBALACCEL_KEY_EDGES", stableSentinelUnchanged: true,
