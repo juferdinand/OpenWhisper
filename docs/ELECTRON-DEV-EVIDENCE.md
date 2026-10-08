@@ -27,6 +27,15 @@ cases pass; actual corrected package execution remains pending. The legacy Swift
 DMG/native UI passes in this run without a DMG source change; the prior failure's
 cause is not established.
 
+Run 37829597870 passes Apple Silicon package identity, its actual renderer OS
+sandbox and normal production retirement/native-descriptor initialization. Its
+owned shortcut driver still leaves setup pending: it sends CDP keyDown, while
+Electron's [main input handler](https://github.com/electron/electron/blob/v44.7.0/shell/browser/api/electron_api_web_contents.cc#L1589)
+accepts rawKeyDown/keyUp. The driver changes only that press-event type, retaining
+the owned window, native keycode, matching release, normal setup, saved-profile/
+globalShortcut assertions and clean Quit check. No application/native behavior
+or OS-global input is introduced by this driver correction.
+
 The strict TypeScript paste adapter lazily loads fixed Apple frameworks only after
 permission and external-target admission. It refuses held modifiers, changed focus
 and app-owned targets, posts one Command+V pair and releases native references.

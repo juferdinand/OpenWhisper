@@ -25,6 +25,7 @@ let application: ElectronApplication | undefined, page: Page | undefined;
 let identity: { executable: string; appPath: string; packaged: boolean; name: string;
   userData: string; sessionData: string; sandbox: boolean | undefined } | undefined;
 let stage = "launch", passed = false;
+let failure: { name: string; message?: string } | undefined;
 const checks: string[] = [];
 try {
   const environment: Record<string, string> = {};
@@ -77,8 +78,9 @@ try {
   await page.locator('[data-portal="enable_shortcut"]').click();
   await expect.poll(async () => (await state()).macos?.recording_shortcut, { timeout: 10_000 }).toBe(true);
   const cdp = await page.context().newCDPSession(page);
+  // Electron emits before-input-event for rawKeyDown/keyUp, not CDP's distinct keyDown type.
   // Dispatch only to this window's Chromium session, never the OS/global input queue.
-  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "F8", code: "F8", modifiers: 12,
+  await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "F8", code: "F8", modifiers: 12,
     windowsVirtualKeyCode: 119, nativeVirtualKeyCode: 100, autoRepeat: false });
   await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "F8", code: "F8", modifiers: 12,
     windowsVirtualKeyCode: 119, nativeVirtualKeyCode: 100 });
@@ -86,7 +88,7 @@ try {
   await expect.poll(async () => (await state()).preferences.macos_shortcut, { timeout: 10_000 }).toBe(accelerator);
   assert.equal(await application.evaluate(({ globalShortcut }, key) => globalShortcut.isRegistered(key), accelerator), true);
   assert.equal((await state()).status, "idle");
-  checks.push("Owned-window CDP Command+Shift+F8 press/release commits through normal setup; actual globalShortcut registration");
+  checks.push("Owned-window CDP Command+Shift+F8 input commits through normal setup; actual globalShortcut registration");
   stage = "shortcut-remove";
   await page.locator('[data-portal="clear_shortcut"]').click();
   await expect.poll(async () => (await state()).preferences.macos_shortcut, { timeout: 10_000 }).toBe(null);
@@ -102,11 +104,12 @@ try {
     nativeUtilityLoading: "Capture/speech utility loading and TCC attribution remain pending", exit }, null, 2), { mode: 0o600 });
   passed = true;
 } catch (error: unknown) {
+  failure = error instanceof Error ? { name: error.name, message: error.message.slice(0, 2000) } : { name: "UNKNOWN" };
   if (page && !page.isClosed()) await page.screenshot({ path: join(evidence, "failure.png"), fullPage: true }).catch(() => {});
   await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "FAIL", stage, identity, checks,
-    error: error instanceof Error ? { name: error.name, message: error.message.slice(0, 2000) } : { name: "UNKNOWN" } }, null, 2), { mode: 0o600 });
+    error: failure }, null, 2), { mode: 0o600 });
   process.exitCode = 1;
 } finally {
   if (application) await application.close().catch(() => {});
 }
-console.log(JSON.stringify({ status: passed ? "PASS" : "FAIL", evidence, architecture: process.arch }));
+console.log(JSON.stringify({ status: passed ? "PASS" : "FAIL", stage, evidence, architecture: process.arch, error: failure }));
