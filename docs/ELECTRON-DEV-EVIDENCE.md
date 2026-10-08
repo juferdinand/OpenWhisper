@@ -230,3 +230,38 @@ The narrow fatal-control correction keeps the helper closed until the parent ter
 Normal shutdown and the speech helper's self-exit paths still need a bounded independent
 owned-process retirement witness before live replacement wiring. Failed/ambiguous cleanup
 must retain ownership and block replacement. No raw PID signals are introduced.
+
+## Model inventory and Apple compile checkpoint
+
+The next separately exported candidate index passes 286 ordinary tests, with eight
+explicit opt-in skips (294 total, 3.96 seconds), strict TypeScript and the shared UI/Electron
+build. Its private inventory has 24 focused filesystem/lease tests. Independent review
+reproduced a catalog filename alias resolving to a differently named inventory ID; the
+correction rejects acquisition/removal through that alias while preserving exact-filename
+import mapping. Complete-copy/hash, deferred/rejected lease retirement, atomic no-replace,
+replacement, private identity and uncertain publication/removal are tested separately.
+Publisher verification, persistent import journal and normal host/UI wiring remain gates.
+
+The Apple edge checkpoint contains a fresh AVAudioEngine owner, serial control executor,
+complete raw format ledger, accepted-callback fence and EOF-drained Apple conversion.
+The opt-in fixture uses generated PCM and independent coalesced Apple conversion, including
+305 represented seconds with a final tail, format/layout transitions, held callbacks,
+cancellation, allocation failures and raising Objective-C stand-ins. Local strict/build and
+generated-fixture syntax checks pass. Native Apple compilation/runtime is pending CI;
+no hardware capture or permission acceptance follows from source checks.
+
+The compile-ready source manifest hash is
+`37c16b28f0bfa67d69e416f7a47c23f65f2ddd51b9482937f82a589d01d6e9da`.
+Native source is `9afeb1470a5b5d9908228a363aa6ee02dee9d781e3ba62d5b4eb12e68eeab70d`;
+builder source is `7e0ac5f7284d2ec812c31ebbc39a6063ba8cf4534399ab286509bcd57df26677`.
+The dedicated CI jobs use [official Apple Silicon/Intel runner labels](https://docs.github.com/en/actions/reference/runners/github-hosted-runners),
+`macos-15` and `macos-15-intel`, with an explicit macOS 14 build deployment target.
+Actual minimum-OS runtime, default-input/device changes, TCC responsibility, signed-helper
+loading and the independent retirement witness remain separate gates.
+The fixture reports only `helperExitObserved` and `actualOSRetirementVerified:false`.
+
+Before/after build guards cover source, pinned headers, scripts and notices. The exact
+upstream Node 24.21.0 full license snapshot is preserved, including its inherited whitespace;
+source whitespace checking excludes that verbatim notice only. Native artifacts, categorical
+runtime phases and manifests are retained by the two owned Apple CI jobs. No PCM, user
+profile, TCC database, signing material or full diagnostic report is uploaded.

@@ -141,6 +141,26 @@ confirmed force-reap before replacement and malformed frames. Its Node utility p
 is not an OS sandbox; the private, unprivileged test container is the isolation boundary.
 No desktop, capture, GPU or complete replacement claim follows from these checks.
 
+## Private model inventory and Apple capture checkpoint
+
+The host-only inventory service enumerates private catalog/custom models, captures an
+immutable CPU/GPU preference with a file lease and imports complete files atomically.
+Mutation is refused while a lease is held; a failed process-retirement Promise retains it.
+Bounded copying, exact names, private file identity and durable publication are tested.
+`private-file` verification means safe storage, not publisher authenticity or valid weights.
+This service has no network or renderer wiring; persistent import recovery and stable-data
+migration remain separate work.
+
+An opt-in Apple capture edge uses AVAudioEngine/AVAudioConverter behind Node-API 8.
+The shared Linux capture implementation is unchanged. Its owned CI fixture feeds generated
+PCM in an actual Electron utility and checks full tails, format changes and Stop ownership
+without allocating an input engine or querying/requesting microphone permission.
+The separate jobs use `macos-15` and `macos-15-intel`, compile with a macOS 14 deployment
+target and retain architecture, Mach-O and categorical runtime evidence. They do not prove
+a macOS 14 runtime, hardware/default-input behavior, TCC, signed-helper loading or OS
+retirement from a generic Electron exit event. Reproduce only in the owned Apple CI VM using
+the [synthetic capture procedure](../electron/tests/owned-macos-capture/README.md).
+
 ## Optional text-model preview
 
 P5 adds a disabled-by-default manual preview at the end of **Models**. Its numeric-loopback

@@ -62,6 +62,57 @@ jobs:
           node --import tsx scripts/build-capture.ts
           OPENWHISPER_CAPTURE_SYNTHETIC_ADDON="$PWD/native/capture/build/openwhisper_capture.node" \
             node --import tsx --test tests/capture.test.ts
+  mac_capture:
+    name: Electron synthetic Mac capture (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            electron/package-lock.json
+            shared/ui/package-lock.json
+      - name: Install locked development dependencies and pinned runtime
+        run: |
+          npm ci --prefix shared/ui
+          npm ci --prefix electron
+          npm run setup --prefix electron
+      - name: Check and build the isolated TypeScript host
+        working-directory: electron
+        run: |
+          npm run typecheck
+          npm test
+          npm run build
+      - name: Install native capture build tools
+        run: brew list cmake ninja >/dev/null 2>&1 || brew install cmake ninja
+      - name: Build the Apple capture edge and test generated PCM without devices
+        working-directory: electron
+        env:
+          OPENWHISPER_OWNED_MAC_CAPTURE_TEST: '1'
+          OPENWHISPER_MAC_CAPTURE_EVIDENCE: ${{ github.workspace }}/electron/.local/macos-capture-evidence
+        run: |
+          node --import tsx scripts/build-macos-capture.ts
+          node --import tsx --test tests/owned-macos-capture.test.ts
+      - name: Upload synthetic capture provenance and categorical results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Electron-macOS-capture-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            electron/.local/macos-capture-evidence/
+            electron/native/macos-capture/build/*/build-manifest.json
+            electron/native/macos-capture/build/*/compile_commands.json
+            electron/native/macos-capture/build/*/openwhisper_macos_capture.node
+            electron/dist/native/macos-capture-notices/
+          if-no-files-found: warn
+          retention-days: 14
   linux:
     uses: ./.github/workflows/linux-build.yml
     with:
