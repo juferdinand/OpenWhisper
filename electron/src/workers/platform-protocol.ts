@@ -5,6 +5,7 @@ import { developmentArtifactSchema } from "../services/development-artifact.js";
 import { linuxApplicationIdSchema, portalShortcutStateSchema } from "../platforms/linux/shared/portal-shortcuts.js";
 import { kdeKeySchema } from "../platforms/linux/kde/keyboard.js";
 import { portalPasteStateSchema } from "../platforms/linux/shared/portal-paste.js";
+import { controlWireStatusTextSchema, parseControlStatus, type ControlWireStatus } from "../platforms/linux/shared/control-status.js";
 
 const envelope = { version: z.literal(1), id: z.uuid() };
 const address = z.string().max(1024).regex(/^unix:(?:path=\/[A-Za-z0-9_./%\-]+|abstract=[A-Za-z0-9_./%\-]+)(?:,guid=[a-fA-F0-9]{32})?$/);
@@ -44,6 +45,7 @@ export type PlatformReply = z.infer<typeof platformReplySchema>;
 const captureEnvelope = { ...envelope, channel: z.literal("platform-capture"), epoch: z.uuid() };
 export const platformCaptureRequestSchema = z.discriminatedUnion("command", [
   z.strictObject({ ...captureEnvelope, command: z.literal("status") }),
+  z.strictObject({ ...captureEnvelope, command: z.literal("wire-status") }),
   z.strictObject({ ...captureEnvelope, command: z.literal("start") }),
   z.strictObject({ ...captureEnvelope, command: z.literal("lease") }),
   z.strictObject({ ...captureEnvelope, command: z.literal("stop"), lease: z.uuid() }),
@@ -53,6 +55,7 @@ export const platformCaptureRequestSchema = z.discriminatedUnion("command", [
 export const platformCaptureReplySchema = z.discriminatedUnion("ok", [
   z.strictObject({ ...captureEnvelope, ok: z.literal(true), value: z.union([
     z.strictObject({ command: z.literal("status"), status: controlStatusSchema }),
+    z.strictObject({ command: z.literal("wire-status"), text: controlWireStatusTextSchema }),
     z.strictObject({ command: z.literal("start"), lease: z.uuid() }),
     z.strictObject({ command: z.literal("lease"), lease: z.uuid().nullable() }),
     ...(["stop", "cancel", "abort-start"] as const).map((command) => z.strictObject({ command: z.literal(command) })),
@@ -115,6 +118,11 @@ export class PlatformCaptureClient implements ControlCapturePort {
     const reply = await this.begin({ command: "status" }).result;
     if (!reply.ok || reply.value.command !== "status") throw new PlatformCaptureError("INVALID_FRAME");
     return reply.value.status;
+  }
+  async wireStatus(): Promise<ControlWireStatus> {
+    const reply = await this.begin({ command: "wire-status" }).result;
+    if (!reply.ok || reply.value.command !== "wire-status") throw new PlatformCaptureError("INVALID_FRAME");
+    return parseControlStatus(reply.value.text);
   }
   async currentLease(): Promise<ControlCaptureLease | undefined> {
     const reply = await this.begin({ command: "lease" }).result;

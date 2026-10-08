@@ -5,6 +5,7 @@ import { access, mkdir, writeFile } from "node:fs/promises";
 import { z } from "zod";
 import { openLinuxBus } from "../../src/platforms/linux/shared/bus.js";
 import { DevControlService, type ControlCaptureLease, type ControlCapturePort, type ControlStatus } from "../../src/platforms/linux/shared/control.js";
+import { parseControlStatus, type RecordingStatus } from "../../src/platforms/linux/shared/control-status.js";
 
 const raw: unknown = Reflect.get(process, "parentPort");
 if (typeof raw !== "object" || raw === null) throw new Error("Owned utility port required.");
@@ -31,6 +32,7 @@ class FakeCapture implements ControlCapturePort {
   state: ControlStatus = "idle"; starts = 0; cancellations = 0; stops = 0;
   startGate: Promise<void> | undefined; stopGate: Promise<void> | undefined;
   status(): ControlStatus { return this.state; }
+  wireStatus() { return { status: this.state === "unavailable" ? "idle" as const : this.state, elapsed: 0n, recovery_available: false }; }
   async start(_signal: AbortSignal): Promise<ControlCaptureLease> {
     this.starts++; await this.startGate; this.state = "recording";
     return { cancel: async () => { this.cancellations++; this.state = "idle"; },
@@ -56,6 +58,10 @@ async function runProbe(): Promise<unknown> {
       child.once("error", reject); child.once("close", (code) => { children.delete(child); accept({ code: code ?? 1, output: text.trim() }); });
     }); return { process: child, result };
   }
+  function accepted(response: { code: number; output: string }, status: RecordingStatus): void {
+    assert.equal(response.code, 0); assert.ok(response.output.startsWith("ACCEPTED:"));
+    assert.deepEqual(parseControlStatus(response.output.slice("ACCEPTED:".length)), { status, elapsed: 0n, recovery_available: false });
+  }
   try {
     assert.equal((await bus.owner("io.github.whisperfree.dev.Control")), bus.uniqueName);
     await assert.rejects(bus.owner("io.github.whisperfree.Control")); checks.push("Dev name is separate; absent production owner is not activated");
@@ -73,19 +79,19 @@ async function runProbe(): Promise<unknown> {
     await expired.result; await wait(() => capture.cancellations === 2); assert.equal(capture.state, "idle");
     checks.push("actual native expiry prevents accepted Start and disposes late acquisition");
     capture.startGate = undefined;
-    assert.deepEqual(await client("normal", "start").result, { code: 0, output: "ACCEPTED:recording" });
+    accepted(await client("normal", "start").result, "recording");
     await pause(60); assert.equal(capture.state, "recording"); assert.equal(capture.cancellations, 2);
     checks.push("immediate post-ack CLI disconnect preserves committed recording");
-    assert.deepEqual(await client("normal", "start").result, { code: 0, output: "ACCEPTED:recording" }); assert.equal(capture.starts, 3);
+    accepted(await client("normal", "start").result, "recording"); assert.equal(capture.starts, 3);
     checks.push("repeat Start is idempotent");
     const closure = deferred(); capture.stopGate = closure.promise;
     const stopping = client("normal", "stop"); await wait(() => capture.stops === 1);
     const busy = await client("normal", "toggle").result; assert.equal(busy.code, 5); assert.equal(capture.starts, 3);
-    closure.resolve(); assert.deepEqual(await stopping.result, { code: 0, output: "ACCEPTED:transcribing" });
+    closure.resolve(); accepted(await stopping.result, "transcribing");
     checks.push("Stop waits for closure fence; concurrent action refused; preparation remains independent");
     capture.state = "idle";
-    assert.deepEqual(await client("normal", "toggle").result, { code: 0, output: "ACCEPTED:recording" });
-    assert.deepEqual(await client("normal", "cancel").result, { code: 0, output: "ACCEPTED:idle" });
+    accepted(await client("normal", "toggle").result, "recording");
+    accepted(await client("normal", "cancel").result, "idle");
     checks.push("toggle and cancel use their own content-free lease");
     await service.close(); await bus.close(); checks.push("service closes bus owner and capture leases");
     return { checks, uid: process.getuid?.(), pid: process.pid, nativeApi: 8, starts: capture.starts,

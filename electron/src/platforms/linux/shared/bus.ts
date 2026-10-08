@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { boundBusInput, busInterfaceSchema, busMemberSchema, busPathSchema, busSignatureSchema,
   busUniqueNameSchema, parseBusValues, signatureOf, type BusValue } from "./bus-values.js";
+import { controlTarget, controlKindSchema, type ControlKind } from "./control-identity.js";
 
 const daemon = "org.freedesktop.DBus";
 const senderSchema = z.union([busUniqueNameSchema, z.literal(daemon)]);
@@ -69,7 +70,7 @@ function validatedReply(input: unknown): z.infer<typeof replySchema> & { body: B
   return { ...reply, body };
 }
 
-/** Worker-local facade. It never opens a bus merely by being imported. */
+/** Typed facade for platform owners and the pre-ready client. Importing opens no bus. */
 export class LinuxBus {
   readonly uniqueName: string;
   readonly generation: string;
@@ -221,14 +222,14 @@ export class LinuxBus {
       member: "GetConnectionUnixUser", inputSignature: "s", outputSignature: "u", body: [{ type: "s", value: busUniqueNameSchema.parse(unique) }], timeoutMs: 3000 });
     const value = reply.body[0]; if (value?.type !== "u") throw new BusFailure("INVALID_FRAME"); return value.value;
   }
-  private eventCallback(filter: BusFilter | undefined, handler: (event: BusEvent) => void): (input: unknown) => void {
+  private eventCallback(filter: BusFilter | undefined, handler: (event: BusEvent) => void, kind: ControlKind = "development"): (input: unknown) => void {
     return (input) => {
       if (this.closing) return;
       try {
         boundBusInput(input); const event = eventSchema.parse(input); const body = parseBusValues(event.body);
         if (event.connection !== this.connection || body.map(signatureOf).join("") !== event.signature) throw new BusFailure("INVALID_FRAME");
         if (filter && (event.kind !== "signal" || event.sender !== filter.sender || event.path !== filter.path || event.interface !== filter.interface || event.member !== filter.member)) throw new BusFailure("INVALID_FRAME");
-        if (!filter && (event.kind !== "method" || !z.uuid().safeParse(event.id).success || event.path !== "/io/github/whisperfree/dev/Control" || event.interface !== "io.github.whisperfree.Control1" ||
+        if (!filter && (event.kind !== "method" || !z.uuid().safeParse(event.id).success || event.path !== controlTarget(kind).path || event.interface !== "io.github.whisperfree.Control1" ||
           !((event.member === "Status" && event.signature === "") || (event.member === "Execute" && event.signature === "s")))) throw new BusFailure("INVALID_FRAME");
         const normalized: BusEvent = { kind: event.kind, connection: event.connection, id: event.id, path: event.path,
           interface: event.interface, member: event.member, sender: event.sender, signature: event.signature, body };
@@ -248,8 +249,12 @@ export class LinuxBus {
     if (this.closing) throw new BusFailure("CLOSED"); this.subscriptions.add(id);
     return async () => { if (!this.subscriptions.delete(id) || this.closing) return; await this.native.unsubscribe(this.connection, id); };
   }
-  async exportControl(handler: (event: BusEvent) => void): Promise<void> {
-    this.active(); await this.native.exportControl(this.connection, this.eventCallback(undefined, handler)); this.active();
+  async exportControl(handler: (event: BusEvent) => void, kind: ControlKind = "development"): Promise<void> {
+    this.active(); const selected = controlKindSchema.parse(kind);
+    const callback = this.eventCallback(undefined, handler, selected);
+    if (selected === "stable") await this.native.exportControl(this.connection, callback, selected);
+    else await this.native.exportControl(this.connection, callback);
+    this.active();
   }
   /** Recheck after asynchronous UID lookup and again at state reservation. */
   controlCurrent(event: BusEvent): boolean {

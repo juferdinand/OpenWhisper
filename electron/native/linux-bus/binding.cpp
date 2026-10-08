@@ -1418,12 +1418,19 @@ static void control_method(GDBusConnection *, const gchar *sender,
 }
 static napi_value export_control(napi_env env, napi_callback_info info) {
   return guarded(env, [&] {
-    auto args = arguments(env, info, 2);
+    // One compiled endpoint selector; no caller-provided object path or XML.
+    size_t count = 4;
+    std::vector<napi_value> args(count);
+    ok(napi_get_cb_info(env, info, &count, args.data(), nullptr, nullptr));
+    check(count == 2 || count == 3);
+    const auto kind = count == 2 ? std::string("development") : string(env, args[2], 11);
+    check(kind == "development" || kind == "stable");
+    const char *path = kind == "stable" ? "/io/github/whisperfree/Control" : "/io/github/whisperfree/dev/Control";
     auto owner = state(env, args[0]);
     auto *handler = callback(env, args[1], owner);
     return async(
         env,
-        [owner, handler] {
+        [owner, handler, path] {
           try {
             owner->in_context([&] {
               if (owner->closing || owner->export_id)
@@ -1467,7 +1474,7 @@ static napi_value export_control(napi_env env, napi_callback_info info) {
               static const GDBusInterfaceVTable vtable{
                   control_method, nullptr, nullptr, {nullptr}};
               owner->export_id = g_dbus_connection_register_object(
-                  owner->connection, "/io/github/whisperfree/dev/Control",
+                  owner->connection, path,
                   xml->interfaces[0], &vtable, owner.get(), nullptr, &failure);
               g_dbus_node_info_unref(xml);
               if (failure) {

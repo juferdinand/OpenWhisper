@@ -97,3 +97,15 @@ test("Dev source and both packaged hosts keep Dev identity and cannot select sta
   }
   assert.throws(() => selectApplicationBuild({ ...source, executable: "/owned/package/openwhisper" }));
 });
+
+test("stable control selection retains package identity gates and admits only exact Linux commands", () => {
+  for (const command of ["start", "stop", "toggle", "cancel", "status"]) {
+    const value = { ...packaged(), purpose: "control" as const, argv: ["/owned/package/openwhisper", "--control", command] };
+    assert.deepEqual(selectApplicationBuild(value), stable);
+    for (const changed of [{ packaged: false }, { packageVersion: "0.2.5" }, { executable: "/owned/package/openwhisper-dev" },
+      { argv: [...value.argv, "extra"] }, { argv: [value.executable, "--control=status"] },
+      { argv: [value.executable, "--dev", "--control", command] }, { platform: "darwin" }]) {
+      assert.throws(() => selectApplicationBuild({ ...value, ...changed }));
+    }
+  }
+});

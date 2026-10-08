@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { BusFailure, LinuxBus, parseSessionBusAddress, type BusMethod } from "../src/platforms/linux/shared/bus.js";
 import { boundBusInput, parseBusValues, signatureOf, validSignature, type BusValue } from "../src/platforms/linux/shared/bus-values.js";
+import { controlTarget } from "../src/platforms/linux/shared/control-identity.js";
 
 test("Bus values preserve exact widths, arrays, dictionaries and explicit variants", () => {
   const body = parseBusValues([{ type: "x", value: "-9223372036854775808" }, { type: "t", value: "18446744073709551615" },
@@ -77,4 +78,21 @@ test("Untrusted signals and events after close cannot mutate application state",
   const frame = { kind: "signal", id: "", connection: f.connection, ...filter, signature: "", body: [] };
   f.emit(frame); assert.equal(mutations, 1); f.emit({ ...frame, sender: ":1.3" });
   await bus.close(); f.emit(frame); assert.equal(mutations, 1); assert.equal(f.counters.closes, 1);
+});
+
+test("export facade passes only fixed identity selectors and rejects an event from the other endpoint", async () => {
+  for (const kind of ["stable", "development"] as const) {
+    const f = fixture(); let callback: ((value: unknown) => void) | undefined, selected: unknown, handled = 0;
+    const binding = { ...f.binding, exportControl: (_connection: unknown, handler: unknown, selector: unknown) => {
+      assert.equal(typeof handler, "function"); callback = (value) => Reflect.apply(handler as (...args: unknown[]) => unknown, undefined, [value]); selected = selector;
+    } };
+    const bus = await LinuxBus.open(binding, "unix:path=/tmp/owned");
+    await bus.exportControl(() => { handled++; }, kind); assert.equal(selected, kind === "stable" ? "stable" : undefined);
+    const event = { kind: "method", id: randomUUID(), connection: f.connection, sender: ":1.9",
+      path: controlTarget(kind).path, interface: "io.github.whisperfree.Control1", member: "Status", signature: "", body: [],
+      expiresAtUs: (process.hrtime.bigint() / 1000n + 1000000n).toString() };
+    callback?.(event); assert.equal(handled, 1);
+    callback?.({ ...event, path: controlTarget(kind === "stable" ? "development" : "stable").path });
+    await bus.close(); assert.equal(handled, 1); assert.equal(f.counters.closes, 1);
+  }
 });

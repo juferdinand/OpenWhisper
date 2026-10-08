@@ -1,9 +1,8 @@
 import { CONTROL_USAGE, isControlCommand, type ControlAction, type ControlCommand, type LaunchSelection } from "../../../cli/arguments.js";
 import { InvalidControlStatus, parseControlStatus, serializeControlStatus, type ControlWireStatus } from "./control-status.js";
+import { controlTarget, type ControlKind } from "./control-identity.js";
 
-export const DEVELOPMENT_CONTROL_TARGET = Object.freeze({
-  name: "io.github.whisperfree.dev.Control", path: "/io/github/whisperfree/dev/Control", interface: "io.github.whisperfree.Control1",
-});
+export const DEVELOPMENT_CONTROL_TARGET = controlTarget("development");
 const DAEMON = "org.freedesktop.DBus";
 export type ControlClientErrorCode = "INVALID_COMMAND" | "CLOSED" | "BUSY" | "CANCELLED" | "TIMEOUT" |
   "NO_SESSION_BUS" | "SESSION_UNAVAILABLE" | "NOT_RUNNING" | "OWNER_UNVERIFIED" | "FOREIGN_OWNER" |
@@ -17,7 +16,7 @@ export interface ControlOperationContext {
   readonly timeoutMs: number;
   readonly noAutoStart: true;
 }
-/** A trusted future adapter implements only these fixed Dev/daemon operations. */
+/** A trusted adapter implements only its fixed captured identity and daemon operations. */
 export interface DevelopmentControlPort {
   readonly generation: string;
   readonly isClosed: boolean;
@@ -34,6 +33,7 @@ export type DevelopmentControlFactory = (context: ControlOperationContext) => Pr
 export interface ControlClientOptions {
   readonly factory: DevelopmentControlFactory;
   readonly uid: number;
+  readonly kind?: ControlKind;
   /** Test budgets may be smaller; production defaults remain five plus two seconds. */
   readonly operationMs?: number;
   readonly cleanupMs?: number;
@@ -81,12 +81,13 @@ function within(task: Promise<void>, milliseconds: number): Promise<void> {
   });
 }
 
-/** Single-use client: no retry, GUI activation, bus loading, profile or native access. */
+/** Single-use client: no retry, GUI activation or profile access; its factory owns native resources. */
 export class DevelopmentControlClient {
   private readonly operationMs: number;
   private readonly cleanupMs: number;
   private readonly factory: DevelopmentControlFactory;
   private readonly uid: number;
+  private readonly target: ReturnType<typeof controlTarget>;
   private readonly retired = completion();
   private transaction: Transaction | undefined;
   private used = false;
@@ -98,6 +99,7 @@ export class DevelopmentControlClient {
     if (!Number.isInteger(options.uid) || options.uid < 0 || options.uid > 0xffff_ffff) throw new RangeError("Invalid control user identity.");
     if (typeof options.factory !== "function") throw new RangeError("Invalid control factory.");
     this.factory = options.factory; this.uid = options.uid;
+    this.target = controlTarget(options.kind ?? "development");
     this.operationMs = budget(options.operationMs, 5000); this.cleanupMs = budget(options.cleanupMs, 2000);
     void this.retired.promise.catch(() => undefined);
   }
@@ -165,9 +167,9 @@ export class DevelopmentControlClient {
             this.abort(transaction, "INVALID_RESPONSE"); return;
           }
           const name: unknown = Reflect.get(input, "name"), before: unknown = Reflect.get(input, "before"), after: unknown = Reflect.get(input, "after");
-          if (Reflect.get(input, "generation") !== epoch || !(name === DEVELOPMENT_CONTROL_TARGET.name || unique(name)) ||
+          if (Reflect.get(input, "generation") !== epoch || !(name === this.target.name || unique(name)) ||
             !(before === "" || unique(before)) || !(after === "" || unique(after))) { this.abort(transaction, "INVALID_RESPONSE"); return; }
-          if ((name === DEVELOPMENT_CONTROL_TARGET.name && before !== after) ||
+          if ((name === this.target.name && before !== after) ||
             (name === owner && before === owner && after === "")) this.abort(transaction, "OWNER_CHANGED");
         } catch { this.abort(transaction, "INVALID_RESPONSE"); }
       }, this.context(transaction));
@@ -232,15 +234,18 @@ const ERROR_MESSAGES: Readonly<Record<ControlClientErrorCode, string>> = Object.
   DISPOSAL_FAILED: "OpenWhisper Dev control cleanup could not be confirmed. Do not repeat the command automatically.",
 });
 export interface ControlCliOutput { readonly exitCode: 0 | 1 | 2; readonly stdout: string; readonly stderr: string }
-export function controlFailureOutput(error: unknown): ControlCliOutput {
-  return Object.freeze({ exitCode: 1, stdout: "", stderr: `${ERROR_MESSAGES[failure(error).code]}\n` });
+export function controlFailureOutput(error: unknown, kind: ControlKind = "development"): ControlCliOutput {
+  controlTarget(kind);
+  const message = ERROR_MESSAGES[failure(error).code];
+  return Object.freeze({ exitCode: 1, stdout: "", stderr: `${kind === "stable" ? message.replaceAll("OpenWhisper Dev", "OpenWhisper") : message}\n` });
 }
 /** Pure early routing. Invalid/GUI selections never invoke the supplied factory. */
-export async function runDevelopmentControl(selection: LaunchSelection, options: ControlClientOptions): Promise<ControlCliOutput | undefined> {
+export async function runApplicationControl(selection: LaunchSelection, options: ControlClientOptions): Promise<ControlCliOutput | undefined> {
   if (selection.kind === "gui") return undefined;
   if (selection.kind === "invalid") return Object.freeze({ exitCode: 2, stdout: "", stderr: `${CONTROL_USAGE}\n` });
   try {
     const result = await new DevelopmentControlClient(options).execute(selection.command);
     return Object.freeze({ exitCode: 0, stdout: `${serializeControlStatus(result)}\n`, stderr: "" });
-  } catch (error: unknown) { return controlFailureOutput(error); }
+  } catch (error: unknown) { return controlFailureOutput(error, options.kind); }
 }
+export const runDevelopmentControl = runApplicationControl;

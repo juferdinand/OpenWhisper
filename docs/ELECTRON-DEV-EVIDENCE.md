@@ -1,6 +1,6 @@
 # Electron development evidence
 
-## Mac stable migration source; native acceptance pending
+## Mac archival migration and native empty-domain worker PASS
 
 The reviewed source adds a bounded CoreFoundation XML/binary decoder, read-only
 AppKit stopped-host and CFPreferences snapshot admission, and exclusive APFS
@@ -13,12 +13,18 @@ Independent review found and corrected a publication-order bug: the final native
 snapshot query must precede the final filesystem/source identity checks. A source
 change during that query now refuses publication. Local strict typing, normal
 build and the compiled Linux startup fixture pass. The full suite passes 1050
-tests, skips 25 explicitly and fails zero in 18.25s. Darwin tests are pending CI:
-archival decoder/filesystem cases use owned fixtures and synthetic cache access;
+tests, skips 25 explicitly and fails zero in 18.25s. At source `f31bea4`,
+[Apple Silicon](https://github.com/juferdinand/OpenWhisper/actions/runs/37855692180/job/113579185090)
+and [Intel](https://github.com/juferdinand/OpenWhisper/actions/runs/37855692180/job/113579185034)
+pass actual CF XML/binary parsing, APFS exclusive publication/source-change refusal
+and compiled-worker admission. Each ordinary Mac suite passes 1032 tests with 43
+explicit skips; owned native capture/retirement and the existing Dev package also
+pass. Archival decoder/filesystem cases use owned fixtures and synthetic cache access;
 the compiled worker uses read-only actual native admission on an empty hosted
 runner preference domain, with synthetic host facts. Neither establishes nonempty
 0.2.5 preference-cache, persistent-signature, login replacement or stable GUI
-acceptance. Current installations are unchanged.
+acceptance. Current installations are unchanged. The normal stable bundle/UI smoke
+is the next bounded package check; it will not relabel Dev CPU evidence as stable.
 
 ## Ordinary stable Linux package startup PASS
 

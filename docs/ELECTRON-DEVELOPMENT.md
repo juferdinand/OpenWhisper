@@ -210,7 +210,7 @@ package from the same frozen source passes the X11 regression in 43.22s.
 The tested `.deb` is unsigned `0.3.0~dev.58169b3a8cc1.modified`; producer metadata
 remains 58169b3a8cc167e7538f434e02f95fe437f46d68+modified. This is a validation build,
 with no installer, release/update channel or changes to current installations.
-Mac stable migration source is implemented with native acceptance pending;
+Mac archival migration and the native empty-domain compiled worker pass ARM/Intel CI;
 autostart, stable command control, updater and release continuity remain pending.
 The [evidence](ELECTRON-DEV-EVIDENCE.md) retains the first
 failed saved-WAV startup attempt and the corrected package result.
@@ -224,7 +224,14 @@ These are thin ad-hoc validation packages with their own validation receipt;
 they do not provide release signing, notarization or an update channel. The Dev
 installer refuses them. Normal startup opens stable storage and performs migration,
 so assembly does not authorize replacing or launching against a live installation.
-Actual stable GUI and native migration acceptance remain pending.
+Actual stable GUI and nonempty legacy preference-cache acceptance remain pending.
+
+The next source increment supports exact Linux `--control start|stop|toggle|cancel|status`
+before GUI/profile initialization. It contacts only the already-running same-user
+stable or Dev owner selected by the captured build, without service activation.
+Stable launch-at-login is available only for the admitted Debian `/opt` installation
+or Mac mainAppService; startup never enables it from a saved preference alone.
+These new runtime paths remain pending exact-package acceptance.
 
 ## Install a separate local Dev copy
 
@@ -432,8 +439,8 @@ Bounded copying, exact names, private file identity and durable publication are 
 The recording Dev host now exposes catalog downloads and host-owned imports through the
 shared UI; the renderer never selects an arbitrary destination or native model path.
 The later Linux stable bootstrap retains safe legacy models in place; this Dev
-import service does not perform migration. Mac stable migration source is implemented;
-actual native and replacement acceptance remains open.
+import service does not perform migration. Mac archival/native empty-domain migration
+passes ARM/Intel CI; normal stable-package and replacement acceptance remains open.
 
 An opt-in Apple capture edge uses AVAudioEngine/AVAudioConverter behind Node-API 8.
 The shared Linux capture implementation is unchanged. Its owned CI fixture feeds generated

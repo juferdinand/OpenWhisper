@@ -15,6 +15,10 @@ import { validateCommandOutput } from "../../src/contracts/ui.js";
 import type { DesktopBridge } from "../../src/contracts/bridge.js";
 import { recordingHostErrorSchema } from "../../src/workers/recording-host-protocol.js";
 import { kdeJournalSchema } from "../../src/platforms/linux/kde/keyboard.js";
+import { parseApplicationBuildModule } from "../../src/contracts/build-identity.js";
+import { parseControlStatus, type ControlWireStatus } from "../../src/platforms/linux/shared/control-status.js";
+import { controlTarget } from "../../src/platforms/linux/shared/control-identity.js";
+import type { ControlCommand, ControlAction } from "../../src/cli/arguments.js";
 
 declare global { interface Window { openwhisper?: DesktopBridge } }
 const execute = promisify(execFile);
@@ -421,20 +425,65 @@ async function main(): Promise<void> {
     assert.equal(initial.development_build, undefined); assert.equal(initial.preferences.setup_completed, true);
     assert.deepEqual(initial.history, legacyHistory); assert.equal(initial.recovery_available, true); await assertStableOriginals();
   }
-  const control = async (action?: "start" | "stop" | "cancel") => {
+  const capturedControl = packaged ? parseApplicationBuildModule(await readFile(join(packageRoot, "dist/main/application-build.js"), "utf8")) : undefined;
+  if (capturedControl) assert.equal(capturedControl.kind, stablePackage ? "stable" : "development");
+  const target = controlTarget(capturedControl?.kind ?? "development");
+  const controlRoots = ["home", "config", "data", "cache"].map((name) => join(root, `control-${name}`));
+  const controlEnvironment: NodeJS.ProcessEnv = { ...env, HOME: controlRoots[0]!, XDG_CONFIG_HOME: controlRoots[1]!,
+    XDG_DATA_HOME: controlRoots[2]!, XDG_CACHE_HOME: controlRoots[3]! };
+  for (const key of ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "NODE_OPTIONS", "NODE_PATH", "NODE_V8_COVERAGE",
+    "ELECTRON_RUN_AS_NODE", "ELECTRON_OVERRIDE_DIST_PATH", "ELECTRON_NO_ASAR"]) delete controlEnvironment[key];
+  const commandRecords: { command: ControlCommand; pid: number; seconds: number; exitCode: 0 | 1; closed: true;
+    status: string | null; elapsed: string | null; recoveryAvailable: boolean | null }[] = [];
+  const packageCommand = async (command: ControlCommand, absent = false): Promise<ControlWireStatus | undefined> => {
+    assert.ok(packaged && capturedControl);
+    assert.equal(basename(executable), capturedControl.kind === "stable" ? "openwhisper" : "openwhisper-dev");
+    const before = application ? await application.evaluate(({ BrowserWindow }) => ({ pid: process.pid, windows: BrowserWindow.getAllWindows().length })) : undefined;
+    for (const path of controlRoots) await assert.rejects(lstat(path), { code: "ENOENT" });
+    const started = performance.now();
+    const request = execute(executable, ["--control", command], { env: controlEnvironment, timeout: 8000, maxBuffer: 4096 });
+    const original = request.child, pid = original.pid; assert.ok(pid);
+    const owner = { child: original, closed: Promise.resolve(), closeObserved: false };
+    owner.closed = new Promise<void>((accept) => original.once("close", () => { owner.closeObserved = true; accept(); })); owners.push(owner);
+    const force = setTimeout(() => { original.kill("SIGKILL"); }, 9000);
+    let result: ControlWireStatus | undefined;
+    try {
+      if (absent) {
+        await assert.rejects(request, (error: unknown) => z.object({ code: z.literal(1), killed: z.literal(false), signal: z.null(), stdout: z.literal(""),
+          stderr: z.literal(`${capturedControl.productName} is not running in this session. Open the app first.\n`) }).safeParse(error).success);
+      } else {
+        const reply = await request; assert.equal(reply.stderr, ""); assert.ok(reply.stdout.endsWith("\n")); result = parseControlStatus(reply.stdout);
+      }
+      await owner.closed; assert.equal(owner.closeObserved, true); await assert.rejects(lstat(`/proc/${pid}`), { code: "ENOENT" });
+      for (const path of controlRoots) await assert.rejects(lstat(path), { code: "ENOENT" });
+      if (before) {
+        assert.ok(application); assert.deepEqual(await application.evaluate(({ BrowserWindow }) => ({ pid: process.pid, windows: BrowserWindow.getAllWindows().length })), before);
+        assert.equal(appCloseObserved, false);
+      }
+      commandRecords.push({ command, pid, seconds: (performance.now() - started) / 1000, exitCode: absent ? 1 : 0, closed: true,
+        status: result?.status ?? null, elapsed: result?.elapsed.toString() ?? null, recoveryAvailable: result?.recovery_available ?? null });
+      await writeFile(join(evidence, "package-control.json"), JSON.stringify({ identity: capturedControl, executable, endpoint: target, commandRecords,
+        noDisplay: true, noNodeModeOrRuntimeOverrides: true, controlRootsAbsent: true,
+        scope: "Actual frozen package executable before graphical readiness; private session and virtual audio only." }, null, 2), { mode: 0o600 });
+      return result;
+    } finally { clearTimeout(force); }
+  };
+  const control = async (action?: ControlAction) => {
+    if (packaged) { const result = await packageCommand(action ?? "status"); assert.ok(result); return result.status; }
     const reply = await execute("/usr/bin/dbus-send", ["--session", "--type=method_call", "--print-reply",
-      "--dest=io.github.whisperfree.dev.Control", "/io/github/whisperfree/dev/Control",
+      `--dest=${target.name}`, target.path,
       `io.github.whisperfree.Control1.${action ? "Execute" : "Status"}`, ...(action ? [`string:${action}`] : [])],
     { env, timeout: 10_000, maxBuffer: 4096 });
-    const value = /string "(idle|recording|transcribing|unavailable)"/u.exec(reply.stdout)?.[1];
-    assert.ok(value, "Owned control must return only its finite status."); return value;
+    const value = /^\s*string "(\{[^\r\n]*\})"\s*$/mu.exec(reply.stdout)?.[1];
+    assert.ok(value, "Owned control must return its closed JSON status."); return parseControlStatus(value.replaceAll('\\"', '"')).status;
   };
   const assertNoDevControl = async () => {
     const reply = await execute("/usr/bin/dbus-send", ["--session", "--type=method_call", "--print-reply", "--dest=org.freedesktop.DBus",
       "/org/freedesktop/DBus", "org.freedesktop.DBus.NameHasOwner", "string:io.github.whisperfree.dev.Control"], { env, timeout: 5000, maxBuffer: 4096 });
     assert.match(reply.stdout, /boolean false/u);
   };
-  if (stablePackage) await assertNoDevControl(); else assert.equal(await control(), "idle");
+  if (stablePackage) { await assertNoDevControl(); assert.equal(await control(), initial.status); }
+  else assert.equal(await control(), "idle");
   if (installation) {
     await checkpoint("refuse-existing-owned-installation");
     const original = application.process(), originalPid = original.pid; assert.ok(originalPid);
@@ -1203,17 +1252,21 @@ async function main(): Promise<void> {
   assert.equal((await state()).recovery_available, false); assert.deepEqual(await readdir(profile.paths.recovery), []);
   assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
   checks.push("actual UI Cancel closes the original capture without recovery");
-  if (!stablePackage) {
+  if (!stablePackage || packaged) {
   await checkpoint("actual-command-start-ui-cancel");
   assert.equal(await control("start"), "recording"); await until(async () => (await state()).status === "recording");
   assert.equal(await control(), "recording");
   await page.locator("#cancel").click(); await until(async () => (await state()).status === "idle");
   await page.locator("#record").click(); await until(async () => (await state()).status === "recording");
   assert.equal(await control("cancel"), "idle"); await until(async () => (await state()).status === "idle");
+  if (packaged) {
+    assert.equal(await control("toggle"), "recording"); await until(async () => (await state()).status === "recording");
+    assert.equal(await control("cancel"), "idle"); await until(async () => (await state()).status === "idle");
+  }
   assert.equal(await control("start"), "recording"); await until(async () => (await state()).status === "recording");
   assert.equal(await control("cancel"), "idle"); await until(async () => (await state()).status === "idle");
   assert.deepEqual(await readdir(profile.paths.recovery), []);
-  checks.push("private command Start and GUI Cancel; later GUI Start and command Cancel share exact owners");
+  checks.push(`${packaged ? "actual no-display package CLI" : "private command"} Start/Status/Cancel${packaged ? "/Toggle" : ""} and GUI cancellation share exact owners${packaged ? "; package CLI creates no profile or window" : ""}`);
   } else await assertNoDevControl();
   await checkpoint("actual-ui-start");
   if (stockKde) await stockPress();
@@ -1234,7 +1287,11 @@ async function main(): Promise<void> {
   await execute("/usr/bin/paplay", ["--raw", "--format=float32le", "--rate=48000", "--channels=1", `--device=${sink}`, audioPath], { env, timeout: 30_000, maxBuffer: 1024 });
   await delay(200);
   await checkpoint("actual-ui-stop");
-  if (stockKde) await stockPress(); else if (nativeX11) await nativePress(); else await portal("Press");
+  if (packaged) {
+    const stopped = await control("stop"); assert.ok(stopped === "transcribing" || stopped === "done");
+    assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
+    checks.push("actual no-display package CLI Stop returns after private capture closure; recognition and delivery are checked separately");
+  } else if (stockKde) await stockPress(); else if (nativeX11) await nativePress(); else await portal("Press");
   await until(async () => {
     const value = await state();
     if (value.status === "error") throw new Error("OWNED_TRANSCRIPTION_FAILED");
@@ -1249,7 +1306,7 @@ async function main(): Promise<void> {
   assert.equal(sha(await readFile(join(stable, "sentinel"))), stableBefore);
   const maps = await readFile(`/proc/${security.pid}/maps`, "utf8");
   assert.equal(maps.includes("openwhisper_capture.node"), false); assert.equal(maps.includes("openwhisper_speech.node"), false);
-  checks.push(`${stockKde ? "actual stock KGlobalAccel F8" : nativeX11 ? "actual native X11 F8" : "actual owned portal"} Start/Stop; real CPU Tiny recognition; private clipboard exact readback; history confirmation; recovery removal; native capture/speech absent from main`);
+  checks.push(`${stockKde ? "actual stock KGlobalAccel F8" : nativeX11 ? "actual native X11 F8" : "actual owned portal"} Start${packaged ? "; no-display package CLI Stop" : "/Stop"}; real CPU Tiny recognition; private clipboard exact readback; history confirmation; recovery removal; native capture/speech absent from main`);
   if (stockKde || nativeX11) await page.evaluate(() => window.openwhisper?.invoke("clear_shortcut", {}));
   else await page.locator('[data-portal="clear_shortcut"]').click();
   await until(async () => (await state()).shortcut === null && !(await state()).shortcut_configuring);
@@ -1331,20 +1388,23 @@ async function main(): Promise<void> {
     assert.match(resources["pids.events"] ?? "", /(?:^|\n)max 0(?:\n|$)/u);
     assert.equal(resources["pids.max"]?.trim(), "256");
   }
+  await checkpoint("graceful-normal-quit");
+  await application.close(); await appOriginalClose; application = undefined;
+  if (packaged) { await packageCommand("status", true); checks.push("absent package owner refuses no-display CLI without activation, profile creation or residual process"); }
   await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", checks, architecture: process.arch, uid: process.getuid?.(),
     transcriptCharacters: result.transcript.length, transcriptSha256: sha(Buffer.from(result.transcript)), countryRecognized: true,
     clipboardConfirmed: true, historyConfirmed: true, recoveryRemoved: true, cancelConfirmed: true, retryConfirmed: true, discardConfirmed: true,
     nativeInMain: false, security,
     sourceScope: "owned-generated-PipeWire-Pulse-monitor-only", fixtureSha256: sha(publicSpeech),
     ...(nativeX11 ? { nativeX11: true, nativeCapture: true, escapePreserved: true, holdStaleReleaseSafe: true, clearedKeyInactive: true } : {}),
-    ...(packaged ? { packagedApplication: true, packageAppPath: packageRoot, executable } : {}),
+    ...(packaged ? { packagedApplication: true, packageAppPath: packageRoot, executable, packageControl: { allCommands: true, noDisplay: true,
+      profileAbsent: true, absentOwnerRefused: true, processesClosed: true } } : {}),
     ...(installation ? { installedRuntime: true, installation } : {}),
     ...(stablePackage ? { stableRuntime: true, stableMigration: { legacyRetry: true, cpuFallback: true, editedStateRetained: true,
       discardNotReplayed: true, originalsPreserved: true, devSentinelUnchanged: true, devControlAbsent: true } } : {}),
     physicalMicrophone: "NOT_USED", hotkeys: stockKde ? "OWNED_STOCK_KDE_KGLOBALACCEL_KEY_EDGES" : nativeX11 ? "OWNED_XVFB_NATIVE_XTEST_KEYS" : "OWNED_SYNTHETIC_PORTAL_SIGNALS_ONLY", portalResourcesClosed: true,
     automaticPaste: "NOT_TESTED", gpu: "NOT_TESTED", macos: "NOT_TESTED" }, null, 2), { mode: 0o600 });
-  await checkpoint("graceful-normal-quit");
-  await application.close(); await appOriginalClose; application = undefined; status = "PASS";
+  status = "PASS";
 }
 try { await main(); } catch (error: unknown) {
   // Installation precedes model/profile creation and capture; retain only its bounded metadata error.

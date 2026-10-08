@@ -69,15 +69,15 @@ const initialize = (appId?: "io.github.whisperfree.dev" | "io.github.whisperfree
 });
 const shutdown = (): PlatformRequest => ({ version: 1, id: randomUUID(), command: "shutdown" });
 
-test("synthetic worker stable ownership avoids Dev control while omitted and explicit Dev keep it", { skip: process.platform !== "linux" }, async () => {
+test("synthetic worker exports exactly its stable or Dev control identity", { skip: process.platform !== "linux" }, async () => {
   for (const appId of [undefined, "io.github.whisperfree.dev", "io.github.whisperfree"] as const) {
     await owner(async (fixture, send) => {
       const ready = platformReplySchema.parse(await send(initialize(appId)));
       assert.equal(ready.ok, true); assert.equal(fixture.buses.length, 1);
       const bus = fixture.buses[0]!;
-      assert.equal(bus.exportCount, appId === "io.github.whisperfree" ? 0 : 1);
+      assert.equal(bus.exportCount, 1);
       const requested = bus.calls.filter((call) => call.member === "RequestName").map((call) => parseBusValues(call.body)[0]);
-      assert.deepEqual(requested, appId === "io.github.whisperfree" ? [] : [{ type: "s", value: "io.github.whisperfree.dev.Control" }]);
+      assert.deepEqual(requested, [{ type: "s", value: appId === "io.github.whisperfree" ? "io.github.whisperfree.Control" : "io.github.whisperfree.dev.Control" }]);
       const repeat = platformReplySchema.parse(await send(initialize(appId)));
       assert.deepEqual(repeat.ok ? null : repeat.code, "BUSY"); assert.equal(fixture.buses.length, 1);
       assert.equal(platformReplySchema.parse(await send(shutdown())).ok, true);
@@ -86,7 +86,7 @@ test("synthetic worker stable ownership avoids Dev control while omitted and exp
     });
   }
 });
-test("synthetic stable worker closes an acquired bus on portal initialization failure and refuses replay", { skip: process.platform !== "linux" }, async () => {
+test("synthetic stable worker closes an acquired bus on control initialization failure and refuses replay", { skip: process.platform !== "linux" }, async () => {
   await owner(async (fixture, send) => {
     const failed = platformReplySchema.parse(await send(initialize("io.github.whisperfree")));
     assert.deepEqual(failed.ok ? null : failed.code, "UNAVAILABLE");
@@ -135,7 +135,7 @@ test("synthetic worker retires a late portal or control acquisition before exit 
       assert.deepEqual(refused.ok ? null : refused.code, "TEARDOWN_FAILED");
       assert.deepEqual(fixture.exitCodes, [1]); assert.equal(fixture.buses[0]?.closeCount, 1);
       assert.equal(fixture.buses[0]?.subscriptions.size, 0);
-      assert.equal(fixture.buses[0]?.exportCount, appId === "io.github.whisperfree" ? 0 : 1);
+      assert.equal(fixture.buses[0]?.exportCount, 1);
     });
   }
 });

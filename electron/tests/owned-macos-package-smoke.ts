@@ -1,29 +1,78 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { chmod, copyFile, lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { _electron, expect, type ElectronApplication, type Page } from "@playwright/test";
 import { z } from "zod";
-import { appStateSchema } from "../src/contracts/ui.js";
+import { appStateSchema, preferencesSchema, snippetSchema } from "../src/contracts/ui.js";
+import { buildIdentitySchema, parseApplicationBuildModule } from "../src/contracts/build-identity.js";
+import { validateMacBundleMetadata } from "../src/main/build-selection.js";
+import { legacyMacosMigrationContextSchema } from "../src/services/legacy-macos-data.js";
+import { decodedLegacyMacosPlistSchema } from "../src/workers/macos-legacy-plist.js";
 import { pinnedRuntimeEnvironment } from "../scripts/runtime.js";
 
-// This script launches only an explicitly supplied Dev package inside the owned Mac CI VM.
+// Stable selection changes only this launcher; the captured package must independently match.
 if (process.platform !== "darwin" || process.getuid?.() === 0 || process.env["GITHUB_ACTIONS"] !== "true" ||
-  process.env["OPENWHISPER_OWNED_MAC_PACKAGE_SMOKE"] !== "1") throw new Error("Mac package smoke requires explicit owned non-root Mac CI execution.");
+  process.env["OPENWHISPER_OWNED_MAC_PACKAGE_SMOKE"] !== "1") {
+  throw new Error("Mac package smoke requires explicit owned non-root Mac CI execution.");
+}
 const args = process.argv.slice(2);
-if (args.length !== 6 || args[0] !== "--package" || args[2] !== "--evidence" || args[4] !== "--fixtures" || !args[1] || !args[3] || !args[5] ||
-  ![args[1], args[3], args[5]].every((path) => isAbsolute(path) && !path.includes("\0"))) throw new Error("Usage: owned-macos-package-smoke.ts --package /absolute/Dev.app --evidence /absolute/fresh/evidence --fixtures /absolute/pinned/fixtures");
+if (![6, 8].includes(args.length) || args[0] !== "--package" || args[2] !== "--evidence" || args[4] !== "--fixtures" ||
+  (args.length === 8 && args[6] !== "--variant") || !args[1] || !args[3] || !args[5] ||
+  ![args[1], args[3], args[5]].every((path) => isAbsolute(path) && !path.includes("\0"))) {
+  throw new Error("Usage: owned-macos-package-smoke.ts --package /absolute/App.app --evidence /absolute/fresh/evidence --fixtures /absolute/pinned/fixtures [--variant development|stable]");
+}
+const variant = z.enum(["development", "stable"]).parse(args.length === 8 ? args[7] : "development");
+const stable = variant === "stable";
+if (stable && process.env["RUNNER_ENVIRONMENT"] !== "github-hosted") throw new Error("Stable smoke requires the disposable hosted Mac account.");
 const sourceBundle = resolve(args[1]), evidence = resolve(args[3]), fixtures = resolve(args[5]);
-if (await realpath(sourceBundle) !== sourceBundle || !sourceBundle.endsWith("/OpenWhisper Dev.app") || evidence.startsWith(`${sourceBundle}/`)) throw new Error("An existing real Dev app and separate fresh evidence directory are required.");
+const sourceRoot = join(sourceBundle, "Contents/Resources/app");
+const capturedBuild = parseApplicationBuildModule(await readFile(join(sourceRoot, "dist/main/application-build.js"), "utf8"));
+assert.equal(capturedBuild.kind, variant, "The explicit launcher variant must match the original package build.");
+if (await realpath(sourceBundle) !== sourceBundle || !sourceBundle.endsWith(`/${capturedBuild.productName}.app`) ||
+  evidence === sourceBundle || evidence.startsWith(`${sourceBundle}/`) || sourceBundle.startsWith(`${evidence}/`)) {
+  throw new Error("A matching real package and separate fresh evidence directory are required.");
+}
 await mkdir(evidence, { mode: 0o700 });
+assert.equal(await realpath(evidence), evidence);
+assert.equal((await lstat(evidence)).uid, process.getuid?.());
 const profile = join(evidence, "fresh-profile"), installationRoot = join(evidence, "Installation Slot");
-const bundle = join(installationRoot, "OpenWhisper Dev.app"), sourceExecutable = join(sourceBundle, "Contents/MacOS/OpenWhisper Dev");
-const executable = join(bundle, "Contents/MacOS/OpenWhisper Dev"), appPath = join(bundle, "Contents/Resources/app");
+const bundle = join(installationRoot, `${capturedBuild.productName}.app`), sourceExecutable = join(sourceBundle, `Contents/MacOS/${capturedBuild.productName}`);
+const executable = join(bundle, `Contents/MacOS/${capturedBuild.productName}`), appPath = join(bundle, "Contents/Resources/app");
 assert.equal((await lstat(sourceExecutable)).isSymbolicLink(), false);
 const sourceDescriptorPath = join(sourceBundle, "Contents/Resources/app/dist/main/development-recording-build.js");
 const sourceDescriptor = await readFile(sourceDescriptorPath);
-const packageMetadata: unknown = JSON.parse(await readFile(join(sourceBundle, "Contents/Resources/notices/mac-dev-package.json"), "utf8"));
-assert.ok(typeof packageMetadata === "object" && packageMetadata !== null && Reflect.get(packageMetadata, "architecture") === process.arch);
+const packageMetadata = z.object({ architecture: z.literal(process.arch), sourceVersion: z.string().regex(/^\d+\.\d+\.\d+$/u),
+  runtimeVersion: z.literal("44.7.0"), applicationBuild: buildIdentitySchema }).parse(JSON.parse(await readFile(join(sourceBundle,
+    `Contents/Resources/notices/${stable ? "mac-stable-validation-package" : "mac-dev-package"}.json`), "utf8")) as unknown);
+assert.deepEqual(packageMetadata.applicationBuild, capturedBuild);
+
+const ownedHome = join(evidence, "home"), legacyRoot = join(ownedHome, "Library/Application Support/WhisperFree");
+const legacySnippets = join(legacyRoot, "snippets.json"), legacyModel = join(legacyRoot, "Models/ggml-tiny.bin");
+const configRoot = join(ownedHome, "Library/Application Support/io.github.whisperfree/electron");
+const cacheRoot = join(ownedHome, "Library/Caches/io.github.whisperfree/electron");
+const ownedSnippet = snippetSchema.parse({ id: "b445efb4-72bb-4b98-97a7-576866917ec5", trigger: "owned package",
+  expansion: "OpenWhisper owned stable fixture 日本語", enabled: true });
+const vocabulary = "OwnedStableFixture, 日本語";
+const digest = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
+async function frozenFile(path: string) {
+  const metadata = await lstat(path, { bigint: true });
+  assert.ok(metadata.isFile() && !metadata.isSymbolicLink() && metadata.nlink === 1n && metadata.uid === BigInt(process.getuid?.() ?? -1));
+  return { dev: String(metadata.dev), ino: String(metadata.ino), size: String(metadata.size), mode: String(metadata.mode),
+    mtimeNs: String(metadata.mtimeNs), ctimeNs: String(metadata.ctimeNs), sha256: digest(await readFile(path)) };
+}
+let originals: Awaited<ReturnType<typeof frozenFile>>[] | undefined;
+let completionFiles: Awaited<ReturnType<typeof frozenFile>>[] | undefined;
+const migrationPaths = [join(configRoot, "migration.json"), join(configRoot, "legacy/snippets.json"),
+  join(configRoot, "legacy/decoded.json"), join(configRoot, "legacy/conversion.json")];
+async function preserved(): Promise<void> {
+  assert.deepEqual(await readFile(sourceDescriptorPath), sourceDescriptor);
+  assert.deepEqual(await readFile(join(appPath, "dist/main/development-recording-build.js")), sourceDescriptor);
+  assert.deepEqual(await Promise.all([legacySnippets, legacyModel].map(frozenFile)), originals);
+  if (completionFiles) assert.deepEqual(await Promise.all(migrationPaths.map(frozenFile)), completionFiles);
+  await assert.rejects(lstat(join(ownedHome, "Library/Preferences/io.github.whisperfree.plist")), { code: "ENOENT" });
+}
 
 let application: ElectronApplication | undefined, page: Page | undefined;
 let identity: { executable: string; appPath: string; packaged: boolean; name: string;
@@ -32,6 +81,8 @@ let stage = "launch", passed = false;
 let failure: { name: string; message?: string } | undefined;
 let nativeUtilityLoading: unknown;
 let installation: unknown;
+let stableMigration: unknown;
+let restartExit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
 const checks: string[] = [];
 try {
   const environment: Record<string, string> = {};
@@ -43,25 +94,55 @@ try {
     encoding: "utf8", timeout: 15_000, maxBuffer: 64 * 1024 });
   assert.match(embeddedNode.trim(), /^v(?:24|25|26)\.[0-9]+\.[0-9]+$/u, "The existing package must provide its embedded Node CLI without an app launch.");
   checks.push("Existing packaged runtime provides the embedded Node CLI without a system Node installation or fuse change");
-  stage = "fresh-dev-installation";
   const installArguments = [join(sourceBundle, "Contents/Resources/app/dist/cli/install-dev.js"), "--source", sourceBundle,
     "--installation-root", installationRoot, "--profile", profile];
   const installEnvironment = { ...environment, ELECTRON_RUN_AS_NODE: "1" };
-  installation = z.object({ installationRoot: z.literal(installationRoot), application: z.literal(bundle),
-    executable: z.literal(executable), profile: z.literal(profile), desktopFile: z.null(), sourceDigest: z.string().regex(/^[a-f0-9]{64}$/u),
-    version: z.literal("0.3.0"), launchArguments: z.tuple([z.literal("--dev-profile"), z.literal(profile)]) }).parse(JSON.parse(
-      execFileSync(sourceExecutable, installArguments, { env: installEnvironment, encoding: "utf8", timeout: 120_000, maxBuffer: 256 * 1024 })));
-  await assert.rejects(lstat(profile), { code: "ENOENT" });
+  if (stable) {
+    stage = "fresh-stable-relocation";
+    await mkdir(installationRoot, { mode: 0o700 });
+    execFileSync("/usr/bin/ditto", [sourceBundle, bundle], { env: environment, timeout: 120_000, stdio: "ignore" });
+    execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], { env: environment, timeout: 15_000, stdio: "ignore" });
+    const bundleInfo: unknown = JSON.parse(execFileSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", join(bundle, "Contents/Info.plist")],
+      { env: environment, encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024 }));
+    validateMacBundleMetadata(capturedBuild, packageMetadata.sourceVersion, bundleInfo);
+    assert.deepEqual(parseApplicationBuildModule(await readFile(join(appPath, "dist/main/application-build.js"), "utf8")), capturedBuild);
+    stage = "owned-stable-legacy-source";
+    await mkdir(ownedHome, { mode: 0o700 });
+    await mkdir(join(legacyRoot, "Models"), { recursive: true, mode: 0o700 });
+    const fixture = join(fixtures, "ggml-tiny.bin");
+    assert.equal(await realpath(fixtures), fixtures);
+    assert.ok((await lstat(fixture)).isFile() && !(await lstat(fixture)).isSymbolicLink());
+    const fixtureBytes = await readFile(fixture);
+    assert.equal(fixtureBytes.length, 77_691_713);
+    assert.equal(digest(fixtureBytes), "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21");
+    await copyFile(fixture, legacyModel); await chmod(legacyModel, 0o644);
+    await writeFile(legacySnippets, JSON.stringify([ownedSnippet]), { flag: "wx", mode: 0o600 });
+    originals = await Promise.all([legacySnippets, legacyModel].map(frozenFile));
+    await assert.rejects(lstat(configRoot), { code: "ENOENT" });
+    environment["HOME"] = ownedHome;
+    environment["TMPDIR"] = evidence;
+    installation = { applicationBuild: capturedBuild, installationRoot, application: bundle, executable,
+      version: packageMetadata.sourceVersion, launchArguments: [], source: "fresh signed validation package copy; no installer" };
+    await preserved();
+    checks.push("Fresh signed stable app copied into owned slot; owned legacy snippets/model only; no preferences-domain write or Dev installer");
+  } else {
+    stage = "fresh-dev-installation";
+    installation = z.object({ installationRoot: z.literal(installationRoot), application: z.literal(bundle),
+      executable: z.literal(executable), profile: z.literal(profile), desktopFile: z.null(), sourceDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+      version: z.literal("0.3.0"), launchArguments: z.tuple([z.literal("--dev-profile"), z.literal(profile)]) }).parse(JSON.parse(
+        execFileSync(sourceExecutable, installArguments, { env: installEnvironment, encoding: "utf8", timeout: 120_000, maxBuffer: 256 * 1024 })));
+    await assert.rejects(lstat(profile), { code: "ENOENT" });
+    checks.push("Embedded Node CLI copies and verifies a fresh signed Dev app, preserving source inputs and leaving the explicit profile nonexistent");
+  }
   assert.deepEqual(await readFile(sourceDescriptorPath), sourceDescriptor);
   assert.equal((await lstat(executable)).isSymbolicLink(), false);
-  checks.push("Embedded Node CLI copies and verifies a fresh signed Dev app, preserving source inputs and leaving the explicit profile nonexistent");
   stage = "launch";
-  application = await _electron.launch({ executablePath: executable, args: ["--dev-profile", profile],
+  application = await _electron.launch({ executablePath: executable, args: stable ? [] : ["--dev-profile", profile],
     env: environment, chromiumSandbox: true, timeout: 30_000 });
   const original = application.process();
   const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((accept) => original.once("close", (code, signal) => accept({ code, signal })));
   page = await application.firstWindow();
-  await expect(page.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev", { timeout: 15_000 });
+  await expect(page.locator(".sidebar-brand strong")).toHaveText(capturedBuild.productName, { timeout: 15_000 });
   assert.equal(page.url(), "app://openwhisper/index.html");
   stage = "package-identity";
   identity = await application.evaluate(({ app, BrowserWindow }) => {
@@ -72,190 +153,257 @@ try {
       userData: app.getPath("userData"), sessionData: app.getPath("sessionData"),
       sandbox: renderer?.sandboxed };
   });
-  assert.equal(identity.executable, executable, "The actual Dev executable must run.");
+  assert.equal(identity.executable, executable, "The actual selected executable must run.");
   assert.equal(identity.appPath, appPath, "The package must use its own Resources/app.");
   assert.equal(identity.packaged, true, "Electron must recognize the renamed packaged executable.");
-  assert.equal(identity.name, "OpenWhisper Dev", "The app must retain the separate Dev name.");
+  assert.equal(identity.name, capturedBuild.productName, "The app must match its captured product name.");
   assert.equal(identity.sandbox, true, "The actual Mac renderer must have its OS sandbox enabled.");
   assert.deepEqual(await page.evaluate(() => ({ node: typeof Reflect.get(window, "process"), require: typeof Reflect.get(window, "require") })),
     { node: "undefined", require: "undefined" });
-  assert.ok(identity.userData.startsWith(`${profile}/`) && identity.sessionData.startsWith(`${profile}/`));
-  checks.push("Actual packaged executable and Resources/app; isolated Dev profile; sandboxed shared UI");
+  if (stable) {
+    assert.equal(identity.userData, configRoot); assert.equal(identity.sessionData, join(cacheRoot, "session"));
+  } else assert.ok(identity.userData.startsWith(`${profile}/`) && identity.sessionData.startsWith(`${profile}/`));
+  checks.push(`Actual packaged executable and Resources/app; isolated ${variant} storage; sandboxed shared UI`);
   stage = "native-composition";
   const state = async () => appStateSchema.parse(await page!.evaluate(() => window.openwhisper!.invoke("get_state", {})));
   const initial = await state();
-  assert.equal(initial.profile, "development"); assert.equal(initial.platform, "macos");
+  assert.equal(initial.profile, stable ? undefined : "development"); assert.equal(initial.platform, "macos");
   assert.equal(initial.native_shortcuts, true, "The packaged normal main must enable Mac keyboard controls.");
   assert.equal(initial.macos?.shortcut_toggle_only, true, "The Mac recording descriptor must be active.");
-  assert.equal(initial.status, "idle"); assert.equal(initial.installed.length, 0); assert.equal(initial.microphones.length, 0);
+  assert.equal(initial.status, "idle"); assert.deepEqual(initial.installed, stable ? ["tiny"] : []); assert.equal(initial.microphones.length, 0);
   assert.equal(initial.preferences.macos_shortcut ?? null, null);
   checks.push("Normal production main factory initializes from signed packaged retirement/native descriptors");
-  stage = "existing-installation-refusal";
-  const refused = spawnSync(sourceExecutable, installArguments, { env: installEnvironment, encoding: "utf8", shell: false,
-    timeout: 30_000, maxBuffer: 256 * 1024 });
-  assert.equal(refused.error, undefined); assert.equal(refused.status, 1); assert.equal(refused.signal, null);
-  assert.match(refused.stderr, /A fresh path is required/u);
-  assert.equal(original.exitCode, null); assert.equal(original.signalCode, null);
-  assert.equal((await state()).status, "idle");
-  assert.deepEqual(await readFile(sourceDescriptorPath), sourceDescriptor);
-  assert.deepEqual(await readFile(join(appPath, "dist/main/development-recording-build.js")), sourceDescriptor);
-  checks.push("A second installation refuses the existing root while the original relocated app remains alive and idle");
-  stage = "signed-native-utility-loading";
-  nativeUtilityLoading = await application.evaluate(async ({ app, utilityProcess, session }, fixtureRoot: string) => {
-    const path = process.getBuiltinModule("path"), modules = process.getBuiltinModule("module"), crypto = process.getBuiltinModule("crypto");
-    const fs = process.getBuiltinModule("fs/promises");
-    if (!path || !modules || !crypto || !fs || !app.isPackaged) throw new Error("Packaged utility inputs unavailable.");
-    const root = app.getAppPath(), deadline = Date.now() + 90_000;
-    let phase = "packaged-inputs";
-    // Object methods avoid tsx's external function-name helper in Playwright's serialized callback.
-    const bounded = { async call<T>(operation: Promise<T>, until = deadline, maximum = 8000): Promise<T> {
-      let timer: NodeJS.Timeout | undefined;
-      try { return await Promise.race([operation, new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${phase}: deadline`)), Math.max(1, Math.min(maximum, until - Date.now())));
-      })]); } finally { if (timer) clearTimeout(timer); }
-    } }.call;
-    const requireCondition = { call(value: unknown, message: string): void { if (!value) throw new Error(`${phase}: ${message}`); } }.call;
-    const mainInventory = { call(): boolean {
-      if (process.report) { process.report.excludeEnv = true; Reflect.set(process.report, "excludeNetwork", true); }
-      const report: unknown = process.report?.getReport();
-      const objects: unknown = report && typeof report === "object" ? Reflect.get(report, "sharedObjects") : undefined;
-      requireCondition(Array.isArray(objects) && objects.every((item: unknown) => typeof item === "string"), "main native inventory unavailable");
-      return (objects as string[]).some((item) => /openwhisper_(?:macos_capture|speech)\.node$/u.test(item));
-    } }.call;
-    type Owner = { child: ReturnType<typeof utilityProcess.fork>; spawned: Promise<number>; exit: Promise<number>;
-      exited: boolean; failed: boolean; frames: unknown[]; wake: (() => void) | undefined; pid: number | undefined };
-    const owners: Owner[] = [];
-    let capture: { pid: number; generation: number; exitCode: number } | undefined;
-    let speech: { pid: number; gpu: null; exitCode: number } | undefined;
-    let inference: { recognized: boolean; modelSha256: string; audioSha256: string; sampleCount: number } | undefined;
-    let error: string | undefined;
-    try {
-      requireCondition(!mainInventory(), "capture/speech loaded in main before utility test");
-      // Inspector eval has no dynamic-import callback; require the packaged synchronous ESM graph.
-      const packagedRequire = modules.createRequire(path.join(root, "package.json"));
-      const build = packagedRequire(path.join(root, "dist/main/development-recording-build.js")) as { DEVELOPMENT_RECORDING_BUILD: unknown };
-      const schema = packagedRequire(path.join(root, "dist/main/development-recording-descriptor.js")) as typeof import("../src/main/development-recording-descriptor.js");
-      const artifacts = packagedRequire(path.join(root, "dist/services/development-artifact.js")) as typeof import("../src/services/development-artifact.js");
-      const recording = packagedRequire(path.join(root, "dist/workers/macos-recording-host-protocol.js")) as typeof import("../src/workers/macos-recording-host-protocol.js");
-      const resources = packagedRequire(path.join(root, "dist/services/speech-resources.js")) as typeof import("../src/services/speech-resources.js");
-      const graph = packagedRequire(path.join(root, "dist/services/speech-entry-graph.js")) as typeof import("../src/services/speech-entry-graph.js");
-      const control = packagedRequire(path.join(root, "dist/workers/speech-control.js")) as typeof import("../src/workers/speech-control.js");
-      const protocol = packagedRequire(path.join(root, "dist/workers/speech-protocol.js")) as typeof import("../src/workers/speech-protocol.js");
-      const mac = packagedRequire(path.join(root, "dist/main/macos-speech-host.js")) as typeof import("../src/main/macos-speech-host.js");
-      const descriptor = schema.developmentRecordingDescriptorSchema.parse(build.DEVELOPMENT_RECORDING_BUILD);
-      requireCondition(descriptor.platform === "darwin" && descriptor.architecture === process.arch, "descriptor platform/architecture");
-      const spawn = { call(entry: string, arguments_: string[], serviceName: string): Owner {
-        const child = utilityProcess.fork(entry, arguments_, { serviceName, stdio: "ignore", execArgv: [], session: session.defaultSession,
-          allowLoadingUnsignedLibraries: false, respondToAuthRequestsFromMainProcess: false, env: mac.macSpeechEnvironment(process.env) });
-        let acceptSpawn!: (pid: number) => void, rejectSpawn!: (error: Error) => void, acceptExit!: (code: number) => void;
-        const owner: Owner = { child, spawned: new Promise((accept, reject) => { acceptSpawn = accept; rejectSpawn = reject; }),
-          exit: new Promise((accept) => { acceptExit = accept; }), exited: false, failed: false, frames: [], wake: undefined, pid: undefined };
-        owners.push(owner); void owner.spawned.catch(() => {});
-        child.once("spawn", () => { const pid = child.pid;
-          if (!pid) { owner.failed = true; rejectSpawn(new Error("Original utility PID missing")); }
-          else { owner.pid = pid; acceptSpawn(pid); } owner.wake?.(); });
-        child.on("message", (input: unknown) => { if (owner.frames.length >= 64) owner.failed = true; else owner.frames.push(input); owner.wake?.(); });
-        child.on("error", () => { owner.failed = true; rejectSpawn(new Error("Original utility error")); owner.wake?.(); });
-        child.once("exit", (code) => { owner.exited = true; acceptExit(code); rejectSpawn(new Error("Original utility exited")); owner.wake?.(); });
-        return owner;
+  if (stable) {
+    stage = "stable-native-context";
+    const nativeFacts = await application.evaluate(async ({ app }) => {
+      const modules = process.getBuiltinModule("module"), path = process.getBuiltinModule("path"),
+        fs = process.getBuiltinModule("fs/promises"), os = process.getBuiltinModule("os");
+      if (!modules || !path || !fs || !os) throw new Error("Native main facts are unavailable.");
+      const root = app.getAppPath(), packagedRequire = modules.createRequire(path.join(root, "package.json"));
+      const admission = packagedRequire(path.join(root, "dist/main/macos-stable-admission.js")) as typeof import("../src/main/macos-stable-admission.js");
+      const build = packagedRequire(path.join(root, "dist/main/application-build.js")) as { APPLICATION_BUILD: unknown };
+      const context = admission.macosMigrationContext({ languages: app.getPreferredSystemLanguages(), architecture: process.arch,
+        physicalMemory: os.totalmem(), loginStatus: app.getLoginItemSettings({ type: "mainAppService" }).status,
+        catalog: JSON.parse(await fs.readFile(path.join(root, "dist/resources/models.json"), "utf8")) as unknown });
+      return { context, build: build.APPLICATION_BUILD, home: os.homedir(), argv: process.argv,
+        logs: app.getPath("logs"), diskCache: app.commandLine.getSwitchValue("disk-cache-dir") };
+    });
+    const nativeContext = legacyMacosMigrationContextSchema.parse(nativeFacts.context);
+    assert.deepEqual(buildIdentitySchema.parse(nativeFacts.build), capturedBuild);
+    assert.equal(nativeFacts.home, ownedHome); assert.equal(nativeFacts.logs, join(cacheRoot, "logs"));
+    assert.equal(nativeFacts.diskCache, join(cacheRoot, "cache"));
+    assert.ok(nativeFacts.argv.every((argument) => !["--dev", "--dev-profile", "--control"].some((flag) =>
+      argument === flag || argument.startsWith(`${flag}=`))));
+    const backup = z.object({ bytes: z.int().positive(), sha256: z.string().regex(/^[a-f0-9]{64}$/u) });
+    const manifest = z.object({ version: z.literal(1), appId: z.literal("io.github.whisperfree"),
+      sourceFormat: z.literal("macos-v0.2.5"), preferences: z.null(), snippets: backup, decoded: backup, conversion: backup })
+      .parse(JSON.parse(await readFile(migrationPaths[0]!, "utf8")) as unknown);
+    const rawSnippet = await readFile(legacySnippets);
+    assert.deepEqual(await readFile(migrationPaths[1]!), rawSnippet);
+    for (const [path, expected] of [[migrationPaths[1]!, manifest.snippets], [migrationPaths[2]!, manifest.decoded],
+      [migrationPaths[3]!, manifest.conversion]] as const) {
+      const bytes = await readFile(path); assert.equal(bytes.length, expected.bytes); assert.equal(digest(bytes), expected.sha256);
+    }
+    assert.deepEqual(decodedLegacyMacosPlistSchema.parse(JSON.parse(await readFile(migrationPaths[2]!, "utf8")) as unknown),
+      { plist: {}, nativeValues: [] });
+    const conversion = z.object({ context: legacyMacosMigrationContextSchema, snippets: z.array(snippetSchema),
+      history: z.array(z.string()) }).parse(JSON.parse(await readFile(migrationPaths[3]!, "utf8")) as unknown);
+    assert.deepEqual(conversion.context, nativeContext); assert.deepEqual(conversion.snippets, [ownedSnippet]);
+    assert.deepEqual(conversion.history, []); assert.deepEqual(initial.preferences.snippets, [ownedSnippet]);
+    assert.equal(initial.preferences.model, nativeContext.defaults.recommendedModel);
+    const nativeLanguage = preferencesSchema.shape.language.safeParse(Array.from(nativeContext.systemLanguage).slice(0, 2).join(""));
+    assert.equal(initial.preferences.language, nativeLanguage.success ? nativeLanguage.data : "auto");
+    assert.equal(initial.preferences.gpu, nativeContext.defaults.appleSilicon);
+    assert.equal(initial.preferences.launch_at_login, nativeContext.defaults.launchAtLogin);
+    assert.deepEqual(preferencesSchema.parse(JSON.parse(await readFile(join(configRoot, "settings/preferences.json"), "utf8")) as unknown), initial.preferences);
+    assert.deepEqual(JSON.parse(await readFile(join(configRoot, "history/history.json"), "utf8")) as unknown, []);
+    for (const path of [ownedHome, configRoot, join(configRoot, "settings"), join(configRoot, "legacy"), cacheRoot, identity.sessionData, nativeFacts.logs]) {
+      const metadata = await lstat(path); assert.ok(metadata.isDirectory() && !metadata.isSymbolicLink());
+      assert.equal(metadata.uid, process.getuid?.()); assert.equal(metadata.mode & 0o7777, 0o700);
+    }
+    assert.ok((await readdir(join(ownedHome, "Library/Application Support/io.github.whisperfree")))
+      .every((name) => !name.startsWith(".electron-migration-")));
+    completionFiles = await Promise.all(migrationPaths.map(frozenFile)); await preserved();
+    stableMigration = { context: nativeContext, preferencesDomain: "actual OS current user / io.github.whisperfree / AnyHost; empty",
+      archivedPlist: "ABSENT", sourceFormat: manifest.sourceFormat, legacySnippetSha256: digest(rawSnippet),
+      legacyModelSha256: originals?.[1]?.sha256, preferenceWrites: "owned JSON only; no CFPreferences writes",
+      readiness: "ordinary packaged main reached UI after its pre-ready profile guard" };
+    stage = "stable-migrated-ui";
+    await page.locator('[data-tab="snippets"]').click();
+    await expect(page.locator('#snippet-form [name="trigger"]')).toHaveValue(ownedSnippet.trigger);
+    await expect(page.locator('#snippet-form [name="expansion"]')).toHaveValue(ownedSnippet.expansion);
+    await page.locator('[data-tab="models"]').click();
+    await expect(page.locator('[data-delete="tiny"]')).toBeVisible();
+    checks.push("Normal stable migration agrees actual empty native domain, real login/hardware/language defaults, exact raw snippets backup and legacy Tiny inventory");
+  }
+  if (!stable) {
+    stage = "existing-installation-refusal";
+    const refused = spawnSync(sourceExecutable, installArguments, { env: installEnvironment, encoding: "utf8", shell: false,
+      timeout: 30_000, maxBuffer: 256 * 1024 });
+    assert.equal(refused.error, undefined); assert.equal(refused.status, 1); assert.equal(refused.signal, null);
+    assert.match(refused.stderr, /A fresh path is required/u);
+    assert.equal(original.exitCode, null); assert.equal(original.signalCode, null);
+    assert.equal((await state()).status, "idle");
+    assert.deepEqual(await readFile(sourceDescriptorPath), sourceDescriptor);
+    assert.deepEqual(await readFile(join(appPath, "dist/main/development-recording-build.js")), sourceDescriptor);
+    checks.push("A second installation refuses the existing root while the original relocated app remains alive and idle");
+    stage = "signed-native-utility-loading";
+    nativeUtilityLoading = await application.evaluate(async ({ app, utilityProcess, session }, fixtureRoot: string) => {
+      const path = process.getBuiltinModule("path"), modules = process.getBuiltinModule("module"), crypto = process.getBuiltinModule("crypto");
+      const fs = process.getBuiltinModule("fs/promises");
+      if (!path || !modules || !crypto || !fs || !app.isPackaged) throw new Error("Packaged utility inputs unavailable.");
+      const root = app.getAppPath(), deadline = Date.now() + 90_000;
+      let phase = "packaged-inputs";
+      // Object methods avoid tsx's external function-name helper in Playwright's serialized callback.
+      const bounded = { async call<T>(operation: Promise<T>, until = deadline, maximum = 8000): Promise<T> {
+        let timer: NodeJS.Timeout | undefined;
+        try { return await Promise.race([operation, new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`${phase}: deadline`)), Math.max(1, Math.min(maximum, until - Date.now())));
+        })]); } finally { if (timer) clearTimeout(timer); }
       } }.call;
-      const next = { async call(owner: Owner, maximum = 8000): Promise<unknown> {
-        while (!owner.frames.length) {
-          requireCondition(!owner.failed && !owner.exited, "original utility failed/exited before reply");
-          await bounded(new Promise<void>((accept) => { owner.wake = accept; }), deadline, maximum); owner.wake = undefined;
+      const requireCondition = { call(value: unknown, message: string): void { if (!value) throw new Error(`${phase}: ${message}`); } }.call;
+      const mainInventory = { call(): boolean {
+        if (process.report) { process.report.excludeEnv = true; Reflect.set(process.report, "excludeNetwork", true); }
+        const report: unknown = process.report?.getReport();
+        const objects: unknown = report && typeof report === "object" ? Reflect.get(report, "sharedObjects") : undefined;
+        requireCondition(Array.isArray(objects) && objects.every((item: unknown) => typeof item === "string"), "main native inventory unavailable");
+        return (objects as string[]).some((item) => /openwhisper_(?:macos_capture|speech)\.node$/u.test(item));
+      } }.call;
+      type Owner = { child: ReturnType<typeof utilityProcess.fork>; spawned: Promise<number>; exit: Promise<number>;
+        exited: boolean; failed: boolean; frames: unknown[]; wake: (() => void) | undefined; pid: number | undefined };
+      const owners: Owner[] = [];
+      let capture: { pid: number; generation: number; exitCode: number } | undefined;
+      let speech: { pid: number; gpu: null; exitCode: number } | undefined;
+      let inference: { recognized: boolean; modelSha256: string; audioSha256: string; sampleCount: number } | undefined;
+      let error: string | undefined;
+      try {
+        requireCondition(!mainInventory(), "capture/speech loaded in main before utility test");
+        // Inspector eval has no dynamic-import callback; require the packaged synchronous ESM graph.
+        const packagedRequire = modules.createRequire(path.join(root, "package.json"));
+        const build = packagedRequire(path.join(root, "dist/main/development-recording-build.js")) as { DEVELOPMENT_RECORDING_BUILD: unknown };
+        const schema = packagedRequire(path.join(root, "dist/main/development-recording-descriptor.js")) as typeof import("../src/main/development-recording-descriptor.js");
+        const artifacts = packagedRequire(path.join(root, "dist/services/development-artifact.js")) as typeof import("../src/services/development-artifact.js");
+        const recording = packagedRequire(path.join(root, "dist/workers/macos-recording-host-protocol.js")) as typeof import("../src/workers/macos-recording-host-protocol.js");
+        const resources = packagedRequire(path.join(root, "dist/services/speech-resources.js")) as typeof import("../src/services/speech-resources.js");
+        const graph = packagedRequire(path.join(root, "dist/services/speech-entry-graph.js")) as typeof import("../src/services/speech-entry-graph.js");
+        const control = packagedRequire(path.join(root, "dist/workers/speech-control.js")) as typeof import("../src/workers/speech-control.js");
+        const protocol = packagedRequire(path.join(root, "dist/workers/speech-protocol.js")) as typeof import("../src/workers/speech-protocol.js");
+        const mac = packagedRequire(path.join(root, "dist/main/macos-speech-host.js")) as typeof import("../src/main/macos-speech-host.js");
+        const descriptor = schema.developmentRecordingDescriptorSchema.parse(build.DEVELOPMENT_RECORDING_BUILD);
+        requireCondition(descriptor.platform === "darwin" && descriptor.architecture === process.arch, "descriptor platform/architecture");
+        const spawn = { call(entry: string, arguments_: string[], serviceName: string): Owner {
+          const child = utilityProcess.fork(entry, arguments_, { serviceName, stdio: "ignore", execArgv: [], session: session.defaultSession,
+            allowLoadingUnsignedLibraries: false, respondToAuthRequestsFromMainProcess: false, env: mac.macSpeechEnvironment(process.env) });
+          let acceptSpawn!: (pid: number) => void, rejectSpawn!: (error: Error) => void, acceptExit!: (code: number) => void;
+          const owner: Owner = { child, spawned: new Promise((accept, reject) => { acceptSpawn = accept; rejectSpawn = reject; }),
+            exit: new Promise((accept) => { acceptExit = accept; }), exited: false, failed: false, frames: [], wake: undefined, pid: undefined };
+          owners.push(owner); void owner.spawned.catch(() => {});
+          child.once("spawn", () => { const pid = child.pid;
+            if (!pid) { owner.failed = true; rejectSpawn(new Error("Original utility PID missing")); }
+            else { owner.pid = pid; acceptSpawn(pid); } owner.wake?.(); });
+          child.on("message", (input: unknown) => { if (owner.frames.length >= 64) owner.failed = true; else owner.frames.push(input); owner.wake?.(); });
+          child.on("error", () => { owner.failed = true; rejectSpawn(new Error("Original utility error")); owner.wake?.(); });
+          child.once("exit", (code) => { owner.exited = true; acceptExit(code); rejectSpawn(new Error("Original utility exited")); owner.wake?.(); });
+          return owner;
+        } }.call;
+        const next = { async call(owner: Owner, maximum = 8000): Promise<unknown> {
+          while (!owner.frames.length) {
+            requireCondition(!owner.failed && !owner.exited, "original utility failed/exited before reply");
+            await bounded(new Promise<void>((accept) => { owner.wake = accept; }), deadline, maximum); owner.wake = undefined;
+          }
+          requireCondition(!owner.failed, "original utility channel failed"); return owner.frames.shift();
+        } }.call;
+        phase = "capture-entry";
+        const captureEntry = await bounded(artifacts.verifyDevelopmentMacCaptureEntry(root, descriptor.captureEntry));
+        const epoch = crypto.randomUUID(), captureOwner = spawn(captureEntry, [epoch], "OpenWhisper Dev Capture Load Check");
+        const capturePid = await bounded(captureOwner.spawned);
+        const captureReady = recording.macRecordingHostReplySchema.parse(await next(captureOwner));
+        requireCondition(captureReady.kind === "ready" && captureReady.epoch === epoch && captureReady.pid === capturePid, "original capture ready identity");
+        const captureControl = { async call(command: "configure" | "close") {
+          const id = crypto.randomUUID();
+          const request = recording.macRecordingHostRequestSchema.parse({ version: 1, channel: "recording-host", epoch, id, command,
+            ...(command === "configure" ? { capture: descriptor.capture, request: {
+              model: { path: path.join(app.getPath("userData"), "unused-native-loading-model.bin"), family: "whisper", gpu: false },
+              language: "auto", vocabulary: "", snippets: [] } } : {}) });
+          captureOwner.child.postMessage(request);
+          for (;;) {
+            const reply = recording.macRecordingHostReplySchema.parse(await next(captureOwner));
+            requireCondition(reply.epoch === epoch, "capture reply epoch");
+            if (reply.kind === "snapshot") { requireCondition(reply.snapshot.phase === "idle" && reply.snapshot.generation === 0 && !reply.snapshot.busy, "capture must remain idle without Start"); continue; }
+            requireCondition(reply.kind === "control" && reply.id === id && reply.command === command && reply.reply.ok && reply.reply.generation === 0, "capture control identity/result");
+            break;
+          }
+        } }.call;
+        phase = "capture-configure-native-load"; await captureControl("configure");
+        phase = "capture-close"; await captureControl("close");
+        const captureExit = await bounded(captureOwner.exit); requireCondition(captureExit === 0, "capture original exit");
+        capture = { pid: capturePid, generation: 0, exitCode: captureExit };
+        phase = "speech-entry";
+        const catalog = await bounded(resources.prepareSpeechResources(path.join(root, "dist"), descriptor.speech));
+        const preparedGraph = await bounded(graph.prepareSpeechEntryGraph(root, descriptor.speechEntryGraph));
+        const entry = await bounded(graph.verifySpeechEntryGraph(preparedGraph)), resource = await bounded(resources.verifySpeechResource(catalog, "cpu"));
+        const speechEpoch = crypto.randomUUID(), speechOwner = spawn(entry.entry, [resource.path, speechEpoch], "OpenWhisper Dev Speech Load Check");
+        const speechPid = await bounded(speechOwner.spawned);
+        protocol.speechReadySchema.parse(await next(speechOwner));
+        phase = "speech-challenges";
+        for (let index = 0; index < 2; index++) {
+          const nonce = crypto.randomUUID(); speechOwner.child.postMessage(control.speechChallengeRequestSchema.parse({ version: 1, type: "challenge", epoch: speechEpoch, nonce }));
+          const reply = control.speechChallengeReplySchema.parse(await next(speechOwner));
+          requireCondition(reply.pid === speechPid && reply.epoch === speechEpoch && reply.nonce === nonce, "original speech challenge identity");
         }
-        requireCondition(!owner.failed, "original utility channel failed"); return owner.frames.shift();
-      } }.call;
-      phase = "capture-entry";
-      const captureEntry = await bounded(artifacts.verifyDevelopmentMacCaptureEntry(root, descriptor.captureEntry));
-      const epoch = crypto.randomUUID(), captureOwner = spawn(captureEntry, [epoch], "OpenWhisper Dev Capture Load Check");
-      const capturePid = await bounded(captureOwner.spawned);
-      const captureReady = recording.macRecordingHostReplySchema.parse(await next(captureOwner));
-      requireCondition(captureReady.kind === "ready" && captureReady.epoch === epoch && captureReady.pid === capturePid, "original capture ready identity");
-      const captureControl = { async call(command: "configure" | "close") {
-        const id = crypto.randomUUID();
-        const request = recording.macRecordingHostRequestSchema.parse({ version: 1, channel: "recording-host", epoch, id, command,
-          ...(command === "configure" ? { capture: descriptor.capture, request: {
-            model: { path: path.join(app.getPath("userData"), "unused-native-loading-model.bin"), family: "whisper", gpu: false },
-            language: "auto", vocabulary: "", snippets: [] } } : {}) });
-        captureOwner.child.postMessage(request);
-        for (;;) {
-          const reply = recording.macRecordingHostReplySchema.parse(await next(captureOwner));
-          requireCondition(reply.epoch === epoch, "capture reply epoch");
-          if (reply.kind === "snapshot") { requireCondition(reply.snapshot.phase === "idle" && reply.snapshot.generation === 0 && !reply.snapshot.busy, "capture must remain idle without Start"); continue; }
-          requireCondition(reply.kind === "control" && reply.id === id && reply.command === command && reply.reply.ok && reply.reply.generation === 0, "capture control identity/result");
-          break;
-        }
-      } }.call;
-      phase = "capture-configure-native-load"; await captureControl("configure");
-      phase = "capture-close"; await captureControl("close");
-      const captureExit = await bounded(captureOwner.exit); requireCondition(captureExit === 0, "capture original exit");
-      capture = { pid: capturePid, generation: 0, exitCode: captureExit };
-      phase = "speech-entry";
-      const catalog = await bounded(resources.prepareSpeechResources(path.join(root, "dist"), descriptor.speech));
-      const preparedGraph = await bounded(graph.prepareSpeechEntryGraph(root, descriptor.speechEntryGraph));
-      const entry = await bounded(graph.verifySpeechEntryGraph(preparedGraph)), resource = await bounded(resources.verifySpeechResource(catalog, "cpu"));
-      const speechEpoch = crypto.randomUUID(), speechOwner = spawn(entry.entry, [resource.path, speechEpoch], "OpenWhisper Dev Speech Load Check");
-      const speechPid = await bounded(speechOwner.spawned);
-      protocol.speechReadySchema.parse(await next(speechOwner));
-      phase = "speech-challenges";
-      for (let index = 0; index < 2; index++) {
-        const nonce = crypto.randomUUID(); speechOwner.child.postMessage(control.speechChallengeRequestSchema.parse({ version: 1, type: "challenge", epoch: speechEpoch, nonce }));
-        const reply = control.speechChallengeReplySchema.parse(await next(speechOwner));
-        requireCondition(reply.pid === speechPid && reply.epoch === speechEpoch && reply.nonce === nonce, "original speech challenge identity");
-      }
-      const speechRequest = { async call(command: "discover" | "shutdown") {
-        const id = crypto.randomUUID(); speechOwner.child.postMessage(protocol.speechRequestSchema.parse({ version: 1, id, command }));
-        const reply = protocol.speechReplySchema.parse(await next(speechOwner));
-        requireCondition(reply.id === id && reply.ok && reply.value.command === command, "speech reply identity/result");
-        if (reply.ok && reply.value.command === "discover") requireCondition(reply.value.gpu === null, "CPU package capability");
-      } }.call;
-      phase = "speech-discover-native-load"; await speechRequest("discover");
-      phase = "speech-pinned-fixtures";
-      requireCondition(await bounded(fs.realpath(fixtureRoot)) === fixtureRoot, "real pinned fixture directory");
-      const modelPath = path.join(fixtureRoot, "ggml-tiny.bin"), audioPath = path.join(fixtureRoot, "jfk.f32");
-      const modelFile = await bounded(fs.lstat(modelPath)), audioFile = await bounded(fs.lstat(audioPath));
-      requireCondition(modelFile.isFile() && !modelFile.isSymbolicLink() && modelFile.size === 77_691_713 &&
-        audioFile.isFile() && !audioFile.isSymbolicLink() && audioFile.size === 704_000, "pinned fixture file identities/sizes");
-      const [modelBytes, audioBytes] = await bounded(Promise.all([fs.readFile(modelPath), fs.readFile(audioPath)]));
-      const modelSha256 = crypto.createHash("sha256").update(modelBytes).digest("hex"), audioSha256 = crypto.createHash("sha256").update(audioBytes).digest("hex");
-      requireCondition(modelBytes.length === 77_691_713 && modelSha256 === "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21" &&
-        audioBytes.length === 704_000 && audioSha256 === "ebd52851100536db02d12c49fddd010372dcdc70243562e057553d476b706ae0", "pinned fixture byte hashes");
-      const samples = new Float32Array(audioBytes.length / Float32Array.BYTES_PER_ELEMENT);
-      new Uint8Array(samples.buffer).set(audioBytes); // Copy the exact public Float32 fixture bytes.
-      inference = { recognized: false, modelSha256, audioSha256, sampleCount: samples.length };
-      phase = "speech-transcribe-cpu-fixture";
-      const transcriptionId = crypto.randomUUID();
-      speechOwner.child.postMessage(protocol.speechRequestSchema.parse({ version: 1, id: transcriptionId, command: "transcribe",
-        model: { path: modelPath, family: "whisper", gpu: false }, samples, language: "en", vocabulary: "" }));
-      const transcription = protocol.speechReplySchema.parse(await next(speechOwner, 30_000));
-      requireCondition(transcription.id === transcriptionId && transcription.ok && transcription.value.command === "transcribe", "speech transcription reply identity/result");
-      inference.recognized = transcription.ok && transcription.value.command === "transcribe" && /ask not what your country can do for you/iu.test(transcription.value.text);
-      requireCondition(inference.recognized, "pinned public phrase recognition");
-      phase = "speech-shutdown"; await speechRequest("shutdown");
-      requireCondition(speechOwner.child.kill(), "original speech termination request");
-      const speechExit = await bounded(speechOwner.exit); requireCondition(speechExit === 0, "speech original exit");
-      speech = { pid: speechPid, gpu: null, exitCode: speechExit };
-      requireCondition(!mainInventory(), "capture/speech loaded in main after utility test");
-    } catch (failure: unknown) { error = failure instanceof Error ? failure.message.slice(0, 1000) : "Unknown utility failure"; }
-    const cleanupDeadline = Date.now() + 8000;
-    const cleanup = await Promise.allSettled(owners.map(async (owner) => {
-      if (!owner.exited && !owner.child.kill()) throw new Error("Original utility cleanup request refused");
-      await bounded(owner.exit, cleanupDeadline);
-      if (owner.failed) throw new Error("Original utility error/channel failure retained through exit");
-    }));
-    const cleanupPassed = cleanup.every((item) => item.status === "fulfilled");
-    let mainCaptureSpeechFree = false;
-    try { mainCaptureSpeechFree = !mainInventory(); }
-    catch (failure: unknown) { error ??= failure instanceof Error ? failure.message.slice(0, 1000) : "Main inventory unavailable after cleanup"; }
-    return { status: error || !cleanupPassed || !mainCaptureSpeechFree ? "FAIL" : "PASS", phase, error, capture, speech, inference, cleanupPassed, mainCaptureSpeechFree,
-      cleanupErrors: cleanup.filter((item) => item.status === "rejected").map((item) => item.reason instanceof Error ? item.reason.message : "Original exit not observed"),
-      originalExitsObserved: owners.map((owner) => ({ pid: owner.pid, exited: owner.exited })),
-      scope: "Signed production capture configure + CPU Tiny/JFK inference; no Start, TCC, microphone audio or full retirement claim" };
-  }, fixtures);
-  assert.ok(typeof nativeUtilityLoading === "object" && nativeUtilityLoading !== null);
-  assert.equal(Reflect.get(nativeUtilityLoading, "status"), "PASS", JSON.stringify(nativeUtilityLoading));
-  checks.push("Signed production capture configure and pinned CPU Tiny/JFK inference in original utilities; original cleanup exits observed; no main capture/speech addon");
+        const speechRequest = { async call(command: "discover" | "shutdown") {
+          const id = crypto.randomUUID(); speechOwner.child.postMessage(protocol.speechRequestSchema.parse({ version: 1, id, command }));
+          const reply = protocol.speechReplySchema.parse(await next(speechOwner));
+          requireCondition(reply.id === id && reply.ok && reply.value.command === command, "speech reply identity/result");
+          if (reply.ok && reply.value.command === "discover") requireCondition(reply.value.gpu === null, "CPU package capability");
+        } }.call;
+        phase = "speech-discover-native-load"; await speechRequest("discover");
+        phase = "speech-pinned-fixtures";
+        requireCondition(await bounded(fs.realpath(fixtureRoot)) === fixtureRoot, "real pinned fixture directory");
+        const modelPath = path.join(fixtureRoot, "ggml-tiny.bin"), audioPath = path.join(fixtureRoot, "jfk.f32");
+        const modelFile = await bounded(fs.lstat(modelPath)), audioFile = await bounded(fs.lstat(audioPath));
+        requireCondition(modelFile.isFile() && !modelFile.isSymbolicLink() && modelFile.size === 77_691_713 &&
+          audioFile.isFile() && !audioFile.isSymbolicLink() && audioFile.size === 704_000, "pinned fixture file identities/sizes");
+        const [modelBytes, audioBytes] = await bounded(Promise.all([fs.readFile(modelPath), fs.readFile(audioPath)]));
+        const modelSha256 = crypto.createHash("sha256").update(modelBytes).digest("hex"), audioSha256 = crypto.createHash("sha256").update(audioBytes).digest("hex");
+        requireCondition(modelBytes.length === 77_691_713 && modelSha256 === "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21" &&
+          audioBytes.length === 704_000 && audioSha256 === "ebd52851100536db02d12c49fddd010372dcdc70243562e057553d476b706ae0", "pinned fixture byte hashes");
+        const samples = new Float32Array(audioBytes.length / Float32Array.BYTES_PER_ELEMENT);
+        new Uint8Array(samples.buffer).set(audioBytes); // Copy the exact public Float32 fixture bytes.
+        inference = { recognized: false, modelSha256, audioSha256, sampleCount: samples.length };
+        phase = "speech-transcribe-cpu-fixture";
+        const transcriptionId = crypto.randomUUID();
+        speechOwner.child.postMessage(protocol.speechRequestSchema.parse({ version: 1, id: transcriptionId, command: "transcribe",
+          model: { path: modelPath, family: "whisper", gpu: false }, samples, language: "en", vocabulary: "" }));
+        const transcription = protocol.speechReplySchema.parse(await next(speechOwner, 30_000));
+        requireCondition(transcription.id === transcriptionId && transcription.ok && transcription.value.command === "transcribe", "speech transcription reply identity/result");
+        inference.recognized = transcription.ok && transcription.value.command === "transcribe" && /ask not what your country can do for you/iu.test(transcription.value.text);
+        requireCondition(inference.recognized, "pinned public phrase recognition");
+        phase = "speech-shutdown"; await speechRequest("shutdown");
+        requireCondition(speechOwner.child.kill(), "original speech termination request");
+        const speechExit = await bounded(speechOwner.exit); requireCondition(speechExit === 0, "speech original exit");
+        speech = { pid: speechPid, gpu: null, exitCode: speechExit };
+        requireCondition(!mainInventory(), "capture/speech loaded in main after utility test");
+      } catch (failure: unknown) { error = failure instanceof Error ? failure.message.slice(0, 1000) : "Unknown utility failure"; }
+      const cleanupDeadline = Date.now() + 8000;
+      const cleanup = await Promise.allSettled(owners.map(async (owner) => {
+        if (!owner.exited && !owner.child.kill()) throw new Error("Original utility cleanup request refused");
+        await bounded(owner.exit, cleanupDeadline);
+        if (owner.failed) throw new Error("Original utility error/channel failure retained through exit");
+      }));
+      const cleanupPassed = cleanup.every((item) => item.status === "fulfilled");
+      let mainCaptureSpeechFree = false;
+      try { mainCaptureSpeechFree = !mainInventory(); }
+      catch (failure: unknown) { error ??= failure instanceof Error ? failure.message.slice(0, 1000) : "Main inventory unavailable after cleanup"; }
+      return { status: error || !cleanupPassed || !mainCaptureSpeechFree ? "FAIL" : "PASS", phase, error, capture, speech, inference, cleanupPassed, mainCaptureSpeechFree,
+        cleanupErrors: cleanup.filter((item) => item.status === "rejected").map((item) => item.reason instanceof Error ? item.reason.message : "Original exit not observed"),
+        originalExitsObserved: owners.map((owner) => ({ pid: owner.pid, exited: owner.exited })),
+        scope: "Signed production capture configure + CPU Tiny/JFK inference; no Start, TCC, microphone audio or full retirement claim" };
+    }, fixtures);
+    assert.ok(typeof nativeUtilityLoading === "object" && nativeUtilityLoading !== null);
+    assert.equal(Reflect.get(nativeUtilityLoading, "status"), "PASS", JSON.stringify(nativeUtilityLoading));
+    checks.push("Signed production capture configure and pinned CPU Tiny/JFK inference in original utilities; original cleanup exits observed; no main capture/speech addon");
+  }
   const accelerator = "Command+Shift+F8";
   assert.equal(await application.evaluate(({ globalShortcut }, key) => globalShortcut.isRegistered(key), accelerator), false);
   stage = "shortcut-setup";
@@ -284,19 +432,48 @@ try {
   await expect.poll(async () => (await state()).preferences.macos_shortcut, { timeout: 10_000 }).toBe(null);
   assert.equal(await application.evaluate(({ globalShortcut }, key) => globalShortcut.isRegistered(key), accelerator), false);
   checks.push("Normal Remove trigger unregisters the actual shortcut");
+  if (stable) {
+    stage = "stable-preference-edit";
+    await page.locator("#vocabulary").fill(vocabulary); await page.locator("#save-vocabulary").click();
+    await expect.poll(async () => (await state()).preferences.vocabulary, { timeout: 10_000 }).toBe(vocabulary);
+    await preserved();
+  }
   stage = "original-quit";
   await application.close();
   const exit = await closed; application = undefined;
   assert.equal(exit.code, 0); assert.equal(exit.signal, null);
   checks.push("Original packaged process exits cleanly through normal Quit and application cleanup");
-  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", architecture: process.arch, identity, checks,
-    input: "CDP to owned window only; no OS global input injection", microphone: "No permission request, capture Start or microphone operation; pinned public inference fixture only",
-    installation, nativeUtilityLoading, tccAttribution: "Permission and real microphone behavior remain pending", exit }, null, 2), { mode: 0o600 });
+  if (stable) {
+    await preserved(); stage = "stable-normal-restart";
+    application = await _electron.launch({ executablePath: executable, args: [], env: environment, chromiumSandbox: true, timeout: 30_000 });
+    const restarted = application.process();
+    const restartedClosed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((accept) =>
+      restarted.once("close", (code, signal) => accept({ code, signal })));
+    page = await application.firstWindow();
+    await expect(page.locator(".sidebar-brand strong")).toHaveText(capturedBuild.productName, { timeout: 15_000 });
+    assert.equal(page.url(), "app://openwhisper/index.html");
+    const retained = await state();
+    assert.equal(retained.profile, undefined); assert.equal(retained.status, "idle"); assert.deepEqual(retained.installed, ["tiny"]);
+    assert.equal(retained.preferences.vocabulary, vocabulary); assert.deepEqual(retained.preferences.snippets, [ownedSnippet]);
+    assert.equal(retained.preferences.macos_shortcut ?? null, null);
+    await page.locator('[data-tab="general"]').click(); await expect(page.locator("#vocabulary")).toHaveValue(vocabulary);
+    await preserved(); stage = "restarted-original-quit";
+    await application.close(); restartExit = await restartedClosed; application = undefined;
+    assert.equal(restartExit.code, 0); assert.equal(restartExit.signal, null); await preserved();
+    checks.push("Owned vocabulary edit survives normal stable restart; raw originals and completion stay unchanged; second original Quit exits 0");
+  }
+  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", architecture: process.arch, applicationBuild: capturedBuild, identity, checks,
+    input: "CDP to owned window only; no OS global input injection", microphone: stable
+      ? "No permission request, capture Start, recording stream or inference in this stable smoke"
+      : "No permission request, capture Start or microphone operation; pinned public inference fixture only",
+    installation, nativeUtilityLoading, stableMigration, tccAttribution: "Permission and real microphone behavior remain pending", exit, restartExit,
+    scope: stable ? "Actual stable normal main/bundle/native empty-domain migration/UI/preferences/regular shortcut/restart/clean Quit; no stable recording or CPU claim"
+      : "Actual Dev package plus signed capture configure and CPU fixture utilities" }, null, 2), { mode: 0o600 });
   passed = true;
 } catch (error: unknown) {
   failure = error instanceof Error ? { name: error.name, message: error.message.slice(0, 2000) } : { name: "UNKNOWN" };
   if (page && !page.isClosed()) await page.screenshot({ path: join(evidence, "failure.png"), fullPage: true }).catch(() => {});
-  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "FAIL", stage, identity, checks, installation, nativeUtilityLoading,
+  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "FAIL", stage, applicationBuild: capturedBuild, identity, checks, installation, nativeUtilityLoading, stableMigration,
     error: failure }, null, 2), { mode: 0o600 });
   process.exitCode = 1;
 } finally {

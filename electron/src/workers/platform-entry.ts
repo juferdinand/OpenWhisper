@@ -28,7 +28,9 @@ function portMethod(name: "on" | "postMessage"): (...args: unknown[]) => unknown
 }
 const subscribe = portMethod("on"), send = portMethod("postMessage");
 const port: ParentPort = { on: (event, listener) => subscribe(event, listener), postMessage: (value) => { send(value); } };
-const unavailable: ControlCapturePort = { status: () => "unavailable", start: async () => { throw new Error("Capture unavailable."); } };
+const unavailable: ControlCapturePort = { status: () => "unavailable",
+  wireStatus: () => ({ status: "idle", elapsed: 0n, recovery_available: false }),
+  start: async () => { throw new Error("Capture unavailable."); } };
 let service: DevControlService | undefined;
 let ownedBus: LinuxBus | undefined;
 let initializeTask: Promise<void> | undefined;
@@ -52,8 +54,8 @@ function closeResources(): Promise<void> {
     // Release input/capture leases while their original bus and RPC are live.
     const input = await Promise.allSettled([paste?.close(), shortcuts?.close()]);
     const control = await Promise.allSettled([service?.close()]);
-    // Stable has no control service. Retain every bus acquired during setup,
-    // including a bus whose later portal or control initialization failed.
+    // Retain every bus acquired during setup, including a bus whose later
+    // portal or control initialization failed.
     const bus = await Promise.allSettled([ownedBus?.close()]);
     captureClient?.close();
     if ([...input, ...control, ...bus].some((result) => result.status === "rejected")) throw new BusFailure("TEARDOWN_FAILED");
@@ -106,9 +108,7 @@ port.on("message", (message) => {
             current();
           }
           generation = ownedBus.generation;
-          if (appId === "io.github.whisperfree.dev") {
-            service = await DevControlService.create(ownedBus, capture); current();
-          }
+          service = await DevControlService.create(ownedBus, capture, appId === "io.github.whisperfree" ? "stable" : "development"); current();
           const journal = request.kdeLeasePath ? await PrivateStateStore.open(request.kdeLeasePath, kdeJournalSchema, [], 4096) : undefined;
           current();
           if (captureClient) {

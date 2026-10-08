@@ -1,10 +1,12 @@
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { buildIdentitySchema, type BuildIdentity } from "../contracts/build-identity.js";
+import { parseLaunchArguments } from "../cli/arguments.js";
 
 export interface ApplicationBuildSelectionOptions {
   readonly build: unknown; readonly argv: readonly string[]; readonly platform: string; readonly architecture: string;
   readonly packaged: boolean; readonly executable: string; readonly appPath: string;
   readonly resourcesPath: string; readonly distribution: string; readonly projectVersion: string; readonly packageVersion: string;
+  readonly purpose?: "gui" | "control";
 }
 const version = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 function fixedPath(path: string): boolean { return isAbsolute(path) && path === resolve(path) && !/[\u0000-\u001f\u007f]/u.test(path); }
@@ -27,6 +29,12 @@ export function validateMacBundleMetadata(build: unknown, projectVersion: string
 /** The host supplies canonical runtime paths. This consistency gate performs no filesystem effects and proves no signing authenticity. */
 export function selectApplicationBuild(options: ApplicationBuildSelectionOptions): BuildIdentity {
   const identity = buildIdentitySchema.parse(options.build);
+  if (options.purpose !== undefined && options.purpose !== "gui" && options.purpose !== "control") throw new Error("Invalid application launch purpose.");
+  if (options.purpose === "control" && (options.platform !== "linux" || parseLaunchArguments(options.argv,
+    options.packaged ? { kind: "packaged", executable: options.executable } :
+      { kind: "development", executable: options.executable, application: options.appPath }).kind !== "control")) {
+    throw new Error("Command control requires its exact Linux launch arguments.");
+  }
   if ((options.platform !== "linux" && options.platform !== "darwin") ||
       (options.architecture !== "x64" && options.architecture !== "arm64") ||
       !version.test(options.projectVersion) || options.projectVersion !== options.packageVersion ||
@@ -35,7 +43,7 @@ export function selectApplicationBuild(options: ApplicationBuildSelectionOptions
   if (identity.kind === "development") {
     if (hasFlag(options.argv, "--stable") || hasFlag(options.argv, "--production")) throw new Error("A Dev build cannot open stable storage.");
   } else if (!options.packaged ||
-      ["--dev", "--dev-profile", "--control"].some((flag) => hasFlag(options.argv, flag))) {
+      ["--dev", "--dev-profile", ...(options.purpose === "control" ? [] : ["--control"])].some((flag) => hasFlag(options.argv, flag))) {
     throw new Error("The stable build requires its packaged GUI identity.");
   }
   if (options.packaged) {

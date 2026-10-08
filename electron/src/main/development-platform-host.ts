@@ -8,6 +8,7 @@ import { boundPlatformFrame, platformCaptureRequestSchema, platformCaptureReplyS
 import { createUtilityPlatformChannelFactory, PlatformChannelError, type PlatformChannel } from "./platform-channel.js";
 import { linuxApplicationIdSchema, type LinuxApplicationId, type PortalShortcutState } from "../platforms/linux/shared/portal-shortcuts.js";
 import type { PortalPasteState } from "../platforms/linux/shared/portal-paste.js";
+import { serializeControlStatus } from "../platforms/linux/shared/control-status.js";
 
 export const developmentPlatformHostDescriptorSchema = z.strictObject({
   root: z.string().min(1).refine((path) => isAbsolute(path) && resolve(path) === path && !path.includes("\0")),
@@ -59,6 +60,10 @@ export class DevelopmentPlatformCaptureBridge {
     const operation = Promise.resolve().then(async () => {
       switch (request.command) {
         case "status": return this.success(request, { command: "status", status: controlStatusSchema.parse(await this.capture.status()) });
+        case "wire-status": {
+          if (!this.capture.wireStatus) return this.failed(request, "UNAVAILABLE");
+          return this.success(request, { command: "wire-status", text: serializeControlStatus(await this.capture.wireStatus()) });
+        }
         case "lease": {
           const lease = await this.capture.currentLease?.();
           if (this.closing) return this.failed(request, "UNAVAILABLE");

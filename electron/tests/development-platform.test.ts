@@ -154,3 +154,16 @@ test("worker current lease preserves the original acquisition and terminal clean
   assert.equal(stops, 1); assert.equal(cancels, 0);
   await bridge.close(); client.close();
 });
+
+test("content-free wire status crosses existing RPC with exact elapsed and rejects extra user content", async () => {
+  const expected = { status: "error" as const, elapsed: 9007199254740993n, recovery_available: true };
+  const bridge = new DevelopmentPlatformCaptureBridge({ status: () => "transcribing", wireStatus: () => expected,
+    async start() { throw Error("Observation must not capture."); } });
+  let client: PlatformCaptureClient;
+  client = new PlatformCaptureClient(bridge.epoch, (request) => { void bridge.handle(request).then((reply) => client.receive(reply)); });
+  assert.deepEqual(await client.wireStatus(), expected);
+  const envelope = frame(bridge, { command: "wire-status" });
+  assert.equal(platformCaptureReplySchema.safeParse({ ...envelope, ok: true,
+    value: { command: "wire-status", text: '{"status":"error","elapsed":0,"recovery_available":true,"transcript":"private"}' } }).success, false);
+  await bridge.close(); client.close();
+});

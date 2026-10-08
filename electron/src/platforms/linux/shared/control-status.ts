@@ -64,3 +64,10 @@ export function serializeControlStatus(value: ControlWireStatus): string {
     typeof value.recovery_available !== "boolean") throw new InvalidControlStatus();
   return `{"status":"${value.status}","elapsed":${value.elapsed},"recovery_available":${value.recovery_available}}`;
 }
+import { z } from "zod";
+
+
+/** RPC transports the exact closed JSON grammar without rounding uint64 values. */
+export const controlWireStatusTextSchema = z.string().max(MAX_CONTROL_STATUS_BYTES).refine((value) => {
+  try { parseControlStatus(value); return true; } catch { return false; }
+});

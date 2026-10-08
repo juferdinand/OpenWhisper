@@ -2,6 +2,7 @@ import type { RecordingSnapshot } from "../core/recording.js";
 import type { ControlCaptureLease, ControlCapturePort, ControlStatus } from "../platforms/linux/shared/control.js";
 import { ControlCaptureLeaseError } from "../platforms/linux/shared/control.js";
 import type { RecordingIdentity } from "./development-recording-host.js";
+import { MAX_CONTROL_ELAPSED, type ControlWireStatus } from "../platforms/linux/shared/control-status.js";
 
 interface RecordingControlOwner {
   currentIdentity(): RecordingIdentity | undefined;
@@ -9,7 +10,7 @@ interface RecordingControlOwner {
 }
 export interface RecordingControlOptions {
   readonly owner: RecordingControlOwner;
-  readonly snapshot: () => Pick<RecordingSnapshot, "phase" | "busy" | "recoveryAvailable">;
+  readonly snapshot: () => Pick<RecordingSnapshot, "phase" | "busy" | "recoveryAvailable"> & { readonly elapsedMs?: number };
   readonly available: () => boolean;
   readonly configure: () => Promise<void>;
   readonly serialize: <T>(operation: () => Promise<T>) => Promise<T>;
@@ -53,6 +54,15 @@ export function createRecordingControlPort(options: RecordingControlOptions): Co
   };
   return Object.freeze({
     status,
+    wireStatus(): ControlWireStatus {
+      const snapshot = options.snapshot(), elapsedMs = snapshot.elapsedMs;
+      if (elapsedMs === undefined || !Number.isFinite(elapsedMs) || elapsedMs < 0) throw new Error("Recording duration is unavailable.");
+      const elapsed = BigInt(Math.floor(elapsedMs / 1000));
+      if (elapsed > MAX_CONTROL_ELAPSED) throw new Error("Recording duration exceeds the control range.");
+      const phase = snapshot.phase === "starting" ? "recording" :
+        snapshot.phase === "stopping" || snapshot.phase === "restoring" || snapshot.phase === "discarding" ? "transcribing" : snapshot.phase;
+      return Object.freeze({ status: phase, elapsed, recovery_available: snapshot.recoveryAvailable });
+    },
     async start(signal: AbortSignal) {
       return options.serialize(async () => {
         if (signal.aborted || status() !== "idle") throw new Error("Recording is unavailable.");

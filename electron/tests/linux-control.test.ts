@@ -4,6 +4,8 @@ import test from "node:test";
 import { BusFailure, type BusEvent, type BusFilter, type BusMethod, type BusReply } from "../src/platforms/linux/shared/bus.js";
 import { DevControlService, DEV_CONTROL_NAME, DEV_CONTROL_PATH, type ControlBus,
   type ControlCaptureLease, type ControlCapturePort, type ControlStatus } from "../src/platforms/linux/shared/control.js";
+import { controlTarget, type ControlKind } from "../src/platforms/linux/shared/control-identity.js";
+import { parseControlStatus } from "../src/platforms/linux/shared/control-status.js";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve = (): void => { throw new Error("Uninitialized fixture."); };
@@ -14,6 +16,7 @@ async function wait(predicate: () => boolean): Promise<void> {
   while (!predicate()) { if (performance.now() - before > 1500) throw new Error("Fixture timed out."); await new Promise<void>((accept) => { setTimeout(accept, 2); }); }
 }
 class FakeBus implements ControlBus {
+  constructor(readonly kind: ControlKind = "development") {}
   generation = randomUUID(); isClosed = false;
   handler: ((event: BusEvent) => void) | undefined;
   watcher: ((event: BusEvent) => void) | undefined;
@@ -26,14 +29,16 @@ class FakeBus implements ControlBus {
   replyEntered = false;
   async call(method: BusMethod): Promise<BusReply> {
     assert.equal(method.destination, "org.freedesktop.DBus"); assert.equal(method.member, "RequestName");
-    assert.deepEqual(method.body, [{ type: "s", value: DEV_CONTROL_NAME }, { type: "u", value: 4 }]);
+    assert.deepEqual(method.body, [{ type: "s", value: controlTarget(this.kind).name }, { type: "u", value: 4 }]);
     this.order.push("name"); return { sender: method.destination, signature: "u", body: [{ type: "u", value: 1 }] };
   }
   async subscribe(filter: BusFilter, handler: (event: BusEvent) => void): Promise<() => Promise<void>> {
     assert.equal(filter.member, "NameOwnerChanged"); this.order.push("watch"); this.watcher = handler;
     return async () => { this.watcher = undefined; };
   }
-  async exportControl(handler: (event: BusEvent) => void): Promise<void> { this.order.push("export"); this.handler = handler; }
+  async exportControl(handler: (event: BusEvent) => void, kind: ControlKind = "development"): Promise<void> {
+    assert.equal(kind, this.kind); this.order.push("export"); this.handler = handler;
+  }
   async authorizeControl(event: BusEvent): Promise<void> {
     await this.authGate;
     if (this.denied) throw new BusFailure("DENIED");
@@ -51,7 +56,7 @@ class FakeBus implements ControlBus {
   async close(): Promise<void> { this.isClosed = true; }
   invoke(action = "status", durationMs = 1000): string {
     const id = randomUUID(); this.handler?.({ kind: "method", id, connection: this.generation, sender: ":1.9",
-      path: DEV_CONTROL_PATH, interface: "io.github.whisperfree.Control1", member: action === "status" ? "Status" : "Execute",
+      path: controlTarget(this.kind).path, interface: "io.github.whisperfree.Control1", member: action === "status" ? "Status" : "Execute",
       signature: action === "status" ? "" : "s", body: action === "status" ? [] : [{ type: "s", value: action }],
       expiresAtUs: (process.hrtime.bigint() / 1000n + BigInt(durationMs * 1000)).toString() }); return id;
   }
@@ -66,6 +71,7 @@ class FakeCapture implements ControlCapturePort {
   startGate: Promise<void> | undefined; stopGate: Promise<void> | undefined;
   signal: AbortSignal | undefined;
   status(): ControlStatus { return this.state; }
+  wireStatus() { return { status: this.state === "unavailable" ? "idle" as const : this.state, elapsed: 0n, recovery_available: false }; }
   async start(signal: AbortSignal): Promise<ControlCaptureLease> {
     this.starts++; this.signal = signal; await this.startGate; this.state = "recording";
     return {
@@ -93,7 +99,7 @@ test("control reserves one action and Stop waits for closure but not duration-de
   const repeated = bus.invoke("toggle"); await wait(() => bus.refusals.some((item) => item.id === repeated));
   assert.equal(bus.refusals.at(-1)?.category, "Busy"); assert.equal(bus.replies.some((item) => item.id === stop), false);
   closure.resolve(); await wait(() => bus.replies.some((item) => item.id === stop));
-  assert.equal(bus.replies.at(-1)?.status, "transcribing");
+  assert.equal(parseControlStatus(bus.replies.at(-1)?.status).status, "transcribing");
   bus.invoke("start"); await wait(() => bus.refusals.at(-1)?.category === "Busy"); assert.equal(capture.starts, 1);
   await service.close();
 });
@@ -140,6 +146,7 @@ test("authenticated Stop captures the exact GUI lease and awaits its original fe
   let state: ControlStatus = "recording";
   const lease: ControlCaptureLease = { async stop() { stops++; await fence.promise; state = "transcribing"; }, async cancel() {} };
   const capture: ControlCapturePort = { status: async () => state, async start() { throw Error("GUI already acquired it."); },
+    wireStatus: () => ({ status: state === "unavailable" ? "idle" : state, elapsed: 0n, recovery_available: false }),
     async currentLease() { lookups++; return lease; } };
   const service = await DevControlService.create(bus, capture);
   bus.denied = true; bus.invoke("stop"); await wait(() => bus.refusals.length === 1);
@@ -147,15 +154,30 @@ test("authenticated Stop captures the exact GUI lease and awaits its original fe
   bus.denied = false; const stop = bus.invoke("stop"); await wait(() => stops === 1);
   assert.equal(bus.replies.some((reply) => reply.id === stop), false);
   fence.resolve(); await wait(() => bus.replies.some((reply) => reply.id === stop));
-  assert.equal(bus.replies.at(-1)?.status, "transcribing"); await service.close();
+  assert.equal(parseControlStatus(bus.replies.at(-1)?.status).status, "transcribing"); await service.close();
 });
 
 test("implemented current lease returning none never falls back to the previous CLI owner", async () => {
   const bus = new FakeBus(); let state: ControlStatus = "idle", oldStops = 0;
   const original: ControlCaptureLease = { async stop() { oldStops++; }, async cancel() {} };
   const capture: ControlCapturePort = { status: async () => state, async start() { state = "recording"; return original; },
+    wireStatus: () => ({ status: state === "unavailable" ? "idle" : state, elapsed: 0n, recovery_available: false }),
     async currentLease() { return undefined; } };
   const service = await DevControlService.create(bus, capture); bus.invoke("start"); await wait(() => bus.replies.length === 1);
   const stop = bus.invoke("stop"); await wait(() => bus.refusals.some((reply) => reply.id === stop));
   assert.equal(oldStops, 0); assert.equal(state, "recording"); await service.close();
+});
+
+test("stable control owns only its fixed legacy endpoint and preserves detailed JSON observation", async () => {
+  const bus = new FakeBus("stable"), capture = new FakeCapture();
+  capture.wireStatus = () => ({ status: "idle", elapsed: 9007199254740993n, recovery_available: true });
+  const service = await DevControlService.create(bus, capture, "stable");
+  const id = bus.invoke("status"); await wait(() => bus.replies.some((reply) => reply.id === id));
+  assert.deepEqual(parseControlStatus(bus.replies.at(-1)?.status), { status: "idle", elapsed: 9007199254740993n, recovery_available: true });
+  const wrong = randomUUID(); bus.handler?.({ kind: "method", id: wrong, connection: bus.generation, sender: ":1.9",
+    path: DEV_CONTROL_PATH, interface: "io.github.whisperfree.Control1", member: "Status", signature: "", body: [],
+    expiresAtUs: (process.hrtime.bigint() / 1000n + 1000000n).toString() });
+  await wait(() => bus.refusals.some((reply) => reply.id === wrong));
+  assert.equal(bus.refusals.at(-1)?.category, "InvalidRequest"); assert.equal(capture.starts, 0);
+  assert.equal(DEV_CONTROL_NAME, controlTarget("development").name); await service.close();
 });

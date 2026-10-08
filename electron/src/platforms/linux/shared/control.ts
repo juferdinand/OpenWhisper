@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { BusFailure, type BusEvent, type BusFilter, type BusMethod, type BusReply } from "./bus.js";
+import { controlTarget, type ControlKind } from "./control-identity.js";
+import { serializeControlStatus, type ControlWireStatus } from "./control-status.js";
 
-export const DEV_CONTROL_NAME = "io.github.whisperfree.dev.Control";
-export const DEV_CONTROL_PATH = "/io/github/whisperfree/dev/Control";
+export const DEV_CONTROL_NAME = controlTarget("development").name;
+export const DEV_CONTROL_PATH = controlTarget("development").path;
 const daemon = "org.freedesktop.DBus";
 export const controlStatusSchema = z.enum(["idle", "recording", "transcribing", "unavailable"]);
 export const controlActionSchema = z.enum(["start", "stop", "toggle", "cancel"]);
@@ -18,6 +20,8 @@ export class ControlCaptureLeaseError extends Error {
 }
 export interface ControlCapturePort {
   status(): ControlStatus | Promise<ControlStatus>;
+  /** Separate wire observation preserves done/error/recovery without changing action gating. */
+  wireStatus?(): ControlWireStatus | Promise<ControlWireStatus>;
   start(signal: AbortSignal): Promise<ControlCaptureLease>;
   /** Capture the current immutable owner after authentication, never retarget a stale lease. */
   currentLease?(): Promise<ControlCaptureLease | undefined>;
@@ -27,7 +31,7 @@ export interface ControlBus {
   readonly isClosed: boolean;
   call(method: BusMethod, signal?: AbortSignal): Promise<BusReply>;
   subscribe(filter: BusFilter, handler: (event: BusEvent) => void): Promise<() => Promise<void>>;
-  exportControl(handler: (event: BusEvent) => void): Promise<void>;
+  exportControl(handler: (event: BusEvent) => void, kind?: ControlKind): Promise<void>;
   authorizeControl(event: BusEvent): Promise<void>;
   controlCurrent(event: BusEvent): boolean;
   reply(id: string, status: string): Promise<void>;
@@ -47,7 +51,7 @@ export class ControlServiceError extends Error {
   }
 }
 
-/** Content-free Dev control. Importing this module neither opens a bus nor captures. */
+/** Content-free control. Importing this module neither opens a bus nor captures. */
 export class DevControlService {
   private readonly epoch = randomUUID();
   private active: Transaction | undefined;
@@ -57,18 +61,19 @@ export class DevControlService {
   private closing = false;
   private unsubscribe: (() => Promise<void>) | undefined;
   private closeTask: Promise<void> | undefined;
-  private constructor(private readonly bus: ControlBus, private readonly capture: ControlCapturePort) {}
+  private constructor(private readonly bus: ControlBus, private readonly capture: ControlCapturePort, private readonly kind: ControlKind) {}
 
-  static async create(bus: ControlBus, capture: ControlCapturePort): Promise<DevControlService> {
-    const service = new DevControlService(bus, capture);
+  static async create(bus: ControlBus, capture: ControlCapturePort, kind: ControlKind = "development"): Promise<DevControlService> {
+    const target = controlTarget(kind);
+    const service = new DevControlService(bus, capture, kind);
     try {
       // Subscribe before authentication/export so a caller cannot disappear unnoticed.
       service.unsubscribe = await bus.subscribe({ sender: daemon, path: "/org/freedesktop/DBus",
         interface: daemon, member: "NameOwnerChanged" }, (event) => { service.ownerChanged(event); });
-      await bus.exportControl((event) => { service.receive(event); });
+      await bus.exportControl((event) => { service.receive(event); }, kind);
       const reply = await bus.call({ destination: daemon, path: "/org/freedesktop/DBus", interface: daemon,
         member: "RequestName", inputSignature: "su", outputSignature: "u",
-        body: [{ type: "s", value: DEV_CONTROL_NAME }, { type: "u", value: 4 }], timeoutMs: 1000 });
+        body: [{ type: "s", value: target.name }, { type: "u", value: 4 }], timeoutMs: 1000 });
       const acquired = reply.body[0];
       if (acquired?.type !== "u" || acquired.value !== 1 || reply.body.length !== 1 || bus.isClosed) throw new ControlServiceError("START_FAILED");
       return service;
@@ -90,7 +95,7 @@ export class DevControlService {
 
   private receive(event: BusEvent): void {
     if (this.closing || this.bus.isClosed) return;
-    if (event.kind !== "method" || event.connection !== this.bus.generation || event.path !== DEV_CONTROL_PATH ||
+    if (event.kind !== "method" || event.connection !== this.bus.generation || event.path !== controlTarget(this.kind).path ||
       event.interface !== "io.github.whisperfree.Control1" ||
       !((event.member === "Status" && event.signature === "" && event.body.length === 0) ||
         (event.member === "Execute" && event.signature === "s" && event.body.length === 1))) {
@@ -127,6 +132,14 @@ export class DevControlService {
     if (this.recording === lease) this.recording = undefined;
   }
 
+  private async replyStatus(transaction: Transaction): Promise<void> {
+    this.current(transaction);
+    if (!this.capture.wireStatus) throw new BusFailure("TRANSPORT_FAILED");
+    const status = serializeControlStatus(await this.capture.wireStatus());
+    this.current(transaction);
+    await this.bus.reply(transaction.event.id, status);
+  }
+
   private async execute(transaction: Transaction): Promise<void> {
     this.current(transaction);
     await this.bus.authorizeControl(transaction.event);
@@ -134,7 +147,7 @@ export class DevControlService {
     const status = controlStatusSchema.parse(await this.capture.status());
     this.current(transaction);
     if (transaction.event.member === "Status") {
-      this.current(transaction); await this.bus.reply(transaction.event.id, status); return;
+      await this.replyStatus(transaction); return;
     }
     const argument = transaction.event.body[0];
     const parsed = controlActionSchema.safeParse(argument?.type === "s" ? argument.value : undefined);
@@ -144,13 +157,13 @@ export class DevControlService {
     const action = parsed.data === "toggle" ? status === "recording" ? "stop" : "start" : parsed.data;
     this.current(transaction);
     if (action === "start") {
-      if (status === "recording") { await this.bus.reply(transaction.event.id, status); return; }
+      if (status === "recording") { await this.replyStatus(transaction); return; }
       let acquired: ControlCaptureLease | undefined;
       try {
         acquired = await this.capture.start(transaction.cancellation.signal);
         this.leases.add(acquired);
         this.current(transaction);
-        await this.bus.reply(transaction.event.id, "recording");
+        await this.replyStatus(transaction);
         // Native acceptance is the commit point. A normal CLI can receive its
         // reply and disconnect before this Promise's completion reaches Node.
         this.recording = acquired;
@@ -170,8 +183,7 @@ export class DevControlService {
       this.current(transaction);
     }
     this.current(transaction);
-    const after = controlStatusSchema.parse(await this.capture.status());
-    this.current(transaction); await this.bus.reply(transaction.event.id, after);
+    await this.replyStatus(transaction);
   }
 
   close(): Promise<void> {

@@ -59,10 +59,24 @@ migration retains later edits without querying or replaying the old profile.
 Stable bundle metadata/signature admission and factual login/hardware context are
 connected before startup migration. Independent review passes; local typing,
 build, compiled Linux regression and 1050 tests pass with 25 explicit skips.
-Actual CF/AppKit/APFS behavior and the compiled Mac worker remain pending ARM/Intel
-CI. The owned worker uses an empty OS preference domain and synthetic host facts;
+Actual CF/AppKit/APFS behavior and the compiled Mac worker pass on
+[Apple Silicon](https://github.com/juferdinand/OpenWhisper/actions/runs/37855692180/job/113579185090)
+and [Intel](https://github.com/juferdinand/OpenWhisper/actions/runs/37855692180/job/113579185034)
+at `f31bea4`. Each Mac suite passes 1032 tests with 43 explicit skips and zero failures;
+the subsequent native empty-domain worker and existing Dev package gates also pass.
+The owned worker uses an empty OS preference domain and synthetic host facts;
 it cannot establish a nonempty 0.2.5 cache or persistent-signature/login transition.
 Ad-hoc thin stable packages are validation artifacts, not releases.
+
+The next reviewed source increment connects pre-ready Linux `--control` to one
+captured stable/Dev endpoint and preserves the legacy content-free JSON status.
+Action gating remains separate from observation. Stable launch-at-login adapters
+are connected: Debian uses only its verified permanent `/opt` layout; Mac uses
+typed `mainAppService` facts, including pending approval. Startup only reads facts;
+registration changes require an explicit settings action. Persisted requests survive
+unavailable capabilities, and late status reads cannot overwrite newer facts.
+Strict typing and 1078 local tests pass with 25 explicit skips; package/runtime
+acceptance of these changes and the normal stable Mac smoke are still pending.
 
 The current checkpoint includes actual stock KDE keyboard dictation, recovery
 after a held-key/GUI cancellation sequence and same-profile crash recovery. Explicit

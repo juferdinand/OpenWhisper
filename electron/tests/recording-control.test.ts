@@ -77,3 +77,18 @@ test("trusted lease cleanup still closes the exact recording after GUI shutdown 
   const lease = await port.currentLease?.(); assert.ok(lease); closing = true;
   await lease.cancel(); assert.deepEqual(commands, ["cancel"]);
 });
+test("wire observation preserves done error and recovery while action gating remains protected", () => {
+  let phase: RecordingSnapshot["phase"] = "done", elapsedMs = 2999, recoveryAvailable = true;
+  const port = createRecordingControlPort({ owner: { currentIdentity: () => undefined, async command() { throw Error("Observation must not command."); } },
+    available: () => true, configure: async () => { throw Error("Observation must not configure."); },
+    serialize: <T>(operation: () => Promise<T>) => Promise.resolve().then(operation),
+    snapshot: () => ({ phase, elapsedMs, recoveryAvailable, busy: false }) });
+  assert.equal(port.status(), "transcribing");
+  assert.deepEqual(port.wireStatus?.(), { status: "done", elapsed: 2n, recovery_available: true });
+  phase = "error"; assert.deepEqual(port.wireStatus?.(), { status: "error", elapsed: 2n, recovery_available: true });
+  recoveryAvailable = false; assert.equal(port.status(), "idle");
+  for (const pending of ["stopping", "restoring", "discarding"] as const) {
+    phase = pending; assert.equal((port.wireStatus?.() as { status: string }).status, "transcribing");
+  }
+  for (const invalid of [-1, NaN, Infinity, Number.MAX_VALUE]) { elapsedMs = invalid; assert.throws(() => port.wireStatus?.()); }
+});

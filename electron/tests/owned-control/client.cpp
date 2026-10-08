@@ -70,9 +70,9 @@ int main(int argc, char **argv) {
   const gchar *result = nullptr;
   g_variant_get(reply, "(&s)", &result);
   if (!result ||
-      (std::strcmp(result, "idle") && std::strcmp(result, "recording") &&
-       std::strcmp(result, "transcribing") &&
-       std::strcmp(result, "unavailable"))) {
+      (std::strcmp(result, "{\"status\":\"idle\",\"elapsed\":0,\"recovery_available\":false}") &&
+       std::strcmp(result, "{\"status\":\"recording\",\"elapsed\":0,\"recovery_available\":false}") &&
+       std::strcmp(result, "{\"status\":\"transcribing\",\"elapsed\":0,\"recovery_available\":false}"))) {
     g_variant_unref(reply);
     return 6;
   }

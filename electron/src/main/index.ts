@@ -9,7 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
-  appStateSchema, modelSchema, validateEvent, MAX_USER_TEXT_BYTES,
+  appStateSchema, modelSchema, preferencesSchema, validateEvent, MAX_USER_TEXT_BYTES, MAX_UI_REQUEST_BYTES,
   type AppState, type EventName, type EventPayload,
 } from "../contracts/ui.js";
 import { PreferenceStore } from "../services/preferences.js";
@@ -47,6 +47,13 @@ import { overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecor
 import { WaylandRecordingOverlay } from "./wayland-recording-overlay.js";
 import { MacosShortcut } from "./macos-shortcut.js";
 import { MacosPaste } from "./macos-paste.js";
+import { MacosAutostart } from "./macos-autostart.js";
+import { LinuxAutostart, selectLinuxAutostartExecutable } from "../services/linux-autostart.js";
+import { createRequire } from "node:module";
+import { routeControlStartup } from "./control-startup.js";
+import { createControlAdapter } from "../platforms/linux/shared/control-adapter.js";
+import { LinuxBus } from "../platforms/linux/shared/bus.js";
+import { verifyDevelopmentLinuxBusArtifact } from "../services/development-artifact.js";
 
 const distribution = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let window: BrowserWindow | undefined;
@@ -177,6 +184,27 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   const history = await PrivateStateStore.open(join(profile.paths.history, "history.json"),
     z.array(z.string().max(MAX_USER_TEXT_BYTES)).max(20), [], 8 * 1024 * 1024, { invalidContent: "preserve-and-default" });
   let notify = (): void => {};
+  let autostart: LinuxAutostart | MacosAutostart | undefined;
+  let loginFact: { readonly requested: boolean; readonly pending?: boolean } | undefined;
+  let loginRefresh = 0;
+  const refreshLogin = async (): Promise<void> => {
+    const generation = ++loginRefresh;
+    try { const fact = await autostart?.status(); if (generation === loginRefresh) loginFact = fact; }
+    catch { if (generation === loginRefresh) loginFact = undefined; }
+  };
+  if (identity.kind === "stable") {
+    try {
+      if (process.platform === "darwin") autostart = MacosAutostart.open({ appId: profile.appId, app });
+      else if (process.platform === "linux") {
+        const executable = selectLinuxAutostartExecutable({ build: identity, packaged: app.isPackaged,
+          executable: await realpath(process.execPath), appPath: await realpath(app.getAppPath()) });
+        if (executable) autostart = await LinuxAutostart.open({ appId: profile.appId,
+          configHome: dirname(profile.roots.config),
+          configDirs: (process.env["XDG_CONFIG_DIRS"] || "/etc/xdg").split(":").filter(Boolean), executable });
+      }
+    } catch { /* Keep persisted requests intact when installation or OS facts are unavailable. */ }
+    await refreshLogin();
+  }
   const downloads = await ModelDownloads.open(profile, inventory, { progress: (value) => {
     downloadProgress = value.total > 0 ? Math.min(1, value.received / value.total) : 0; notify();
   } });
@@ -248,13 +276,13 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   };
   const state = (): AppState => appStateSchema.parse({
     updates: { configured: false, status: "idle", version: null, progress: 0, error: null, package: identity.kind === "stable" ? platform === "macos" ? "macos" : "deb" : "development" },
-    launch_at_login_available: false,
+    launch_at_login_available: !!autostart && loginFact !== undefined,
     platform,
     ...(platform === "macos" ? { macos: {
       microphone_allowed: microphoneAllowed, recording_shortcut: macShortcut?.state().configuring ?? false,
       shortcut_toggle_only: macRecording, clipboard_restore_available: false,
       shortcut_hint: "Press and release a keyboard key. Escape cancels.",
-      editor: "", recommended: [], updates_configured: false, launch_at_login_pending: false,
+      editor: "", recommended: [], updates_configured: false, launch_at_login_pending: loginFact?.pending ?? false,
     } } : {}),
     version, status: recording.phase === "starting" ? "recording"
       : ["stopping", "restoring", "discarding"].includes(recording.phase) ? "transcribing" : recording.phase,
@@ -263,7 +291,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       : recording.error ? `Recording failed: ${recording.error}.` : descriptor ? "" : "Recording is not available in this development preview."),
     transcript: Buffer.byteLength(recording.transcript, "utf8") <= MAX_USER_TEXT_BYTES ? recording.transcript : "",
     transcript_preview_omitted: Buffer.byteLength(recording.transcript, "utf8") > MAX_USER_TEXT_BYTES,
-    history: history.snapshot().filter((text) => Buffer.byteLength(text, "utf8") <= MAX_USER_TEXT_BYTES), preferences: preferences.snapshot(),
+    history: history.snapshot().filter((text) => Buffer.byteLength(text, "utf8") <= MAX_USER_TEXT_BYTES),
+    preferences: { ...preferences.snapshot(), ...(loginFact ? { launch_at_login: loginFact.requested } : {}) },
     models: [...catalog.models, ...installed.filter((item) => !catalog.models.some((model) => model.id === item.model.id)).map((item) => item.model)],
     installed: installed.map((item) => item.model.id), microphones: sources.map((source) => source.id),
     session: process.env["XDG_SESSION_TYPE"] ?? "unknown",
@@ -555,9 +584,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     handlers: {
       get_state: () => state(),
       save_preferences: ({ changes }) => withRecordingControl(async () => {
-        if (changes.launch_at_login !== undefined || changes.auto_check_updates === true) {
-          throw new Error("Login and update services are not configured in this build.");
-        }
+        if (changes.auto_check_updates === true) throw new Error("Update services are not configured in this build.");
+        if (changes.launch_at_login !== undefined && (!autostart || !loginFact)) throw new Error("Login services are unavailable in this installation.");
         if (changes.model && !catalog.models.some((model) => model.id === changes.model) && !installed.some((item) => item.model.id === changes.model)) {
           throw new Error("Unknown catalog model.");
         }
@@ -573,7 +601,20 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         if (changes.hold_to_record && shortcut.nativeKey !== null && modifierOnly(shortcut.nativeKey)) {
           throw new Error("Modifier-only KDE triggers use toggle mode.");
         }
-        await preferences.patch(changes);
+        const candidate = preferencesSchema.parse({ ...preferences.snapshot(), ...changes });
+        if (Buffer.byteLength(JSON.stringify(candidate), "utf8") > MAX_UI_REQUEST_BYTES) throw new Error("Preferences exceed their size limit.");
+        if (changes.launch_at_login !== undefined) {
+          try { await autostart!.set(changes.launch_at_login); }
+          finally { await refreshLogin(); notify(); }
+        }
+        try { await preferences.patch(changes); }
+        catch (error: unknown) {
+          if (changes.launch_at_login !== undefined) {
+            message = "The login setting may have changed; preferences could not be saved.";
+            await refreshLogin(); notify();
+          }
+          throw error;
+        }
         if (changes.hold_to_record !== undefined) await platformHost?.shortcut("mode", changes.hold_to_record);
         if (["model", "language", "microphone", "vocabulary", "snippets", "gpu"].some((key) => Object.hasOwn(changes, key))) configured = false;
         const current = state();
@@ -583,6 +624,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       complete_setup: async () => {
         await preferences.completeSetup();
         emit("state", state());
+      },
+      open_login_settings: () => {
+        if (!(autostart instanceof MacosAutostart)) throw new Error("Login settings are unavailable in this installation.");
+        autostart.openSettings();
       },
       save_local_processing: async ({ changes }) => {
         await processingProfile.update((current) => applyLocalProcessingProfilePatch(current, changes));
@@ -708,6 +753,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted";
     accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(false); notify();
   });
+  if (autostart) window.on("focus", () => { void refreshLogin().then(notify); });
   // Configure the saved request to discover private stopped audio before showing
   // the controls. Source resolution, capture and inference remain explicit actions.
   if (host && descriptor?.platform === "linux" && installed.some((item) => item.model.id === preferences.snapshot().model)) {
@@ -730,13 +776,45 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   notify();
 }
 
-const bootstrap = await prepareApplication().catch(() => {
-  // Startup diagnostics are categorical: no preferences, paths, audio or user text.
-  console.error("OpenWhisper could not initialize its application profile.");
-  app.exit(1);
-  return undefined;
+const control = await routeControlStartup({ argv: process.argv,
+  layout: app.isPackaged ? { kind: "packaged", executable: process.execPath } :
+    { kind: "development", executable: process.execPath, application: app.getAppPath() },
+  platform: process.platform, build: APPLICATION_BUILD,
+  prepare: async (captured) => {
+    const appPath = await realpath(app.getAppPath());
+    const version = (await readFile(join(distribution, "resources/VERSION"), "utf8")).trim();
+    const manifest: unknown = JSON.parse(await readFile(join(appPath, "package.json"), "utf8"));
+    const identity = selectApplicationBuild({ build: captured, purpose: "control", argv: process.argv,
+      platform: process.platform, architecture: process.arch, packaged: app.isPackaged,
+      executable: await realpath(process.execPath), appPath, resourcesPath: await realpath(process.resourcesPath),
+      distribution: await realpath(distribution), projectVersion: version, packageVersion: z.object({ version: z.string() }).parse(manifest).version });
+    const descriptor = developmentRecordingDescriptorSchema.parse(DEVELOPMENT_RECORDING_BUILD);
+    if (descriptor.platform !== "linux" || descriptor.architecture !== process.arch || !descriptor.platformServices || !process.getuid) {
+      throw new Error("Command control requires its matching Linux platform services.");
+    }
+    const artifact = descriptor.platformServices.bus;
+    return { uid: process.getuid(), factory: createControlAdapter({ kind: identity.kind,
+      address: process.env["DBUS_SESSION_BUS_ADDRESS"], open: async (address, context) => {
+        const path = await verifyDevelopmentLinuxBusArtifact(appPath, artifact);
+        if (context.signal.aborted) throw new Error("Command control was cancelled.");
+        // The pre-ready client loads only its verified fixed package addon; no
+        // capture, portal, FD access or graphical utility process is initialized.
+        const binding: unknown = createRequire(import.meta.url)(path);
+        return LinuxBus.open(binding, address, context.signal, { expiresAtUs: context.expiresAtUs });
+      } }) };
+  },
 });
-if (bootstrap) void start(bootstrap).catch(() => {
-  console.error("OpenWhisper could not initialize its application services or UI.");
-  app.exit(1);
-});
+if (control) {
+  process.stdout.write(control.stdout); process.stderr.write(control.stderr); app.exit(control.exitCode);
+} else {
+  const bootstrap = await prepareApplication().catch(() => {
+    // Startup diagnostics are categorical: no preferences, paths, audio or user text.
+    console.error("OpenWhisper could not initialize its application profile.");
+    app.exit(1);
+    return undefined;
+  });
+  if (bootstrap) void start(bootstrap).catch(() => {
+    console.error("OpenWhisper could not initialize its application services or UI.");
+    app.exit(1);
+  });
+}
