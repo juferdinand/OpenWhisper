@@ -11,11 +11,16 @@ export interface SpeechChannel {
   onExit(listener: () => void): () => void;
   terminate(): Promise<void>;
 }
-/** A rejected factory has rolled back its owner; a returned channel transfers cleanup ownership. */
+/** Ordinary factory refusals have rolled back their owner. A trusted integrity or
+ * teardown refusal retains failed ownership and blocks this client's reallocation.
+ * A returned channel transfers cleanup ownership. */
 export type SpeechChannelFactory = (signal: AbortSignal) => Promise<SpeechChannel>;
-export type SpeechFailureCode = "CANCELLED" | "BUSY" | "START_FAILED" | "TEARDOWN_FAILED" | "WORKER_FAILED" | "TIMEOUT" | "INVALID_REPLY" | "NATIVE_FAILED" | "CLOSED";
+export type SpeechFailureCode = "CANCELLED" | "BUSY" | "START_FAILED" | "INTEGRITY_FAILED" | "TEARDOWN_FAILED" | "WORKER_FAILED" | "TIMEOUT" | "INVALID_REPLY" | "NATIVE_FAILED" | "CLOSED";
 export class SpeechWorkerError extends Error {
   constructor(readonly code: SpeechFailureCode) { super(`Speech worker: ${code}.`); }
+}
+function terminalFactoryFailure(error: unknown): error is SpeechWorkerError {
+  return error instanceof SpeechWorkerError && (error.code === "INTEGRITY_FAILED" || error.code === "TEARDOWN_FAILED");
 }
 
 interface Pending {
@@ -119,13 +124,15 @@ export class SpeechClient {
       this.readyReject = (error) => { clearTimeout(timer); reject(error); };
       // Register the transaction before invoking the factory. Cancellation rejects the
       // request promptly, but a retry waits for any late owner to be confirmed reaped.
-      this.factoryOwnership = Promise.all([previousFactory, previousDisposal]).catch(() => {
-        throw new SpeechWorkerError("TEARDOWN_FAILED");
+      this.factoryOwnership = Promise.all([previousFactory, previousDisposal]).catch((error: unknown) => {
+        throw new SpeechWorkerError(error instanceof SpeechWorkerError && error.code === "INTEGRITY_FAILED" ? "INTEGRITY_FAILED" : "TEARDOWN_FAILED");
       }).then(async () => {
         if (controller.signal.aborted || this.closed || epoch !== this.epoch) return;
         let channel: SpeechChannel;
         try { channel = await this.factory(controller.signal); }
-        catch {
+        catch (error: unknown) {
+          // Even a canceled/stale request must retain unconfirmed factory ownership.
+          if (terminalFactoryFailure(error)) throw error;
           if (!controller.signal.aborted && epoch === this.epoch) this.fail("START_FAILED");
           return;
         }
@@ -142,7 +149,7 @@ export class SpeechClient {
       });
       void this.factoryOwnership.catch((error: unknown) => {
         if (!controller.signal.aborted && epoch === this.epoch) {
-          this.fail(error instanceof SpeechWorkerError && error.code === "TEARDOWN_FAILED" ? "TEARDOWN_FAILED" : "START_FAILED");
+          this.fail(terminalFactoryFailure(error) ? error.code : "START_FAILED");
         }
       });
     });

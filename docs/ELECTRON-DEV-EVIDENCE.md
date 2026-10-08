@@ -323,3 +323,14 @@ an unsettled unsubscribe still blocks completion. These are injected tests, not 
 bus evidence. Native loading/open cancellation, real Status snapshots, early bootstrap,
 installed CLI and hardened packaging remain separately reviewed work. No recording
 wiring or existing desktop issue closure follows from this slice.
+
+### Trusted speech factory refusal
+
+An independent pure reproduction found that a trusted pre-transfer TEARDOWN_FAILED
+became START_FAILED and fulfilled the factory ownership promise. The corrected client
+retains actual SpeechWorkerError integrity/teardown refusals as rejected ownership,
+including a refusal arriving after cancellation. A subsequent request awaits that same
+ownership and cannot allocate again. Arbitrary exception code fields stay generic.
+All 12 combined client/factory lifecycle tests pass; the initial two failing regressions
+are retained privately. This fence belongs to the continuing client instance. It does
+not prove a process-wide allocation fence, native retirement or automatic fallback.
