@@ -14,6 +14,8 @@ const lifecycleSchema = z.strictObject({ kind: z.literal("failure"), connection:
 const replySchema = z.strictObject({ connection: z.uuid(), id: z.uuid(), sender: senderSchema,
   signature: busSignatureSchema, body: z.unknown() });
 const deadlineSchema = z.string().regex(/^[1-9][0-9]{0,19}$/).refine((value) => /^[1-9][0-9]{0,19}$/.test(value) && BigInt(value) < (1n << 64n));
+const openingOptionsSchema = z.strictObject({ expiresAtUs: deadlineSchema });
+const openingSchema = z.strictObject({ connection: z.uuid(), ready: z.instanceof(Promise) });
 const eventFields = { connection: z.uuid(), path: busPathSchema, interface: busInterfaceSchema, member: busMemberSchema,
   signature: busSignatureSchema, body: z.unknown() };
 const eventSchema = z.discriminatedUnion("kind", [
@@ -30,8 +32,9 @@ type NativeMethods = Record<NativeName, (...args: unknown[]) => unknown>;
 export type BusMethod = z.input<typeof methodSchema>;
 export type BusFilter = z.infer<typeof filterSchema>;
 export interface BusReply { sender: string; signature: string; body: BusValue[] }
+export type BusOpeningOptions = z.input<typeof openingOptionsSchema>;
 export interface BusEvent extends BusReply { kind: "signal" | "method"; connection: string; id: string; path: string; interface: string; member: string; expiresAtUs?: string }
-export type BusFailureCode = "INVALID_FRAME" | "CLOSED" | "CANCELLED" | "TIMEOUT" | "REMOTE_ERROR" | "TRANSPORT_FAILED" | "EXPIRED" | "DENIED";
+export type BusFailureCode = "INVALID_FRAME" | "CLOSED" | "CANCELLED" | "TIMEOUT" | "REMOTE_ERROR" | "TRANSPORT_FAILED" | "TEARDOWN_FAILED" | "EXPIRED" | "DENIED";
 export class BusFailure extends Error {
   constructor(readonly code: BusFailureCode) { super("Linux session service failed."); this.name = "BusFailure"; }
 }
@@ -39,7 +42,7 @@ function safeFailure(error: unknown): BusFailure {
   if (error instanceof BusFailure) return error;
   if (typeof error === "object" && error !== null) {
     const code: unknown = Reflect.get(error, "code");
-    if (code === "CANCELLED" || code === "TIMEOUT" || code === "CLOSED" || code === "REMOTE_ERROR" || code === "INVALID_FRAME") return new BusFailure(code);
+    if (code === "CANCELLED" || code === "TIMEOUT" || code === "CLOSED" || code === "REMOTE_ERROR" || code === "INVALID_FRAME" || code === "TEARDOWN_FAILED") return new BusFailure(code);
   }
   return new BusFailure("TRANSPORT_FAILED");
 }
@@ -79,9 +82,10 @@ export class LinuxBus {
     this.connection = identity.connection; this.generation = identity.connection; this.uniqueName = identity.uniqueName;
   }
   /** Injection exists for pure tests and owned utilities, never preload IPC. */
-  static async open(binding: unknown, address: unknown, signal?: AbortSignal): Promise<LinuxBus> {
+  static async open(binding: unknown, address: unknown, signal?: AbortSignal, opening?: BusOpeningOptions): Promise<LinuxBus> {
     if (signal?.aborted) throw new BusFailure("CANCELLED");
     const native = methods(binding); const explicit = parseSessionBusAddress(address);
+    if (opening !== undefined) return LinuxBus.openBefore(binding, native, explicit, opening, signal);
     let bus: LinuxBus | undefined;
     let earlyFailure: string | undefined;
     const onFailure = (input: unknown): void => {
@@ -98,6 +102,77 @@ export class LinuxBus {
       if (signal?.aborted) { await bus.close(); throw new BusFailure("CANCELLED"); }
       return bus;
     } catch (error: unknown) { if (bus && !bus.closing) await bus.close(); throw safeFailure(error); }
+  }
+  private static async openBefore(binding: unknown, native: NativeMethods, address: string,
+                                  input: BusOpeningOptions, signal?: AbortSignal): Promise<LinuxBus> {
+    const options = openingOptionsSchema.parse(input);
+    const expires = BigInt(options.expiresAtUs);
+    if (expires <= process.hrtime.bigint() / 1000n) throw new BusFailure("TIMEOUT");
+    if (typeof binding !== "object" || binding === null) throw new BusFailure("INVALID_FRAME");
+    const begin: unknown = Reflect.get(binding, "beginOpen");
+    if (typeof begin !== "function") throw new BusFailure("INVALID_FRAME");
+    let connection: string | undefined;
+    let bus: LinuxBus | undefined;
+    let earlyFailure = false;
+    let cancelled = false;
+    let closing: Promise<void> | undefined;
+    const dispose = (): Promise<void> => {
+      if (closing) return closing;
+      if (!connection) return Promise.reject(new BusFailure("TEARDOWN_FAILED"));
+      try { closing = Promise.resolve(native.close(connection)).then(() => undefined).catch((error: unknown) => { throw safeFailure(error); }); }
+      catch (error: unknown) { closing = Promise.reject(safeFailure(error)); }
+      // Abort/lifecycle callbacks initiate disposal synchronously, but readiness
+      // remains owned until its settlement; no unhandled early rejection.
+      void closing.catch(() => undefined);
+      return closing;
+    };
+    const onFailure = (value: unknown): void => {
+      try {
+        boundBusInput(value); const frame = lifecycleSchema.parse(value);
+        if (bus) { if (frame.connection === bus.connection) void bus.close().catch(() => undefined); return; }
+        if (connection && frame.connection !== connection) return;
+      } catch { /* Invalid native lifecycle metadata also requires disposal. */ }
+      earlyFailure = true;
+      if (connection) void dispose();
+    };
+    let ready: Promise<unknown> | undefined;
+    const abort = (): void => { cancelled = true; void dispose(); };
+    try {
+      const raw: unknown = Reflect.apply(begin, binding, [address, options.expiresAtUs, onFailure]);
+      // Retain a valid ownership token/Promise even if the rest of the return
+      // shape is malformed, so a rejected identity cannot escape cleanup.
+      if (typeof raw === "object" && raw !== null) {
+        const token = z.uuid().safeParse(Reflect.get(raw, "connection"));
+        const pending: unknown = Reflect.get(raw, "ready");
+        if (token.success) connection = token.data;
+        if (pending instanceof Promise) ready = pending;
+      }
+      const opened = openingSchema.parse(raw);
+      connection = opened.connection; ready = opened.ready;
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) abort();
+      if (earlyFailure) void dispose();
+      const value: unknown = await ready; boundBusInput(value);
+      const identity = connectionSchema.parse(value);
+      if (identity.connection !== connection) throw new BusFailure("INVALID_FRAME");
+      if (cancelled || signal?.aborted) throw new BusFailure("CANCELLED");
+      if (earlyFailure) throw new BusFailure("TRANSPORT_FAILED");
+      if (expires <= process.hrtime.bigint() / 1000n) throw new BusFailure("TIMEOUT");
+      bus = new LinuxBus(native, identity);
+      return bus;
+    } catch (error: unknown) {
+      // The native certificate includes opening completion and final callback
+      // holders. Separately keep even a malformed/late ready Promise owned.
+      if (connection) {
+        const disposal = dispose();
+        if (ready) await Promise.allSettled([ready]);
+        await disposal;
+      } else if (ready) {
+        await Promise.allSettled([ready]);
+        throw new BusFailure("TEARDOWN_FAILED");
+      }
+      throw safeFailure(error);
+    } finally { signal?.removeEventListener("abort", abort); }
   }
   private active(): void { if (this.closing) throw new BusFailure("CLOSED"); }
   get isClosed(): boolean { return this.closing; }

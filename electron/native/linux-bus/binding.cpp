@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <future>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <sys/stat.h>
@@ -18,6 +19,28 @@ struct Failure : std::runtime_error {
 struct State;
 struct Callback;
 struct Event;
+struct Module;
+// JS-thread-only lifetime/certificate fields. TSFN holders retain this record
+// through their finalizers, independently of the module's environment lifetime.
+struct Environment {
+  napi_env env = nullptr;
+  Module *module = nullptr;
+  bool cleaning = false;
+};
+struct Retirement {
+  std::shared_ptr<Environment> environment;
+  std::string id;
+  size_t callbacks = 0;
+  bool opening_complete = false;
+  bool close_started = false;
+  bool early_identity = false;
+  bool close_claimed = false;
+  bool stopped = false;
+  bool failed = false;
+  napi_deferred deferred = nullptr;
+  napi_ref promise = nullptr;
+};
+static void finish_retirement(const std::shared_ptr<Retirement> &record);
 static void deliver(Callback *handler, Event *event);
 struct Deadline {
   std::mutex mutex;
@@ -25,9 +48,11 @@ struct Deadline {
   bool done = false;
   std::thread thread;
   Deadline(GCancellable *cancellation, int milliseconds)
-      : thread([this, cancellation, milliseconds] {
+      : Deadline(cancellation, std::chrono::microseconds(milliseconds * 1000)) {}
+  Deadline(GCancellable *cancellation, std::chrono::microseconds remaining)
+      : thread([this, cancellation, remaining] {
           std::unique_lock<std::mutex> lock(mutex);
-          if (!clock.wait_for(lock, std::chrono::milliseconds(milliseconds),
+          if (!clock.wait_for(lock, remaining,
                               [this] { return done; }))
             g_cancellable_cancel(cancellation);
         }) {}
@@ -43,6 +68,7 @@ struct Deadline {
 struct Callback {
   napi_threadsafe_function function = nullptr;
   std::weak_ptr<State> state;
+  std::shared_ptr<Retirement> retirement;
 };
 struct Event {
   std::string kind, id, sender, path, interface, member;
@@ -61,6 +87,7 @@ static Callback *callback(napi_env env, napi_value function,
 struct State : std::enable_shared_from_this<State> {
   std::string id = uuid();
   std::string unique;
+  std::shared_ptr<Retirement> retirement;
   std::atomic<bool> closing{false};
   GDBusConnection *connection = nullptr;
   GMainContext *context = nullptr;
@@ -149,13 +176,32 @@ struct State : std::enable_shared_from_this<State> {
 };
 struct Module {
   std::map<std::string, std::shared_ptr<State>> states;
-  ~Module() {
+  std::shared_ptr<Environment> environment;
+  explicit Module(napi_env env) : environment(std::make_shared<Environment>()) {
+    environment->env = env;
+    environment->module = this;
+  }
+  void cleanup() {
+    environment->cleaning = true;
+    // Cancel queued/opening work before any serialized stop. No JS finalizer
+    // is awaited here: abort only schedules finalization on the environment loop.
+    for (auto &item : states) {
+      item.second->closing = true;
+      g_cancellable_cancel(item.second->opening);
+      std::lock_guard<std::mutex> guard(item.second->mutex);
+      for (auto &call : item.second->calls)
+        g_cancellable_cancel(call.second);
+    }
     for (auto &item : states) {
       try {
         item.second->stop();
       } catch (...) { /* Process disposal is the final fence. */
       }
     }
+  }
+  ~Module() {
+    cleanup();
+    environment->module = nullptr;
   }
 };
 static void abort_callback(Callback *callback) {
@@ -277,6 +323,106 @@ static napi_value error(napi_env env, const char *code) {
   put(env, result, "code", string(env, code));
   return result;
 }
+static void finish_retirement(const std::shared_ptr<Retirement> &record) {
+  auto environment = record->environment;
+  if (environment->cleaning || !environment->module)
+    return;
+  auto env = environment->env;
+  try {
+    if (record->failed) {
+      if (record->deferred) {
+        ok(napi_reject_deferred(env, record->deferred,
+                                error(env, "TEARDOWN_FAILED")));
+        record->deferred = nullptr;
+      }
+      // Keep the state and shared rejected close result: failed disposal does
+      // not permit a replacement connection or a second cleanup transaction.
+      return;
+    }
+    if (!record->stopped || !record->opening_complete || record->callbacks != 0)
+      return;
+    // beginOpen already handed out this owner. Even an automatically stopped
+    // failed opening stays addressable until that caller claims its certificate.
+    if (record->early_identity && !record->close_claimed)
+      return;
+    if (record->promise) {
+      ok(napi_delete_reference(env, record->promise));
+      record->promise = nullptr;
+    }
+    if (record->deferred) {
+      ok(napi_resolve_deferred(env, record->deferred, undefined(env)));
+      record->deferred = nullptr;
+    }
+    environment->module->states.erase(record->id);
+  } catch (...) {
+    // An allocation/NAPI failure cannot supply a certificate. Environment
+    // teardown still owns the retained state; never throw through a finalizer.
+    record->failed = true;
+  }
+}
+struct CloseJob {
+  std::shared_ptr<State> owner;
+  napi_async_work work = nullptr;
+  bool failed = false;
+};
+static napi_value begin_close(napi_env env, const std::shared_ptr<State> &owner,
+                              bool expose) {
+  auto record = owner->retirement;
+  napi_value promise = undefined(env);
+  owner->closing = true;
+  g_cancellable_cancel(owner->opening);
+  {
+    std::lock_guard<std::mutex> guard(owner->mutex);
+    for (auto &item : owner->calls)
+      g_cancellable_cancel(item.second);
+  }
+  if (expose) {
+    record->close_claimed = true;
+    if (record->promise) {
+      ok(napi_get_reference_value(env, record->promise, &promise));
+      return promise;
+    }
+    ok(napi_create_promise(env, &record->deferred, &promise));
+    ok(napi_create_reference(env, promise, 1, &record->promise));
+  }
+  if (!record->close_started) {
+    auto task = std::make_unique<CloseJob>(CloseJob{owner, nullptr, false});
+    auto *job = task.get();
+    record->close_started = true;
+    try {
+      ok(napi_create_async_work(
+          env, nullptr, string(env, "OpenWhisperLinuxBusClose"),
+          [](napi_env, void *pointer) {
+            auto *task = static_cast<CloseJob *>(pointer);
+            try { task->owner->stop(); }
+            catch (...) { task->failed = true; }
+          },
+          [](napi_env current, napi_status status, void *pointer) {
+            std::unique_ptr<CloseJob> task(static_cast<CloseJob *>(pointer));
+            auto retirement = task->owner->retirement;
+            const bool disposed =
+                napi_delete_async_work(current, task->work) == napi_ok;
+            retirement->failed = retirement->failed || task->failed ||
+                                 status != napi_ok || !disposed;
+            retirement->stopped = !retirement->failed;
+            task.reset();
+            // Finalizers and opening completion run on this same JS loop. A
+            // pending callback never makes this callback block that loop. The
+            // close work and its owner captures are gone before certification.
+            finish_retirement(retirement);
+          },
+          job, &job->work));
+      ok(napi_queue_async_work(env, job->work));
+      task.release(); // The completion callback now owns the queued job.
+    } catch (...) {
+      record->failed = true;
+      if (job->work)
+        napi_delete_async_work(env, job->work);
+    }
+  }
+  finish_retirement(record);
+  return promise;
+}
 struct Job {
   napi_env env;
   napi_async_work work = nullptr;
@@ -284,17 +430,20 @@ struct Job {
   std::function<void()> execute;
   std::function<napi_value()> complete;
   std::function<void()> failed;
+  std::function<void(bool)> retired;
   std::string failure;
 };
 static napi_value async(napi_env env, std::function<void()> execute,
                         std::function<napi_value()> complete,
-                        std::function<void()> failed = {}) {
+                        std::function<void()> failed = {},
+                        std::function<void(bool)> retired = {}) {
   auto *job = new Job{env,
                       nullptr,
                       nullptr,
                       std::move(execute),
                       std::move(complete),
                       std::move(failed),
+                      std::move(retired),
                       ""};
   napi_value promise;
   try {
@@ -315,30 +464,46 @@ static napi_value async(napi_env env, std::function<void()> execute,
         },
         [](napi_env current, napi_status status, void *pointer) {
           std::unique_ptr<Job> task(static_cast<Job *>(pointer));
+          bool settled = false;
           try {
             if (status != napi_ok && task->failure.empty())
               task->failure = "CANCELLED";
-            if (task->failure.empty())
+            if (task->failure.empty()) {
               ok(napi_resolve_deferred(current, task->deferred,
                                        task->complete()));
-            else {
+              settled = true;
+            } else {
               if (task->failed)
                 task->failed();
               ok(napi_reject_deferred(current, task->deferred,
                                       error(current, task->failure.c_str())));
+              settled = true;
             }
           } catch (const Failure &value) {
             if (task->failed)
               task->failed();
-            napi_reject_deferred(current, task->deferred,
-                                 error(current, value.what()));
+            try {
+              auto failure = error(current, value.what());
+              settled = napi_reject_deferred(current, task->deferred,
+                                              failure) == napi_ok;
+            } catch (...) { /* No opening retirement certificate is issued. */ }
           } catch (...) {
             if (task->failed)
               task->failed();
-            napi_reject_deferred(current, task->deferred,
-                                 error(current, "INVALID_FRAME"));
+            try {
+              auto failure = error(current, "INVALID_FRAME");
+              settled = napi_reject_deferred(current, task->deferred,
+                                              failure) == napi_ok;
+            } catch (...) { /* No opening retirement certificate is issued. */ }
           }
-          napi_delete_async_work(current, task->work);
+          const bool disposed =
+              napi_delete_async_work(current, task->work) == napi_ok;
+          auto retired = std::move(task->retired);
+          task.reset();
+          // Only opening uses this hook. Its ready outcome, async work and Job
+          // captures must retire before close can publish an acknowledgment.
+          if (retired)
+            retired(settled && disposed);
         },
         job, &job->work));
     ok(napi_queue_async_work(env, job->work));
@@ -347,7 +512,10 @@ static napi_value async(napi_env env, std::function<void()> execute,
       job->failed();
     if (job->work)
       napi_delete_async_work(env, job->work);
+    auto retired = std::move(job->retired);
     delete job;
+    if (retired)
+      retired(false); // No ready outcome was returned to the caller.
     throw;
   }
   return promise;
@@ -388,26 +556,55 @@ static bool address_valid(const std::string &value) {
   }
   return g_dbus_is_supported_address(value.c_str(), nullptr);
 }
-static napi_value open(napi_env env, napi_callback_info info) {
-  return guarded(env, [&] {
-    size_t count = 3;
-    std::vector<napi_value> args(count);
-    ok(napi_get_cb_info(env, info, &count, args.data(), nullptr, nullptr));
-    check(count == 1 || count == 2);
-    args.resize(count);
-    auto address = string(env, args[0], 1024);
-    check(address_valid(address));
-    check(module(env)->states.empty());
-    auto owner = std::make_shared<State>();
-    if (count == 2)
-      owner->lifecycle_callback = callback(env, args[1], owner);
-    module(env)->states.emplace(owner->id, owner);
-    return async(
+static uint64_t expiry(napi_env env, napi_value input) {
+  auto value = string(env, input, 20);
+  check(!value.empty() && value[0] >= '1' && value[0] <= '9' &&
+        std::all_of(value.begin(), value.end(),
+                    [](char c) { return c >= '0' && c <= '9'; }));
+  uint64_t result = 0;
+  for (char digit : value) {
+    auto next = static_cast<uint64_t>(digit - '0');
+    check(result <= (std::numeric_limits<uint64_t>::max() - next) / 10);
+    result = result * 10 + next;
+  }
+  return result;
+}
+static std::chrono::microseconds remaining_open(uint64_t expires) {
+  auto now = static_cast<uint64_t>(g_get_monotonic_time());
+  if (expires <= now)
+    throw Failure("TIMEOUT");
+  return std::chrono::microseconds(std::min<uint64_t>(expires - now, 5000000));
+}
+struct OpenResult {
+  std::shared_ptr<State> owner;
+  napi_value ready;
+};
+static OpenResult start_open(napi_env env, const std::string &address,
+                             napi_value lifecycle, uint64_t expires) {
+  check(address_valid(address));
+  if (expires)
+    remaining_open(expires); // Refuse expiry before allocating an owner.
+  check(module(env)->states.empty());
+  auto owner = std::make_shared<State>();
+  owner->retirement = std::make_shared<Retirement>();
+  owner->retirement->environment = module(env)->environment;
+  owner->retirement->id = owner->id;
+  owner->retirement->early_identity = expires != 0;
+  module(env)->states.emplace(owner->id, owner);
+  try {
+    if (lifecycle)
+      owner->lifecycle_callback = callback(env, lifecycle, owner);
+    auto ready = async(
         env,
-        [owner, address] {
+        [owner, address, expires] {
           std::lock_guard<std::recursive_mutex> lifetime(owner->lifecycle);
           if (owner->closing)
             throw Failure("CLOSED");
+          // The default worker keeps its existing five-second opening budget.
+          // Explicit callers retain the original monotonic budget after dequeue.
+          auto remaining = expires ? remaining_open(expires)
+                                   : std::chrono::microseconds(5000000);
+          Deadline deadline(owner->opening, remaining);
           GDBusAuthObserver *observer = g_dbus_auth_observer_new();
           g_signal_connect(
               observer, "allow-mechanism",
@@ -430,15 +627,6 @@ static napi_value open(napi_env env, napi_callback_info info) {
                 return uid == getuid();
               }),
               nullptr);
-          std::mutex clock_mutex;
-          std::condition_variable clock;
-          bool finished = false;
-          std::thread deadline([&] {
-            std::unique_lock<std::mutex> guard(clock_mutex);
-            if (!clock.wait_for(guard, std::chrono::seconds(5),
-                                [&] { return finished; }))
-              g_cancellable_cancel(owner->opening);
-          });
           GError *failure = nullptr;
           owner->context = g_main_context_new();
           g_main_context_push_thread_default(owner->context);
@@ -449,19 +637,17 @@ static napi_value open(napi_env env, napi_callback_info info) {
                   G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION),
               observer, owner->opening, &failure);
           g_main_context_pop_thread_default(owner->context);
-          {
-            std::lock_guard<std::mutex> guard(clock_mutex);
-            finished = true;
-          }
-          clock.notify_one();
-          deadline.join();
           g_object_unref(observer);
           if (failure) {
             const bool cancelled =
                 g_error_matches(failure, G_IO_ERROR, G_IO_ERROR_CANCELLED);
             g_error_free(failure);
+            if (expires)
+              remaining_open(expires);
             throw Failure(cancelled ? "CANCELLED" : "CONNECT_FAILED");
           }
+          if (expires)
+            remaining_open(expires);
           if (!owner->connection || owner->closing)
             throw Failure("CLOSED");
           g_dbus_connection_set_exit_on_close(owner->connection, FALSE);
@@ -498,7 +684,54 @@ static napi_value open(napi_env env, napi_callback_info info) {
           put(env, result, "uniqueName", string(env, owner->unique));
           return result;
         },
-        [env, owner] { module(env)->states.erase(owner->id); });
+        [env, owner] {
+          if (!owner->retirement->environment->cleaning) {
+            try { begin_close(env, owner, false); }
+            catch (...) { owner->retirement->failed = true; }
+          }
+        },
+        [record = owner->retirement](bool retired) {
+          if (retired)
+            record->opening_complete = true;
+          else
+            record->failed = true;
+          finish_retirement(record);
+        });
+    return {owner, ready};
+  } catch (...) {
+    owner->retirement->early_identity = false; // No handle was returned.
+    owner->retirement->failed = true;
+    try { begin_close(env, owner, false); }
+    catch (...) { /* Environment cleanup retains this failed owner. */ }
+    throw;
+  }
+}
+static napi_value open(napi_env env, napi_callback_info info) {
+  return guarded(env, [&] {
+    size_t count = 3;
+    std::vector<napi_value> args(count);
+    ok(napi_get_cb_info(env, info, &count, args.data(), nullptr, nullptr));
+    check(count == 1 || count == 2);
+    return start_open(env, string(env, args[0], 1024),
+                       count == 2 ? args[1] : nullptr, 0).ready;
+  });
+}
+static napi_value begin_open(napi_env env, napi_callback_info info) {
+  return guarded(env, [&] {
+    auto args = arguments(env, info, 3);
+    auto address = string(env, args[0], 1024);
+    auto expires = expiry(env, args[1]);
+    auto opening = start_open(env, address, args[2], expires);
+    try {
+      auto result = object(env);
+      put(env, result, "connection", string(env, opening.owner->id));
+      put(env, result, "ready", opening.ready);
+      return result;
+    } catch (...) {
+      opening.owner->retirement->early_identity = false;
+      begin_close(env, opening.owner, false);
+      throw;
+    }
   });
 }
 struct CallData {
@@ -651,12 +884,18 @@ static Callback *callback(napi_env env, napi_value function,
   napi_valuetype kind;
   ok(napi_typeof(env, function, &kind));
   check(kind == napi_function);
-  auto *result = new Callback{nullptr, owner};
+  auto holder =
+      std::make_unique<Callback>(Callback{nullptr, owner, owner->retirement});
+  auto *result = holder.get();
   ok(napi_create_threadsafe_function(
       env, function, nullptr, string(env, "OpenWhisperLinuxBusEvent"), 32, 1,
       result,
       [](napi_env, void *pointer, void *) {
-        delete static_cast<Callback *>(pointer);
+        std::unique_ptr<Callback> finalized(static_cast<Callback *>(pointer));
+        auto retirement = finalized->retirement;
+        finalized.reset();
+        --retirement->callbacks;
+        finish_retirement(retirement);
       },
       result,
       [](napi_env current, napi_value js, void *context, void *pointer) {
@@ -664,6 +903,9 @@ static Callback *callback(napi_env env, napi_value function,
         auto *handler = static_cast<Callback *>(context);
         auto owner = handler->state.lock();
         if (!current || !js || !owner)
+          return;
+        auto environment = owner->retirement->environment;
+        if (environment->cleaning || !environment->module)
           return;
         try {
           if (owner->closing)
@@ -712,7 +954,12 @@ static Callback *callback(napi_env env, napi_value function,
         }
       },
       &result->function));
-  ok(napi_unref_threadsafe_function(env, result->function));
+  ++owner->retirement->callbacks;
+  holder.release(); // Only the TSFN finalizer owns the successful holder.
+  if (napi_unref_threadsafe_function(env, result->function) != napi_ok) {
+    abort_callback(result);
+    throw Invalid();
+  }
   return result;
 }
 static void deliver(Callback *handler, Event *event) {
@@ -1077,19 +1324,7 @@ static napi_value close(napi_env env, napi_callback_info info) {
   return guarded(env, [&] {
     auto args = arguments(env, info, 1);
     auto owner = state(env, args[0], true);
-    owner->closing = true;
-    g_cancellable_cancel(owner->opening);
-    {
-      std::lock_guard<std::mutex> guard(owner->mutex);
-      for (auto &item : owner->calls)
-        g_cancellable_cancel(item.second);
-    }
-    return async(
-        env, [owner] { owner->stop(); },
-        [env, owner] {
-          module(env)->states.erase(owner->id);
-          return undefined(env);
-        });
+    return begin_close(env, owner, true);
   });
 }
 static napi_value reject(napi_env env, napi_callback_info info) {
@@ -1112,15 +1347,28 @@ static napi_value reject(napi_env env, napi_callback_info info) {
 }
 static napi_value initialize(napi_env env, napi_value exports) {
   return guarded(env, [&] {
-    auto *value = new Module;
+    auto *value = new Module(env);
     ok(napi_set_instance_data(
         env, value,
         [](napi_env, void *pointer, void *) {
           delete static_cast<Module *>(pointer);
         },
         nullptr));
+    auto cleanup = std::make_unique<std::shared_ptr<Environment>>(value->environment);
+    ok(napi_add_env_cleanup_hook(
+        env,
+        [](void *pointer) {
+          std::unique_ptr<std::shared_ptr<Environment>> lifetime(
+              static_cast<std::shared_ptr<Environment> *>(pointer));
+          (*lifetime)->cleaning = true;
+          if ((*lifetime)->module)
+            (*lifetime)->module->cleanup();
+        }, cleanup.get()));
+    cleanup.release();
     const napi_property_descriptor methods[] = {
         {"open", nullptr, open, nullptr, nullptr, nullptr, napi_default,
+         nullptr},
+        {"beginOpen", nullptr, begin_open, nullptr, nullptr, nullptr, napi_default,
          nullptr},
         {"call", nullptr, call, nullptr, nullptr, nullptr, napi_default,
          nullptr},

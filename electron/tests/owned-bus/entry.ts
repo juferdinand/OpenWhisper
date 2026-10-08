@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { BusFailure, openLinuxBus, type LinuxBus, type BusMethod } from "../../src/platforms/linux/shared/bus.js";
 import type { BusValue } from "../../src/platforms/linux/shared/bus-values.js";
+import { safeFailure } from "../owned-bus-opening/diagnostics.js";
 
 interface ParentPort { on(event: "message", handler: (event: { data: unknown }) => void): void; postMessage(value: unknown): void }
 const raw: unknown = Reflect.get(process, "parentPort");
@@ -151,7 +152,7 @@ port.on("message", (event) => {
   if (!command.success || used) { process.exitCode = 1; return; } used = true;
   void runProbe().then((result) => { port.postMessage({ version: 1, id: command.data.id, command: "run", result }); }, async (error: unknown) => {
     // Synthetic test assertions are retained categorically, never native payloads.
-    await writeFile("/evidence/fixture-error.txt", error instanceof Error ? `${error.name}: ${error.message}\n${error.stack ?? ""}` : "Fixture failed", { mode: 0o600 });
+    await writeFile("/evidence/fixture-error.json", JSON.stringify(safeFailure("SCENARIO", error)), { mode: 0o600 });
     port.postMessage({ version: 1, id: command.data.id, command: "run", error: error instanceof BusFailure ? error.code : "FIXTURE_FAILED" });
   });
 });

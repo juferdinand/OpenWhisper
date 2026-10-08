@@ -612,3 +612,25 @@ The reviewed source manifest is
 Actual composition of this factory, the continuing supervisor, private model
 leases and native inference remains the next separately checked gate. Ordinary
 recording/UI wiring and automatic application fallback are not established.
+
+### Retained Linux bus opening and environment cleanup
+
+The separately reviewed `beginOpen` edge keeps one monotonic deadline and retains
+its opaque native owner through cancellation, readiness and actual callback/read
+disposal. Existing default opening remains compatible. Six actual private-bus
+opening cases now pass with the exact retained addon, including original daemon
+birth admission before scenarios and original exit/close before final absence.
+The separate environment-disposal case also passes: its pending certificate
+marker exists, no successful acknowledgment follows, and the original utility
+becomes absent before completion. This is observed ordering/non-running evidence,
+not a universal cleanup-hook or full-reap guarantee.
+
+The remaining transport fixture stops with a categorical `TIMEOUT` before its
+complete nineteen-case result or foreign-UID stage. Its exact failing operation
+is not observable in the original fixture. That failure is retained; a finite
+operation ledger is being prepared before any diagnostic retry or semantic fix.
+The utility's separately observed same-birth zombie is non-running, not reaped.
+The actual fixed test-service compile and its Ubuntu 22 ABI metadata pass; native
+code was reused unchanged. Original receipts and exact container removal/absence
+were independently checked. These results do not establish live desktop,
+capture, installed CLI or production adapter acceptance.
