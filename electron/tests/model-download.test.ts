@@ -137,7 +137,8 @@ test("held transport closure prevents a second download until the same close set
   const gate = deferred<void>(), records = scripts(); assert.ok(records[0]);
   records[0] = { headers: { status: 500, raw: [] } };
   const transport = new FakeTransport(records, gate.promise), inventory = await ctx.inventory();
-  const service = await ModelDownloads.open(ctx.profile, inventory, { transport: () => transport, limits: { cleanupMs: 20 } });
+  // The held close must time out; subsequent private file sync must tolerate loaded CI.
+  const service = await ModelDownloads.open(ctx.profile, inventory, { transport: () => transport, limits: { cleanupMs: 200 } });
   await assert.rejects(service.download("tiny"), failure("METADATA_FAILED"));
   await assert.rejects(service.finalize(), failure("CLEANUP_FAILED"));
   await assert.rejects((await ModelDownloads.open(ctx.profile, inventory)).download("tiny"), failure("BUSY"));

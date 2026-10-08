@@ -1,5 +1,34 @@
 # Electron development evidence
 
+The Linux shortcut increment adds explicit desktop setup, Cancel, confirmed binding
+descriptions, toggle/hold recording and session cleanup to the normal Dev host.
+Strict TypeScript and the recording-enabled build pass. **840 tests pass**, with
+13 explicit native opt-in skips; **57 shared UI tests pass**. The existing held
+download-close test now allows 200 ms for cleanup after its deliberate timeout,
+avoiding an unrelated 20 ms private-file-sync race under concurrent test load.
+
+The existing normal-UI/private-audio runner uses the existing pinned bus compiler
+image to assemble a synthetic portal frontend before execution. Real D-Bus/native
+transport carries early request responses, pending consent cancellation, retry,
+binding loss and hold-recording cancellation. Portal Start/Stop performs actual CPU
+Tiny recognition, confirmed clipboard/history delivery and recovery deletion;
+the existing GUI/command Cancel and source-loss Retry/Discard cases remain included.
+This is protocol/container evidence, not stock KDE/GNOME consent or OS key delivery.
+Specialized KDE/X11 input, target-app paste, GPU and physical-device gates remain open.
+
+Current local packet: `.local/planning/electron-migration/p4-linux-dev-recording/ui-run-shortcuts-4/`
+(outside Git). The original commands and test namespace close successfully. An earlier
+attempt, `ui-run-shortcuts-3`, hit its overall deadline while launching the normal app;
+its commands and namespace were subsequently closed. No root cause or bootstrap fix
+is claimed from the later successful run. Retain this startup gap for the lifecycle
+replacement gate, rather than treating a rerun as a fix.
+
+The Mac/control predecessor `5270796` passes all six jobs in
+[CI37760091723](https://github.com/juferdinand/OpenWhisper/actions/runs/37760091723),
+including normal Mac Dev assembly. New shortcut source requires its own push CI.
+
+Previous checkpoints follow for their retained scope and provenance.
+
 Current 0.3.0 development checkpoint: normal CPU recording is connected on Linux and
 macOS. The Mac composition uses the production process-retirement boundary, an explicit
 permission button and RAM-only Retry/Discard. Linux also connects authenticated Dev

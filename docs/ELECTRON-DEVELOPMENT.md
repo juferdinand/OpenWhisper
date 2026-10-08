@@ -79,6 +79,22 @@ object `/io/github/whisperfree/dev/Control`, interface `io.github.whisperfree.Co
 `cancel`. An immutable recording lease prevents a delayed command from stopping a later
 recording. This Dev service is separate from the planned packaged `--control` launcher.
 
+In **General**, **Set trigger** now creates a GlobalShortcuts portal session. Setup
+opens only after an explicit click; no global binding is registered on Dev startup.
+The desktop chooses the combination, and the UI shows its confirmed description.
+Pending consent has a **Cancel** action. Toggle uses activation edges; push to talk
+uses actual activation/release edges. A release during pending Start cancels that
+same acquisition. Session loss, binding removal and application shutdown close
+owned recordings and portal resources; an unrelated GUI recording is preserved.
+An unavailable portal leaves the main recording controls usable.
+
+The portal connection registers the separate `io.github.whisperfree.dev` identity.
+Its matching `.desktop` launcher must be discoverable by the desktop frontend;
+Dev permissions and bindings must not use the stable application's identity.
+Automated evidence includes a synthetic frontend on a real private D-Bus, virtual
+audio and normal UI. Stock KDE/GNOME portal sessions and specialized KDE/X11
+triggers still need replacement validation; see [the evidence](ELECTRON-DEV-EVIDENCE.md).
+
 ## macOS CPU recording Dev build
 
 Use the same explicit `npm run dev -- --recording --dev-profile /absolute/private/path/openwhisper-dev`

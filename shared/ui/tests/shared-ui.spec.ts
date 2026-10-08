@@ -7,6 +7,25 @@ const catalog = JSON.parse(
   readFileSync(resolve("../models.json"), "utf8"),
 ).models;
 
+test("pending desktop consent exposes Cancel and keeps the trigger setup separate from direct input capture", async ({ page }) => {
+  await start(page, "linux");
+  await page.evaluate(() => {
+    const host = window as any; host.testState.shortcut_configuring = true; host.publishState();
+  });
+  await expect(page.getByText("Choose a shortcut in your desktop’s dialog.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).calls.at(-1).command)).toBe("cancel_shortcut");
+  await page.evaluate(() => {
+    const host = window as any; host.testState.preferences.ui_language = "de"; host.publishState();
+  });
+  await expect(page.getByText("Wähle eine Tastenkombination im Dialog deines Desktops.", { exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    const host = window as any; host.testState.shortcut_configuring = false;
+    host.testState.message = "Shortcut setup was cancelled. Window recording remains usable."; host.publishState();
+  });
+  await expect(page.locator("#status")).toHaveText("Die Einrichtung des Tastenkürzels wurde abgebrochen. Die Aufnahme über das Fenster bleibt verfügbar.");
+});
+
 test("an omitted large transcript preview still exposes complete Copy in both interface languages", async ({ page }) => {
   await start(page, "linux");
   await page.evaluate(() => {

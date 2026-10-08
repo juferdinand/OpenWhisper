@@ -259,7 +259,7 @@ function render() {
     .forEach((b) => b.classList.toggle("selected", b.dataset.tab === tab));
   syncPreferenceControls();
   syncProcessingPreview();
-  const triggerBusy = portalBusy || ["recording", "transcribing"].includes(state.status) || ["downloading", "installing"].includes(state.updates.status);
+  const triggerBusy = portalBusy || state.shortcut_configuring || ["recording", "transcribing"].includes(state.status) || ["downloading", "installing"].includes(state.updates.status);
   document.querySelectorAll<HTMLButtonElement>('[data-portal="enable_shortcut"], [data-portal="clear_shortcut"], [data-portal="desktop_shortcut"]').forEach(button => {
     button.disabled = triggerBusy || (button.dataset.portal === "enable_shortcut" && !state.native_shortcuts && !state.shortcut_portal);
   });
@@ -281,6 +281,7 @@ function render() {
     state.shortcut_portal,
     state.paste_portal,
     state.shortcut,
+    state.shortcut_configuring,
     state.native_shortcuts, state.native_x11, state.native_paste, state.native_mouse, state.native_middle_mouse, state.recording_shortcut, state.preferences.native_trigger, state.preferences.x11_trigger,
     state.paste_ready,
     state.download,
@@ -791,6 +792,8 @@ function triggerHelp() {
 }
 
 function shortcutButton() {
+  if (state.shortcut_configuring)
+    return `<span class="secondary" role="status">${esc(t("Choose a shortcut in your desktop’s dialog."))}</span> <button data-command="cancel_shortcut">${esc(t("Cancel"))}</button>`;
   if (isMac() && state.macos!.recording_shortcut)
     return `<span class="secondary">${esc(t(state.macos!.shortcut_hint))}</span> <button data-command="cancel_shortcut">${esc(t("Cancel"))}</button>`;
   if (!isMac() && state.recording_shortcut)

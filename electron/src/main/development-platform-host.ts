@@ -6,6 +6,7 @@ import { controlStatusSchema, type ControlCaptureLease, type ControlCapturePort,
 import { boundPlatformFrame, platformCaptureRequestSchema, platformCaptureReplySchema,
   type PlatformCaptureRequest, type PlatformCaptureReply } from "../workers/platform-protocol.js";
 import { createUtilityPlatformChannelFactory, PlatformChannelError, type PlatformChannel } from "./platform-channel.js";
+import type { PortalShortcutState } from "../platforms/linux/shared/portal-shortcuts.js";
 
 export const developmentPlatformHostDescriptorSchema = z.strictObject({
   root: z.string().min(1).refine((path) => isAbsolute(path) && resolve(path) === path && !path.includes("\0")),
@@ -130,11 +131,13 @@ export class DevelopmentPlatformCaptureBridge {
 export class DevelopmentPlatformHost {
   private closeTask: Promise<void> | undefined;
   private constructor(private readonly bridge: DevelopmentPlatformCaptureBridge, private readonly channel: PlatformChannel) {}
-  static async open(options: { descriptor: DevelopmentPlatformDescriptor; address: string; capture: ControlCapturePort },
+  static async open(options: { descriptor: DevelopmentPlatformDescriptor; address: string; capture: ControlCapturePort;
+    shortcuts?: (state: PortalShortcutState) => void },
     signal: AbortSignal): Promise<DevelopmentPlatformHost> {
     const descriptor = developmentPlatformHostDescriptorSchema.parse(options.descriptor);
     const bridge = new DevelopmentPlatformCaptureBridge(options.capture);
-    const factory = createUtilityPlatformChannelFactory({ artifacts: descriptor, capture: (request) => bridge.handle(request) });
+    const factory = createUtilityPlatformChannelFactory({ artifacts: descriptor, capture: (request) => bridge.handle(request),
+      ...(options.shortcuts ? { shortcuts: options.shortcuts } : {}) });
     let channel: PlatformChannel | undefined;
     try {
       channel = await factory(signal);
@@ -151,10 +154,15 @@ export class DevelopmentPlatformHost {
     if (!reply.ok || reply.value.command !== "status") throw new PlatformChannelError("INVALID_FRAME");
     return reply.value.status;
   }
+  async shortcut(action: "enable" | "configure" | "clear" | "cancel" | "mode", hold: boolean): Promise<void> {
+    const reply = await this.channel.request({ version: 1, id: randomUUID(), command: "shortcut", action, hold });
+    if (!reply.ok || reply.value.command !== "shortcut") throw new PlatformChannelError("INVALID_FRAME");
+  }
   close(): Promise<void> {
     this.closeTask ??= Promise.resolve().then(async () => {
-      // First retire every original main capture acquisition, then the bus helper.
-      await this.bridge.close(); await this.channel.close();
+      // The utility first closes its portal/CLI leases while capture RPC is live.
+      // Main then retires any acquisitions left by a failed or killed utility.
+      try { await this.channel.close(); } finally { await this.bridge.close(); }
     });
     return this.closeTask;
   }

@@ -30,5 +30,11 @@ native bytes and compiles a typed captured descriptor. It freezes source/payload
 checks the stopped-container roundtrip. Runtime never refreshes its expected native hashes.
 The renderer stays sandboxed; the Node utilities are isolated by the private container.
 The result and lifecycle receipts contain categorical metadata and hashes, not recorded text.
+The runner also compiles a synthetic portal frontend using the existing pinned Ubuntu22
+bus compiler image, before freezing the runtime payload. This fixture exercises actual
+native D-Bus signatures, early replies, pending consent Cancel/retry, portal session/binding
+loss, hold recording cleanup and portal Start/Stop through real recognition and delivery.
+It sends synthetic portal signals; it does not press compositor keys or grant host access.
 Original commands, processes and exact container cleanup are retained. Physical microphones,
-hotkeys, automatic paste, hardware GPU, Mac recording and release signing are separate gates.
+stock KDE/GNOME dialogs and key delivery, automatic paste, hardware GPU, Mac recording and
+release signing are separate gates.

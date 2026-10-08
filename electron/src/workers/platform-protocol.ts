@@ -2,6 +2,7 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { controlStatusSchema, type ControlCaptureLease, type ControlCapturePort, type ControlStatus } from "../platforms/linux/shared/control.js";
 import { developmentArtifactSchema } from "../services/development-artifact.js";
+import { portalShortcutStateSchema } from "../platforms/linux/shared/portal-shortcuts.js";
 
 const envelope = { version: z.literal(1), id: z.uuid() };
 const address = z.string().max(1024).regex(/^unix:(?:path=\/[A-Za-z0-9_./%\-]+|abstract=[A-Za-z0-9_./%\-]+)(?:,guid=[a-fA-F0-9]{32})?$/);
@@ -9,13 +10,16 @@ export const platformRequestSchema = z.discriminatedUnion("command", [
   z.strictObject({ ...envelope, command: z.literal("initialize"), address,
     captureBridge: z.strictObject({ epoch: z.uuid(), native: developmentArtifactSchema }).optional() }),
   z.strictObject({ ...envelope, command: z.literal("status") }),
+  z.strictObject({ ...envelope, command: z.literal("shortcut"), action: z.enum(["enable", "configure", "clear", "cancel", "mode"]), hold: z.boolean() }),
   z.strictObject({ ...envelope, command: z.literal("shutdown") }),
 ]);
 export const platformReadySchema = z.strictObject({ version: z.literal(1), type: z.literal("ready") });
+export const platformShortcutEventSchema = z.strictObject({ version: z.literal(1), type: z.literal("shortcuts"), state: portalShortcutStateSchema });
 export const platformReplySchema = z.discriminatedUnion("ok", [
   z.strictObject({ ...envelope, ok: z.literal(true), value: z.union([
     z.strictObject({ command: z.literal("initialize"), generation: z.uuid(), captureAvailable: z.boolean() }),
     z.strictObject({ command: z.literal("status"), status: controlStatusSchema }),
+    z.strictObject({ command: z.literal("shortcut"), state: portalShortcutStateSchema }),
     z.strictObject({ command: z.literal("shutdown") }),
   ]) }),
   z.strictObject({ ...envelope, ok: z.literal(false), code: z.enum(["UNAVAILABLE", "BUSY", "INVALID_FRAME", "TEARDOWN_FAILED"]) }),

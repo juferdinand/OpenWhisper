@@ -71,6 +71,8 @@ const descriptor = developmentRecordingDescriptorSchema.parse({ ...original,
 await build({ stdin: { contents: `export const DEVELOPMENT_RECORDING_BUILD: unknown = ${JSON.stringify(descriptor)};`, loader: "ts", resolveDir: root },
   outfile: join(app, "dist/main/development-recording-build.js"), platform: "node", format: "esm", target: "node24", sourcemap: false });
 await mkdir(join(payload, "fixtures"), { mode: 0o700 });
+await mkdir(join(payload, "owned-bus"), { mode: 0o700 });
+for (const name of ["portal-service.cpp", "portal-fixture.hpp"]) await cp(join(root, "tests/owned-bus", name), join(payload, "owned-bus", name));
 for (const name of ["ggml-tiny.bin", "jfk.f32"]) await cp(join(fixtures, name), join(payload, "fixtures", name), { errorOnExist: true, force: false });
 const bundled = await build({ entryPoints: [join(root, "tests/owned-dev-recording/driver.ts")], outfile: join(payload, "driver.mjs"),
   platform: "node", format: "esm", target: "node24", bundle: true, external: ["@playwright/test"], metafile: true, sourcemap: false });
@@ -82,12 +84,11 @@ for (const name of ["@playwright/test", "playwright", "playwright-core"]) {
 const sources: Record<string, { bytes: number; sha256: string }> = {};
 for (const name of Object.keys(bundled.metafile.inputs)) sources[name] = await describe(resolve(root, name));
 sources["tests/owned-dev-recording/run.ts"] = await describe(fileURLToPath(import.meta.url));
-await writeFile(join(output, "assembly.json"), JSON.stringify({ image: IMAGE, sources, originalDescriptor: original, descriptor,
-  originalDist: distBefore, payload: await inventory(payload), native: { capture: { path: capture, ...captureRecord }, speech: { path: speech, ...speechRecord }, bus: { path: bus, ...busRecord } },
-  seccomp: { path: seccomp, ...await describe(seccomp) },
-  scope: "Normal Dev main/preload/shared UI and capture utility; retained Ubuntu22 native inputs assembled before private runtime." }, null, 2), { mode: 0o600 });
-const frozen = await inventory(payload);
+for (const name of ["portal-service.cpp", "portal-fixture.hpp"]) sources[`tests/owned-bus/${name}`] = await describe(join(root, "tests/owned-bus", name));
+let frozen: Awaited<ReturnType<typeof inventory>>;
 const container = `openwhisper-owned-dev-recording-${randomUUID()}`;
+const compiler = `${container}-compiler`, compilerImage = "sha256:403f066a165681074f19f1977b2b46617d3dd7b072cb7037400dbe01676ed3cb";
+let compilerCreated = false;
 const dockerConfig = join(output, "docker-config"); await mkdir(dockerConfig, { mode: 0o700 });
 const commands: { args: string[]; code: number; expired: boolean; overflow: boolean; errored: boolean; closureObserved: boolean }[] = [];
 const outstanding = new Set<Promise<unknown>>(); let sequence = 0, created = false, result = "FAIL", namespaceRemoved = false;
@@ -115,6 +116,23 @@ async function required(args: string[], milliseconds?: number) {
   const value = await docker(args, milliseconds); assert.equal(value.code, 0); assert.equal(value.closureObserved, true); return value.stdout.trim();
 }
 try {
+  const buildImage = await required(["image", "inspect", compilerImage]); z.array(z.object({ Id: z.literal(compilerImage) })).length(1).parse(JSON.parse(buildImage));
+  compilerCreated = true;
+  await required(["create", "--name", compiler, "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL",
+    "--security-opt", "no-new-privileges", "--pids-limit", "64", "--memory", "1g", "--ulimit", "core=0:0", "--entrypoint", "/usr/bin/c++", compilerImage,
+    "-std=c++17", "-Wall", "-Wextra", "-Werror", "/tmp/sources/portal-service.cpp", "-I/usr/include/glib-2.0",
+    "-I/usr/lib/x86_64-linux-gnu/glib-2.0/include", "-o", "/tmp/owned-portal", "-lgio-2.0", "-lgobject-2.0", "-lglib-2.0", "-pthread"]);
+  await required(["cp", "-a", join(payload, "owned-bus"), `${compiler}:/tmp/sources`]);
+  await required(["start", "--attach", compiler], 60_000);
+  z.array(z.object({ State: z.object({ Running: z.literal(false), ExitCode: z.literal(0) }) })).length(1)
+    .parse(JSON.parse(await required(["inspect", compiler])));
+  await required(["cp", "-a", `${compiler}:/tmp/owned-portal`, join(payload, "owned-bus/owned-portal")]);
+  await required(["rm", compiler]); compilerCreated = false;
+  frozen = await inventory(payload);
+  await writeFile(join(output, "assembly.json"), JSON.stringify({ image: IMAGE, sources, originalDescriptor: original, descriptor,
+    originalDist: distBefore, payload: frozen, native: { capture: { path: capture, ...captureRecord }, speech: { path: speech, ...speechRecord }, bus: { path: bus, ...busRecord } },
+    portalFixture: { compilerImage, binary: await describe(join(payload, "owned-bus/owned-portal")) }, seccomp: { path: seccomp, ...await describe(seccomp) },
+    scope: "Normal Dev UI/capture/platform utilities with retained Ubuntu22 native inputs and a synthetic portal frontend assembled before private runtime." }, null, 2), { mode: 0o600 });
   const image = await required(["image", "inspect", IMAGE]); z.array(z.object({ Id: z.literal(IMAGE) })).length(1).parse(JSON.parse(image));
   created = true;
   await required(["create", "--name", container, "--init", "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL",
@@ -139,6 +157,7 @@ try {
     .parse(JSON.parse(await readFile(join(output, "lifecycle.json"), "utf8")));
   assert.deepEqual(await inventory(payload), frozen); result = "PASS";
 } finally {
+  if (compilerCreated) await docker(["rm", "--force", compiler], 20_000);
   if (created) {
     try { await docker(["cp", `${container}:/evidence/.`, output], 10_000); } catch {}
     try { await docker(["rm", "--force", container], 20_000); } catch {}

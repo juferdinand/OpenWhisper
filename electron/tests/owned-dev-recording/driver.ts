@@ -96,6 +96,17 @@ async function main(): Promise<void> {
   const stableBefore = sha(await readFile(join(stable, "sentinel")));
   await checkpoint("private-session");
   const bus = child("/usr/bin/dbus-daemon", ["--session", "--nofork", `--address=unix:path=${runtime}/bus`], env); await waitSocket(join(runtime, "bus"), bus);
+  const portalBinary = join(payload, "owned-bus/owned-portal");
+  const portalOwner = child(portalBinary, [env.DBUS_SESSION_BUS_ADDRESS!], env);
+  await until(async () => {
+    assert.equal(portalOwner.closeObserved, false);
+    return (await execute("/usr/bin/dbus-send", ["--session", "--type=method_call", "--print-reply", "--dest=org.freedesktop.DBus",
+      "/org/freedesktop/DBus", "org.freedesktop.DBus.NameHasOwner", "string:org.freedesktop.portal.Desktop"], { env, timeout: 5000, maxBuffer: 8192 })).stdout.includes("boolean true");
+  });
+  const portal = async (member: "PortalMode" | "PortalStatus" | "Press" | "Release" | "Unassign" | "End", mode?: "grant" | "pending" | "deny") => {
+    return (await execute("/usr/bin/dbus-send", ["--session", "--type=method_call", "--print-reply", "--dest=org.freedesktop.portal.Desktop",
+      "/owned", `org.openwhisper.Owned.${member}`, ...(mode ? [`string:${mode}`] : [])], { env, timeout: 5000, maxBuffer: 8192 })).stdout;
+  };
   const pipewire = child("/usr/bin/pipewire", [], env); await waitSocket(join(runtime, "pipewire-0"), pipewire);
   child("/usr/bin/wireplumber", [], env);
   const pulse = child("/usr/bin/pipewire-pulse", [], env); await waitSocket(join(runtime, "pulse/native"), pulse);
@@ -116,8 +127,17 @@ async function main(): Promise<void> {
   });
   env.DISPLAY = display;
   await checkpoint("launch-normal-application");
-  application = await _electron.launch({ executablePath: join(packageRoot, "node_modules/electron/dist/electron"),
-    args: [packageRoot, "--dev", "--dev-profile", profileRoot], env, chromiumSandbox: true, timeout: 30_000 });
+  const startupWatch = setTimeout(() => {
+    // Capture only owned process/resource metadata when bootstrap stalls, never argv or content.
+    void Promise.all([execute("/bin/ps", ["-eo", "pid,ppid,comm,stat"], { env, timeout: 5000, maxBuffer: 65_536 }),
+      readFile("/sys/fs/cgroup/pids.current", "utf8"), readFile("/sys/fs/cgroup/pids.max", "utf8"), readFile("/sys/fs/cgroup/memory.events", "utf8")])
+      .then(([processes, pids, maximum, memory]) => writeFile(join(evidence, "startup-resources.json"),
+        JSON.stringify({ processes: processes.stdout, pids, maximum, memory }), { mode: 0o600 })).catch(() => {});
+  }, 10_000);
+  try {
+    application = await _electron.launch({ executablePath: join(packageRoot, "node_modules/electron/dist/electron"),
+      args: [packageRoot, "--dev", "--dev-profile", profileRoot], env, chromiumSandbox: true, timeout: 30_000 });
+  } finally { clearTimeout(startupWatch); }
   application.process().stdout?.on("data", (bytes: Buffer) => { diagnostics.stdoutBytes += bytes.length; });
   application.process().stderr?.on("data", (bytes: Buffer) => { diagnostics.stderrBytes += bytes.length; });
   page = await application.firstWindow();
@@ -163,6 +183,25 @@ async function main(): Promise<void> {
   assert.deepEqual(await page.evaluate(() => ({ process: "process" in globalThis, require: "require" in globalThis,
     bridge: typeof window.openwhisper?.invoke })), { process: false, require: false, bridge: "function" });
   checks.push("normal main/shared UI/preload; private Tiny inventory; enumeration with zero streams; sandboxed renderer");
+  await checkpoint("owned-portal-cancel-and-retry");
+  assert.equal((await state()).shortcut_portal, true); assert.equal((await state()).shortcut, null);
+  await portal("PortalMode", "pending"); await page.locator('[data-portal="enable_shortcut"]').click();
+  await until(async () => !!(await state()).shortcut_configuring);
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await until(async () => !(await state()).shortcut_configuring && (await state()).shortcut === null);
+  assert.match(await portal("PortalStatus"), /uint32 0/u);
+  await portal("PortalMode", "grant"); await page.locator('[data-portal="enable_shortcut"]').click();
+  await until(async () => (await state()).shortcut === "Ctrl+Alt+Space");
+  await portal("Press"); await until(async () => (await state()).status === "recording");
+  await portal("End"); await until(async () => (await state()).status === "idle" && (await state()).shortcut === null && !(await state()).shortcut_configuring);
+  assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), ""); assert.match(await portal("PortalStatus"), /uint32 0/u);
+  await page.evaluate(() => window.openwhisper?.invoke("save_preferences", { changes: { hold_to_record: true } }));
+  await page.locator('[data-portal="enable_shortcut"]').click(); await until(async () => (await state()).shortcut === "Ctrl+Alt+Space");
+  await portal("Press"); await until(async () => (await state()).status === "recording");
+  await portal("Unassign"); await until(async () => (await state()).status === "idle" && (await state()).shortcut === null && !(await state()).shortcut_configuring);
+  assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), ""); assert.match(await portal("PortalStatus"), /uint32 0/u);
+  await page.evaluate(() => window.openwhisper?.invoke("save_preferences", { changes: { hold_to_record: false } }));
+  checks.push("actual native D-Bus portal protocol: cancelled pending consent, explicit retry, granted binding, session loss and hold binding revoke close only the original private capture");
   await checkpoint("actual-ui-cancel");
   await page.locator("#record").click(); await until(async () => (await state()).status === "recording");
   await page.locator("#cancel").click(); await until(async () => (await state()).status === "idle");
@@ -180,7 +219,8 @@ async function main(): Promise<void> {
   assert.deepEqual(await readdir(profile.paths.recovery), []);
   checks.push("private command Start and GUI Cancel; later GUI Start and command Cancel share exact owners");
   await checkpoint("actual-ui-start");
-  await page.locator("#record").click(); await until(async () => (await state()).status === "recording");
+  await page.locator('[data-portal="enable_shortcut"]').click(); await until(async () => (await state()).shortcut === "Ctrl+Alt+Space");
+  await portal("Press"); await portal("Release"); await until(async () => (await state()).status === "recording");
   await until(async () => (await pactl(["list", "short", "source-outputs"])).trim().split("\n").filter(Boolean).length === 1);
   assert.deepEqual(await sourceNames(), [source]);
   const publicSpeech = await readFile(join(payload, "fixtures/jfk.f32"));
@@ -192,7 +232,7 @@ async function main(): Promise<void> {
   await execute("/usr/bin/paplay", ["--raw", "--format=float32le", "--rate=48000", "--channels=1", `--device=${sink}`, audioPath], { env, timeout: 30_000, maxBuffer: 1024 });
   await delay(200);
   await checkpoint("actual-ui-stop");
-  await page.locator("#record").click();
+  await portal("Press");
   await until(async () => (await state()).status === "done", 120_000);
   const result = await state(); assert.match(result.transcript.toLowerCase(), /country/u);
   assert.equal(result.gpu_available, false); assert.equal(result.preferences.gpu, false); assert.equal(result.recovery_available, false);
@@ -203,7 +243,9 @@ async function main(): Promise<void> {
   assert.equal(sha(await readFile(join(stable, "sentinel"))), stableBefore);
   const maps = await readFile(`/proc/${security.pid}/maps`, "utf8");
   assert.equal(maps.includes("openwhisper_capture.node"), false); assert.equal(maps.includes("openwhisper_speech.node"), false);
-  checks.push("actual UI Stop; real CPU Tiny recognition; private clipboard exact readback; history confirmation; recovery removal; native capture/speech absent from main");
+  checks.push("actual owned portal Start/Stop; real CPU Tiny recognition; private clipboard exact readback; history confirmation; recovery removal; native capture/speech absent from main");
+  await page.locator('[data-portal="clear_shortcut"]').click(); await until(async () => (await state()).shortcut === null && !(await state()).shortcut_configuring);
+  assert.match(await portal("PortalStatus"), /uint32 0/u);
   await checkpoint("actual-source-loss-retry");
   await expect(page.locator("#record-label")).toHaveText("Start dictation");
   await page.locator("#record").click(); await until(async () => (await state()).status === "recording");
@@ -253,7 +295,8 @@ async function main(): Promise<void> {
     clipboardConfirmed: true, historyConfirmed: true, recoveryRemoved: true, cancelConfirmed: true, retryConfirmed: true, discardConfirmed: true,
     nativeInMain: false, security,
     sourceScope: "owned-generated-PipeWire-Pulse-monitor-only", fixtureSha256: sha(publicSpeech),
-    physicalMicrophone: "NOT_USED", hotkeys: "NOT_TESTED", automaticPaste: "NOT_TESTED", gpu: "NOT_TESTED", macos: "NOT_TESTED" }, null, 2), { mode: 0o600 });
+    physicalMicrophone: "NOT_USED", hotkeys: "OWNED_SYNTHETIC_PORTAL_SIGNALS_ONLY", portalResourcesClosed: true,
+    automaticPaste: "NOT_TESTED", gpu: "NOT_TESTED", macos: "NOT_TESTED" }, null, 2), { mode: 0o600 });
   await checkpoint("graceful-normal-quit");
   await application.close(); application = undefined; status = "PASS";
 }

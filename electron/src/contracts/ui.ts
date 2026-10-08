@@ -156,6 +156,7 @@ export const appStateSchema = z.strictObject({
   native_mouse: z.boolean().optional(),
   native_middle_mouse: z.boolean().optional(),
   recording_shortcut: z.boolean().optional(),
+  shortcut_configuring: z.boolean().optional(),
   paste_ready: z.boolean(),
   gpu_available: z.boolean(),
   gpu_supported: z.boolean().optional(),

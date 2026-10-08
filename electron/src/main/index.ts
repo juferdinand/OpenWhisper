@@ -29,6 +29,7 @@ import { DevelopmentRecordingHost, developmentPulseServer } from "./development-
 import { saveDevelopmentTranscript } from "../services/development-transcripts.js";
 import { DevelopmentPlatformHost } from "./development-platform-host.js";
 import { createRecordingControlPort } from "./recording-control.js";
+import { portalShortcutStateSchema } from "../platforms/linux/shared/portal-shortcuts.js";
 
 const distribution = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let window: BrowserWindow | undefined;
@@ -114,6 +115,7 @@ async function start(): Promise<void> {
   const macRecording = descriptor?.platform === "darwin";
   let microphoneAllowed = macRecording && systemPreferences.getMediaAccessStatus("microphone") === "granted";
   let platformHost: DevelopmentPlatformHost | undefined;
+  let shortcut = portalShortcutStateSchema.parse({ available: false, configuring: false, label: null, result: "NONE" });
   if (descriptor) {
     host = await DevelopmentRecordingHost.open(resolve(distribution, ".."), descriptor, inventory, {
       recoveryPath: profile.paths.recovery,
@@ -173,7 +175,8 @@ async function start(): Promise<void> {
     installed: installed.map((item) => item.model.id), microphones: sources.map((source) => source.id),
     session: process.env["XDG_SESSION_TYPE"] ?? "unknown",
     desktop: process.env["XDG_CURRENT_DESKTOP"] ?? "unknown", clipboard_available: descriptor !== null,
-    shortcut_portal: false, paste_portal: false, shortcut: null, native_shortcuts: false,
+    shortcut_portal: shortcut.available, paste_portal: false, shortcut: shortcut.label, native_shortcuts: false,
+    shortcut_configuring: shortcut.configuring,
     native_x11: false, native_paste: false, native_mouse: false, native_middle_mouse: false,
     recording_shortcut: false, paste_ready: false, gpu_available: false, gpu_supported: false,
     gpu_device: null, gpu_fallback: false, recovery_available: recording.recoveryAvailable, overlay_available: false,
@@ -262,6 +265,15 @@ async function start(): Promise<void> {
       platformHost = await DevelopmentPlatformHost.open({
         descriptor: { root: resolve(distribution, ".."), ...descriptor.platformServices },
         address: process.env.DBUS_SESSION_BUS_ADDRESS ?? "",
+        shortcuts: (value) => {
+          shortcut = value;
+          const messages = { NONE: "", ENABLED: "Global shortcut enabled. Your desktop controls its key binding.",
+            UNASSIGNED: "No shortcut assigned. Choose a key combination in your desktop's shortcut settings.",
+            CANCELLED: "Shortcut setup was cancelled. Window recording remains usable.",
+            ENDED: "Shortcut session ended. Enable it again in Settings.",
+            FAILED: "Shortcut setup or recording failed. Window recording remains usable." };
+          message = messages[value.result]; notify();
+        },
         capture: createRecordingControlPort({ owner: host, snapshot: () => recording, configure: configureRecording,
           serialize: withRecordingControl,
           cleanupSerialize: <T>(operation: () => Promise<T>) => withRecordingControl(operation, true),
@@ -269,6 +281,10 @@ async function start(): Promise<void> {
       }, new AbortController().signal);
     } catch { message = "Desktop command control is not available. Window recording remains usable."; }
   }
+  const shortcutAction = (command: "enable" | "configure" | "clear" | "cancel"): Promise<void> => action(async () => {
+    if (!platformHost || ((recording.busy || recording.recoveryAvailable) && command !== "cancel")) throw new Error("Shortcut setup is unavailable.");
+    await platformHost.shortcut(command, preferences.snapshot().hold_to_record);
+  });
   app.on("before-quit", (event) => {
     if (shutdownComplete) return;
     event.preventDefault();
@@ -294,12 +310,13 @@ async function start(): Promise<void> {
           throw new Error("Unknown catalog model.");
         }
         if ((recording.busy || recording.recoveryAvailable) &&
-          ["model", "language", "microphone", "vocabulary", "snippets", "gpu", "output"].some((key) => Object.hasOwn(changes, key))) {
+          ["model", "language", "microphone", "vocabulary", "snippets", "gpu", "output", "hold_to_record"].some((key) => Object.hasOwn(changes, key))) {
           throw new Error("Finish or discard the current recording before changing its request.");
         }
         if (changes.output && changes.output !== "clipboard") throw new Error("The recording Dev build supports clipboard output.");
         if (changes.gpu) throw new Error("The recording Dev build uses CPU inference.");
         await preferences.patch(changes);
+        if (changes.hold_to_record !== undefined) await platformHost?.shortcut("mode", changes.hold_to_record);
         if (["model", "language", "microphone", "vocabulary", "snippets", "gpu"].some((key) => Object.hasOwn(changes, key))) configured = false;
         const current = state();
         emit("state", current);
@@ -323,6 +340,10 @@ async function start(): Promise<void> {
         }
       },
       cancel_local_processing: ({ requestId }) => { processing.cancel(requestId); },
+      enable_shortcut: () => shortcutAction("enable"),
+      desktop_shortcut: () => shortcutAction("configure"),
+      clear_shortcut: () => shortcutAction("clear"),
+      cancel_shortcut: () => shortcutAction("cancel"),
       toggle_recording: () => recordingAction(async () => {
         if (!host) throw new Error("Recording unavailable.");
         if (recording.phase === "recording" || recording.phase === "starting") await host.command("stop");
