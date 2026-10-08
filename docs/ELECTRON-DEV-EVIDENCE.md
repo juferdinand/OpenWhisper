@@ -539,6 +539,47 @@ The complete Apple Silicon retirement artifact from
 was independently checked against `4cb0bae`: all seven owned child cases reached
 full reap and disposal, and the synthetic Worker completed exactly once during
 Node's work drain before the addon cleanup hook. All recorded source and native
-binary hashes match. This is actual macOS 15.5 arm64 runtime evidence; it does not
+binary hashes match. This is actual arm64 evidence on a macOS 15 CI runner using
+the 15.5 SDK; the SDK version is not the runtime OS version. It does not
 establish Intel execution, macOS 14 runtime, production Metal admission, kernel
 cancellation or signed package loading. Zombie visibility was not observed.
+
+At `2f0099f`, [CI 37731217799](https://github.com/juferdinand/OpenWhisper/actions/runs/37731217799)
+passes the same complete owned retirement gate on both Apple Silicon and Intel.
+The independently checked artifacts match all fourteen project source hashes
+and four pinned header hashes per architecture. Seven actual child cases fully
+reap and dispose; the target-free synthetic Worker again completes exactly once
+during the work drain, followed by one cleanup/disposal and zero reservation.
+The runtime is Electron 44.7 with Node 24.21. Tested binding hashes agree with
+their build manifests. These diagnostic artifacts do not contain the binary
+itself or establish production factory, Metal, device/TCC or signing acceptance.
+
+### Owned HTTPS transport and retained cleanup
+
+The private loopback TLS gate now passes all thirteen cases with the reviewed
+Node 24.21 runtime and immutable unprivileged network-none container. It publishes
+and reads back exactly 1,000,017 synthetic bytes with matching SHA-256 and a counted
+17-byte tail. Certificate/hostname refusal, incomplete response parsing, a distinct
+local error after apparent EOF, two cancellation phases and three deadlines pass.
+All acquired original requests, responses and sockets observe actual close events;
+owned servers close with no remaining connections. Three additional cases hold
+close notifications over already closed connections: retained cleanup refuses,
+a second owner remains BUSY without another request, and the same owner finalizes
+after notification release. These cases do not hold physical connections open.
+
+The first actual run remains a failure after its successful partial download.
+An independently reproduced test defect expected an empty cache even though Dev
+preparation creates control/locks/session. The corrected fixture requires those
+exact private empty directories and rejects staging, symlinks, permission/owner
+changes or missing entries. Seventeen focused inert/private-filesystem checks
+pass and are registered in ordinary CI; the actual TLS runner is separately
+opted in. Closed stage checkpoints retain no response content or private keys.
+The successful runtime input is
+`2a2a43a4d5247d61b984ace9ba6c7a4642b189da35f5a3bb5d6e3bc7a7d47545`;
+all 128 declared inputs and copied runtime artifacts were independently checked.
+Exact container removal/absence and original CLI closure are confirmed.
+
+This is actual local TLS with synthetic model publication. Public provider/catalog
+behavior, model authenticity, native compatibility, crash recovery, interprocess
+locking and live UI download wiring remain separate work. No production CA or
+destination override was introduced.
