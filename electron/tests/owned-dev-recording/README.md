@@ -105,3 +105,26 @@ Cancel, unchanged keyboard focus and original Quit. This does not select XWaylan
 globally. The failed native Wayland probe is retained: Electron's built-in inactive
 show cannot preserve focus there, so that overlay path stays guarded pending the
 separate native layer-shell requirement.
+
+Use `--stock-kde-wayland-overlay` for the native Wayland surface case. This mode
+passes the application's explicit `--experimental-wayland-overlay` switch.
+It currently fails the post-click focus check on the pinned stock KWin desktop;
+Cancel itself and exact native pixel matching are verified, while Stop/recognition
+is not reached. Normal Dev does not enable this prototype by default. This mode
+does not enable inner XWayland or change the app's Wayland backend. The same
+trusted, sandboxed overlay renderer stays offscreen; the owned GTK/layer-shell
+utility paints its frames with keyboard mode NONE. The driver identifies that
+original utility and its loaded libraries, reads the actual compositor output
+bounds, and captures the verified outer KWin surface through Xlib using pinned
+Koffi 3.3.2. These desktop PNGs include the native surface, rather than only the
+offscreen renderer. Pointer coordinates combine the 360×64 bottom-centered
+surface with the existing shared buttons' actual DOM bounds.
+
+The case checks default-hidden and idle visibility, unchanged main focus,
+overlay preference refusal, real F8/private capture and actual pointer Cancel.
+A second public-fixture capture ends with actual native pointer Stop and CPU
+recognition, independent Wayland clipboard/history readback and recovery removal.
+Normal Quit must close the original app and leave the observed surface process
+absent. Existing sandbox, private audio, task cap and exact namespace cleanup
+guards remain unchanged. The runner copies the exact pinned Koffi package and
+Linux native companion into the normal app before freezing the assembly.

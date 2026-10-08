@@ -36,7 +36,8 @@ import { portalShortcutStateSchema } from "../platforms/linux/shared/portal-shor
 import { KdeKeyCapture } from "../platforms/linux/kde/key-capture.js";
 import { modifierOnly } from "../platforms/linux/kde/keyboard.js";
 import { buildTrayMenu } from "./tray-menu.js";
-import { overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay } from "./recording-overlay.js";
+import { overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "./recording-overlay.js";
+import { WaylandRecordingOverlay } from "./wayland-recording-overlay.js";
 
 const distribution = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let window: BrowserWindow | undefined;
@@ -110,6 +111,7 @@ async function start(): Promise<void> {
   let recordingOperation: Promise<unknown> | undefined;
   let shutdownInProgress = false, shutdownComplete = false;
   let overlay: BrowserWindow | undefined, overlayReady = false;
+  let waylandOverlay: WaylandRecordingOverlay | undefined;
   let tray: Tray | undefined, trayKey = "";
   let recording = recordingSnapshotSchema.parse({ phase: "idle", generation: 0, elapsedMs: 0, level: 0,
     busy: false, recoveryAvailable: false, error: null, transcript: "" });
@@ -209,7 +211,8 @@ async function start(): Promise<void> {
     shortcut_configuring: shortcut.configuring,
     native_x11: false, native_paste: false, native_mouse: false, native_middle_mouse: false,
     recording_shortcut: !!keyCapture, paste_ready: pasteState.ready, paste_configuring: pasteState.configuring, gpu_available: false, gpu_supported: false,
-    gpu_device: null, gpu_fallback: false, recovery_available: recording.recoveryAvailable, overlay_available: !!overlay && !overlay.isDestroyed(),
+    gpu_device: null, gpu_fallback: false, recovery_available: recording.recoveryAvailable,
+    overlay_available: !!overlay && !overlay.isDestroyed() && (!waylandOverlay || waylandOverlay.available),
     download, progress: download ? downloadProgress : inferenceProgress,
     elapsed: Math.min(Number.MAX_SAFE_INTEGER, Math.floor(recording.elapsedMs / 1000)), level: recording.level,
     model_directory: profile.paths.models,
@@ -254,20 +257,34 @@ async function start(): Promise<void> {
     },
   });
   const contents = window.webContents;
-  if (supportsInactiveRecordingOverlay({ platform: process.platform,
+  const inactiveOverlay = supportsInactiveRecordingOverlay({ platform: process.platform,
     ...(process.env["XDG_SESSION_TYPE"] ? { sessionType: process.env["XDG_SESSION_TYPE"] } : {}),
     ...(process.env["WAYLAND_DISPLAY"] ? { waylandDisplay: process.env["WAYLAND_DISPLAY"] } : {}),
     ozonePlatform: app.commandLine.getSwitchValue("ozone-platform"),
-  })) {
+  });
+  // The owned prototype still fails post-click focus retention on stock KWin.
+  const nativeWaylandOverlay = app.commandLine.hasSwitch("experimental-wayland-overlay") && process.platform === "linux" && !inactiveOverlay &&
+    (!!process.env["WAYLAND_DISPLAY"] || process.env["XDG_SESSION_TYPE"] === "wayland" ||
+      app.commandLine.getSwitchValue("ozone-platform") === "wayland");
+  if (inactiveOverlay || nativeWaylandOverlay) {
     try {
-      const options = overlayWindowOptions({ title: `${profile.productName} Recording`, preloadPath: join(distribution, "preload/index.cjs") });
+      const options = (nativeWaylandOverlay ? waylandOverlayWindowOptions : overlayWindowOptions)(
+        { title: `${profile.productName} Recording`, preloadPath: join(distribution, "preload/index.cjs") });
       const area = screen.getPrimaryDisplay().workArea;
       overlay = new BrowserWindow({ ...options,
         x: Math.floor(area.x + (area.width - 360) / 2), y: Math.floor(area.y + area.height - 88),
         webPreferences: { ...options.webPreferences, webSecurity: true, devTools: false },
       });
-      overlay.on("closed", () => { overlayReady = false; overlay = undefined; notify(); });
+      overlay.on("closed", () => {
+        overlayReady = false; overlay = undefined;
+        void waylandOverlay?.close().catch(() => {}); notify();
+      });
+      if (nativeWaylandOverlay) {
+        waylandOverlay = new WaylandRecordingOverlay(overlay, join(distribution, "workers/wayland-surface-entry.js"), () => notify());
+        if (!await waylandOverlay.start()) overlay.destroy();
+      }
     } catch {
+      if (overlay && !overlay.isDestroyed()) overlay.destroy();
       console.error("OpenWhisper Dev could not create its recording overlay.");
     }
   }
@@ -286,7 +303,8 @@ async function start(): Promise<void> {
       const snapshot = state(); emit("state", snapshot); updateTray(snapshot);
       if (overlayReady && overlay && !overlay.isDestroyed()) {
         const visible = shouldShowRecordingOverlay(snapshot);
-        if (visible && !overlay.isVisible()) overlay.showInactive();
+        if (waylandOverlay) waylandOverlay.setVisible(visible);
+        else if (visible && !overlay.isVisible()) overlay.showInactive();
         else if (!visible && overlay.isVisible()) overlay.hide();
       }
     }
@@ -407,7 +425,7 @@ async function start(): Promise<void> {
     shutdownInProgress = true; cancelRequested = true; processing.close(); downloadAbort?.abort();
     keyCapture = undefined; contents.setIgnoreMenuShortcuts(false);
     void (async () => { await recordingOperation?.catch(() => {}); await downloading; await downloads.finalize();
-      await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); })().then(() => {
+      await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); await waylandOverlay?.close(); })().then(() => {
       shutdownComplete = true; tray?.destroy(); tray = undefined;
       overlay?.destroy(); app.quit();
     }, () => {

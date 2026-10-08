@@ -1,5 +1,43 @@
 # Electron development evidence
 
+The native Wayland layer-shell prototype uses strict TypeScript and pinned
+Koffi 3.3.2 against the existing GTK3 libraries; it adds no authored C/C++ or second
+frontend. Its trusted sandboxed renderer stays unmapped. An empty initial paint
+is ignored under a finite first-frame deadline; frame acknowledgements, PNG size,
+input regions and the original utility shutdown remain bounded. Creation failures
+destroy the unused renderer and leave main controls available.
+
+**`stock-kde-wayland-overlay-4` remains FAIL.** Actual owned KWin screenshots match
+all 12,501 sampled idle pixels and 12,206 recording pixels from the trusted renderer.
+Mapping preserves main focus; real F8 opens one private audio stream, and an actual
+GTK pointer Cancel returns the app to idle with no stream or recovery. The subsequent
+main-window focus assertion fails. Attempt5 reproduces the same focus boundary
+through a temporary shared-button activation experiment, so that alternative was
+removed. Original graceful Quit, private service closure and exact namespace removal
+pass in both failed packets. Their total runner durations are 47.10 and 46.33 seconds.
+Pointer Stop/recognition is not reached and is not claimed as passing.
+
+The final guarded build passes ordinary native Wayland dictation and insertion into
+the owned inner XWayland editor in **`stock-kde-xwayland-paste-4`**, 24.91 seconds.
+Clipboard/paste confirmation, recovery removal, permission revoke, original graceful
+Quit and exact namespace cleanup pass. Strict TypeScript checking and recording build
+pass; the final unit suite has **910 passes, 13 native opt-in skips and 0 failures**,
+16.78 seconds. The unchanged shared UI retains its59-test receipt.
+
+The earlier failed packets are retained separately: attempt1's screenshot hash
+comparison could not establish actual native visibility; attempts2/3 identify an
+empty 0×0 initial Electron paint. The corrected pixel gate and first-frame handling
+establish real native presentation in attempts4/5. No failed packet is overwritten.
+The unresolved post-click focus boundary keeps the prototype behind the explicit
+`--experimental-wayland-overlay` switch. Ordinary native Wayland Dev keeps its main
+control fallback; no global XWayland selection or focus restoration is added.
+
+At committed `97e473f`, [CI37808051769](https://github.com/juferdinand/OpenWhisper/actions/runs/37808051769)
+finishes with all six jobs passing. This does not certify the later local prototype
+or establish that the earlier intermittent Mac process-binding failure is resolved.
+
+The preceding tray/XWayland checkpoint remains as follows.
+
 The normal Dev now connects a localized tray menu and the existing shared recording
 overlay to the same authoritative recording handlers. In **`stock-kde-overlay-xwayland-2`**,
 the app explicitly uses the verified private inner XWayland server. The sandboxed overlay

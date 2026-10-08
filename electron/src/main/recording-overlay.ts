@@ -20,6 +20,13 @@ export function overlayWindowOptions({ title, preloadPath }: Readonly<{ title: s
   };
 }
 
+export function waylandOverlayWindowOptions(options: Readonly<{ title: string; preloadPath: string }>): BrowserWindowConstructorOptions {
+  const base = overlayWindowOptions(options);
+  return { ...base, webPreferences: { ...base.webPreferences,
+    offscreen: { useSharedTexture: false, deviceScaleFactor: 1 }, backgroundThrottling: false,
+  } };
+}
+
 export function shouldShowRecordingOverlay(state: AppState): boolean {
   return state.status === "recording" || state.status === "transcribing" ||
     state.recovery_available === true || state.preferences.show_idle_overlay === true;

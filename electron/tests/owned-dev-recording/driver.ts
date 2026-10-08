@@ -3,7 +3,7 @@ import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 import { _electron, expect, type ElectronApplication, type Page } from "@playwright/test";
@@ -21,6 +21,7 @@ const packageRoot = join(payload, "app"), evidence = "/evidence";
 const stockKde = process.env.OPENWHISPER_STOCK_KDE === "1";
 const kdeLifecycle = process.env.OPENWHISPER_KDE_LIFECYCLE === "1";
 const kdeOverlay = process.env.OPENWHISPER_KDE_OVERLAY === "1";
+const kdeWaylandOverlay = process.env.OPENWHISPER_KDE_WAYLAND_OVERLAY === "1";
 const kdeXwaylandPaste = process.env.OPENWHISPER_KDE_PASTE === "xwayland";
 const kdePaste = process.env.OPENWHISPER_KDE_PASTE === "wayland" || kdeXwaylandPaste;
 const sha = (value: Uint8Array) => createHash("sha256").update(value).digest("hex");
@@ -32,7 +33,11 @@ const appOwners: { original: ChildProcess; closed: Promise<void>; closeObserved:
 let lastState: Readonly<{ status: string; recordingAvailable: boolean; recoveryAvailable: boolean; elapsed: number; progress: number;
   messageCategory: "NONE" | "RECORDING_ERROR" | "ACTION_REFUSED" | "OTHER"; recordingError: string | null }> | undefined;
 const owners: { child: ChildProcess; closed: Promise<void>; closeObserved: boolean }[] = [];
-const diagnostics: { stdoutBytes: number; stderrBytes: number } = { stdoutBytes: 0, stderrBytes: 0 };
+const surfaceFailureSchema = z.enum(["startup-timeout", "image-size", "png-size", "invalid-reply", "frame-mismatch", "frame-timeout",
+  "renderer-regions", "helper-exit", "helper-error", "native-message", "native-frame", "native-visibility", "native-pump", "native-close"]);
+const diagnostics: { stdoutBytes: number; stderrBytes: number; surfaceFailures: z.infer<typeof surfaceFailureSchema>[];
+  surfaceDimensions: { width: number; height: number }[] } =
+  { stdoutBytes: 0, stderrBytes: 0, surfaceFailures: [], surfaceDimensions: [] };
 async function checkpoint(value: string): Promise<void> {
   stage = value; await writeFile(join(evidence, "checkpoint.json"), JSON.stringify({ stage, checks }), { mode: 0o600 });
 }
@@ -89,6 +94,10 @@ async function main(): Promise<void> {
   }
   if (process.env.OPENWHISPER_KDE_OVERLAY !== undefined) {
     assert.equal(kdeOverlay, true); assert.equal(stockKde, true);
+    assert.equal(kdeLifecycle, false); assert.equal(kdePaste, false);
+  }
+  if (process.env.OPENWHISPER_KDE_WAYLAND_OVERLAY !== undefined) {
+    assert.equal(kdeWaylandOverlay, true); assert.equal(stockKde, true); assert.equal(kdeOverlay, false);
     assert.equal(kdeLifecycle, false); assert.equal(kdePaste, false);
   }
   assert.ok((await lstat("/.dockerenv")).isFile());
@@ -270,6 +279,7 @@ async function main(): Promise<void> {
   try {
     application = await _electron.launch({ executablePath: join(packageRoot, "node_modules/electron/dist/electron"),
       args: [packageRoot, "--dev", "--dev-profile", profileRoot,
+        ...(kdeWaylandOverlay ? ["--experimental-wayland-overlay"] : []),
         ...(stockKde ? [kdeOverlay ? "--ozone-platform=x11" : "--ozone-platform=wayland"] : [])],
       env: applicationEnvironment, chromiumSandbox: true, timeout: 30_000 });
   } finally { clearTimeout(startupWatch); }
@@ -278,7 +288,28 @@ async function main(): Promise<void> {
   original.stdout?.on("data", (bytes: Buffer) => { diagnostics.stdoutBytes += bytes.length; });
   owner.closed = new Promise<void>((accept) => original.once("close", () => { owner.closeObserved = true; appCloseObserved = true; accept(); }));
   appOwners.push(owner); appOriginalClose = owner.closed;
-  original.stderr?.on("data", (bytes: Buffer) => { diagnostics.stderrBytes += bytes.length; });
+  let diagnosticLine = "", diagnosticOverflow = false;
+  original.stderr?.on("data", (bytes: Buffer) => {
+    diagnostics.stderrBytes += bytes.length;
+    for (const character of bytes.toString("utf8")) {
+      if (character === "\n") {
+        if (!diagnosticOverflow && diagnostics.surfaceFailures.length < 16) {
+          const category = surfaceFailureSchema.safeParse(/^OpenWhisper Wayland overlay failed: ([a-z-]+)\r?$/u.exec(diagnosticLine)?.[1]);
+          if (category.success) diagnostics.surfaceFailures.push(category.data);
+        }
+        if (!diagnosticOverflow && diagnostics.surfaceDimensions.length < 4) {
+          const dimensions = /^OpenWhisper Wayland overlay image dimensions: (\d{1,4})x(\d{1,4})\r?$/u.exec(diagnosticLine);
+          if (dimensions && Number(dimensions[1]) <= 8192 && Number(dimensions[2]) <= 8192) {
+            diagnostics.surfaceDimensions.push({ width: Number(dimensions[1]), height: Number(dimensions[2]) });
+          }
+        }
+        diagnosticLine = ""; diagnosticOverflow = false;
+      } else if (!diagnosticOverflow) {
+        if (diagnosticLine.length >= 256) { diagnosticLine = ""; diagnosticOverflow = true; }
+        else diagnosticLine += character;
+      }
+    }
+  });
   page = await application.firstWindow();
   await expect(page.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev");
   assert.equal(page.url(), "app://openwhisper/index.html");
@@ -381,7 +412,7 @@ async function main(): Promise<void> {
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await until(async () => !(await state()).recording_shortcut);
     assert.equal((await state()).shortcut, "F8");
-    if (kdeOverlay) {
+    if (kdeOverlay || kdeWaylandOverlay) {
       const mainUrl = "app://openwhisper/index.html", overlayUrl = `${mainUrl}?overlay=1`;
       await checkpoint("actual-overlay-default-hidden");
       assert.equal((await state()).overlay_available, true);
@@ -392,6 +423,81 @@ async function main(): Promise<void> {
         return overlayPage !== undefined;
       });
       assert.ok(overlayPage); const overlay = overlayPage;
+      const outputBounds = kdeWaylandOverlay ? await application.evaluate(({ screen }) => screen.getPrimaryDisplay().bounds) : undefined;
+      if (outputBounds) assert.deepEqual(outputBounds, { x: 0, y: 0, width: 1100, height: 750 });
+      const surfaceBounds = outputBounds ? { x: outputBounds.x + (outputBounds.width - 360) / 2,
+        y: outputBounds.y + outputBounds.height - 24 - 64, width: 360, height: 64 } : undefined;
+      let surfacePid: number | undefined;
+      if (kdeWaylandOverlay) {
+        await until(async () => {
+          const metrics = await application!.evaluate(({ app }) => app.getAppMetrics().filter((metric) =>
+            metric.type === "Utility" && (metric.name === "OpenWhisper Wayland Recording Surface" || metric.serviceName === "OpenWhisper Wayland Recording Surface")));
+          assert.ok(metrics.length <= 1); surfacePid = metrics[0]?.pid; return surfacePid !== undefined;
+        });
+        assert.ok(surfacePid); assert.equal((await lstat(`/proc/${surfacePid}`)).uid, 1000);
+        const maps = await readFile(`/proc/${surfacePid}/maps`, "utf8");
+        assert.ok(maps.includes("libgtk-3.so") && maps.includes("libgtk-layer-shell.so"));
+        await writeFile(join(evidence, "native-surface-owner.json"), JSON.stringify({ pid: surfacePid, uid: 1000,
+          outputBounds, surfaceBounds, serviceName: "OpenWhisper Wayland Recording Surface" }), { mode: 0o600 });
+      }
+      const nativeScreenshot = async (name: string, matchTrustedFrame = false) => {
+        assert.equal(kdeWaylandOverlay, true); assert.ok(outputBounds && surfaceBounds);
+        assert.match(env.DISPLAY ?? "", /^:\d+$/u);
+        const module: typeof import("koffi") = await import(pathToFileURL(join(packageRoot, "node_modules/koffi/index.js")).href);
+        const xlib = module.default.load("libX11.so.6");
+        const open: (name: string) => unknown = xlib.func("void *XOpenDisplay(const char *name)");
+        const screen: (display: unknown) => number = xlib.func("int XDefaultScreen(void *display)");
+        const depth: (display: unknown, screen: number) => number = xlib.func("int XDefaultDepth(void *display, int screen)");
+        const get: (display: unknown, window: number, x: number, y: number, width: number, height: number, mask: bigint, format: number) => unknown =
+          xlib.func("void *XGetImage(void *display, unsigned long window, int x, int y, unsigned int width, unsigned int height, unsigned long mask, int format)");
+        const pixel: (image: unknown, x: number, y: number) => unknown = xlib.func("unsigned long XGetPixel(void *image, int x, int y)");
+        const destroy: (image: unknown) => unknown = xlib.func("int XDestroyImage(void *image)");
+        const close: (display: unknown) => unknown = xlib.func("int XCloseDisplay(void *display)");
+        const display = open(env.DISPLAY!); assert.ok(display);
+        let image: unknown;
+        try {
+          assert.equal(depth(display, screen(display)), 24);
+          const window = Number.parseInt(windows[0]!, 16); assert.ok(Number.isSafeInteger(window) && window > 0);
+          image = get(display, window, 0, 0, 1100, 750, 0xffffffffffffffffn, 2); assert.ok(image);
+          const bitmap = Buffer.alloc(1100 * 750 * 4);
+          for (let y = 0; y < 750; y++) for (let x = 0; x < 1100; x++) {
+            const value = pixel(image, x, y);
+            assert.ok(typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 0xffffff);
+            const offset = (y * 1100 + x) * 4;
+            bitmap[offset] = value & 255; bitmap[offset + 1] = value >>> 8 & 255; bitmap[offset + 2] = value >>> 16 & 255; bitmap[offset + 3] = 255;
+          }
+          const reference = matchTrustedFrame ? await overlay.screenshot({ timeout: 5000 }) : Buffer.alloc(0);
+          const rendered = await application!.evaluate(({ nativeImage }, input) => {
+            const image = nativeImage.createFromBitmap(Buffer.from(input.bitmap), { width: 1100, height: 750 });
+            const surface = image.crop(input.bounds);
+            return { desktop: Array.from(image.toPNG()), surface: Array.from(surface.toPNG()), bitmap: Array.from(surface.toBitmap()),
+              reference: input.reference.length ? Array.from(nativeImage.createFromBuffer(Buffer.from(input.reference)).toBitmap()) : [] };
+          }, { bitmap: Array.from(bitmap), bounds: surfaceBounds, reference: Array.from(reference) });
+          await writeFile(join(evidence, name), Buffer.from(rendered.desktop), { mode: 0o600 });
+          await writeFile(join(evidence, name.replace(/\.png$/u, "-surface.png")), Buffer.from(rendered.surface), { mode: 0o600 });
+          if (matchTrustedFrame) {
+            assert.equal(rendered.reference.length, 360 * 64 * 4); assert.equal(rendered.bitmap.length, rendered.reference.length);
+            let samples = 0, matched = 0;
+            for (let y = 1; y < 63; y++) for (let x = 1; x < 359; x++) {
+              const offset = (y * 360 + x) * 4;
+              if (rendered.reference[offset + 3] !== 255) continue;
+              let solid = true;
+              for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+                const neighbor = ((y + dy) * 360 + x + dx) * 4;
+                for (let channel = 0; channel < 4; channel++) if (rendered.reference[neighbor + channel] !== rendered.reference[offset + channel]) solid = false;
+              }
+              if (!solid) continue; samples++;
+              if ([0, 1, 2].every((channel) => rendered.bitmap[offset + channel] === rendered.reference[offset + channel])) matched++;
+            }
+            await writeFile(join(evidence, name.replace(/\.png$/u, "-paint-match.json")), JSON.stringify({ samples, matched,
+              source: "TRUSTED_OFFSCREEN_RENDERER", target: "ACTUAL_OWNED_KWIN_SURFACE_CROP", minimumRatio: 0.9 }), { mode: 0o600 });
+            assert.ok(samples >= 3000 && matched / samples >= 0.9, "Actual native surface must contain the trusted overlay's opaque solid pixels");
+          }
+          return sha(Buffer.from(rendered.surface));
+        } finally {
+          try { if (image) destroy(image); } finally { close(display); xlib.unload(); }
+        }
+      };
       const windowState = () => application!.evaluate(({ BrowserWindow }, urls) => {
         const main = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL() === urls.main);
         const floating = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL() === urls.overlay);
@@ -424,11 +530,13 @@ async function main(): Promise<void> {
         return current;
       };
       assert.equal((await overlayState()).status, "idle");
+      const defaultSurface = kdeWaylandOverlay ? await nativeScreenshot("native-overlay-default-hidden.png") : undefined;
       checks.push("trusted actual overlay is hidden by default; sandbox/context isolation and Linux kernel renderer isolation; no renderer Node API");
 
       await checkpoint("actual-overlay-idle-preference");
       await page.locator('[data-pref="show_idle_overlay"]').check();
-      await until(async () => (await state()).preferences.show_idle_overlay === true && (await windowState()).overlayVisible);
+      await until(async () => (await state()).preferences.show_idle_overlay === true &&
+        (kdeWaylandOverlay || (await windowState()).overlayVisible));
       await assertFocusRetained();
       await expect(overlay.locator("#record-control")).toHaveAttribute("data-status", "idle");
       assert.equal(await overlay.evaluate(async () => {
@@ -436,7 +544,11 @@ async function main(): Promise<void> {
         catch (error: unknown) { return error instanceof Error ? error.message : null; }
       }), "This action is not available from this window.");
       assert.equal((await state()).preferences.show_idle_overlay, true);
-      assert.equal((await windowState()).overlayVisible, true);
+      assert.equal((await windowState()).overlayVisible, !kdeWaylandOverlay);
+      if (kdeWaylandOverlay) {
+        await delay(200);
+        assert.notEqual(await nativeScreenshot("native-overlay-idle.png", true), defaultSurface);
+      }
       await overlay.screenshot({ path: join(evidence, "overlay-idle.png"), timeout: 5000 });
       checks.push("shared-UI idle-overlay preference shows the real nonfocusable window without taking main focus; overlay preference mutation refused");
 
@@ -448,13 +560,15 @@ async function main(): Promise<void> {
       await assertFocusRetained();
       assert.equal(await control(), "recording");
       await overlay.screenshot({ path: join(evidence, "overlay-recording.png"), timeout: 5000 });
+      if (kdeWaylandOverlay) await nativeScreenshot("native-overlay-recording.png", true);
       await expect(overlay.locator("#cancel")).toBeVisible();
-      const cancelRect = await overlay.locator("#cancel").evaluate((button) => {
+      const pointerButton = async (id: "#cancel" | "#record") => {
+      const cancelRect = await overlay.locator(id).evaluate((button) => {
         if (!(button instanceof HTMLButtonElement) || button.disabled || button.hidden) throw new Error("OWNED_OVERLAY_CANCEL_UNAVAILABLE");
         const rect = button.getBoundingClientRect();
         return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
       });
-      const overlayBounds = await application.evaluate(({ BrowserWindow }, url) => {
+      const overlayBounds = surfaceBounds ?? await application!.evaluate(({ BrowserWindow }, url) => {
         const floating = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL() === url);
         if (!floating) throw new Error("OWNED_OVERLAY_WINDOW_MISSING"); return floating.getBounds();
       }, overlayUrl);
@@ -465,11 +579,13 @@ async function main(): Promise<void> {
         y: Math.round(overlayBounds.y + cancelRect.y + cancelRect.height / 2) };
       assert.ok(cancelPoint.x >= 0 && cancelPoint.x < 1100 && cancelPoint.y >= 0 && cancelPoint.y < 750,
         "Overlay Cancel must lie inside the already verified owned KWin viewport");
-      await writeFile(join(evidence, "overlay-cancel-pointer.json"), JSON.stringify({ overlayBounds, cancelRect, cancelPoint,
-        outerWindow: windows[0]!, route: "OWNED_OUTER_XTEST_CANCEL" }, null, 2), { mode: 0o600 });
+      await writeFile(join(evidence, id === "#cancel" ? "overlay-cancel-pointer.json" : "overlay-stop-pointer.json"), JSON.stringify({ overlayBounds, cancelRect, cancelPoint,
+        outerWindow: windows[0]!, route: "OWNED_OUTER_XTEST", control: id }, null, 2), { mode: 0o600 });
       // The unchanged outer DISPLAY routes actual XTEST input through the already grabbed private KWin surface.
       await execute("/usr/bin/xdotool", ["mousemove", "--sync", "--window", windows[0]!, String(cancelPoint.x), String(cancelPoint.y), "click", "1"],
         { env, timeout: 3000, maxBuffer: 4096 });
+      };
+      await pointerButton("#cancel");
       await until(async () => (await state()).status === "idle" && (await overlayState()).status === "idle");
       assert.equal(await control(), "idle");
       assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
@@ -478,10 +594,40 @@ async function main(): Promise<void> {
       await assertFocusRetained();
       checks.push("actual stock F8 opens one private capture; main/control/overlay mirror that owner; actual owned outer XTEST pointer Cancel closes its stream without recovery or focus change");
 
+      if (kdeWaylandOverlay) {
+        await checkpoint("native-wayland-overlay-pointer-stop");
+        await stockPress(); await until(async () => (await state()).status === "recording" && (await overlayState()).status === "recording");
+        const publicSpeech = await readFile(join(payload, "fixtures/jfk.f32"));
+        assert.equal(publicSpeech.length, 704000); assert.equal(sha(publicSpeech), "ebd52851100536db02d12c49fddd010372dcdc70243562e057553d476b706ae0");
+        const audio = Buffer.alloc(publicSpeech.length * 3);
+        for (let index = 0; index < publicSpeech.length / 4; index++) for (let repeat = 0; repeat < 3; repeat++)
+          audio.writeFloatLE(publicSpeech.readFloatLE(index * 4), (index * 3 + repeat) * 4);
+        const audioPath = join(root, "overlay-public-generated.f32"); await writeFile(audioPath, audio, { mode: 0o600 });
+        await execute("/usr/bin/paplay", ["--raw", "--format=float32le", "--rate=48000", "--channels=1", `--device=${sink}`, audioPath],
+          { env, timeout: 30_000, maxBuffer: 1024 });
+        await delay(200); await assertFocusRetained();
+        await pointerButton("#record");
+        await until(async () => {
+          const value = await state(); if (value.status === "error") throw new Error("OWNED_TRANSCRIPTION_FAILED");
+          return value.status === "done";
+        }, 120_000);
+        const result = await state(); assert.match(result.transcript.toLowerCase(), /country/u);
+        const clipboard = await execute("/usr/bin/wl-paste", ["--no-newline"], { env, timeout: 3000, maxBuffer: 1024 * 1024 });
+        assert.equal(clipboard.stdout, result.transcript); assert.equal(result.history[0], result.transcript);
+        assert.equal(result.recovery_available, false); assert.deepEqual(await readdir(profile.paths.recovery), []);
+        assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
+        await assertFocusRetained();
+        checks.push("native GTK layer-shell pointer Stop reaches the same trusted offscreen renderer; real CPU Tiny recognition equals independent Wayland clipboard/history; focus retained and recovery removed");
+      }
+
       await checkpoint("actual-overlay-idle-hidden-again");
       await page.locator('[data-pref="show_idle_overlay"]').uncheck();
       await until(async () => (await state()).preferences.show_idle_overlay === false && !(await windowState()).overlayVisible);
       await assertFocusRetained();
+      if (kdeWaylandOverlay) {
+        await delay(200); await nativeScreenshot("native-overlay-hidden-again.png");
+        assert.equal((await windowState()).overlayVisible, false);
+      }
       const maps = await readFile(`/proc/${security.pid}/maps`, "utf8");
       assert.equal(maps.includes("openwhisper_capture.node"), false); assert.equal(maps.includes("openwhisper_speech.node"), false);
       assert.equal(sha(await readFile(join(stable, "sentinel"))), stableBefore);
@@ -497,16 +643,21 @@ async function main(): Promise<void> {
         })]);
       } finally { if (closeTimer) clearTimeout(closeTimer); }
       assert.equal(owner.closeObserved, true); assert.equal(overlay.isClosed(), true); application = undefined;
+      if (surfacePid) await until(async () => {
+        try { await lstat(`/proc/${surfacePid}`); return false; }
+        catch (error: unknown) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return true; throw error; }
+      }, 5000);
       const resources = await recordResources("resources.json");
       assert.match(resources["pids.events"] ?? "", /(?:^|\n)max 0(?:\n|$)/u);
       assert.equal(resources["pids.max"]?.trim(), "256");
       for (const field of ["oom", "oom_kill"]) assert.match(resources["memory.events"] ?? "", new RegExp(`(?:^|\\n)${field} 0(?:\\n|$)`, "u"));
       await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", checks,
-        applicationBackend: "XWAYLAND",
+        applicationBackend: kdeWaylandOverlay ? "WAYLAND" : "XWAYLAND",
+        ...(kdeWaylandOverlay ? { nativeSurfaceScreenshot: true, nativePointerStop: true, clipboardConfirmed: true, surfaceProcessAbsentAfterQuit: true } : {}),
         overlayUrl, defaultHidden: true, idlePreferenceVisibility: true, focusRetained: true, preferenceMutationRefused: true,
         overlaySandbox: true, privateCaptureCancelled: true, originalApplicationClosed: true, nativeInMain: false,
         overlayInput: "OWNED_OUTER_XTEST_CANCEL", hotkeys: "OWNED_STOCK_KDE_KGLOBALACCEL_KEY_EDGES", stableSentinelUnchanged: true,
-        physicalMicrophone: "NOT_USED", desktop: "OWNED_STOCK_KDE", recognition: "NOT_TESTED", automaticPaste: "NOT_TESTED" }, null, 2), { mode: 0o600 });
+        physicalMicrophone: "NOT_USED", desktop: "OWNED_STOCK_KDE", recognition: kdeWaylandOverlay ? "CPU_TINY_PUBLIC_FIXTURE" : "NOT_TESTED", automaticPaste: "NOT_TESTED" }, null, 2), { mode: 0o600 });
       status = "PASS"; return;
     }
     if (kdePaste) {

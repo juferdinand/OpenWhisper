@@ -37,6 +37,17 @@ ordinary native Wayland dictation remains checked. The app is not globally force
 to XWayland. The full native layer-shell gate is still required; the explicit
 XWayland overlay pass does not complete it.
 
+A strict TypeScript GTK/layer-shell prototype now paints the same trusted Electron
+overlay offscreen. The owned native Wayland case verifies actual desktop pixels,
+real F8 capture and pointer Cancel, but the main window loses its focused state
+after the click. Both offscreen mouse delivery and a temporary shared-button
+activation experiment reproduce that boundary. The latter experiment was removed.
+The prototype therefore requires the explicit `--experimental-wayland-overlay`
+switch; normal Dev retains its guarded main-control fallback. Native pointer Stop,
+recognition through that control and the complete L-OVERLAY gate remain unpassed.
+The current committed CI at `97e473f` has all six jobs passing; this local prototype
+is a separate checkpoint, not part of that successful CI result.
+
 ## Delivery order and execution limits
 
 The complete 0.3.0 migration remains the objective. Deliver one runnable behavior

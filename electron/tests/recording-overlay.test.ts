@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AppState } from "../src/contracts/ui.js";
-import { overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay } from "../src/main/recording-overlay.js";
+import { overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "../src/main/recording-overlay.js";
 
 function state(): AppState {
   return {
@@ -59,6 +59,15 @@ test("overlay starts hidden and cannot activate or resize the transparent floati
   assert.equal(options.skipTaskbar, true); assert.equal(options.alwaysOnTop, true);
   assert.equal(options.resizable, false); assert.equal(options.hasShadow, false);
   assert.equal(options.width, 360); assert.equal(options.height, 64);
+});
+
+test("native Wayland renders the shared controls offscreen without mapping a BrowserWindow", () => {
+  const options = waylandOverlayWindowOptions({ title: "Recording", preloadPath: "/owned/preload.cjs" });
+  assert.equal(options.show, false); assert.equal(options.focusable, false);
+  assert.deepEqual(options.webPreferences?.offscreen, { useSharedTexture: false, deviceScaleFactor: 1 });
+  assert.equal(options.webPreferences?.backgroundThrottling, false);
+  assert.equal(options.webPreferences?.sandbox, true);
+  assert.equal(options.webPreferences?.nodeIntegration, false);
 });
 
 test("overlay follows active recording and transcription then hides completed or failed phases", () => {

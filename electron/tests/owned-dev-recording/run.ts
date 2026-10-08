@@ -16,9 +16,10 @@ const args = process.argv.slice(2);
 const absolute = z.string().min(1).max(4096).refine((path) => path === resolve(path) && !path.includes("\0"));
 const kdeLifecycle = args[6] === "--stock-kde-lifecycle";
 const kdeOverlay = args[6] === "--stock-kde-overlay";
+const kdeWaylandOverlay = args[6] === "--stock-kde-wayland-overlay";
 const kdeXwaylandPaste = args[6] === "--stock-kde-xwayland-paste";
 const kdePaste = args[6] === "--stock-kde-paste" || kdeXwaylandPaste;
-const stockKde = args[6] === "--stock-kde" || kdeLifecycle || kdePaste || kdeOverlay;
+const stockKde = args[6] === "--stock-kde" || kdeLifecycle || kdePaste || kdeOverlay || kdeWaylandOverlay;
 if (args.length !== (stockKde ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
     || process.platform !== "linux" || process.arch !== "x64" || process.getuid?.() === 0) throw new Error("INVALID_EXECUTION");
 const output = absolute.parse(args[1]), planning = absolute.parse(args[3]), fixtures = absolute.parse(args[5]);
@@ -48,9 +49,12 @@ const distBefore = await inventory(join(root, "dist"));
 await cp(join(root, "dist"), join(app, "dist"), { recursive: true, errorOnExist: true, force: false });
 await cp(join(root, "package.json"), join(app, "package.json"), { errorOnExist: true, force: false });
 await mkdir(join(app, "node_modules"), { mode: 0o700 });
-for (const name of ["zod", "electron", "@playwright/test", "playwright", "playwright-core"]) {
+for (const name of ["zod", "electron", "@playwright/test", "playwright", "playwright-core", "koffi", "@koromix/koffi-linux-x64"]) {
   await mkdir(dirname(join(app, "node_modules", name)), { recursive: true, mode: 0o700 });
   await cp(join(root, "node_modules", name), join(app, "node_modules", name), { recursive: true, errorOnExist: true, force: false });
+}
+for (const name of ["koffi", "@koromix/koffi-linux-x64"]) {
+  assert.equal(z.object({ version: z.literal("3.3.2") }).parse(JSON.parse(await readFile(join(app, "node_modules", name, "package.json"), "utf8"))).version, "3.3.2");
 }
 assert.deepEqual(await inventory(join(root, "dist")), distBefore);
 const captureRecord = await describe(capture), speechRecord = await describe(speech);
@@ -189,6 +193,7 @@ try {
   // inference. Keep the same process cap and genuine compositor/portal path.
   const command = stockKde ? ["OPENWHISPER_STOCK_KDE=1", ...(kdeLifecycle ? ["OPENWHISPER_KDE_LIFECYCLE=1"] : []),
     ...(kdeOverlay ? ["OPENWHISPER_KDE_OVERLAY=1"] : []),
+    ...(kdeWaylandOverlay ? ["OPENWHISPER_KDE_WAYLAND_OVERLAY=1"] : []),
     ...(kdePaste ? [`OPENWHISPER_KDE_PASTE=${kdeXwaylandPaste ? "xwayland" : "wayland"}`] : []), "KWIN_COMPOSE=Q", "LP_NUM_THREADS=2", "/usr/bin/python3", "/payload/run-owned-desktop.py", "--session", "kde-wayland",
     ...(kdeXwaylandPaste || kdeOverlay ? ["--kde-xwayland"] : []),
     "--output", "/tmp/owned-desktop", "--timeout", "180", "--", "/payload/node", "/payload/driver.mjs"]
@@ -199,9 +204,11 @@ try {
   await required(["cp", `${container}:/evidence/.`, output]); assert.equal(observed.code, 0); assert.equal(observed.closureObserved, true);
   (kdeLifecycle ? z.object({ status: z.literal("PASS"), activeBindingQuit: z.literal(true), crashRecovery: z.literal(true),
     originalApplicationCloses: z.array(z.object({ closed: z.literal(true) })).length(3) })
-    : kdeOverlay ? z.object({ status: z.literal("PASS"), defaultHidden: z.literal(true), idlePreferenceVisibility: z.literal(true),
+    : kdeOverlay || kdeWaylandOverlay ? z.object({ status: z.literal("PASS"), defaultHidden: z.literal(true), idlePreferenceVisibility: z.literal(true),
       focusRetained: z.literal(true), preferenceMutationRefused: z.literal(true), overlaySandbox: z.literal(true),
-      privateCaptureCancelled: z.literal(true), originalApplicationClosed: z.literal(true), nativeInMain: z.literal(false), applicationBackend: z.literal("XWAYLAND") })
+      privateCaptureCancelled: z.literal(true), originalApplicationClosed: z.literal(true), nativeInMain: z.literal(false),
+      applicationBackend: z.literal(kdeWaylandOverlay ? "WAYLAND" : "XWAYLAND"),
+      ...(kdeWaylandOverlay ? { nativeSurfaceScreenshot: z.literal(true), nativePointerStop: z.literal(true), clipboardConfirmed: z.literal(true) } : {}) })
     : kdePaste ? z.object({ status: z.literal("PASS"), clipboardConfirmed: z.literal(true), recoveryRemoved: z.literal(true),
       nativeInMain: z.literal(false), pasteConfirmed: z.literal(true), permissionRevoked: z.literal(true), targetBackend: z.literal(kdeXwaylandPaste ? "XWAYLAND" : "WAYLAND") })
     : z.object({ status: z.literal("PASS"), clipboardConfirmed: z.literal(true), recoveryRemoved: z.literal(true), nativeInMain: z.literal(false) }))
