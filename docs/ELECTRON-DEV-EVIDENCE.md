@@ -275,3 +275,51 @@ The fixture now retains a categorical startup milestone, keeps private directory
 A separate strict TypeScript Linux process observer was independently reviewed. It checks genuine procfs, bounded fixed-path NOFOLLOW stat/status/stat identity, current UID/direct parent, and numeric birth. Zombie/dead state remains non-running rather than reaped; absence or a different bound birth may establish original retirement. Deadline, cancellation, refusal or ambiguity poisons that witness and retains late reader completion. It never signals, reaps, creates a replacement, or releases a model lease. The initial live candidate is provisional: a future original-channel fresh nonce and matching birth must precede workload admission.
 
 The independent queued-reader regression initially failed because a settlement barrier omitted already accepted operations whose reads had not begun. The corrected ordinal barrier waits those operations and their actual late read/FD closure; later admissions are outside that snapshot. Focused observer tests pass 27/27, including the unchanged independent regression. These are inert/private filesystem tests; actual Node/Electron topology and OS retirement remain separate owned execution gates. Existing factory/channel semantics are not changed by this standalone service.
+
+### Verified Apple synthetic runtime
+
+[CI 37718566759](https://github.com/juferdinand/OpenWhisper/actions/runs/37718566759)
+passes all six jobs at `db6616d`; its merge tree matches the branch tree. Independent
+artifact review verifies both downloaded ZIP digests and 15 tracked source hashes.
+Apple Silicon and Intel each pass all nine generated-PCM cases in 4.731 and 7.496
+seconds respectively. The long ledger contains 14,640,017 input frames at 48 kHz
+(305 seconds plus 17 end frames), producing 4,880,006 samples. Each architecture's
+coalesced independent Apple-converter reference has the same sample count and zero
+maximum difference. Cross-architecture bit identity is not claimed.
+
+Both packets report zero engine allocations, input-node access, permission queries,
+permission requests and audio-file writes. They retain startup readiness, nine categorical
+case phases and helper exit. The native addon hashes are unchanged from the failed
+bootstrap run. The local result packet is `macos-capture-ci/run-37718566759`, with
+evidence hash `74db94cb207e80ec0acb1fbafdd22c5402396eeae17430642fbe78412c13792b`.
+This is generated audio on macOS 15, with a macOS 14 deployment target. It does not
+prove physical microphone/TCC/device behavior, minimum-OS runtime, signed production
+helper loading or OS retirement. The CI-only unsigned-library allowance remains
+separate from production packaging.
+
+### Bounded ambient diagnostic and pure control client
+
+The separately frozen run-9 early-ESM diagnostic passes three owned profiles: empty
+private buses, a fixed login-manager owner, and fixed login/systemd/portal owners.
+The unmodified Electron runtime dwells for about 1.4 seconds around a native GetId
+and confirmed close while app readiness stays false. After retaining evidence, explicit
+assertions require zero StartServiceByName calls, zero activation-capable non-daemon
+calls and zero fake provider calls. Header/category timestamps observe Chromium's
+login-manager owner lookup before the TypeScript entry. Empty activation directories
+and zero provider calls make this a bounded startup observation; neither activatable
+providers nor successful portal/systemd methods or universal no-activation are proved.
+The retained evidence hash is `1c0143693ccb77a3e0fe8798d540ff82f1f898910e6699272bddf46bbc8c4f73`.
+
+Three pure strict-TypeScript modules parse trusted bounded argv, preserve all uint64
+elapsed digits in the stable three-field JSON grammar, and route a single Dev control
+transaction through a fixed-purpose injected port. Seventeen focused tests pass,
+including two independent retirement cases. Watches precede owner lookup, UID and
+generation are pinned, and every operation carries the shared deadline and
+NO_AUTO_START policy. Accepted actions are never repeated or cancelled during cleanup.
+The operation budget is five seconds followed by a separate two-second cleanup budget;
+late cleanup remains owned, and failed retirement permanently closes the instance.
+Fulfilled port close must certify all subscriptions, callbacks and pending resources;
+an unsettled unsubscribe still blocks completion. These are injected tests, not native
+bus evidence. Native loading/open cancellation, real Status snapshots, early bootstrap,
+installed CLI and hardened packaging remain separately reviewed work. No recording
+wiring or existing desktop issue closure follows from this slice.
