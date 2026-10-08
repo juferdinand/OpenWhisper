@@ -39,6 +39,7 @@ import { buildTrayMenu } from "./tray-menu.js";
 import { overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "./recording-overlay.js";
 import { WaylandRecordingOverlay } from "./wayland-recording-overlay.js";
 import { MacosShortcut } from "./macos-shortcut.js";
+import { MacosPaste } from "./macos-paste.js";
 
 const distribution = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let window: BrowserWindow | undefined;
@@ -134,6 +135,11 @@ async function start(): Promise<void> {
     ? new WaylandClipboard() : undefined;
   const clipboardOutput = waylandClipboard ?? clipboard;
   let microphoneAllowed = macRecording && systemPreferences.getMediaAccessStatus("microphone") === "granted";
+  let accessibilityAllowed = macRecording && systemPreferences.isTrustedAccessibilityClient(false);
+  const macPaste = macRecording ? MacosPaste.create({
+    accessibilityGranted: () => systemPreferences.isTrustedAccessibilityClient(false),
+    targetAllowed: () => !shutdownInProgress && !!window && !window.isDestroyed() && !window.isFocused() && !overlay?.isFocused(),
+  }) : undefined;
   let platformHost: DevelopmentPlatformHost | undefined;
   let shortcut = portalShortcutStateSchema.parse({ available: false, configuring: false, label: null, result: "NONE" });
   let pasteState = portalPasteStateSchema.parse({ available: false, configuring: false, ready: false, result: "NONE" });
@@ -154,10 +160,13 @@ async function start(): Promise<void> {
           catch { return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false }; }
         }
         if (context.signal.aborted) return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
-        const wantsPaste = preferences.snapshot().output === "paste" && descriptor.platform === "linux";
+        const wantsPaste = preferences.snapshot().output === "paste";
         const delivered = await deliverClipboard(text, context, { writeText: (text) => clipboardOutput.writeText(text), readText: () => clipboardOutput.readText(),
           ...(wantsPaste ? { paste: async () => {
-            try { return await platformHost?.paste() ?? false; }
+            try {
+              if (macPaste) { accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(false); return await macPaste.paste(); }
+              return await platformHost?.paste() ?? false;
+            }
             catch { pasteState = { ...pasteState, ready: false, available: false, result: "FAILED" }; notify(); return false; }
           } } : {}) });
         if (!delivered.clipboardConfirmed) return delivered;
@@ -196,7 +205,8 @@ async function start(): Promise<void> {
     platform,
     ...(platform === "macos" ? { macos: {
       microphone_allowed: microphoneAllowed, recording_shortcut: macShortcut?.state().configuring ?? false,
-      shortcut_toggle_only: macRecording, shortcut_hint: "Press and release a keyboard key. Escape cancels.",
+      shortcut_toggle_only: macRecording, clipboard_restore_available: false,
+      shortcut_hint: "Press and release a keyboard key. Escape cancels.",
       editor: "", recommended: [], updates_configured: false, launch_at_login_pending: false,
     } } : {}),
     version, status: recording.phase === "starting" ? "recording"
@@ -214,9 +224,9 @@ async function start(): Promise<void> {
     shortcut_portal: shortcut.available, paste_portal: pasteState.available, shortcut: macShortcut?.state().label ?? shortcut.label,
     native_shortcuts: macShortcut?.state().available ?? shortcut.nativeAvailable,
     shortcut_configuring: shortcut.configuring && !shortcut.nativeX11,
-    native_x11: shortcut.nativeX11 ?? false, native_paste: false, native_mouse: false, native_middle_mouse: false,
+    native_x11: shortcut.nativeX11 ?? false, native_paste: !!macPaste, native_mouse: false, native_middle_mouse: false,
     recording_shortcut: (macShortcut?.state().configuring ?? false) || !!keyCapture || !!shortcut.nativeX11 && shortcut.configuring,
-    paste_ready: pasteState.ready, paste_configuring: pasteState.configuring, gpu_available: false, gpu_supported: false,
+    paste_ready: macPaste ? accessibilityAllowed : pasteState.ready, paste_configuring: pasteState.configuring, gpu_available: false, gpu_supported: false,
     gpu_device: null, gpu_fallback: false, recovery_available: recording.recoveryAvailable,
     overlay_available: !!overlay && !overlay.isDestroyed() && (!waylandOverlay || waylandOverlay.available),
     download, progress: download ? downloadProgress : inferenceProgress,
@@ -335,7 +345,7 @@ async function start(): Promise<void> {
     if (configured && host?.isConfigured()) return;
     if (!host) throw new Error("Recording unavailable.");
     const selected = preferences.snapshot(), model = installed.find((item) => item.model.id === selected.model);
-    if (!model || selected.output !== "clipboard" && !(selected.output === "paste" && descriptor?.platform === "linux") || selected.gpu) {
+    if (!model || selected.output !== "clipboard" && !(selected.output === "paste" && (descriptor?.platform === "linux" || macPaste)) || selected.gpu) {
       throw new Error("Choose an installed model, CPU inference and supported output.");
     }
     // Recovery may be transcribed with the microphone disconnected; resolve sources only on Start.
@@ -484,7 +494,7 @@ async function start(): Promise<void> {
     shutdownInProgress = true; cancelRequested = true; processing.close(); downloadAbort?.abort();
     keyCapture = undefined; contents.setIgnoreMenuShortcuts(false);
     void (async () => { await recordingOperation?.catch(() => {}); await downloading; await downloads.finalize();
-      await macShortcut?.close(); await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); await waylandOverlay?.close(); })().then(() => {
+      await macShortcut?.close(); macPaste?.close(); await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); await waylandOverlay?.close(); })().then(() => {
       shutdownComplete = true; tray?.destroy(); tray = undefined;
       overlay?.destroy(); app.quit();
     }, () => {
@@ -504,7 +514,7 @@ async function start(): Promise<void> {
           ["model", "language", "microphone", "vocabulary", "snippets", "gpu", "output", "hold_to_record"].some((key) => Object.hasOwn(changes, key))) {
           throw new Error("Finish or discard the current recording before changing its request.");
         }
-        if (changes.output && changes.output !== "clipboard" && !(changes.output === "paste" && descriptor?.platform === "linux")) {
+        if (changes.output && changes.output !== "clipboard" && !(changes.output === "paste" && (descriptor?.platform === "linux" || macPaste))) {
           throw new Error("The recording Dev build does not support this output.");
         }
         if (changes.gpu) throw new Error("The recording Dev build uses CPU inference.");
@@ -541,8 +551,18 @@ async function start(): Promise<void> {
       desktop_shortcut: () => shortcutAction("configure"),
       clear_shortcut: () => shortcutAction("clear"),
       cancel_shortcut: () => shortcutAction("cancel"),
-      enable_paste: () => action(async () => { if (!platformHost) throw new Error("Keyboard permission unavailable."); await platformHost.pastePermission("enable"); }),
-      disable_paste: () => action(async () => { if (!platformHost) throw new Error("Keyboard permission unavailable."); await platformHost.pastePermission("clear"); }),
+      enable_paste: () => action(async () => {
+        if (macPaste) {
+          accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(true);
+          if (!accessibilityAllowed) await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility");
+          return;
+        }
+        if (!platformHost) throw new Error("Keyboard permission unavailable."); await platformHost.pastePermission("enable");
+      }),
+      disable_paste: () => action(async () => {
+        if (macPaste) { await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"); return; }
+        if (!platformHost) throw new Error("Keyboard permission unavailable."); await platformHost.pastePermission("clear");
+      }),
       toggle_recording: toggleRecording,
       cancel_recording: cancelRecording,
       retry_transcription: () => recordingAction(async () => { await configureRecording(); if (cancelRequested) return; inferenceProgress = 0; await host?.command("retry"); }),
@@ -634,7 +654,8 @@ async function start(): Promise<void> {
   window.on("closed", () => { processing.close(); ipcMain.removeHandler("openwhisper:invoke"); window = undefined; });
   window.once("ready-to-show", () => { window?.show(); });
   if (macRecording) window.on("focus", () => {
-    microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted"; notify();
+    microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted";
+    accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(false); notify();
   });
   await window.loadURL(MAIN_URL);
   // A hidden Wayland surface may wait for mapping before producing its first

@@ -585,13 +585,16 @@ test("Linux exposes the detected GPU and keeps the CPU choice independent of aut
   await expect(page.getByText("No compatible GPU detected.", { exact: false })).not.toBeVisible();
 });
 
-test("Mac Dev regular-key controls explain toggle mode and remove only their own profile", async ({ page }) => {
+test("Mac Dev controls expose native Accessibility setup and preserve separate trigger profiles", async ({ page }) => {
   await start(page, "macos");
   await page.evaluate(() => {
     const host = window as unknown as { testState: import("../../../electron/src/contracts/ui").AppState; publishState(): void };
     if (!host.testState.macos) throw new Error("Missing Mac capabilities");
     host.testState.macos.shortcut_toggle_only = true;
+    host.testState.macos.clipboard_restore_available = false;
+    host.testState.preferences.output = "paste";
     host.testState.native_shortcuts = true; host.testState.shortcut_portal = false;
+    host.testState.native_paste = true; host.testState.paste_portal = false;
     host.testState.shortcut = "Command+Shift+Space";
     host.testState.preferences.macos_shortcut = "Command+Shift+Space";
     host.testState.preferences.native_trigger = { kind: "mouse", button: 8 };
@@ -601,6 +604,8 @@ test("Mac Dev regular-key controls explain toggle mode and remove only their own
   await expect(page.getByLabel("Recording mode")).toBeDisabled();
   await expect(page.getByLabel("Recording mode")).toHaveValue("false");
   await expect(page.getByText("Regular keyboard shortcuts use toggle mode in this build.", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-portal="enable_paste"]')).toBeEnabled();
+  await expect(page.getByRole("checkbox", { name: "Restore the previous clipboard afterward", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Command+Shift+Space", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Remove trigger", exact: true }).click();
   await expect(page.getByRole("button", { name: "Set trigger …", exact: true })).toBeVisible();

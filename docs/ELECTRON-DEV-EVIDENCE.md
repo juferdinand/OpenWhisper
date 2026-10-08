@@ -1,5 +1,30 @@
 # Electron development evidence
 
+## Mac Dev package and Accessibility paste source
+
+Per-architecture Dev packaging preserves the pinned Electron framework links,
+locked dependencies, source metadata and native origin notices. It signs native
+inputs before build-time descriptor finalization, then signs and verifies the
+bundle and extracted ZIP. The existing Apple Silicon/Intel CI matrix launches the
+actual package with a fresh private profile to check identity, sandboxed UI,
+owned-window regular-key setup/removal and original clean Quit. That new runtime
+check is pending; Linux fixture checks do not establish a Mac package result.
+
+The strict TypeScript paste adapter lazily loads fixed Apple frameworks only after
+permission and external-target admission. It refuses held modifiers, changed focus
+and app-owned targets, posts one Command+V pair and releases native references.
+Confirmed clipboard output remains the fallback. Native event posting does not
+establish target-field readback. Nine inert adapter cases pass. The shared UI now
+exposes native Accessibility setup without a Linux portal; unsupported clipboard
+restoration is hidden through an optional capability preserving legacy Swift UI.
+
+The completed increment passes strict typing/recording build and 942 unit cases
+with 14 explicit skips (17.23s). After the small optional UI capability addition,
+35 affected contract/shortcut/paste/package cases, strict typing and all 60 shared
+UI cases pass after rebuilding the assets. Physical
+microphones, TCC attribution, actual target insertion, Metal and stable release
+signing/update continuity remain open.
+
 ## Basic Mac regular-key control source
 
 The main-owned strict TypeScript adapter connects explicit regular-key toggle

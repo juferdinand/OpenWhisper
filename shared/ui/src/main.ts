@@ -441,7 +441,7 @@ function render() {
       section(
         t("Output"),
         outputs() +
-          (isMac() && p.output === "paste"
+          (isMac() && state.macos?.clipboard_restore_available !== false && p.output === "paste"
             ? toggle(
                 t("Restore the previous clipboard afterward"),
                 "restore_clipboard",
@@ -756,7 +756,7 @@ function render() {
   );
 }
 function nativePaste() { return !isMac() && !!state.native_paste && !state.paste_portal; }
-function pasteAvailable() { return state.paste_portal || (!isMac() && !!state.native_paste); }
+function pasteAvailable() { return state.paste_portal || !!state.native_paste; }
 function permissionButton() {
   const pending = !isMac() && state.paste_configuring;
   return `<button data-portal="${state.paste_ready || pending ? "disable_paste" : "enable_paste"}" ${!pasteAvailable() || portalBusy ? "disabled" : ""}>${pending ? t("Cancel") : state.paste_ready ? (isMac() ? t("System Settings") : t("Revoke")) : t("Allow")}</button>`;

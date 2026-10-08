@@ -204,11 +204,27 @@ removes only this adapter's binding/profile. Dev registration starts only after
 explicit setup. This adapter uses toggle mode; Fn, modifier-only, mouse and hold
 triggers remain unavailable. The shared UI explains that restriction.
 
+Mac **Allow Accessibility access** requests permission only after an explicit click.
+Paste output confirms the complete clipboard before requesting one Command+V pair.
+It refuses insertion into the app itself, a changed foreground application or while
+modifier keys are held. Missing permission or a refused attempt leaves clipboard
+output available. Clipboard restoration is unavailable in this adapter; its control
+is hidden without changing the legacy Swift interface.
+
 The normal Mac composition is implemented and covered by synthetic/unit tests. Physical
 microphone permission, default-device changes and signed-helper behavior still require
 their acceptance checks; do not treat native CI conversion tests as hardware validation.
-Global Fn/modifier/mouse triggers, automatic paste, assembled overlay behavior,
+Global Fn/modifier/mouse triggers, actual target paste, assembled overlay behavior,
 Metal selection and signed release packages remain incomplete.
+
+The existing Apple Silicon and Intel CI jobs now build a separate, per-architecture
+`OpenWhisper Dev.app` and ZIP with ad-hoc signing. Packaging verifies native signed
+bytes, bundle identity and the extracted archive. An owned CI driver launches that
+actual package with a private profile, checks the sandboxed shared UI, exercises
+regular-key setup/removal and exits through normal Quit. It requests no microphone
+or Accessibility permission and sends input only to its own Chromium window.
+These artifacts are Dev previews; universal/release signing and stable updates
+remain separate work. See the [evidence](ELECTRON-DEV-EVIDENCE.md).
 
 ## Automated checks
 

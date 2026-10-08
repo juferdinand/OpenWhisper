@@ -113,6 +113,7 @@ export const macStateSchema = z.strictObject({
   microphone_allowed: z.boolean(),
   recording_shortcut: z.boolean(),
   shortcut_toggle_only: z.boolean().optional(),
+  clipboard_restore_available: z.boolean().optional(),
   shortcut_hint: utf8(8192),
   editor: label,
   recommended: z.array(modelId).max(128),
