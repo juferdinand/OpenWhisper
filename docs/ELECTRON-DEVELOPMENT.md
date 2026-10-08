@@ -5,8 +5,8 @@ The implementation starts **OpenWhisper Dev** with the existing settings UI,
 a schema-validated sandboxed bridge and private settings/session directories. An explicit
 CPU recording build connects the shared controls to native capture and clipboard output on
 Linux and macOS. The target version is **0.3.0**; see [current status](ELECTRON-STATUS.md).
-The default lightweight preview leaves recording disabled. Global triggers, automatic paste,
-autostart and stable updates remain unavailable in this slice.
+The default lightweight preview leaves recording disabled. The CPU Dev supports explicit
+Linux F8 setup and optional keyboard-only paste; autostart and stable updates remain disabled.
 It does not replace the released 0.2.5 application or establish desktop/speech parity.
 The About view shows the Dev build's source commit and whether the checkout was modified;
 the Models view exposes the selected private model directory.
@@ -39,8 +39,27 @@ npm run dev -- --dev-profile /absolute/private/path/openwhisper-dev
 Existing Dev directories must be owned by the current user with mode `0700`; stored
 preferences use `0600`. Stable storage, overlapping bases, symlink paths and unsafe
 existing directories are refused. No stable preferences, models or recovery files are
-imported automatically. Closing the last window quits this early preview so it stays
+imported automatically. Closing the main window quits this Dev host so it stays
 reachable without assuming a working tray host.
+
+## Desktop controls
+
+The tray uses the existing app icon and shared English/German labels. Its Settings,
+Start/Stop, Cancel and Quit actions use the same recording handlers as the shared UI.
+Unavailable recording actions stay disabled; closing the main window still quits.
+Native tray presentation on each desktop remains an acceptance item.
+
+The floating control loads the same trusted shared UI through a sandboxed, restricted
+overlay bridge. It shows during recording/transcription/recovery, or when the existing
+idle-overlay preference is enabled. Built-in non-activating presentation is enabled on
+macOS and X11, including an explicitly selected XWayland backend. The owned KDE XWayland
+test covers actual pointer Cancel without moving keyboard focus.
+
+Native Wayland uses the main recording control for now: Electron's
+[inactive-show API is unsupported there](https://www.electronjs.org/docs/latest/api/browser-window#winshowinactive),
+and the real KDE probe lost focus. The known unsafe path is guarded, without globally
+forcing XWayland. A native layer-shell surface using shared renderer output remains
+required by the full migration plan; GNOME needs usable fallback controls.
 
 ## Linux CPU recording Dev build
 

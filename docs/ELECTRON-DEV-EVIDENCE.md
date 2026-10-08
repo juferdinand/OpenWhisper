@@ -1,5 +1,26 @@
 # Electron development evidence
 
+The normal Dev now connects a localized tray menu and the existing shared recording
+overlay to the same authoritative recording handlers. In **`stock-kde-overlay-xwayland-2`**,
+the app explicitly uses the verified private inner XWayland server. The sandboxed overlay
+is hidden by default, follows the idle preference and mirrors real F8 capture. An actual
+pointer click through the private outer KWin surface cancels its one audio stream without
+moving keyboard focus. Overlay preference mutation is refused. Original Quit and exact
+namespace cleanup pass; peak199/cap256, no rejection/OOM, **9.43 seconds**. Attempt1
+separately covers renderer DOM Cancel (10.32 seconds); the final attempt proves pointer input.
+
+The native Wayland attempt **`stock-kde-overlay-1` fails focus retention** when shown.
+Electron documents inactive-show as unsupported there. The known unsafe BrowserWindow
+path is guarded; no global XWayland switch or focus restoration masks the failure.
+Native layer-shell presentation using shared renderer output remains required. Fresh
+`stock-kde-xwayland-paste-3` still passes native Wayland app → XWayland editor dictation
+and exact clipboard/history delivery in25.38 seconds, with peak218/cap256 and clean Quit.
+
+Strict TS and recording build pass; **900 unit tests pass**, with13 native opt-in skips.
+The15 new tests cover tray action routing/localization/availability and overlay policy.
+The unchanged shared UI retains its59-test evidence. Real tray surface/menu interaction,
+assembled Mac presentation and native Wayland floating controls remain open.
+
 The normal native Wayland Dev app also pastes into an **owned inner XWayland GTK
 editor** in `stock-kde-xwayland-paste-2`. The actual KWin-owned Xwayland server is
 verified before target startup; only the editor changes display backend. Real F8

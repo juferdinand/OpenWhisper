@@ -11,10 +11,10 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | Area | Current result | Remaining work |
 | --- | --- | --- |
 | Plan and architecture | Reviewed plan, repository research answers and issue/PR review recorded | Keep decisions aligned with final implementation |
-| Shared interface and services | Existing design, strict TS bridge, isolated Dev profile, settings, models and history | Tray and complete platform behaviors |
+| Shared interface and services | Existing design, strict TS bridge, isolated Dev profile, settings, models/history and localized shared-owner tray actions; sandboxed recording overlay connected | Native tray presentation, assembled Mac overlay and remaining platform behaviors |
 | Linux dictation | Normal UI, CPU recognition, clipboard, Retry/Discard and graceful Quit pass on private Ubuntu22 and stock Kubuntu/KDE 5.27 native Wayland with virtual audio; background Wayland publication and actual GTK target insertion also pass | Startup-failure cleanup under resource pressure; remaining desktop control, overlays and accelerated inference in normal Dev |
 | macOS dictation | Normal CPU Dev recording, explicit permission button and RAM Retry/Discard are now connected; focused synthetic tests pass | Validate the assembled Mac build and physical permission/device behavior; add Metal selection |
-| Linux desktop integration | Dev commands, portal sessions and explicit KDE keyboard setup share recording ownership. Stock KDE 5.27 native Wayland F8 capture, actual key-driven dictation, held-key/GUI cancellation, Remove, active-binding Quit/crash recovery and keyboard-only paste into separate Wayland and inner XWayland GTK targets pass | GNOME consent/combined behavior, modifier-only/mouse and standalone KDE/X11 triggers, packaged CLI, overlays and wlroots replacement behavior |
+| Linux desktop integration | Dev commands, portal sessions and explicit KDE keyboard setup share recording ownership. Stock KDE 5.27 native Wayland F8 capture, cancellation, active-binding Quit/crash recovery and keyboard-only paste into Wayland/XWayland editors pass. Explicit owned XWayland overlay passes real pointer Cancel with keyboard focus retained | Native Wayland layer-shell overlay, native tray presentation, GNOME consent/combined behavior, modifier-only/mouse and standalone KDE/X11 triggers, packaged CLI and wlroots replacement behavior |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
 | Packaging and updates | Architecture and compatibility requirements documented | Electron AppImage/.deb/universal DMG+ZIP, signing, stable data continuity and actual old-client update checks |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
@@ -30,6 +30,12 @@ original failure; only verified stale owners permit safe reference cleanup.
 Prior startup/pressure failures remain retained. It does not change the installed application or publish
 a release. [Dev instructions](ELECTRON-DEVELOPMENT.md) explain the currently runnable
 build; [automated evidence](ELECTRON-DEV-EVIDENCE.md) records its exact tested scope.
+
+The new native Wayland overlay probe failed focus retention, matching Electron's
+documented inactive-show limitation. Its BrowserWindow path is guarded while
+ordinary native Wayland dictation remains checked. The app is not globally forced
+to XWayland. The full native layer-shell gate is still required; the explicit
+XWayland overlay pass does not complete it.
 
 ## Delivery order and execution limits
 

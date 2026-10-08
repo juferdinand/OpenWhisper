@@ -20,6 +20,7 @@ const payload = resolve(fileURLToPath(new URL("./", import.meta.url)));
 const packageRoot = join(payload, "app"), evidence = "/evidence";
 const stockKde = process.env.OPENWHISPER_STOCK_KDE === "1";
 const kdeLifecycle = process.env.OPENWHISPER_KDE_LIFECYCLE === "1";
+const kdeOverlay = process.env.OPENWHISPER_KDE_OVERLAY === "1";
 const kdeXwaylandPaste = process.env.OPENWHISPER_KDE_PASTE === "xwayland";
 const kdePaste = process.env.OPENWHISPER_KDE_PASTE === "wayland" || kdeXwaylandPaste;
 const sha = (value: Uint8Array) => createHash("sha256").update(value).digest("hex");
@@ -85,6 +86,10 @@ async function main(): Promise<void> {
   if (kdeLifecycle) assert.equal(stockKde, true);
   if (process.env.OPENWHISPER_KDE_PASTE !== undefined) {
     assert.equal(kdePaste, true); assert.equal(stockKde, true); assert.equal(kdeLifecycle, false);
+  }
+  if (process.env.OPENWHISPER_KDE_OVERLAY !== undefined) {
+    assert.equal(kdeOverlay, true); assert.equal(stockKde, true);
+    assert.equal(kdeLifecycle, false); assert.equal(kdePaste, false);
   }
   assert.ok((await lstat("/.dockerenv")).isFile());
   for (const device of ["/dev/snd", "/dev/input", "/dev/uinput", "/dev/dri"]) await assert.rejects(lstat(device), { code: "ENOENT" });
@@ -180,6 +185,78 @@ async function main(): Promise<void> {
   });
   env.DISPLAY = display;
   }
+  const ownedInnerXwaylandEnvironment = async () => {
+    await checkpoint("owned-inner-xwayland-ownership");
+    assert.equal(stockKde, true);
+    const environmentFile = env.WF_OWNED_XWAYLAND_ENV_FILE;
+    assert.ok(environmentFile && environmentFile === resolve(environmentFile));
+    await until(async () => {
+      try { const value = await lstat(environmentFile); return value.isFile() && value.size > 0; }
+      catch (error: unknown) {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+        throw error;
+      }
+    });
+    const fileStat = await lstat(environmentFile), directoryStat = await lstat(dirname(environmentFile));
+    assert.ok(fileStat.isFile() && !fileStat.isSymbolicLink() && fileStat.size <= 4096);
+    assert.equal(fileStat.uid, 1000);
+    assert.ok(directoryStat.isDirectory() && !directoryStat.isSymbolicLink());
+    assert.equal(directoryStat.uid, 1000); assert.equal(directoryStat.mode & 0o077, 0);
+    const inner = z.strictObject({ DISPLAY: z.string().regex(/^:\d+$/u), XAUTHORITY: z.string().max(4096).nullable(),
+      WAYLAND_DISPLAY: z.literal("openwhisper-owned") }).parse(JSON.parse(await readFile(environmentFile, "utf8")));
+    assert.notEqual(inner.DISPLAY, env.DISPLAY);
+    const socket = await lstat(join("/tmp/.X11-unix", `X${inner.DISPLAY.slice(1)}`));
+    assert.ok(socket.isSocket()); assert.equal(socket.uid, 1000);
+    const authority = inner.XAUTHORITY ?? "";
+    if (authority) {
+      assert.equal(authority, resolve(authority));
+      const authStat = await lstat(authority);
+      assert.ok(authStat.isFile() && !authStat.isSymbolicLink()); assert.equal(authStat.uid, 1000);
+    }
+    const innerEnvironment = { ...env, DISPLAY: inner.DISPLAY, XAUTHORITY: authority };
+    // Wake KWin's lazy inner server through an inert connection, never input.
+    await execute("/usr/bin/xwininfo", ["-root"], { env: innerEnvironment, timeout: 3000, maxBuffer: 16_384 });
+    const daemonCall = async (method: string, argument: string) =>
+      (await execute("/usr/bin/gdbus", ["call", "--session", "--dest", "org.freedesktop.DBus", "--object-path", "/org/freedesktop/DBus",
+        "--method", `org.freedesktop.DBus.${method}`, argument], { env, timeout: 3000, maxBuffer: 4096 })).stdout.trim();
+    const ownerReply = /^\('(:\d+\.\d+)',\)$/u.exec(await daemonCall("GetNameOwner", "org.kde.KWin"));
+    assert.ok(ownerReply); const kwinOwner = ownerReply[1]!;
+    const pidReply = /^\((?:uint32 )?([1-9]\d*),\)$/u.exec(await daemonCall("GetConnectionUnixProcessID", kwinOwner));
+    assert.ok(pidReply); const kwinPid = Number(pidReply[1]);
+    assert.ok(Number.isSafeInteger(kwinPid) && kwinPid <= 2_147_483_647);
+    const pending = [kwinPid], seen = new Set<number>();
+    let xwayland: { pid: number; argv: string[] } | undefined;
+    while (pending.length && seen.size < 64) {
+      const current = pending.pop()!; if (seen.has(current)) continue; seen.add(current);
+      const proc = `/proc/${current}`;
+      try {
+        assert.equal((await lstat(proc)).uid, 1000);
+        const argv = (await readFile(`${proc}/cmdline`, "utf8")).split("\0");
+        assert.equal(argv.pop(), "");
+        if (argv[0] && basename(argv[0]) === "Xwayland" && argv.includes(inner.DISPLAY)) {
+          xwayland = { pid: current, argv }; break;
+        }
+        const children = (await readFile(`${proc}/task/${current}/children`, "utf8")).trim();
+        for (const value of children ? children.split(/\s+/u) : []) {
+          assert.match(value, /^[1-9]\d*$/u); const childPid = Number(value);
+          assert.ok(Number.isSafeInteger(childPid) && childPid <= 2_147_483_647); pending.push(childPid);
+        }
+      } catch (error: unknown) {
+        if (!(error instanceof Error) || !("code" in error) || (error.code !== "ENOENT" && error.code !== "ESRCH")) throw error;
+      }
+    }
+    assert.ok(xwayland && xwayland.pid !== kwinPid, "Inner display must belong to an actual owned KWin descendant Xwayland");
+    const authFlags = xwayland.argv.map((value, index) => value === "-auth" ? index : -1).filter((index) => index !== -1);
+    if (authority) {
+      assert.equal(authFlags.length, 1); assert.equal(xwayland.argv[authFlags[0]! + 1], authority);
+    } else assert.equal(authFlags.length, 0, "Inner Xwayland must not require an unrecorded cookie");
+    assert.equal(await daemonCall("GetNameOwner", "org.kde.KWin"), `('${kwinOwner}',)`);
+    await writeFile(join(evidence, "inner-xwayland-ownership.json"), JSON.stringify({ uid: 1000, kwinPid, xwaylandPid: xwayland.pid,
+      display: inner.DISPLAY, xauthority: authority, ownerStable: true, descendantsInspected: seen.size }, null, 2), { mode: 0o600 });
+    return innerEnvironment;
+  };
+  // Only the explicit overlay test uses inner Xwayland; owned F8 injection keeps the outer display.
+  const applicationEnvironment = kdeOverlay ? await ownedInnerXwaylandEnvironment() : env;
   await checkpoint("launch-normal-application");
   const launchApplication = async () => {
   appCloseObserved = false;
@@ -192,7 +269,9 @@ async function main(): Promise<void> {
   }, 10_000);
   try {
     application = await _electron.launch({ executablePath: join(packageRoot, "node_modules/electron/dist/electron"),
-      args: [packageRoot, "--dev", "--dev-profile", profileRoot, ...(stockKde ? ["--ozone-platform=wayland"] : [])], env, chromiumSandbox: true, timeout: 30_000 });
+      args: [packageRoot, "--dev", "--dev-profile", profileRoot,
+        ...(stockKde ? [kdeOverlay ? "--ozone-platform=x11" : "--ozone-platform=wayland"] : [])],
+      env: applicationEnvironment, chromiumSandbox: true, timeout: 30_000 });
   } finally { clearTimeout(startupWatch); }
   const original = application.process();
   const owner = { original, closed: Promise.resolve(), closeObserved: false, termination: null as "quit" | "crash" | null };
@@ -302,6 +381,134 @@ async function main(): Promise<void> {
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await until(async () => !(await state()).recording_shortcut);
     assert.equal((await state()).shortcut, "F8");
+    if (kdeOverlay) {
+      const mainUrl = "app://openwhisper/index.html", overlayUrl = `${mainUrl}?overlay=1`;
+      await checkpoint("actual-overlay-default-hidden");
+      assert.equal((await state()).overlay_available, true);
+      assert.equal((await state()).preferences.show_idle_overlay, false);
+      let overlayPage: Page | undefined;
+      await until(async () => {
+        overlayPage = application!.windows().find((candidate) => candidate.url() === overlayUrl);
+        return overlayPage !== undefined;
+      });
+      assert.ok(overlayPage); const overlay = overlayPage;
+      const windowState = () => application!.evaluate(({ BrowserWindow }, urls) => {
+        const main = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL() === urls.main);
+        const floating = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL() === urls.overlay);
+        if (!main || !floating) throw new Error("OWNED_OVERLAY_WINDOW_MISSING");
+        return { mainFocused: main.isFocused(), mainVisible: main.isVisible(), overlayFocused: floating.isFocused(),
+          overlayVisible: floating.isVisible(), overlayFocusable: floating.isFocusable(), overlayRendererPid: floating.webContents.getOSProcessId() };
+      }, { main: mainUrl, overlay: overlayUrl });
+      await application.evaluate(({ BrowserWindow }, url) => {
+        const main = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL() === url);
+        if (!main) throw new Error("OWNED_MAIN_WINDOW_MISSING"); main.focus();
+      }, mainUrl);
+      await until(async () => (await windowState()).mainFocused);
+      const hidden = await windowState();
+      assert.equal(hidden.mainVisible, true); assert.equal(hidden.overlayVisible, false);
+      assert.equal(hidden.overlayFocusable, false); assert.equal(hidden.overlayFocused, false);
+      const overlayStatus = await readFile(`/proc/${hidden.overlayRendererPid}/status`, "utf8");
+      const overlayArguments = (await readFile(`/proc/${hidden.overlayRendererPid}/cmdline`, "utf8")).split("\0");
+      assert.match(overlayStatus, /^NoNewPrivs:\s+1$/mu); assert.match(overlayStatus, /^Seccomp:\s+2$/mu);
+      assert.match(overlayStatus, /^Seccomp_filters:\s+[2-9]\d*$/mu); assert.match(overlayStatus, /^NSpid:\s+\d+\s+\d+/mu);
+      assert.match(overlayStatus, /^CapEff:\s+0+$/mu); assert.match(overlayStatus, /^Uid:\s+1000\s+1000\s+1000\s+1000$/mu);
+      assert.equal(overlayArguments.some((argument) => argument.includes("no-sandbox")), false);
+      assert.match(overlayArguments.join(" "), /(?:^|\s)--type=renderer(?:\s|$)/u);
+      assert.match(overlayArguments.join(" "), /(?:^|\s)--enable-sandbox(?:\s|$)/u);
+      assert.deepEqual(await overlay.evaluate(() => ({ process: "process" in globalThis, require: "require" in globalThis,
+        bridge: typeof window.openwhisper?.invoke })), { process: false, require: false, bridge: "function" });
+      const overlayState = async () => validateCommandOutput("get_state", await overlay.evaluate(() => window.openwhisper?.invoke("get_state", {})));
+      const assertFocusRetained = async () => {
+        const current = await windowState();
+        assert.equal(current.mainFocused, true); assert.equal(current.overlayFocused, false); assert.equal(current.overlayFocusable, false);
+        return current;
+      };
+      assert.equal((await overlayState()).status, "idle");
+      checks.push("trusted actual overlay is hidden by default; sandbox/context isolation and Linux kernel renderer isolation; no renderer Node API");
+
+      await checkpoint("actual-overlay-idle-preference");
+      await page.locator('[data-pref="show_idle_overlay"]').check();
+      await until(async () => (await state()).preferences.show_idle_overlay === true && (await windowState()).overlayVisible);
+      await assertFocusRetained();
+      await expect(overlay.locator("#record-control")).toHaveAttribute("data-status", "idle");
+      assert.equal(await overlay.evaluate(async () => {
+        try { await window.openwhisper?.invoke("save_preferences", { changes: { show_idle_overlay: false } }); return null; }
+        catch (error: unknown) { return error instanceof Error ? error.message : null; }
+      }), "This action is not available from this window.");
+      assert.equal((await state()).preferences.show_idle_overlay, true);
+      assert.equal((await windowState()).overlayVisible, true);
+      await overlay.screenshot({ path: join(evidence, "overlay-idle.png"), timeout: 5000 });
+      checks.push("shared-UI idle-overlay preference shows the real nonfocusable window without taking main focus; overlay preference mutation refused");
+
+      await checkpoint("actual-f8-overlay-cancel");
+      await stockPress();
+      await until(async () => (await state()).status === "recording" && (await overlayState()).status === "recording");
+      await expect(overlay.locator("#record-control")).toHaveAttribute("data-status", "recording");
+      await until(async () => (await pactl(["list", "short", "source-outputs"])).trim().split("\n").filter(Boolean).length === 1);
+      await assertFocusRetained();
+      assert.equal(await control(), "recording");
+      await overlay.screenshot({ path: join(evidence, "overlay-recording.png"), timeout: 5000 });
+      await expect(overlay.locator("#cancel")).toBeVisible();
+      const cancelRect = await overlay.locator("#cancel").evaluate((button) => {
+        if (!(button instanceof HTMLButtonElement) || button.disabled || button.hidden) throw new Error("OWNED_OVERLAY_CANCEL_UNAVAILABLE");
+        const rect = button.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      });
+      const overlayBounds = await application.evaluate(({ BrowserWindow }, url) => {
+        const floating = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL() === url);
+        if (!floating) throw new Error("OWNED_OVERLAY_WINDOW_MISSING"); return floating.getBounds();
+      }, overlayUrl);
+      assert.ok(Object.values(cancelRect).every(Number.isFinite));
+      assert.ok(cancelRect.width > 0 && cancelRect.height > 0 && cancelRect.x >= 0 && cancelRect.y >= 0);
+      assert.ok(cancelRect.x + cancelRect.width <= overlayBounds.width && cancelRect.y + cancelRect.height <= overlayBounds.height);
+      const cancelPoint = { x: Math.round(overlayBounds.x + cancelRect.x + cancelRect.width / 2),
+        y: Math.round(overlayBounds.y + cancelRect.y + cancelRect.height / 2) };
+      assert.ok(cancelPoint.x >= 0 && cancelPoint.x < 1100 && cancelPoint.y >= 0 && cancelPoint.y < 750,
+        "Overlay Cancel must lie inside the already verified owned KWin viewport");
+      await writeFile(join(evidence, "overlay-cancel-pointer.json"), JSON.stringify({ overlayBounds, cancelRect, cancelPoint,
+        outerWindow: windows[0]!, route: "OWNED_OUTER_XTEST_CANCEL" }, null, 2), { mode: 0o600 });
+      // The unchanged outer DISPLAY routes actual XTEST input through the already grabbed private KWin surface.
+      await execute("/usr/bin/xdotool", ["mousemove", "--sync", "--window", windows[0]!, String(cancelPoint.x), String(cancelPoint.y), "click", "1"],
+        { env, timeout: 3000, maxBuffer: 4096 });
+      await until(async () => (await state()).status === "idle" && (await overlayState()).status === "idle");
+      assert.equal(await control(), "idle");
+      assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
+      assert.deepEqual(await readdir(profile.paths.recovery), []);
+      assert.equal((await state()).recovery_available, false);
+      await assertFocusRetained();
+      checks.push("actual stock F8 opens one private capture; main/control/overlay mirror that owner; actual owned outer XTEST pointer Cancel closes its stream without recovery or focus change");
+
+      await checkpoint("actual-overlay-idle-hidden-again");
+      await page.locator('[data-pref="show_idle_overlay"]').uncheck();
+      await until(async () => (await state()).preferences.show_idle_overlay === false && !(await windowState()).overlayVisible);
+      await assertFocusRetained();
+      const maps = await readFile(`/proc/${security.pid}/maps`, "utf8");
+      assert.equal(maps.includes("openwhisper_capture.node"), false); assert.equal(maps.includes("openwhisper_speech.node"), false);
+      assert.equal(sha(await readFile(join(stable, "sentinel"))), stableBefore);
+      checks.push("turning off the idle preference hides the actual idle overlay; main remains focused and usable; stable sentinel unchanged");
+
+      await checkpoint("graceful-normal-quit-after-overlay");
+      const owner = appOwners.at(-1)!; owner.termination = "quit";
+      const closing = application.close().then(() => owner.closed); void closing.catch(() => {});
+      let closeTimer: NodeJS.Timeout | undefined;
+      try {
+        await Promise.race([closing, new Promise<never>((_, reject) => {
+          closeTimer = setTimeout(() => reject(new Error("OWNED_APP_CLOSE_TIMEOUT")), 10_000);
+        })]);
+      } finally { if (closeTimer) clearTimeout(closeTimer); }
+      assert.equal(owner.closeObserved, true); assert.equal(overlay.isClosed(), true); application = undefined;
+      const resources = await recordResources("resources.json");
+      assert.match(resources["pids.events"] ?? "", /(?:^|\n)max 0(?:\n|$)/u);
+      assert.equal(resources["pids.max"]?.trim(), "256");
+      for (const field of ["oom", "oom_kill"]) assert.match(resources["memory.events"] ?? "", new RegExp(`(?:^|\\n)${field} 0(?:\\n|$)`, "u"));
+      await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", checks,
+        applicationBackend: "XWAYLAND",
+        overlayUrl, defaultHidden: true, idlePreferenceVisibility: true, focusRetained: true, preferenceMutationRefused: true,
+        overlaySandbox: true, privateCaptureCancelled: true, originalApplicationClosed: true, nativeInMain: false,
+        overlayInput: "OWNED_OUTER_XTEST_CANCEL", hotkeys: "OWNED_STOCK_KDE_KGLOBALACCEL_KEY_EDGES", stableSentinelUnchanged: true,
+        physicalMicrophone: "NOT_USED", desktop: "OWNED_STOCK_KDE", recognition: "NOT_TESTED", automaticPaste: "NOT_TESTED" }, null, 2), { mode: 0o600 });
+      status = "PASS"; return;
+    }
     if (kdePaste) {
       await checkpoint("actual-keyboard-session-allow");
       await until(async () => (await state()).paste_portal);
@@ -327,73 +534,7 @@ async function main(): Promise<void> {
       const targetBackend = kdeXwaylandPaste ? "XWAYLAND" : "WAYLAND";
       let targetEnvironment = { ...env, GDK_BACKEND: "wayland" };
       if (kdeXwaylandPaste) {
-        await checkpoint("owned-inner-xwayland-ownership");
-        const environmentFile = env.WF_OWNED_XWAYLAND_ENV_FILE;
-        assert.ok(environmentFile && environmentFile === resolve(environmentFile));
-        await until(async () => {
-          try { const value = await lstat(environmentFile); return value.isFile() && value.size > 0; }
-          catch (error: unknown) {
-            if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
-            throw error;
-          }
-        });
-        const fileStat = await lstat(environmentFile), directoryStat = await lstat(dirname(environmentFile));
-        assert.ok(fileStat.isFile() && !fileStat.isSymbolicLink() && fileStat.size <= 4096);
-        assert.equal(fileStat.uid, 1000);
-        assert.ok(directoryStat.isDirectory() && !directoryStat.isSymbolicLink());
-        assert.equal(directoryStat.uid, 1000); assert.equal(directoryStat.mode & 0o077, 0);
-        const inner = z.strictObject({ DISPLAY: z.string().regex(/^:\d+$/u), XAUTHORITY: z.string().max(4096).nullable(),
-          WAYLAND_DISPLAY: z.literal("openwhisper-owned") }).parse(JSON.parse(await readFile(environmentFile, "utf8")));
-        assert.notEqual(inner.DISPLAY, env.DISPLAY);
-        const socket = await lstat(join("/tmp/.X11-unix", `X${inner.DISPLAY.slice(1)}`));
-        assert.ok(socket.isSocket()); assert.equal(socket.uid, 1000);
-        const authority = inner.XAUTHORITY ?? "";
-        if (authority) {
-          assert.equal(authority, resolve(authority));
-          const authStat = await lstat(authority);
-          assert.ok(authStat.isFile() && !authStat.isSymbolicLink()); assert.equal(authStat.uid, 1000);
-        }
-        const innerEnvironment = { ...env, DISPLAY: inner.DISPLAY, XAUTHORITY: authority };
-        // Wake KWin's lazy inner server through an inert connection, never input.
-        await execute("/usr/bin/xwininfo", ["-root"], { env: innerEnvironment, timeout: 3000, maxBuffer: 16_384 });
-        const daemonCall = async (method: string, argument: string) =>
-          (await execute("/usr/bin/gdbus", ["call", "--session", "--dest", "org.freedesktop.DBus", "--object-path", "/org/freedesktop/DBus",
-            "--method", `org.freedesktop.DBus.${method}`, argument], { env, timeout: 3000, maxBuffer: 4096 })).stdout.trim();
-        const ownerReply = /^\('(:\d+\.\d+)',\)$/u.exec(await daemonCall("GetNameOwner", "org.kde.KWin"));
-        assert.ok(ownerReply); const kwinOwner = ownerReply[1]!;
-        const pidReply = /^\((?:uint32 )?([1-9]\d*),\)$/u.exec(await daemonCall("GetConnectionUnixProcessID", kwinOwner));
-        assert.ok(pidReply); const kwinPid = Number(pidReply[1]);
-        assert.ok(Number.isSafeInteger(kwinPid) && kwinPid <= 2_147_483_647);
-        const pending = [kwinPid], seen = new Set<number>();
-        let xwayland: { pid: number; argv: string[] } | undefined;
-        while (pending.length && seen.size < 64) {
-          const current = pending.pop()!; if (seen.has(current)) continue; seen.add(current);
-          const proc = `/proc/${current}`;
-          try {
-            assert.equal((await lstat(proc)).uid, 1000);
-            const argv = (await readFile(`${proc}/cmdline`, "utf8")).split("\0");
-            assert.equal(argv.pop(), "");
-            if (argv[0] && basename(argv[0]) === "Xwayland" && argv.includes(inner.DISPLAY)) {
-              xwayland = { pid: current, argv }; break;
-            }
-            const children = (await readFile(`${proc}/task/${current}/children`, "utf8")).trim();
-            for (const value of children ? children.split(/\s+/u) : []) {
-              assert.match(value, /^[1-9]\d*$/u); const childPid = Number(value);
-              assert.ok(Number.isSafeInteger(childPid) && childPid <= 2_147_483_647); pending.push(childPid);
-            }
-          } catch (error: unknown) {
-            if (!(error instanceof Error) || !("code" in error) || (error.code !== "ENOENT" && error.code !== "ESRCH")) throw error;
-          }
-        }
-        assert.ok(xwayland && xwayland.pid !== kwinPid, "Inner display must belong to an actual owned KWin descendant Xwayland");
-        const authFlags = xwayland.argv.map((value, index) => value === "-auth" ? index : -1).filter((index) => index !== -1);
-        if (authority) {
-          assert.equal(authFlags.length, 1); assert.equal(xwayland.argv[authFlags[0]! + 1], authority);
-        } else assert.equal(authFlags.length, 0, "Inner Xwayland must not require an unrecorded cookie");
-        assert.equal(await daemonCall("GetNameOwner", "org.kde.KWin"), `('${kwinOwner}',)`);
-        await writeFile(join(evidence, "inner-xwayland-ownership.json"), JSON.stringify({ uid: 1000, kwinPid, xwaylandPid: xwayland.pid,
-          display: inner.DISPLAY, xauthority: authority, ownerStable: true, descendantsInspected: seen.size }, null, 2), { mode: 0o600 });
-        targetEnvironment = { ...innerEnvironment, GDK_BACKEND: "x11" };
+        targetEnvironment = { ...await ownedInnerXwaylandEnvironment(), GDK_BACKEND: "x11" };
       }
       const pasted = join(root, kdeXwaylandPaste ? "pasted-xwayland.txt" : "pasted-wayland.txt");
       await checkpoint(kdeXwaylandPaste ? "owned-inner-xwayland-target" : "owned-native-wayland-target");

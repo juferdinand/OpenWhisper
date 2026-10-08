@@ -96,3 +96,12 @@ checks the launcher-owned environment file, distinct inner display and socket,
 actual Xwayland descendant of the private KWin bus owner, and authentication path.
 This case proves the Wayland-to-XWayland delivery boundary on the pinned KDE
 fixture; it does not establish standalone X11 desktop support.
+
+Use `--stock-kde-overlay` to verify the normal app on the explicitly selected,
+owned inner XWayland backend. The runner verifies the server before app launch;
+outer XTEST still enters through the private KWin surface. The case checks sandboxed
+overlay IPC, default/idle visibility, real F8 capture, one shared owner, actual pointer
+Cancel, unchanged keyboard focus and original Quit. This does not select XWayland
+globally. The failed native Wayland probe is retained: Electron's built-in inactive
+show cannot preserve focus there, so that overlay path stays guarded pending the
+separate native layer-shell requirement.

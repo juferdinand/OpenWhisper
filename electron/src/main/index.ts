@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, session, shell, systemPreferences } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, protocol, screen, session, shell, systemPreferences, Tray } from "electron";
 import { deliverClipboard } from "../services/clipboard-output.js";
 import { WaylandClipboard } from "../services/wayland-clipboard.js";
 import { portalPasteStateSchema } from "../platforms/linux/shared/portal-paste.js";
@@ -19,7 +19,7 @@ import {
   localProcessingProfileSchema, defaultLocalProcessingProfile, applyLocalProcessingProfilePatch,
 } from "../contracts/local-processing.js";
 import { prepareDevelopmentProfile, resolveDevelopmentProfile } from "../services/profiles.js";
-import { CONTENT_SECURITY_POLICY, MAIN_URL, readApplicationAsset } from "./assets.js";
+import { CONTENT_SECURITY_POLICY, MAIN_URL, OVERLAY_URL, readApplicationAsset } from "./assets.js";
 import { createUiDispatcher, uiFailure, type UiSender } from "./ipc.js";
 import { ModelInventory, type InstalledModel } from "../services/model-inventory.js";
 import { ModelDownloads } from "../services/model-download.js";
@@ -35,6 +35,8 @@ import { createRecordingControlPort } from "./recording-control.js";
 import { portalShortcutStateSchema } from "../platforms/linux/shared/portal-shortcuts.js";
 import { KdeKeyCapture } from "../platforms/linux/kde/key-capture.js";
 import { modifierOnly } from "../platforms/linux/kde/keyboard.js";
+import { buildTrayMenu } from "./tray-menu.js";
+import { overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay } from "./recording-overlay.js";
 
 const distribution = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let window: BrowserWindow | undefined;
@@ -85,6 +87,9 @@ async function start(): Promise<void> {
   app.on("second-instance", () => {
     if (window && !window.isDestroyed()) { window.show(); window.focus(); }
   });
+  app.on("activate", () => {
+    if (window && !window.isDestroyed()) { window.show(); window.focus(); }
+  });
   app.on("window-all-closed", () => { app.quit(); });
   await app.whenReady();
   const preferences = await DevelopmentPreferenceStore.open(profile);
@@ -104,6 +109,8 @@ async function start(): Promise<void> {
   let recordingControl = false, cancelRequested = false;
   let recordingOperation: Promise<unknown> | undefined;
   let shutdownInProgress = false, shutdownComplete = false;
+  let overlay: BrowserWindow | undefined, overlayReady = false;
+  let tray: Tray | undefined, trayKey = "";
   let recording = recordingSnapshotSchema.parse({ phase: "idle", generation: 0, elapsedMs: 0, level: 0,
     busy: false, recoveryAvailable: false, error: null, transcript: "" });
   let message = "", inferenceProgress = 0;
@@ -174,6 +181,11 @@ async function start(): Promise<void> {
   const buildRaw: unknown = JSON.parse(await readFile(join(distribution, "resources/development-build.json"), "utf8"));
   const build = z.strictObject({ commit: z.string().regex(/^([a-f0-9]{40}|source)$/), modified: z.boolean() }).parse(buildRaw);
   const platform = process.platform === "darwin" ? "macos" : "linux";
+  const localeSchema = z.record(z.string(), z.string());
+  const trayLocales = {
+    en: localeSchema.parse(JSON.parse(await readFile(join(distribution, "resources/locales/en.json"), "utf8")) as unknown),
+    de: localeSchema.parse(JSON.parse(await readFile(join(distribution, "resources/locales/de.json"), "utf8")) as unknown),
+  };
   const state = (): AppState => appStateSchema.parse({
     updates: { configured: false, status: "idle", version: null, progress: 0, error: null, package: "development" },
     platform,
@@ -197,7 +209,7 @@ async function start(): Promise<void> {
     shortcut_configuring: shortcut.configuring,
     native_x11: false, native_paste: false, native_mouse: false, native_middle_mouse: false,
     recording_shortcut: !!keyCapture, paste_ready: pasteState.ready, paste_configuring: pasteState.configuring, gpu_available: false, gpu_supported: false,
-    gpu_device: null, gpu_fallback: false, recovery_available: recording.recoveryAvailable, overlay_available: false,
+    gpu_device: null, gpu_fallback: false, recovery_available: recording.recoveryAvailable, overlay_available: !!overlay && !overlay.isDestroyed(),
     download, progress: download ? downloadProgress : inferenceProgress,
     elapsed: Math.min(Number.MAX_SAFE_INTEGER, Math.floor(recording.elapsedMs / 1000)), level: recording.level,
     model_directory: profile.paths.models,
@@ -242,13 +254,42 @@ async function start(): Promise<void> {
     },
   });
   const contents = window.webContents;
+  if (supportsInactiveRecordingOverlay({ platform: process.platform,
+    ...(process.env["XDG_SESSION_TYPE"] ? { sessionType: process.env["XDG_SESSION_TYPE"] } : {}),
+    ...(process.env["WAYLAND_DISPLAY"] ? { waylandDisplay: process.env["WAYLAND_DISPLAY"] } : {}),
+    ozonePlatform: app.commandLine.getSwitchValue("ozone-platform"),
+  })) {
+    try {
+      const options = overlayWindowOptions({ title: `${profile.productName} Recording`, preloadPath: join(distribution, "preload/index.cjs") });
+      const area = screen.getPrimaryDisplay().workArea;
+      overlay = new BrowserWindow({ ...options,
+        x: Math.floor(area.x + (area.width - 360) / 2), y: Math.floor(area.y + area.height - 88),
+        webPreferences: { ...options.webPreferences, webSecurity: true, devTools: false },
+      });
+      overlay.on("closed", () => { overlayReady = false; overlay = undefined; notify(); });
+    } catch {
+      console.error("OpenWhisper Dev could not create its recording overlay.");
+    }
+  }
   const emit = <N extends EventName>(name: N, payload: EventPayload<N>): void => {
-    if (!contents.isDestroyed() && contents.mainFrame.url === MAIN_URL) {
-      contents.send(`openwhisper:event:${name}`, validateEvent(name, payload));
+    const validated = validateEvent(name, payload);
+    for (const [target, url] of [[contents, MAIN_URL], [overlay?.webContents, OVERLAY_URL]] as const) {
+      if (target && !target.isDestroyed() && target.mainFrame.url === url) {
+        target.send(`openwhisper:event:${name}`, validated);
+      }
     }
   };
+  const showSettings = (): void => { if (window && !window.isDestroyed()) { window.show(); window.focus(); } };
+  let updateTray = (_state: AppState): void => {};
   notify = () => {
-    try { emit("state", state()); }
+    try {
+      const snapshot = state(); emit("state", snapshot); updateTray(snapshot);
+      if (overlayReady && overlay && !overlay.isDestroyed()) {
+        const visible = shouldShowRecordingOverlay(snapshot);
+        if (visible && !overlay.isVisible()) overlay.showInactive();
+        else if (!visible && overlay.isVisible()) overlay.hide();
+      }
+    }
     catch { console.error("OpenWhisper Dev could not publish its UI state."); }
   };
   const action = async (operation: () => Promise<void>): Promise<void> => {
@@ -280,6 +321,14 @@ async function start(): Promise<void> {
       ...(macRecording ? {} : { server: audioServer ?? `unix:${join(process.env.XDG_RUNTIME_DIR ?? profile.paths.locks, "pulse/native")}`,
         source: selected.microphone }) }); configured = true;
   };
+  const toggleRecording = (): Promise<void> => recordingAction(async () => {
+    if (!host) throw new Error("Recording unavailable.");
+    if (recording.phase === "recording" || recording.phase === "starting") await host.command("stop");
+    else { await configureRecording(); if (cancelRequested) return; inferenceProgress = 0; await host.command("start"); }
+  });
+  const cancelRecording = (): Promise<void> => action(async () => {
+    cancelRequested = true; if (host?.isConfigured()) await host.command("cancel");
+  });
   if (host && descriptor?.platform === "linux" && descriptor.platformServices) {
     try {
       platformHost = await DevelopmentPlatformHost.open({
@@ -353,20 +402,21 @@ async function start(): Promise<void> {
     event.preventDefault();
     if (shutdownInProgress) return;
     if (macRecording && recording.recoveryAvailable) {
-      message = "Retry or discard the stopped recording before quitting. Its audio is kept in memory."; notify(); return;
+      message = "Retry or discard the stopped recording before quitting. Its audio is kept in memory."; showSettings(); notify(); return;
     }
     shutdownInProgress = true; cancelRequested = true; processing.close(); downloadAbort?.abort();
     keyCapture = undefined; contents.setIgnoreMenuShortcuts(false);
     void (async () => { await recordingOperation?.catch(() => {}); await downloading; await downloads.finalize();
       await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); })().then(() => {
-      shutdownComplete = true; app.quit();
+      shutdownComplete = true; tray?.destroy(); tray = undefined;
+      overlay?.destroy(); app.quit();
     }, () => {
       // Preserve uncertain owners and the private recovery files for explicit review.
       shutdownInProgress = false; message = "Recording cleanup could not finish. Recording data and uncertain processes are kept."; notify();
     });
   });
   const dispatcher = createUiDispatcher({
-    windows: [{ webContentsId: contents.id, role: "main" }],
+    windows: [{ webContentsId: contents.id, role: "main" }, ...(overlay ? [{ webContentsId: overlay.webContents.id, role: "overlay" as const }] : [])],
     handlers: {
       get_state: () => state(),
       save_preferences: ({ changes }) => withRecordingControl(async () => {
@@ -415,12 +465,8 @@ async function start(): Promise<void> {
       cancel_shortcut: () => shortcutAction("cancel"),
       enable_paste: () => action(async () => { if (!platformHost) throw new Error("Keyboard permission unavailable."); await platformHost.pastePermission("enable"); }),
       disable_paste: () => action(async () => { if (!platformHost) throw new Error("Keyboard permission unavailable."); await platformHost.pastePermission("clear"); }),
-      toggle_recording: () => recordingAction(async () => {
-        if (!host) throw new Error("Recording unavailable.");
-        if (recording.phase === "recording" || recording.phase === "starting") await host.command("stop");
-        else { await configureRecording(); if (cancelRequested) return; inferenceProgress = 0; await host.command("start"); }
-      }),
-      cancel_recording: () => action(async () => { cancelRequested = true; if (host?.isConfigured()) await host.command("cancel"); }),
+      toggle_recording: toggleRecording,
+      cancel_recording: cancelRecording,
       retry_transcription: () => recordingAction(async () => { await configureRecording(); if (cancelRequested) return; inferenceProgress = 0; await host?.command("retry"); }),
       discard_recovery: () => recordingAction(async () => { await configureRecording(); if (!cancelRequested) await host?.command("discard"); }),
       refresh_microphones: () => recordingAction(async () => { if (!host) throw new Error("Recording unavailable.");
@@ -470,18 +516,42 @@ async function start(): Promise<void> {
       show_transcripts_folder: () => action(async () => { if (await shell.openPath(profile.paths.transcripts)) throw new Error("Folder unavailable."); }),
     },
   });
+  try {
+    const icon = nativeImage.createFromPath(join(distribution, "ui/app-icon.png")).resize({ width: 18, height: 18 });
+    if (icon.isEmpty()) throw new Error("Tray icon unavailable.");
+    if (process.platform === "darwin") icon.setTemplateImage(true);
+    tray = new Tray(icon); tray.setToolTip(profile.productName); tray.on("click", showSettings);
+    updateTray = (snapshot) => {
+      if (!tray || tray.isDestroyed()) return;
+      const key = JSON.stringify([snapshot.status, snapshot.recording_available, snapshot.recovery_available, snapshot.preferences.ui_language]);
+      if (key === trayKey) return;
+      trayKey = key;
+      const labels = trayLocales[snapshot.preferences.ui_language];
+      tray.setContextMenu(Menu.buildFromTemplate([...buildTrayMenu(snapshot, {
+        settings: showSettings,
+        toggleRecording: () => { if (!shutdownInProgress) void toggleRecording(); },
+        cancelRecording: () => { if (!shutdownInProgress) void cancelRecording(); },
+        quit: () => { app.quit(); },
+      }, (label) => labels[label] ?? label)]));
+    };
+  } catch {
+    tray?.destroy(); tray = undefined;
+    console.error("OpenWhisper Dev could not create its tray control.");
+  }
   ipcMain.handle("openwhisper:invoke", async (event, request: unknown) => {
     if (shutdownInProgress) return uiFailure("UNAVAILABLE_COMMAND");
-    if (contents.isDestroyed()) return uiFailure("UNTRUSTED_SENDER");
+    if (contents.isDestroyed() || event.sender.isDestroyed()) return uiFailure("UNTRUSTED_SENDER");
     const result = await dispatcher.dispatch({ sender: sender(event), serializedRequest: request });
-    if (contents.isDestroyed() || !dispatcher.isTrustedSender(sender(event))) {
+    if (contents.isDestroyed() || event.sender.isDestroyed() || !dispatcher.isTrustedSender(sender(event))) {
       return uiFailure("UNTRUSTED_SENDER");
     }
     return result;
   });
-  contents.setWindowOpenHandler(() => ({ action: "deny" }));
-  contents.on("will-navigate", (event) => { event.preventDefault(); });
-  contents.on("will-attach-webview", (event) => { event.preventDefault(); });
+  for (const target of [contents, ...(overlay ? [overlay.webContents] : [])]) {
+    target.setWindowOpenHandler(() => ({ action: "deny" }));
+    target.on("will-navigate", (event) => { event.preventDefault(); });
+    target.on("will-attach-webview", (event) => { event.preventDefault(); });
+  }
   window.on("close", (event) => { if (!shutdownComplete) { event.preventDefault(); app.quit(); } });
   window.on("closed", () => { processing.close(); ipcMain.removeHandler("openwhisper:invoke"); window = undefined; });
   window.once("ready-to-show", () => { window?.show(); });
@@ -492,6 +562,17 @@ async function start(): Promise<void> {
   // A hidden Wayland surface may wait for mapping before producing its first
   // frame. Do not make initial visibility depend only on ready-to-show.
   if (window && !window.isDestroyed() && !window.isVisible()) window.show();
+  const loadingOverlay = overlay;
+  if (loadingOverlay && !loadingOverlay.isDestroyed()) {
+    try {
+      await loadingOverlay.loadURL(OVERLAY_URL);
+      if (overlay === loadingOverlay && !loadingOverlay.isDestroyed()) overlayReady = true;
+    } catch {
+      if (!loadingOverlay.isDestroyed()) loadingOverlay.destroy();
+      if (overlay === loadingOverlay) overlay = undefined;
+    }
+  }
+  notify();
 }
 
 void start().catch(() => {

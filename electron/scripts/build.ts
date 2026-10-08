@@ -27,6 +27,7 @@ export async function buildApplication(options: { readonly recording?: boolean }
   });
   await cp(resolve(root, "../shared/ui/dist"), join(root, "dist/ui"), { recursive: true });
   await mkdir(join(root, "dist/resources"), { recursive: true });
+  await cp(resolve(root, "../shared/locales"), join(root, "dist/resources/locales"), { recursive: true });
   await cp(resolve(root, "../shared/models.json"), join(root, "dist/resources/models.json"));
   await cp(resolve(root, "../VERSION"), join(root, "dist/resources/VERSION"));
   const revision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", shell: false });
