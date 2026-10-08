@@ -124,7 +124,16 @@ so KDE cannot consume that key first. Startup itself leaves the journal untouche
 toggle dictation, held-key/GUI cancellation, Quit with an active binding and
 same-profile crash recovery paths have owned runtime evidence.
 
-On other desktops, **Set trigger** creates a GlobalShortcuts portal session. Setup
+Genuine X11 now has a separate TypeScript/native-keyboard implementation inside
+the existing platform utility; it does not run on Wayland or XWayland. Explicit
+setup uses native X11 focus and preserves the legacy X11 profile independently of
+KDE settings. The owned Xvfb run passes actual F8 setup, Escape preservation,
+held/repeated keys, CPU dictation, clipboard/history, trigger removal and
+Retry/Discard. Registration remains session-only after explicit setup; a saved
+profile does not bind on startup. Named-desktop/layout coverage and automatic
+X11 paste remain follow-up work rather than established support.
+
+On remaining desktops, **Set trigger** creates a GlobalShortcuts portal session. Setup
 opens only after an explicit click; no global binding is registered on Dev startup.
 The desktop chooses the combination, and the UI shows its confirmed description.
 Pending consent has a **Cancel** action. Toggle uses activation edges; push to talk
@@ -148,6 +157,27 @@ Automated evidence includes a synthetic frontend on a real private D-Bus, virtua
 audio and normal UI. Stock KDE 5.27 regular-key control is also checked through
 actual virtual key edges in nested KWin. Specialized KDE/X11, GNOME and remaining
 replacement gates still need validation; see [the evidence](ELECTRON-DEV-EVIDENCE.md).
+
+## Linux Dev package preview
+
+An existing Linux x64 build can be copied into a separate Dev directory and Debian
+archive without building, downloading, installing or launching it:
+
+```bash
+cd electron
+node --import tsx scripts/package-linux-preview.ts --output /absolute/fresh/output
+```
+
+This requires `readelf` and `dpkg-deb`; use `--directory-only` when only the directory
+is needed. The script preserves package/build metadata, checks captured native
+inputs, copies the locked production dependencies and retains notices. It uses
+the separate Dev package, launcher and `/opt/openwhisper-dev` destination. Archives
+are unsigned previews and do not replace the stable application.
+
+Native inputs must be built on the intended distribution baseline. The current
+host-built speech addon needs GLIBC 2.43, which the generated Debian dependency
+declares. It cannot run on Ubuntu 22.04 or Debian 13. Archive metadata/extraction
+checks do not establish installed runtime, AppImage, updates or release acceptance.
 
 ## macOS CPU recording Dev build
 

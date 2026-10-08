@@ -164,8 +164,9 @@ export class DevelopmentPlatformHost {
     const reply = await this.channel.request({ version: 1, id: randomUUID(), command: "bind-key", key, hold });
     if (!reply.ok || reply.value.command !== "bind-key") throw new PlatformChannelError("INVALID_FRAME");
   }
-  async prepareKeyCapture(): Promise<void> {
-    const reply = await this.channel.request({ version: 1, id: randomUUID(), command: "prepare-key" });
+  async prepareKeyCapture(windowId?: number, hold?: boolean): Promise<void> {
+    const reply = await this.channel.request({ version: 1, id: randomUUID(), command: "prepare-key",
+      ...(windowId === undefined ? {} : { windowId }), ...(hold === undefined ? {} : { hold }) });
     if (!reply.ok || reply.value.command !== "prepare-key") throw new PlatformChannelError("INVALID_FRAME");
   }
   async pastePermission(action: "enable" | "clear"): Promise<void> {

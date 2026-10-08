@@ -94,7 +94,7 @@ port.on("message", (message) => {
       }
       case "prepare-key": {
         if (!shortcuts) return { version: 1, id: request.id, ok: false, code: "UNAVAILABLE" };
-        await shortcuts.prepareKeyCapture();
+        await shortcuts.prepareKeyCapture(request.windowId, request.hold);
         return { version: 1, id: request.id, ok: true, value: { command: "prepare-key", state: shortcuts.state() } };
       }
       case "paste-permission": {

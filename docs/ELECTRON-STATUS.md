@@ -14,9 +14,9 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | Shared interface and services | Existing design, strict TS bridge, isolated Dev profile, settings, models/history and localized shared-owner tray actions; sandboxed recording overlay connected | Native tray presentation, assembled Mac overlay and remaining platform behaviors |
 | Linux dictation | Normal UI, CPU recognition, clipboard, Retry/Discard and graceful Quit pass on private Ubuntu22 and stock Kubuntu/KDE 5.27 native Wayland with virtual audio; background Wayland publication and actual GTK target insertion also pass | Startup-failure cleanup under resource pressure; remaining desktop control, overlays and accelerated inference in normal Dev |
 | macOS dictation | Normal CPU Dev recording, explicit permission button and RAM Retry/Discard are now connected; focused synthetic tests pass | Validate the assembled Mac build and physical permission/device behavior; add Metal selection |
-| Linux desktop integration | Dev commands, portal sessions and explicit KDE keyboard setup share recording ownership. Stock KDE 5.27 native Wayland F8, cancellation, binding Quit/crash recovery and paste into Wayland/XWayland editors pass. The guarded native overlay passes actual pointer Cancel/Stop, CPU recognition and foreground editor keyboard delivery | Overlay stacking above fullscreen/keep-above windows and other compositors, native tray presentation, GNOME consent/combined behavior, modifier-only/mouse and standalone KDE/X11 triggers, packaged CLI and wlroots replacement behavior |
+| Linux desktop integration | Stock KDE 5.27 native Wayland F8, cancellation, binding Quit/crash recovery and paste into Wayland/XWayland editors pass. The guarded native overlay passes pointer Cancel/Stop and foreground editor keyboard delivery. Genuine X11 native F8 capture, held/repeated keys, CPU dictation, clipboard/history and Retry/Discard pass in private Xvfb | Basic packaged controls remain required; expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
-| Packaging and updates | Architecture and compatibility requirements documented | Electron AppImage/.deb/universal DMG+ZIP, signing, stable data continuity and actual old-client update checks |
+| Packaging and updates | An unsigned Dev directory/.deb preview preserves captured inputs and passes archive/layout checks; current host native inputs require GLIBC 2.43 | Portable native baseline and installed runtime checks, Electron AppImage/universal DMG+ZIP, signing, stable data continuity and actual old-client update checks |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 The current checkpoint includes actual stock KDE keyboard dictation, recovery
@@ -46,15 +46,37 @@ independent clipboard/history and original cleanup pass in 28.50 seconds.
 KWin stacks this role below active fullscreen and keep-above windows. That behavior
 and other compositors remain unresolved, so the explicit
 `--experimental-wayland-overlay` switch and main-control fallback remain.
-The full L-OVERLAY gate stays open. CI at the preceding `da74568` checkpoint is
-observed separately from this local result; no older artifact is relabeled.
+The full L-OVERLAY gate stays open. CI at committed `de495e6` passes all six jobs;
+that result does not validate subsequent uncommitted inputs or relabel older artifacts.
+
+The genuine-X11 adapter uses the existing platform utility and strict TypeScript
+Koffi calls, preserving the legacy keycode/keysym/modifiers/group profile separately
+from KDE preferences. Native capture requires actual X11 focus ancestry. In private
+Xvfb the server confirms the owned main window as its keyboard target while
+Electron reports it unfocused. Initial keyboard mapping notices can now precede
+the first captured candidate; later mapping changes still retire a captured or
+active binding. The owned case passes real F8 setup, Escape preservation,
+held/repeated keys, safe cancellation, CPU dictation, clipboard/history,
+trigger removal, Retry/Discard and original cleanup in 40.99 seconds.
+See the [exact evidence](ELECTRON-DEV-EVIDENCE.md). The package preview is a separate
+frozen metadata/layout result, predating the final X11 corrections; it is not a
+runnable Ubuntu/Debian or release acceptance result.
 
 ## Delivery order and execution limits
+
+Owner scope adjustment, 2026-10-08: finish the current genuine-X11 increment,
+then defer expanded Linux desktop/special-input matrices to existing bug reports.
+Basic dictation, controls and installation must work on both macOS and Linux.
+Known basic-function failures still need correction. Prioritize the remaining
+Mac composition and usable packages/update transition; keep untested desktop
+claims and follow-up issues explicit instead of blocking on exhaustive coverage.
+The original migration plan remains the architecture record; deferred coverage
+is not a completed acceptance gate.
 
 The complete 0.3.0 migration remains the objective. Deliver one runnable behavior
 at a time. Regular KDE keyboard control is now checked against the owned stock
 desktop, including active-binding Quit/crash recovery and insertion into native
-Wayland and inner XWayland editors; next verify GNOME and remaining desktop controls. Reuse the
+Wayland and inner XWayland editors, with a separate genuine-X11 basic dictation pass. Reuse the
 current desktop harness; do not build another general evidence framework.
 
 Keep implementation and diagnosis rounds to about 30 minutes before reporting a

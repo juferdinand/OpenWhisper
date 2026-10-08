@@ -778,7 +778,7 @@ function modifierOnlyTrigger() {
 }
 function triggerLabel() {
   const trigger = state.preferences.native_trigger;
-  if (!isMac() && state.native_shortcuts && trigger?.kind === "mouse") {
+  if (!isMac() && !state.native_x11 && state.native_shortcuts && trigger?.kind === "mouse") {
     if (trigger.button === 2) return t("Middle mouse button");
     if (trigger.button === 8) return t("Mouse back button");
     if (trigger.button === 9) return t("Mouse forward button");

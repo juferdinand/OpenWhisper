@@ -10,6 +10,15 @@ implement it on an isolated branch with reviewable packages and automated eviden
 
 ## Decision and scope
 
+Owner priority update, 2026-10-08: finish the current genuine-X11 increment, then
+defer expanded Linux desktop and special-input coverage to existing bug reports.
+Basic dictation, controls and installation must work on both macOS and Linux for
+0.3.0. The broader gates below remain the architecture/backlog record, rather
+than requiring exhaustive Linux matrices before the basic replacement is usable.
+Keep actual known basic-function failures blocking, unsupported controls explicit,
+strict update/data/signing guarantees intact and user acceptance before merging
+or replacing an installation.
+
 Replace the Swift/WebKit macOS host and Rust/Tauri Linux host with one Electron application.
 Keep the current `shared/ui` design, icon, Inter font, navigation and English/German interface.
 Use shared Chromium renderer code and one set of typed application services, with explicit platform

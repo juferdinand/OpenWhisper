@@ -19,15 +19,18 @@ const kdeOverlay = args[6] === "--stock-kde-overlay";
 const kdeWaylandOverlay = args[6] === "--stock-kde-wayland-overlay";
 const kdeXwaylandPaste = args[6] === "--stock-kde-xwayland-paste";
 const kdePaste = args[6] === "--stock-kde-paste" || kdeXwaylandPaste;
+const nativeX11 = args[6] === "--native-x11";
 const stockKde = args[6] === "--stock-kde" || kdeLifecycle || kdePaste || kdeOverlay || kdeWaylandOverlay;
-if (args.length !== (stockKde ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
+const portalFixture = !stockKde && !nativeX11;
+const copiedNode = stockKde || nativeX11;
+if (args.length !== (copiedNode ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
     || process.platform !== "linux" || process.arch !== "x64" || process.getuid?.() === 0) throw new Error("INVALID_EXECUTION");
 const output = absolute.parse(args[1]), planning = absolute.parse(args[3]), fixtures = absolute.parse(args[5]);
 for (const path of [planning, fixtures]) {
   const directory = await lstat(path); assert.ok(directory.isDirectory() && !directory.isSymbolicLink());
   assert.ok(output !== path && !output.startsWith(`${path}/`) || (path === planning && output.startsWith(`${planning}/p4-linux-dev-recording/`)));
 }
-const IMAGE = stockKde ? "sha256:796933aebc81829a07ba245ea7e10b594f032b2b90bcaf70002ce8395f2c2b33"
+const IMAGE = copiedNode ? "sha256:796933aebc81829a07ba245ea7e10b594f032b2b90bcaf70002ce8395f2c2b33"
   : "sha256:741fe6d91a1dbbb4b371448920d6c02274a28ca3d380e7d71049da5cd666f488";
 const capture = join(planning, "p4-linux-dev-recording/native-sources/run-1/openwhisper_capture.node");
 const speech = join(planning, "p6-proposal/gpu-build-1/cpu/openwhisper_speech.node");
@@ -82,7 +85,7 @@ const descriptor = developmentRecordingDescriptorSchema.parse({ ...original,
 await build({ stdin: { contents: `export const DEVELOPMENT_RECORDING_BUILD: unknown = ${JSON.stringify(descriptor)};`, loader: "ts", resolveDir: root },
   outfile: join(app, "dist/main/development-recording-build.js"), platform: "node", format: "esm", target: "node24", sourcemap: false });
 await mkdir(join(payload, "fixtures"), { mode: 0o700 });
-if (!stockKde) {
+if (portalFixture) {
   await mkdir(join(payload, "owned-bus"), { mode: 0o700 });
   for (const name of ["portal-service.cpp", "portal-fixture.hpp"]) await cp(join(root, "tests/owned-bus", name), join(payload, "owned-bus", name));
 }
@@ -111,7 +114,7 @@ if (kdePaste || kdeWaylandOverlay) {
     platform: "neutral", format: "iife", target: "es2015", bundle: true, sourcemap: false });
   sources["tests/owned-dev-recording/focus-target.ts"] = await describe(focus);
 }
-if (!stockKde) for (const name of ["portal-service.cpp", "portal-fixture.hpp"]) sources[`tests/owned-bus/${name}`] = await describe(join(root, "tests/owned-bus", name));
+if (portalFixture) for (const name of ["portal-service.cpp", "portal-fixture.hpp"]) sources[`tests/owned-bus/${name}`] = await describe(join(root, "tests/owned-bus", name));
 let frozen: Awaited<ReturnType<typeof inventory>>;
 const container = `openwhisper-owned-dev-recording-${randomUUID()}`;
 const compiler = `${container}-compiler`, compilerImage = "sha256:403f066a165681074f19f1977b2b46617d3dd7b072cb7037400dbe01676ed3cb";
@@ -148,11 +151,11 @@ try {
   compilerCreated = true;
   await required(["create", "--name", compiler, "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL",
     "--security-opt", "no-new-privileges", "--pids-limit", "64", "--memory", "1g", "--ulimit", "core=0:0", "--entrypoint",
-    stockKde ? "/bin/true" : "/usr/bin/c++", compilerImage, ...(stockKde ? [] : [
+    copiedNode ? "/bin/true" : "/usr/bin/c++", compilerImage, ...(copiedNode ? [] : [
     "-std=c++17", "-Wall", "-Wextra", "-Werror", "/tmp/sources/portal-service.cpp", "-I/usr/include/glib-2.0",
     "-I/usr/lib/x86_64-linux-gnu/glib-2.0/include", "-o", "/tmp/owned-portal", "-lgio-2.0", "-lgobject-2.0", "-lglib-2.0", "-pthread"])]);
-  if (stockKde) {
-    // Stock KDE uses its installed portal; only copy Node from the stopped image.
+  if (copiedNode) {
+    // These modes need no synthetic portal; copy Node from the stopped image.
     await required(["cp", "-a", `${compiler}:/opt/node/bin/node`, join(payload, "node")]);
   } else {
     await required(["cp", "-a", join(payload, "owned-bus"), `${compiler}:/tmp/sources`]);
@@ -165,10 +168,11 @@ try {
   frozen = await inventory(payload);
   await writeFile(join(output, "assembly.json"), JSON.stringify({ image: IMAGE, sources, originalDescriptor: original, descriptor,
     originalDist: distBefore, payload: frozen, native: { capture: { path: capture, ...captureRecord }, speech: { path: speech, ...speechRecord }, bus: { path: bus, ...busRecord } },
-    portalFixture: stockKde ? null : { compilerImage, binary: await describe(join(payload, "owned-bus/owned-portal")) },
-    ...(stockKde ? { nodeRuntime: { sourceImage: compilerImage, ...await describe(join(payload, "node")) } } : {}),
+    portalFixture: portalFixture ? { compilerImage, binary: await describe(join(payload, "owned-bus/owned-portal")) } : null,
+    ...(copiedNode ? { nodeRuntime: { sourceImage: compilerImage, ...await describe(join(payload, "node")) } } : {}),
     seccomp: { path: seccomp, ...await describe(seccomp) },
-    scope: stockKde ? "Normal native Wayland Dev UI with retained Ubuntu22 native inputs against stock Kubuntu KDE portal; no synthetic portal signals."
+    scope: nativeX11 ? "Normal Dev UI against private Xvfb with actual XTEST native X11 keys; no compositor, portal fixture or synthetic signals."
+      : stockKde ? "Normal native Wayland Dev UI with retained Ubuntu22 native inputs against stock Kubuntu KDE portal; no synthetic portal signals."
       : "Normal Dev UI/capture/platform utilities with retained Ubuntu22 native inputs and a synthetic portal frontend assembled before private runtime." }, null, 2), { mode: 0o600 });
   const image = await required(["image", "inspect", IMAGE]); z.array(z.object({ Id: z.literal(IMAGE) })).length(1).parse(JSON.parse(image));
   created = true;
@@ -176,7 +180,7 @@ try {
     "--security-opt", "no-new-privileges", "--security-opt", `seccomp=${seccomp}`, "--pids-limit", "256", "--memory", "4g", "--shm-size", "256m",
     "--ulimit", "core=0:0", "--entrypoint", "/bin/sleep", IMAGE, "500"]);
   await required(["cp", "-a", payload, `${container}:/payload`]);
-  if (stockKde) {
+  if (copiedNode) {
     const runtimeEvidence = join(output, "runtime-evidence"); await mkdir(runtimeEvidence, { mode: 0o700 });
     await required(["cp", "-a", runtimeEvidence, `${container}:/evidence`]);
   }
@@ -197,6 +201,7 @@ try {
     ...(kdePaste ? [`OPENWHISPER_KDE_PASTE=${kdeXwaylandPaste ? "xwayland" : "wayland"}`] : []), "KWIN_COMPOSE=Q", "LP_NUM_THREADS=2", "/usr/bin/python3", "/payload/run-owned-desktop.py", "--session", "kde-wayland",
     ...(kdeXwaylandPaste || kdeOverlay ? ["--kde-xwayland"] : []),
     "--output", "/tmp/owned-desktop", "--timeout", "180", "--", "/payload/node", "/payload/driver.mjs"]
+    : nativeX11 ? ["OPENWHISPER_NATIVE_X11=1", "/payload/node", "/payload/driver.mjs"]
     : ["/opt/node/bin/node", "/payload/driver.mjs"];
   const observed = await docker(["exec", "--user", "1000:1000", container, "/usr/bin/env", "-i", "PATH=/opt/node/bin:/usr/bin:/bin", "LANG=C.UTF-8",
     "OPENWHISPER_OWNED_DEV_RECORDING=1", ...command], stockKde ? 240_000 : 210_000);
@@ -210,6 +215,8 @@ try {
       applicationBackend: z.literal(kdeWaylandOverlay ? "WAYLAND" : "XWAYLAND"),
       ...(kdeWaylandOverlay ? { nativeSurfaceScreenshot: z.literal(true), nativePointerStop: z.literal(true), clipboardConfirmed: z.literal(true),
         foregroundKeyboardDelivery: z.literal(true), editorBackend: z.literal("WAYLAND") } : {}) })
+    : nativeX11 ? z.object({ status: z.literal("PASS"), nativeX11: z.literal(true), nativeCapture: z.literal(true), escapePreserved: z.literal(true),
+      holdStaleReleaseSafe: z.literal(true), clearedKeyInactive: z.literal(true), clipboardConfirmed: z.literal(true), historyConfirmed: z.literal(true) })
     : kdePaste ? z.object({ status: z.literal("PASS"), clipboardConfirmed: z.literal(true), recoveryRemoved: z.literal(true),
       nativeInMain: z.literal(false), pasteConfirmed: z.literal(true), permissionRevoked: z.literal(true), targetBackend: z.literal(kdeXwaylandPaste ? "XWAYLAND" : "WAYLAND") })
     : z.object({ status: z.literal("PASS"), clipboardConfirmed: z.literal(true), recoveryRemoved: z.literal(true), nativeInMain: z.literal(false) }))

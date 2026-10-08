@@ -15,7 +15,7 @@ export const platformRequestSchema = z.discriminatedUnion("command", [
   z.strictObject({ ...envelope, command: z.literal("status") }),
   z.strictObject({ ...envelope, command: z.literal("shortcut"), action: z.enum(["enable", "configure", "clear", "cancel", "mode"]), hold: z.boolean() }),
   z.strictObject({ ...envelope, command: z.literal("bind-key"), key: kdeKeySchema, hold: z.boolean() }),
-  z.strictObject({ ...envelope, command: z.literal("prepare-key") }),
+  z.strictObject({ ...envelope, command: z.literal("prepare-key"), windowId: z.int().min(1).max(0xffffffff).optional(), hold: z.boolean().optional() }),
   z.strictObject({ ...envelope, command: z.literal("paste-permission"), action: z.enum(["enable", "clear"]) }),
   z.strictObject({ ...envelope, command: z.literal("paste") }),
   z.strictObject({ ...envelope, command: z.literal("shutdown") }),

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { x11TriggerSchema } from "../../../contracts/ui.js";
 import { BusFailure, type BusEvent, type BusFilter, type BusMethod, type BusReply } from "./bus.js";
 import type { BusValue } from "./bus-values.js";
 import type { ControlCapturePort } from "./control.js";
@@ -11,6 +12,7 @@ const shortcuts = "org.freedesktop.portal.GlobalShortcuts";
 const daemon = "org.freedesktop.DBus";
 export const portalShortcutStateSchema = z.strictObject({ available: z.boolean(), configuring: z.boolean(),
   label: z.string().max(1024).nullable(), nativeAvailable: z.boolean().default(false), nativeKey: z.int().nullable().default(null),
+  nativeX11: z.boolean().optional(), x11Trigger: x11TriggerSchema.nullable().optional(),
   result: z.enum(["NONE", "ENABLED", "UNASSIGNED", "CANCELLED", "ENDED", "FAILED", "CONFLICT", "CONFIGURE_UNAVAILABLE"]) });
 export type PortalShortcutState = z.infer<typeof portalShortcutStateSchema>;
 export interface ShortcutBus {

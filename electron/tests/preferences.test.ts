@@ -23,6 +23,13 @@ test("concurrent development patches preserve each field and retain text across 
     await assert.rejects(reopened.patch({ launch_at_login: true }));
     await reopened.patch({ model: "base" });
     assert.equal((await DevelopmentPreferenceStore.open(profile)).snapshot().model, "base");
+    const x11 = { keycode: 74, keysym: 65477, modifiers: 0, group: 0 };
+    await Promise.all([reopened.saveNativeTrigger({ kind: "mouse", button: 8 }), reopened.saveX11Trigger(x11)]);
+    const triggers = await DevelopmentPreferenceStore.open(profile);
+    assert.deepEqual(triggers.snapshot().x11_trigger, x11);
+    assert.deepEqual(triggers.snapshot().native_trigger, { kind: "mouse", button: 8 });
+    await triggers.saveX11Trigger(null);
+    assert.deepEqual((await DevelopmentPreferenceStore.open(profile)).snapshot().native_trigger, { kind: "mouse", button: 8 });
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 

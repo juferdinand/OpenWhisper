@@ -664,15 +664,16 @@ test("Linux X11 trigger removal and German help preserve the inactive KDE profil
   await page.evaluate(() => {
     const w = window as any;
     Object.assign(w.testState, { session: "X11", native_shortcuts: true, native_x11: true, native_paste: true, shortcut_portal: false, paste_portal: false, shortcut: "F8" });
-    Object.assign(w.testState.preferences, { ui_language: "de", x11_trigger: { keycode: 74, keysym: 65477, modifiers: 0, group: 0 }, native_trigger: { kind: "key", key: 0x01000021 } });
+    Object.assign(w.testState.preferences, { ui_language: "de", x11_trigger: { keycode: 74, keysym: 65477, modifiers: 0, group: 0 }, native_trigger: { kind: "mouse", button: 8 } });
     w.publishState();
   });
   await page.getByRole("button", { name: "Allgemein", exact: true }).click();
   await expect(page.getByText("Automatisches Einfügen unter X11", { exact: true })).toBeVisible();
   await expect(page.getByText("Wähle eine normale Taste", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "F8", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Auslöser entfernen", exact: true }).click();
   await expect(page.getByRole("button", { name: "Auslöser festlegen …", exact: true })).toBeVisible();
-  expect(await page.evaluate(() => (window as any).testState.preferences.native_trigger.key)).toBe(0x01000021);
+  expect(await page.evaluate(() => (window as any).testState.preferences.native_trigger)).toEqual({ kind: "mouse", button: 8 });
   expect(await page.evaluate(() => (window as any).testState.preferences.x11_trigger)).toBeNull();
 });
 

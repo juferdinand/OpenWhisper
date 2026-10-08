@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   MAX_UI_REQUEST_BYTES, preferencePatchSchema, preferencesSchema,
-  nativeTriggerSchema, type NativeTrigger,
+  nativeTriggerSchema, type NativeTrigger, x11TriggerSchema, type X11Trigger,
   type PreferencePatch, type Preferences,
 } from "../contracts/ui.js";
 import type { DevelopmentProfile } from "./profiles.js";
@@ -72,8 +72,11 @@ export class DevelopmentPreferenceStore {
   saveNativeTrigger(trigger: NativeTrigger | null): Promise<Preferences> {
     return this.update({ native_trigger: trigger === null ? null : nativeTriggerSchema.parse(trigger) });
   }
+  saveX11Trigger(trigger: X11Trigger | null): Promise<Preferences> {
+    return this.update({ x11_trigger: trigger === null ? null : x11TriggerSchema.parse(trigger) });
+  }
 
-  private update(changes: PreferencePatch | Pick<Preferences, "setup_completed"> | Pick<Preferences, "native_trigger">): Promise<Preferences> {
+  private update(changes: PreferencePatch | Pick<Preferences, "setup_completed"> | Pick<Preferences, "native_trigger"> | Pick<Preferences, "x11_trigger">): Promise<Preferences> {
     const updated = this.queue.then(async () => {
       const preferences = preferencesSchema.parse({ ...this.preferences, ...changes });
       enforceDevelopmentPolicy(preferences);

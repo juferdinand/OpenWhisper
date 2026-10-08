@@ -208,9 +208,10 @@ async function start(): Promise<void> {
     session: process.env["XDG_SESSION_TYPE"] ?? "unknown",
     desktop: process.env["XDG_CURRENT_DESKTOP"] ?? "unknown", clipboard_available: descriptor !== null,
     shortcut_portal: shortcut.available, paste_portal: pasteState.available, shortcut: shortcut.label, native_shortcuts: shortcut.nativeAvailable,
-    shortcut_configuring: shortcut.configuring,
-    native_x11: false, native_paste: false, native_mouse: false, native_middle_mouse: false,
-    recording_shortcut: !!keyCapture, paste_ready: pasteState.ready, paste_configuring: pasteState.configuring, gpu_available: false, gpu_supported: false,
+    shortcut_configuring: shortcut.configuring && !shortcut.nativeX11,
+    native_x11: shortcut.nativeX11 ?? false, native_paste: false, native_mouse: false, native_middle_mouse: false,
+    recording_shortcut: !!keyCapture || !!shortcut.nativeX11 && shortcut.configuring,
+    paste_ready: pasteState.ready, paste_configuring: pasteState.configuring, gpu_available: false, gpu_supported: false,
     gpu_device: null, gpu_fallback: false, recovery_available: recording.recoveryAvailable,
     overlay_available: !!overlay && !overlay.isDestroyed() && (!waylandOverlay || waylandOverlay.available),
     download, progress: download ? downloadProgress : inferenceProgress,
@@ -371,11 +372,16 @@ async function start(): Promise<void> {
             CONFLICT: "This trigger conflicts with an existing desktop shortcut. Choose another trigger.",
             CONFIGURE_UNAVAILABLE: "Change this shortcut in your desktop's settings. Its current binding remains active.",
             FAILED: "Shortcut setup or recording failed. Window recording remains usable." };
-          message = value.nativeKey !== null && value.result === "ENABLED" ? "" : messages[value.result];
+          message = (value.nativeKey !== null || value.x11Trigger) && value.result === "ENABLED" ? "" : messages[value.result];
           const savedTrigger = preferences.snapshot().native_trigger;
           if (value.nativeKey !== null && value.result === "ENABLED" &&
               (savedTrigger?.kind !== "key" || savedTrigger.key !== value.nativeKey)) {
             void preferences.saveNativeTrigger({ kind: "key", key: value.nativeKey }).then(notify,
+              () => { message = "The action could not be completed. Stopped recordings are kept for retry."; notify(); });
+          }
+          if (value.x11Trigger && value.result === "ENABLED" &&
+              JSON.stringify(preferences.snapshot().x11_trigger) !== JSON.stringify(value.x11Trigger)) {
+            void preferences.saveX11Trigger(value.x11Trigger).then(notify,
               () => { message = "The action could not be completed. Stopped recordings are kept for retry."; notify(); });
           }
           notify();
@@ -390,6 +396,14 @@ async function start(): Promise<void> {
   const shortcutAction = (command: "enable" | "configure" | "clear" | "cancel"): Promise<void> => action(async () => {
     if (!platformHost || ((recording.busy || recording.recoveryAvailable) && command !== "cancel")) throw new Error("Shortcut setup is unavailable.");
     if (command === "enable" && shortcut.nativeAvailable) {
+      if (shortcut.nativeX11) {
+        // The native adapter verifies actual X11 focus ancestry before its grab.
+        // Electron's activation flag can remain false on a genuine bare X server.
+        if (!window) throw new Error("Shortcut setup is unavailable.");
+        const handle = window.getNativeWindowHandle();
+        const xid = handle.length === 8 ? Number(handle.readBigUInt64LE()) : handle.readUInt32LE();
+        await platformHost.prepareKeyCapture(xid, preferences.snapshot().hold_to_record); return;
+      }
       await platformHost.prepareKeyCapture();
       if (shutdownInProgress || !window?.isFocused()) throw new Error("Shortcut setup is unavailable.");
       keyCapture = new KdeKeyCapture(); contents.setIgnoreMenuShortcuts(true); message = ""; notify(); return;
@@ -397,7 +411,10 @@ async function start(): Promise<void> {
     if (command === "cancel" && keyCapture) { keyCapture = undefined; contents.setIgnoreMenuShortcuts(false); notify(); return; }
     keyCapture = undefined; contents.setIgnoreMenuShortcuts(false);
     await platformHost.shortcut(command, preferences.snapshot().hold_to_record);
-    if (command === "clear") await preferences.saveNativeTrigger(null);
+    if (command === "clear") {
+      if (shortcut.nativeX11) await preferences.saveX11Trigger(null);
+      else await preferences.saveNativeTrigger(null);
+    }
   });
   contents.on("before-input-event", (event, input) => {
     if (!keyCapture) return;

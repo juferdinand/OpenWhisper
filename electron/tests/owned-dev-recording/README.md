@@ -39,6 +39,21 @@ Original commands, processes and exact container cleanup are retained. Physical 
 stock KDE/GNOME dialogs and key delivery, automatic paste, hardware GPU, Mac recording and
 release signing are separate gates.
 
+Append `--native-x11` for actual X11 keys in the existing isolated Xvfb session.
+This selection reuses the pinned Kubuntu image for its installed Xvfb, xdotool and
+audio dependencies, but starts no KWin/KDE compositor or portal fixture. It copies
+only the pinned Node runtime from the stopped compiler image; no synthetic portal
+is compiled or signalled. The normal app explicitly selects `--ozone-platform=x11`
+with no Wayland display. The normal UI starts native key capture, actual XTEST F8
+press/release saves the legacy `x11_trigger` profile, and Escape preserves that
+binding. Held/repeated F8 must own one capture; GUI Cancel followed by a later GUI
+recording must survive the stale release. Later real F8 Start/Stop exercises the
+public fixture, CPU recognition, clipboard/history and recovery removal. Remove
+must release the grab so another real F8 does not start capture. The existing
+Retry/Discard, sandbox, stable-sentinel and original process/container cleanup
+checks remain. This is owned Xvfb evidence, not acceptance of a named X11 desktop,
+physical keyboard, conflict handling across unrelated applications or packages.
+
 Append `--stock-kde` to reuse `linux/scripts/run-owned-desktop.py` and the pinned
 cached Kubuntu 24.04 portal image. This mode opens the normal app with native
 Wayland and installed KDE portal services, never the synthetic frontend. It uses

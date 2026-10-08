@@ -1,5 +1,73 @@
 # Electron development evidence
 
+## Genuine X11 setup and Dev package preview checkpoint
+
+**`native-x11-triggers-7` passes**, 40.99 seconds. The existing owned
+recording runner uses the pinned private Kubuntu image with Xvfb, genuine X11
+session variables and actual XTEST key edges; it starts no compositor or synthetic
+portal. The X server confirms the original owned main XID as its keyboard target,
+although Electron reports it unfocused. Actual F8 capture preserves the legacy
+profile (keycode74, keysym65477, modifiers0, group0). Real Escape restores the
+binding; held/repeated F8 opens one stream, and a stale release after GUI Cancel
+cannot stop a later GUI recording. F8 Start/Stop, real CPU Tiny recognition, exact
+clipboard/history agreement, recovery removal, trigger removal, source-loss
+Retry without recapture and Discard pass. Original application/private-service
+closure and exact namespace removal pass. No physical microphone, GPU or
+automatic target paste is used or claimed.
+
+The separate strict TypeScript adapter runs in the existing platform utility,
+uses pinned Koffi and fixed X11/XKB libraries, and adds no authored C/C++ source or
+helper supervisor. It preserves legacy keycode/keysym/modifiers/group preferences
+separately from KDE profiles. Native focus ancestry gates its explicit grab;
+press/release capture, repeat suppression, conflict rollback, lock variants and
+layout invalidation have inert coverage. A map notice before the first candidate
+allows capture against the current XKB map; a notice after a candidate or active
+binding still invalidates it. Stale startup events are cleared before capture,
+and pointer-only mapping notifications are ignored. Eight focused inert cases and
+final strict TS/recording build pass. The final full suite has 920 passes,
+14 explicit opt-in/tool skips and zero failures in 16.79 seconds; the shared UI
+has 59 passes after its assets are rebuilt. The earlier 917-pass integration
+receipt remains separate from these final source inputs.
+
+Packets1–6 retain the original failures: initial state publication, Electron's
+activation flag on bare Xvfb, then native setup invalidation. Packet6 remains FAIL
+in 27.22 seconds with ENDED and no profile; its original cleanup passes.
+[X server input-source switching](https://github.com/mirror/xserver/blob/master/xkb/xkbUtils.c)
+can emit a new-keyboard notice before the first key. This was a source-supported
+causal candidate rather than a measured event subtype. The minimal pre-candidate
+handling passes the unchanged actual key scenario. Xlib's
+[pending map refresh](https://github.com/mirror/libX11/blob/master/src/xkb/XKBBind.c)
+keeps subsequent key translation current. Named desktops, startup/reconnect,
+real layout/lock/conflict coverage and opted-in XTEST paste remain open; #29
+is not closed by this basic dictation result.
+
+The parallel Linux packaging script preserves an existing distribution,
+package.json, lockfile, captured native descriptors and locked production
+dependencies with their notices. An actual unsigned Dev `.deb` passes metadata,
+extraction, staged-tree equality and desktop-file validation without installation
+or app execution. Three focused tests pass in the existing offline private Debian
+image; on the host the two non-archive checks pass and the archive check explicitly
+skips because `dpkg-deb` is absent. The package uses the separate Dev identity and
+`/opt/openwhisper-dev` destination.
+
+The retained preview is
+`OpenWhisper-Dev-Linux-amd64_0.3.0~dev.de495e626e28.modified.deb`, SHA-256
+`4d532343be2f0b7f568ac5bf6dd02e8a139b9781e3999f79df0079936380d384`.
+Its metadata remains `de495e6+modified`; it was frozen before the final X11 focus
+and queue corrections. Its host-built speech addon requires GLIBC 2.43, truthfully
+declared in Debian dependencies. Ubuntu 22.04 and Debian 13 cannot run that input.
+This is archive/layout evidence, not portable or installed runtime, AppImage,
+signatures, updates or release acceptance. Neither installation is replaced.
+
+[CI37817460015](https://github.com/juferdinand/OpenWhisper/actions/runs/37817460015)
+at committed `de495e6` passes all six jobs. That CI result is separate from these
+later local inputs. The complete 0.3.0 migration and #21/#29/#30 remain open.
+The owner's subsequent scope adjustment defers expanded Linux desktop matrices
+to follow-up tickets; basic Mac/Linux dictation, controls and installation remain
+required.
+
+## Previous foreground editor checkpoint
+
 **`stock-kde-wayland-editor-focus-2` passes in 28.50 seconds.** The preceding
 case1 fails at the actual editor's post-Cancel keyboard marker in 15.93 seconds:
 the editor retains only its initial 14 bytes, while both Electron focus flags
