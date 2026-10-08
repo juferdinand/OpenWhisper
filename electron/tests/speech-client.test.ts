@@ -170,7 +170,7 @@ test("failed late termination blocks retry and exposes categorical shutdown fail
   await nextTurn(); abort.abort(); await rejected;
   returned.accept(first);
   await nextTurn();
-  await assert.rejects(client.gpuDevice(), code("START_FAILED"));
+  await assert.rejects(client.gpuDevice(), code("TEARDOWN_FAILED"));
   assert.equal(starts, 1); assert.equal(first.terminated, 1);
   await assert.rejects(client.close(), code("WORKER_FAILED"));
 });

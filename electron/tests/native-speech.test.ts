@@ -31,7 +31,7 @@ test("disposable native CPU probe recognizes the public fixture twice and releas
   const audio = process.env.OPENWHISPER_NATIVE_TEST_AUDIO;
   assert.ok(model && audio);
   const { stdout, stderr } = await promisify(execFile)(process.execPath, ["--import", "tsx",
-    join(root, "tests/fixtures/native-speech.ts"), join(root, "native/build/openwhisper_speech.node"), model, audio], {
+    join(root, "tests/fixtures/native-speech.ts"), join(root, "native/build-cpu/openwhisper_speech.node"), model, audio], {
     cwd: root, timeout: 90_000, maxBuffer: 8 * 1024 * 1024,
   });
   const raw: unknown = JSON.parse(stdout);

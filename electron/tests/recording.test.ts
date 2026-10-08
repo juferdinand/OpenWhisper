@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { setImmediate } from "node:timers/promises";
 import { test } from "node:test";
 import { RecordingCoordinator, recordingRequestSchema } from "../src/core/recording.js";
+import { LinuxSpeechGate } from "../src/workers/speech-gate.js";
 import type {
   CaptureCallbacks, CapturedHandle, CaptureFinalization, CaptureSession, ControlReply,
-  DeliveryReceipt, Ownership, PreparedAudio, RecordingOptions, RecordingRequest,
+  DeliveryIdentity, DeliveryReceipt, Ownership, PreparedAudio, RecordingOptions, RecordingRequest,
   RecoveryBoundary, RecoverySaved, RecoveryToken, SpeechResult, WorkContext,
 } from "../src/core/recording.js";
 
@@ -33,6 +34,10 @@ class OwnedCapture implements CaptureSession<Samples> {
   starts = 0;
   closes = 0;
   preparations = 0;
+  releases = 0;
+  released = false;
+  private releaseTask: Promise<void> | undefined;
+  releaseGate: (() => Promise<void>) | undefined;
   startGate: (() => Promise<void>) | undefined;
   closeGate: (() => Promise<CaptureFinalization<Samples>>) | undefined;
   prepareGate: ((captured: Samples, context: WorkContext) => Promise<PreparedAudio>) | undefined;
@@ -60,6 +65,17 @@ class OwnedCapture implements CaptureSession<Samples> {
     if (this.prepareGate) return this.prepareGate(captured, context);
     return audio(captured.chunks, context);
   }
+  release(): Promise<void> {
+    if (this.released) return Promise.resolve();
+    this.releaseTask ??= (async () => {
+      assert.equal(this.live, false);
+      this.releases++; this.events.push("release");
+      await this.releaseGate?.(); this.released = true;
+    })();
+    const task = this.releaseTask;
+    void task.catch(() => { if (this.releaseTask === task) this.releaseTask = undefined; });
+    return task;
+  }
 }
 
 class OwnedRecovery implements RecoveryBoundary {
@@ -70,6 +86,7 @@ class OwnedRecovery implements RecoveryBoundary {
   saveGate: ((samples: PreparedAudio, context: WorkContext) => Promise<RecoverySaved>) | undefined;
   readGate: ((token: RecoveryToken, context: WorkContext) => Promise<PreparedAudio>) | undefined;
   removeGate: ((token: RecoveryToken, context: WorkContext) => Promise<Ownership>) | undefined;
+  ensureGate: ((token: RecoveryToken, context: WorkContext) => Promise<RecoverySaved>) | undefined;
   constructor(private readonly events: string[]) {}
   async latest(): Promise<RecoveryToken | null> {
     const id = this.records.keys().next().value;
@@ -88,6 +105,10 @@ class OwnedRecovery implements RecoveryBoundary {
     if (!found) throw new Error("Owned record absent");
     return { ...found, ...ownership(context) };
   }
+  async ensureCommitted(token: RecoveryToken, context: WorkContext): Promise<RecoverySaved> {
+    if (!this.ensureGate) throw new Error("Owned durability remains unconfirmed");
+    return this.ensureGate(token, context);
+  }
   async remove(token: RecoveryToken, context: WorkContext): Promise<Ownership> {
     this.removals++; this.events.push("remove");
     if (this.removeGate) return this.removeGate(token, context);
@@ -95,7 +116,7 @@ class OwnedRecovery implements RecoveryBoundary {
   }
 }
 
-function fixture(platform: "macos" | "linux" = "linux", recoveryStore?: OwnedRecovery) {
+function fixture(platform: "macos" | "linux" = "linux", recoveryStore?: OwnedRecovery, speechGate?: LinuxSpeechGate) {
   const events: string[] = [];
   const sessions: OwnedCapture[] = [];
   const recovery = recoveryStore ?? new OwnedRecovery(events);
@@ -104,7 +125,7 @@ function fixture(platform: "macos" | "linux" = "linux", recoveryStore?: OwnedRec
   let deliveryCalls = 0;
   let configure: ((capture: OwnedCapture) => void) | undefined;
   let speechHook: ((samples: PreparedAudio, input: RecordingRequest, context: WorkContext) => Promise<SpeechResult>) | undefined;
-  let deliveryHook: ((text: string, context: WorkContext) => Promise<DeliveryReceipt>) | undefined;
+  let deliveryHook: ((text: string, context: WorkContext, identity: DeliveryIdentity) => Promise<DeliveryReceipt>) | undefined;
   const common = {
     clock: { now: () => time },
     capture: { create(callbacks: CaptureCallbacks) {
@@ -115,14 +136,14 @@ function fixture(platform: "macos" | "linux" = "linux", recoveryStore?: OwnedRec
       if (speechHook) return speechHook(samples, input, context);
       return { ...ownership(context), text: "  Unchanged fixture 日本語 👩‍💻  " };
     } },
-    delivery: { async deliver(text: string, context: WorkContext) {
+    delivery: { async deliver(text: string, context: WorkContext, identity: DeliveryIdentity) {
       deliveryCalls++; events.push("delivery");
-      if (deliveryHook) return deliveryHook(text, context);
+      if (deliveryHook) return deliveryHook(text, context, identity);
       return copied(context);
     } },
   };
   const options: RecordingOptions<Samples> = platform === "linux"
-    ? { ...common, platform, recovery } : { ...common, platform };
+    ? { ...common, platform, recovery, ...(speechGate ? { speechGate } : {}) } : { ...common, platform };
   const coordinator = new RecordingCoordinator(options);
   return {
     coordinator, options, events, sessions, recovery,
@@ -143,6 +164,219 @@ async function until(condition: () => boolean): Promise<void> {
   assert.fail("Owned deferred boundary did not reach its expected stage");
 }
 
+test("clean cancellation and failed start rollback release fenced capture without preparing or saving", async () => {
+  for (const mode of ["cancel", "start-failure"] as const) {
+    const f = fixture();
+    if (mode === "start-failure") f.configure((session) => {
+      session.startGate = async () => { session.live = true; throw new Error("Owned failed start"); };
+    });
+    await f.coordinator.start(request);
+    if (mode === "cancel") assert.equal((await f.coordinator.cancel()).ok, true);
+    assert.equal(f.capture().released, true); assert.equal(f.capture().releases, 1);
+    assert.equal(f.capture().preparations, 0); assert.equal(f.recovery.saves, 0);
+    assert.deepEqual(f.counts(), { speech: 0, delivery: 0 });
+    assert.equal(f.coordinator.snapshot().busy, false);
+  }
+});
+
+test("failed clean cancellation retains the capture owner until cleanup retry", async () => {
+  const f = fixture(); f.configure((session) => {
+    session.releaseGate = async () => { throw new Error("Owned cleanup failure"); };
+  });
+  await f.coordinator.start(request);
+  const cancelled = await f.coordinator.cancel();
+  assert.equal(cancelled.ok, false); assert.equal(f.coordinator.snapshot().error, "CAPTURE_RELEASE_FAILED");
+  assert.equal(f.coordinator.snapshot().busy, true); assert.equal(f.capture().released, false);
+  assert.equal((await f.coordinator.start(request)).ok, false);
+  f.capture().releaseGate = undefined;
+  assert.equal((await f.coordinator.cancel()).ok, true); assert.equal(f.capture().released, true);
+  assert.equal(f.capture().closes, 1); assert.equal(f.capture().releases, 2);
+});
+
+test("Stop cannot reclaim a recording while clean Cancel is awaiting native release", async () => {
+  const f = fixture(); const cleanup = deferred<void>();
+  f.configure((session) => { session.releaseGate = () => cleanup.promise; });
+  await f.coordinator.start(request);
+  const cancelled = f.coordinator.cancel(); await until(() => f.capture().releases === 1);
+  const stopped = await f.coordinator.stop();
+  assert.equal(stopped.ok, false); if (!stopped.ok) assert.equal(stopped.error, "BUSY");
+  assert.equal(f.capture().preparations, 0); assert.equal(f.recovery.saves, 0);
+  cleanup.resolve(); assert.equal((await cancelled).ok, true);
+  assert.equal(f.coordinator.snapshot().phase, "idle"); assert.equal(f.coordinator.snapshot().recoveryAvailable, false);
+  assert.deepEqual(f.counts(), { speech: 0, delivery: 0 });
+});
+
+test("Cancel owns the discard when it arrives during Stop's unacknowledged native fence", async () => {
+  const f = fixture(); const fence = deferred<CaptureFinalization<Samples>>();
+  f.configure((session) => { session.closeGate = () => fence.promise; });
+  await f.coordinator.start(request);
+  const stopped = f.coordinator.stop(); await until(() => f.capture().closes === 1);
+  const cancelled = f.coordinator.cancel();
+  const session = f.capture(); session.live = false;
+  fence.resolve({ generation: session.callbacks.generation, streamClosed: true, finalSamplesFenced: true,
+    error: null, captured: { generation: session.callbacks.generation, chunks: session.chunks } });
+  assert.equal((await stopped).ok, false); assert.equal((await cancelled).ok, true);
+  await f.coordinator.completion(); assert.equal(session.released, true);
+  assert.equal(session.preparations, 0); assert.equal(f.recovery.saves, 0);
+  assert.deepEqual(f.counts(), { speech: 0, delivery: 0 }); assert.equal(f.coordinator.snapshot().phase, "idle");
+});
+
+test("concurrent clean Cancel replies cannot clear a later recording owner", async () => {
+  const f = fixture(); const cleanup = deferred<void>();
+  f.configure((session) => { session.releaseGate = () => cleanup.promise; });
+  await f.coordinator.start(request);
+  const first = f.coordinator.cancel(); const second = f.coordinator.cancel();
+  await until(() => f.capture().releases === 1); cleanup.resolve();
+  assert.equal((await first).ok, true);
+  f.configure(() => {}); assert.equal((await f.coordinator.start(request)).ok, true);
+  const generation = f.coordinator.snapshot().generation;
+  assert.equal((await second).ok, true);
+  assert.equal(f.coordinator.snapshot().generation, generation);
+  assert.equal(f.coordinator.snapshot().phase, "recording"); assert.equal(f.capture().live, true);
+  await f.coordinator.cancel();
+});
+
+test("release failure after confirmed delivery retries cleanup without repeating inference or delivery", async () => {
+  const f = fixture(); f.configure((session) => {
+    session.releaseGate = async () => { throw new Error("Owned cleanup failure"); };
+  });
+  await f.coordinator.start(request); await f.coordinator.stop(); await f.coordinator.completion();
+  assert.equal(f.coordinator.snapshot().error, "CAPTURE_RELEASE_FAILED");
+  assert.equal(f.coordinator.snapshot().recoveryAvailable, true); assert.equal(f.recovery.records.size, 0);
+  assert.deepEqual(f.counts(), { speech: 1, delivery: 1 });
+  assert.equal((await f.coordinator.start(request)).ok, false);
+  f.capture().releaseGate = undefined; f.coordinator.retry(); await f.coordinator.completion();
+  assert.equal(f.coordinator.snapshot().phase, "done"); assert.equal(f.capture().released, true);
+  assert.deepEqual(f.counts(), { speech: 1, delivery: 1 }); assert.equal(f.recovery.removals, 1);
+});
+
+test("discard after processing cancellation waits for native preparation before releasing its ledger", async () => {
+  const f = fixture(); const prepare = deferred<PreparedAudio>();
+  f.configure((session) => { session.prepareGate = () => prepare.promise; });
+  await f.coordinator.start(request); await f.coordinator.stop();
+  await until(() => f.capture().preparations === 1); await f.coordinator.cancel();
+  let discarded = false;
+  const discard = f.coordinator.discardRecovery().then((result) => { discarded = true; return result; });
+  await setImmediate(); assert.equal(discarded, false); assert.equal(f.capture().releases, 0);
+  assert.equal((await f.coordinator.start(request)).ok, false);
+  prepare.resolve(audio(f.capture().chunks, { generation: 1, attempt: 1 }));
+  assert.equal((await discard).ok, true); assert.equal(f.capture().released, true);
+  assert.equal(f.recovery.saves, 0); assert.deepEqual(f.counts(), { speech: 0, delivery: 0 });
+});
+
+test("Linux silence returns idle without recovery or inference but speech-like empty recognition remains recoverable", async () => {
+  for (const chunks of [[new Float32Array(3199).fill(0.5)], [new Float32Array(16000)]] as const) {
+    const f = fixture("linux", undefined, new LinuxSpeechGate()); f.configure((session) => { session.chunks = [...chunks]; });
+    await f.coordinator.start(request); await f.coordinator.stop(); await f.coordinator.completion();
+    assert.equal(f.coordinator.snapshot().phase, "idle"); assert.equal(f.capture().released, true);
+    assert.equal(f.recovery.saves, 0); assert.deepEqual(f.counts(), { speech: 0, delivery: 0 });
+  }
+  const spoken = fixture("linux", undefined, new LinuxSpeechGate());
+  spoken.configure((session) => { session.chunks = [new Float32Array(3200).fill(0.01)]; });
+  spoken.speech(async (_samples, _request, context) => ({ ...ownership(context), text: "" }));
+  await spoken.coordinator.start(request); await spoken.coordinator.stop(); await spoken.coordinator.completion();
+  assert.equal(spoken.coordinator.snapshot().error, "EMPTY_TRANSCRIPT");
+  assert.equal(spoken.capture().released, false); assert.equal(spoken.recovery.records.size, 1);
+});
+
+test("failed capture bypasses silence classification and preserves its partial backup until discard", async () => {
+  const f = fixture("linux", undefined, new LinuxSpeechGate()); f.configure((session) => {
+    session.chunks = [new Float32Array(1)]; session.finalError = "capture_failed";
+  });
+  await f.coordinator.start(request); await f.coordinator.stop(); await f.coordinator.completion();
+  assert.equal(f.coordinator.snapshot().error, "CAPTURE_FAILED"); assert.equal(f.capture().released, false);
+  assert.equal(f.recovery.records.size, 1); assert.deepEqual(f.counts(), { speech: 0, delivery: 0 });
+  assert.equal((await f.coordinator.discardRecovery()).ok, true); assert.equal(f.capture().released, true);
+});
+
+test("failed capture remains recoverable after an initial save failure even when its partial audio is silent", async () => {
+  const f = fixture("linux", undefined, new LinuxSpeechGate()); f.configure((session) => {
+    session.chunks = [new Float32Array(1000)]; session.finalError = "capture_failed";
+  });
+  f.recovery.saveGate = async () => { throw new Error("Owned disk failure"); };
+  await f.coordinator.start(request); await f.coordinator.stop(); await f.coordinator.completion();
+  assert.equal(f.coordinator.snapshot().error, "RECOVERY_SAVE_FAILED"); assert.equal(f.capture().released, false);
+  f.recovery.saveGate = undefined; f.speech(async () => { throw new Error("Owned inference failure"); });
+  f.coordinator.retry(); await f.coordinator.completion();
+  assert.equal(f.recovery.saves, 2); assert.equal(f.recovery.records.size, 1);
+  assert.equal(f.coordinator.snapshot().error, "SPEECH_FAILED"); assert.equal(f.capture().released, false);
+  assert.equal(f.coordinator.snapshot().recoveryAvailable, true);
+  assert.equal((await f.coordinator.discardRecovery()).ok, true); assert.equal(f.capture().released, true);
+});
+
+test("Linux delivery identity survives recovery restore after a lost postcommit reply", async () => {
+  const f = fixture(); let firstIdentity: DeliveryIdentity | undefined;
+  f.delivery(async (_text, _context, identity) => {
+    firstIdentity = identity; throw new Error("Owned reply lost after an external commit");
+  });
+  await f.coordinator.start(request); await f.coordinator.stop(); await f.coordinator.completion();
+  assert.equal(f.coordinator.snapshot().error, "DELIVERY_FAILED");
+  assert.deepEqual(firstIdentity, { kind: "recovery", token: "owned-1" });
+  const replacement = fixture("linux", f.recovery);
+  replacement.delivery(async (_text, context, identity) => {
+    assert.deepEqual(identity, firstIdentity); return copied(context);
+  });
+  assert.equal((await replacement.coordinator.start(request)).ok, false);
+  assert.equal(replacement.sessions.length, 0);
+  replacement.coordinator.retry(); await replacement.coordinator.completion();
+  assert.equal(replacement.coordinator.snapshot().phase, "done"); assert.equal(f.recovery.records.size, 0);
+});
+
+test("final delivery text can exceed the native window text cap without truncation", async () => {
+  const f = fixture("macos"); const text = "Unchanged 日本語 👩‍💻\n".repeat(200_000);
+  assert.ok(Buffer.byteLength(text, "utf8") > 4 * 1024 * 1024);
+  f.speech(async (_samples, _request, context) => ({ ...ownership(context), text }));
+  f.delivery(async (received, context, identity) => {
+    assert.strictEqual(received, text); assert.deepEqual(identity, { kind: "memory", generation: 1 });
+    return copied(context);
+  });
+  await f.coordinator.start(request); await f.coordinator.stop(); await f.coordinator.completion();
+  assert.strictEqual(f.coordinator.snapshot().transcript, text); assert.equal(f.coordinator.snapshot().phase, "done");
+  assert.equal(f.capture().released, true); assert.equal(f.recovery.saves, 0);
+});
+
+test("postcommit durability failure retains its token and confirms the same record before explicit retry", async () => {
+  const f = fixture(); const token = { id: "owned-postcommit" };
+  f.recovery.saveGate = async (samples, context) => {
+    f.recovery.records.set(token.id, samples);
+    return { ...ownership(context), token, durable: false };
+  };
+  assert.equal((await f.coordinator.start(request)).ok, true);
+  await f.coordinator.stop(); await f.coordinator.completion();
+  assert.equal(f.coordinator.snapshot().error, "RECOVERY_SAVE_FAILED");
+  assert.deepEqual(f.counts(), { speech: 0, delivery: 0 });
+  f.recovery.ensureGate = async (found, context) => {
+    assert.equal(found.id, token.id);
+    return { ...ownership(context), token: found, durable: false };
+  };
+  f.coordinator.retry(); await f.coordinator.completion();
+  assert.equal(f.coordinator.snapshot().error, "RECOVERY_SAVE_FAILED");
+  assert.equal(f.recovery.saves, 1); assert.equal(f.counts().speech, 0);
+  f.recovery.ensureGate = async (found, context) => ({ ...ownership(context), token: found, durable: true });
+  f.coordinator.retry(); await f.coordinator.completion();
+  assert.equal(f.coordinator.snapshot().phase, "done");
+  assert.equal(f.recovery.saves, 1); assert.equal(f.recovery.records.size, 0);
+  assert.deepEqual(f.counts(), { speech: 1, delivery: 1 });
+});
+
+test("postcommit durability tokens survive cancellation and explicit discard without inference", async () => {
+  const f = fixture(); const pending = deferred<RecoverySaved>();
+  const token = { id: "owned-late-postcommit" };
+  f.recovery.saveGate = async (samples, context) => {
+    f.recovery.records.set(token.id, samples);
+    await pending.promise;
+    return { ...ownership(context), token, durable: false };
+  };
+  await f.coordinator.start(request); await f.coordinator.stop();
+  await until(() => f.recovery.saves === 1);
+  await f.coordinator.cancel();
+  const discarding = f.coordinator.discardRecovery();
+  pending.resolve({ generation: 1, attempt: 1, token, durable: false });
+  assert.equal((await discarding).ok, true);
+  assert.equal(f.recovery.records.size, 0); assert.equal(f.recovery.removals, 1);
+  assert.deepEqual(f.counts(), { speech: 0, delivery: 0 });
+});
+
 test("Stop closes, checks errors and fences final samples before acknowledgement and preparation", async () => {
   const f = fixture(); f.configure((session) => { session.appendFinal = true; });
   let received = 0;
@@ -159,7 +393,7 @@ test("Stop closes, checks errors and fences final samples before acknowledgement
   assert.equal(stopped.ok, true);
   assert.equal(f.capture().preparations, 0);
   await f.coordinator.completion();
-  assert.deepEqual(f.events, ["start", "close", "fence", "ack", "prepare", "save", "speech", "delivery", "remove"]);
+  assert.deepEqual(f.events, ["start", "close", "fence", "ack", "prepare", "save", "speech", "delivery", "remove", "release"]);
   assert.equal(received, 4); assert.equal(f.coordinator.snapshot().phase, "done");
   assert.equal(f.coordinator.snapshot().recoveryAvailable, false);
 });
@@ -283,9 +517,15 @@ test("stale preparation and speech results cannot deliver or affect the next rec
     await f.coordinator.start(request); await f.coordinator.stop(); const oldDone = f.coordinator.completion();
     await until(() => context !== undefined); assert.ok(context);
     await f.coordinator.cancel(); assert.equal(f.coordinator.snapshot().recoveryAvailable, true);
-    await f.coordinator.discardRecovery(); await f.coordinator.start(request);
+    const discarded = f.coordinator.discardRecovery();
+    if (stage === "prepare") {
+      await setImmediate(); assert.equal(f.capture().releases, 0);
+      assert.equal(f.coordinator.snapshot().phase, "discarding");
+      gate.resolve(audio([new Float32Array([1])], context));
+    }
+    await discarded; await f.coordinator.start(request);
     const before = f.coordinator.snapshot();
-    gate.resolve(stage === "prepare" ? audio([new Float32Array([1])], context) : { ...ownership(context), text: "Stale text" });
+    if (stage === "speech") gate.resolve({ ...ownership(context), text: "Stale text" });
     await oldDone;
     assert.deepEqual(f.coordinator.snapshot(), before); assert.equal(f.counts().delivery, 0);
     await f.coordinator.cancel();

@@ -46,6 +46,8 @@ export interface CaptureSession<C extends CapturedHandle> {
   /** Duration-heavy conversion/validation runs outside the main/renderer event loops.
    * Returned buffers are transferred exclusively; no old callback may mutate them. */
   prepare(captured: C, context: WorkContext): Promise<PreparedAudio>;
+  /** Idempotent, bounded cleanup after a confirmed fence. Failure retains ownership for retry. */
+  release?(): Promise<void>;
 }
 export interface CaptureBoundary<C extends CapturedHandle> {
   /** Allocate ownership only; opening a native stream belongs to start(). */
@@ -59,22 +61,37 @@ export interface SpeechBoundary {
    * The adapter owns bounded inference windows, disposable workers and CPU/GPU retries. */
   transcribe(audio: PreparedAudio, request: RecordingRequest, context: WorkContext): Promise<SpeechResult>;
 }
+export interface SpeechDisposition extends Ownership { readonly hasSpeech: boolean }
+export interface SpeechGate {
+  /** Scan only in the capture utility. No duration-heavy work belongs on main or renderer. */
+  classify(audio: PreparedAudio, context: WorkContext): Promise<SpeechDisposition>;
+}
 export type DeliveryReceipt = Ownership & (
   | { readonly outcome: "clipboard" | "paste"; readonly clipboardConfirmed: true }
   | { readonly outcome: "editor" | "failed"; readonly clipboardConfirmed: false }
 );
+export type DeliveryIdentity =
+  | { readonly kind: "recovery"; readonly token: string }
+  | { readonly kind: "memory"; readonly generation: number };
 export interface DeliveryBoundary {
-  /** Check cancellation/target ownership at commit, then confirm delivery. generation is
-   * a stable idempotency key within this coordinator; retries must not duplicate a commit. */
-  deliver(text: string, context: WorkContext): Promise<DeliveryReceipt>;
+  /** Check cancellation/target ownership at commit, then confirm delivery. Linux recovery
+   * identity survives a capture-helper restart; memory identity is scoped by its helper epoch.
+   * Retrying one identity must not duplicate an already confirmed commit. */
+  deliver(text: string, context: WorkContext, identity: DeliveryIdentity): Promise<DeliveryReceipt>;
 }
 export interface RecoveryToken { readonly id: string }
-export interface RecoverySaved extends Ownership { readonly token: RecoveryToken }
+export interface RecoverySaved extends Ownership {
+  readonly token: RecoveryToken;
+  /** False retains a visible committed file whose directory durability still needs confirmation. */
+  readonly durable?: boolean;
+}
 export interface RecoveryBoundary {
   latest(): Promise<RecoveryToken | null>;
   /** Atomically commit private audio or reject without a committed record. Cancellation
    * must not lose the only copy; a late committed token still belongs to this recording. */
   save(audio: PreparedAudio, context: WorkContext): Promise<RecoverySaved>;
+  /** Retry durability for the same committed token before inference, without creating another backup. */
+  ensureCommitted?(token: RecoveryToken, context: WorkContext): Promise<RecoverySaved>;
   read(token: RecoveryToken, context: WorkContext): Promise<PreparedAudio>;
   remove(token: RecoveryToken, context: WorkContext): Promise<Ownership>;
 }
@@ -83,7 +100,7 @@ export interface RecordingClock { now(): number }
 export type RecordingPhase = "idle" | "starting" | "recording" | "stopping"
   | "transcribing" | "restoring" | "discarding" | "done" | "error";
 export type RecordingError = "BUSY" | "INVALID_REQUEST" | "CALLER_INACTIVE" | "START_FAILED"
-  | "STOP_FAILED" | "CAPTURE_FAILED" | "OWNERSHIP_FAILED" | "PREPARATION_FAILED"
+  | "STOP_FAILED" | "CAPTURE_FAILED" | "CAPTURE_RELEASE_FAILED" | "OWNERSHIP_FAILED" | "PREPARATION_FAILED"
   | "RECOVERY_PENDING" | "RECOVERY_READ_FAILED" | "RECOVERY_SAVE_FAILED"
   | "RECOVERY_REMOVE_FAILED" | "SPEECH_FAILED" | "EMPTY_TRANSCRIPT" | "DELIVERY_FAILED"
   | "CANCELLED" | "NO_RECOVERY";
@@ -108,8 +125,8 @@ interface CommonOptions<C extends CapturedHandle> {
   readonly clock: RecordingClock;
 }
 export type RecordingOptions<C extends CapturedHandle> = CommonOptions<C> & (
-  | { readonly platform: "linux"; readonly recovery: RecoveryBoundary }
-  | { readonly platform: "macos"; readonly recovery?: never }
+  | { readonly platform: "linux"; readonly recovery: RecoveryBoundary; readonly speechGate?: SpeechGate }
+  | { readonly platform: "macos"; readonly recovery?: never; readonly speechGate?: never }
 );
 interface CaptureOwner<C extends CapturedHandle> {
   readonly generation: number;
@@ -119,6 +136,7 @@ interface CaptureOwner<C extends CapturedHandle> {
   startDone: Promise<void>;
   closing: Promise<CaptureFinalization<C>> | undefined;
   failed: boolean;
+  discarding: boolean;
 }
 interface Pending<C extends CapturedHandle> {
   readonly generation: number;
@@ -126,7 +144,13 @@ interface Pending<C extends CapturedHandle> {
   readonly session: CaptureSession<C> | undefined;
   readonly captured: C | undefined;
   prepared: PreparedAudio | undefined;
+  preparing: Promise<PreparedAudio> | undefined;
+  speechDetected: boolean | undefined;
+  releasing: Promise<void> | undefined;
+  released: boolean;
   token: RecoveryToken | undefined;
+  durabilityPending: boolean;
+  captureFailed: boolean;
   text: string | undefined;
   receipt: DeliveryReceipt | undefined;
   saving: Promise<RecoverySaved> | undefined;
@@ -190,6 +214,9 @@ export class RecordingCoordinator<C extends CapturedHandle> {
     if (options.platform === "macos" && options.recovery !== undefined) {
       throw new Error("macOS recording recovery must remain in memory.");
     }
+    if (options.platform === "macos" && options.speechGate !== undefined) {
+      throw new Error("macOS recording must not use the Linux silence gate.");
+    }
     if (options.platform === "linux" && options.recovery === undefined) {
       throw new Error("Linux recording requires a private recovery boundary.");
     }
@@ -223,8 +250,9 @@ export class RecordingCoordinator<C extends CapturedHandle> {
   private newPending(owner: { generation: number; request: RecordingRequest },
     session?: CaptureSession<C>, captured?: C, token?: RecoveryToken): Pending<C> {
     return { generation: owner.generation, request: owner.request, session, captured, token,
-      prepared: undefined, text: undefined, receipt: undefined, saving: undefined,
-      delivering: undefined, removing: undefined, discarded: false };
+      prepared: undefined, preparing: undefined, speechDetected: undefined, releasing: undefined,
+      released: false, text: undefined, receipt: undefined, saving: undefined,
+      delivering: undefined, removing: undefined, discarded: false, durabilityPending: false, captureFailed: false };
   }
 
   async start(input: RecordingRequestInput, control: StartControl = { acknowledge: accepted }): Promise<ControlReply> {
@@ -237,7 +265,7 @@ export class RecordingCoordinator<C extends CapturedHandle> {
     catch { const reply = this.reply(false, "INVALID_REQUEST"); acknowledge(control.acknowledge, reply); return reply; }
     const owner: CaptureOwner<C> = {
       generation: ++this.generation, request, controller: new AbortController(), session: undefined,
-      startDone: Promise.resolve(), closing: undefined, failed: false,
+      startDone: Promise.resolve(), closing: undefined, failed: false, discarding: false,
     };
     this.capture = owner; this.phase = "starting"; this.error = null;
     const expire = (): void => { owner.controller.abort(); };
@@ -308,12 +336,17 @@ export class RecordingCoordinator<C extends CapturedHandle> {
     this.elapsedMs = this.snapshot().elapsedMs; this.startedAt = undefined; this.level = 0;
   }
   private async rollback(owner: CaptureOwner<C>): Promise<void> {
-    owner.controller.abort();
+    owner.discarding = true; owner.controller.abort();
     try {
       const final = await this.finalization(owner);
       if (this.capture === owner) {
         this.freezeElapsed();
-        if (this.closed(owner, final)) { this.capture = undefined; this.fail("START_FAILED"); }
+        if (this.closed(owner, final)) {
+          try { await owner.session?.release?.(); }
+          catch { if (this.capture === owner) this.fail("CAPTURE_RELEASE_FAILED"); return; }
+          if (this.capture !== owner) return;
+          this.capture = undefined; this.fail("START_FAILED");
+        }
         else this.fail("STOP_FAILED");
       }
     } catch { if (this.capture === owner) this.fail("STOP_FAILED"); }
@@ -322,11 +355,17 @@ export class RecordingCoordinator<C extends CapturedHandle> {
   async stop(sink: Acknowledge = accepted): Promise<ControlReply> {
     const owner = this.capture;
     if (!owner) { const reply = this.reply(!this.job, "BUSY"); acknowledge(sink, reply); return reply; }
+    if (owner.discarding) {
+      const reply = this.reply(false, "BUSY", owner.generation); acknowledge(sink, reply); return reply;
+    }
     if (this.phase === "starting") return this.cancel(sink);
     this.phase = "stopping";
     let final: CaptureFinalization<C>;
     try { final = await this.finalization(owner); }
     catch { this.fail("STOP_FAILED"); const reply = this.reply(false, "STOP_FAILED", owner.generation); acknowledge(sink, reply); return reply; }
+    if (owner.discarding) {
+      const reply = this.reply(false, "BUSY", owner.generation); acknowledge(sink, reply); return reply;
+    }
     if (this.capture !== owner) {
       const reply = this.reply(false, "CANCELLED", owner.generation); acknowledge(sink, reply); return reply;
     }
@@ -350,7 +389,7 @@ export class RecordingCoordinator<C extends CapturedHandle> {
     if (this.lookup) { this.lookup = undefined; this.phase = "idle"; }
     const owner = this.capture;
     if (owner) {
-      owner.controller.abort(); this.phase = "stopping";
+      owner.discarding = true; owner.controller.abort(); this.phase = "stopping";
       let final: CaptureFinalization<C>;
       try { final = await this.finalization(owner); }
       catch { if (this.capture === owner) this.fail("STOP_FAILED"); const reply = this.reply(false, "STOP_FAILED", owner.generation); acknowledge(sink, reply); return reply; }
@@ -358,8 +397,9 @@ export class RecordingCoordinator<C extends CapturedHandle> {
         if (!this.closed(owner, final)) {
           this.fail("STOP_FAILED"); const reply = this.reply(false, "STOP_FAILED", owner.generation); acknowledge(sink, reply); return reply;
         }
-        this.freezeElapsed(); this.capture = undefined;
+        this.freezeElapsed();
         if (owner.failed || final.error !== null) {
+          this.capture = undefined;
           if (final.captured !== null) {
             this.pending = this.newPending(owner, owner.session, final.captured);
             this.launch(this.pending, "CAPTURE_FAILED");
@@ -367,6 +407,15 @@ export class RecordingCoordinator<C extends CapturedHandle> {
           this.fail("CAPTURE_FAILED");
           const reply = this.reply(false, "CAPTURE_FAILED", owner.generation); acknowledge(sink, reply); return reply;
         }
+        try { await owner.session?.release?.(); }
+        catch {
+          if (this.capture === owner) this.fail("CAPTURE_RELEASE_FAILED");
+          const reply = this.reply(false, "CAPTURE_RELEASE_FAILED", owner.generation); acknowledge(sink, reply); return reply;
+        }
+        if (this.capture !== owner) {
+          const reply = this.reply(true, "BUSY", owner.generation); acknowledge(sink, reply); return reply;
+        }
+        this.capture = undefined;
         this.phase = "idle"; this.error = null;
       }
     } else if (this.job) {
@@ -404,22 +453,27 @@ export class RecordingCoordinator<C extends CapturedHandle> {
     this.job?.controller.abort(); this.job = undefined;
     this.discarding = true; pending.discarded = true; this.phase = "discarding";
     const context = this.context(pending.generation, new AbortController());
+    let stage: RecordingError = "RECOVERY_REMOVE_FAILED";
     try {
+      // Cancellation can clear the active job while its native conversion is still settling.
+      await pending.preparing?.catch(() => {});
       // A save may commit after cancellation. Wait for its owned token before discarding.
       await pending.saving?.catch(() => {});
       // Do not release this recording's ownership while an earlier native delivery
       // can still commit. The adapter must settle cancellation with its bounded cleanup.
       await pending.delivering?.catch(() => {});
       await this.remove(pending, context);
+      stage = "CAPTURE_RELEASE_FAILED"; await this.release(pending);
       if (this.pending === pending) { this.pending = undefined; this.phase = "idle"; this.error = null; }
       return this.reply(true, "BUSY", pending.generation);
     } catch {
-      pending.discarded = false; this.fail("RECOVERY_REMOVE_FAILED");
-      return this.reply(false, "RECOVERY_REMOVE_FAILED", pending.generation);
+      pending.discarded = false; this.fail(stage);
+      return this.reply(false, stage, pending.generation);
     } finally { this.discarding = false; }
   }
 
   private launch(pending: Pending<C>, retentionError?: RecordingError): void {
+    if (retentionError === "CAPTURE_FAILED") pending.captureFailed = true;
     const controller = new AbortController();
     const job: Job<C> = {
       pending, controller, context: this.context(pending.generation, controller), retentionError,
@@ -436,17 +490,29 @@ export class RecordingCoordinator<C extends CapturedHandle> {
   }
   private async save(pending: Pending<C>, audio: PreparedAudio, context: WorkContext): Promise<void> {
     const recovery = this.recovery;
-    if (!recovery || pending.token) return;
+    if (!recovery || (pending.token && !pending.durabilityPending)) return;
     if (!pending.saving) {
       pending.saving = (async () => {
-        const saved = await recovery.save(audio, context);
-        if (!owned(saved, context) || !tokenValid(saved.token)) throw new Error("Invalid recovery ownership.");
+        const previous = pending.token;
+        const saved = previous
+          ? await (recovery.ensureCommitted?.(previous, context) ?? Promise.reject(new Error("Recovery durability is not confirmed.")))
+          : await recovery.save(audio, context);
+        if (!owned(saved, context) || !tokenValid(saved.token)
+            || (previous && saved.token.id !== previous.id)) throw new Error("Invalid recovery ownership.");
+        // A visible committed file must remain owned even when its durability failed.
         pending.token = Object.freeze({ id: saved.token.id });
+        pending.durabilityPending = previous ? saved.durable !== true : saved.durable === false;
+        if (saved.durable !== undefined && typeof saved.durable !== "boolean") {
+          pending.durabilityPending = true; throw new Error("Invalid recovery durability.");
+        }
         return saved;
       })();
     }
     const saving = pending.saving;
-    try { await saving; } finally { if (pending.saving === saving) pending.saving = undefined; }
+    try {
+      await saving;
+      if (pending.durabilityPending) throw new Error("Recovery durability is not confirmed.");
+    } finally { if (pending.saving === saving) pending.saving = undefined; }
   }
   private deliveryConfirmed(receipt: DeliveryReceipt): boolean {
     if (receipt.outcome === "clipboard" || receipt.outcome === "paste") {
@@ -476,7 +542,10 @@ export class RecordingCoordinator<C extends CapturedHandle> {
     if (pending.receipt && this.deliveryConfirmed(pending.receipt)) return;
     if (!pending.delivering) {
       pending.delivering = (async () => {
-        const receipt = await this.options.delivery.deliver(pending.text ?? "", context);
+        const identity: DeliveryIdentity = pending.token
+          ? { kind: "recovery", token: pending.token.id }
+          : { kind: "memory", generation: pending.generation };
+        const receipt = await this.options.delivery.deliver(pending.text ?? "", context, identity);
         if (!owned(receipt, context)) throw new Error("Invalid delivery ownership.");
         pending.receipt = receipt;
         return receipt;
@@ -488,15 +557,30 @@ export class RecordingCoordinator<C extends CapturedHandle> {
       if (!this.deliveryConfirmed(receipt)) throw new Error("Delivery was not confirmed.");
     } finally { if (pending.delivering === delivering) pending.delivering = undefined; }
   }
+  private async release(pending: Pending<C>): Promise<void> {
+    if (pending.released) return;
+    pending.releasing ??= (async () => {
+      await pending.session?.release?.(); pending.released = true;
+    })();
+    const releasing = pending.releasing;
+    try { await releasing; }
+    finally { if (pending.releasing === releasing) pending.releasing = undefined; }
+  }
   private async process(job: Job<C>): Promise<void> {
     const { pending, context } = job;
     let stage: RecordingError = "PREPARATION_FAILED";
     try {
       if (!this.current(job)) return;
       if (!pending.prepared) {
+        // A cancelled attempt may still own the native converter. Never run two preparations.
+        await pending.preparing?.catch(() => {});
+        if (!this.current(job)) return;
         let audio: PreparedAudio;
         if (pending.captured && pending.session) {
-          audio = await pending.session.prepare(pending.captured, context);
+          const preparing = pending.session.prepare(pending.captured, context);
+          pending.preparing = preparing;
+          try { audio = await preparing; }
+          finally { if (pending.preparing === preparing) pending.preparing = undefined; }
         } else if (pending.token && this.recovery) {
           stage = "RECOVERY_READ_FAILED"; audio = await this.recovery.read(pending.token, context);
         } else throw new Error("No captured audio is available.");
@@ -505,7 +589,24 @@ export class RecordingCoordinator<C extends CapturedHandle> {
       }
       if (!this.current(job)) return;
       const audio: PreparedAudio = { ...pending.prepared, generation: context.generation, attempt: context.attempt };
-      stage = "RECOVERY_SAVE_FAILED"; await this.save(pending, audio, context);
+      const gate = this.options.platform === "linux" ? this.options.speechGate : undefined;
+      if (gate && !pending.token && !pending.captureFailed) {
+        if (pending.speechDetected === undefined) {
+          const disposition = await gate.classify(audio, context);
+          if (!this.current(job)) return;
+          if (!owned(disposition, context) || typeof disposition.hasSpeech !== "boolean") {
+            stage = "OWNERSHIP_FAILED"; throw new Error("Invalid silence classification ownership.");
+          }
+          pending.speechDetected = disposition.hasSpeech;
+        }
+        if (!pending.speechDetected) {
+          stage = "CAPTURE_RELEASE_FAILED"; await this.release(pending);
+          if (!this.current(job)) return;
+          this.pending = undefined; this.phase = "idle"; this.error = null; return;
+        }
+      }
+      stage = "RECOVERY_SAVE_FAILED";
+      if (!pending.receipt || !this.deliveryConfirmed(pending.receipt)) await this.save(pending, audio, context);
       if (!this.current(job)) return;
       if (job.retentionError) { this.fail(job.retentionError); return; }
       if (pending.text === undefined) {
@@ -523,6 +624,8 @@ export class RecordingCoordinator<C extends CapturedHandle> {
       if (!this.current(job)) return;
       stage = "RECOVERY_REMOVE_FAILED";
       await this.remove(pending, context);
+      if (!this.current(job)) return;
+      stage = "CAPTURE_RELEASE_FAILED"; await this.release(pending);
       if (!this.current(job)) return;
       this.transcript = pending.text; this.pending = undefined; this.phase = "done"; this.error = null;
     } catch { if (this.current(job)) this.fail(stage); }

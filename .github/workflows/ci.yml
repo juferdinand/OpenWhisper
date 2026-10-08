@@ -41,7 +41,7 @@ jobs:
           npm run build
       - name: Install native CPU build tools (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build pkg-config libglib2.0-dev
       - name: Install native CPU build tools (macOS)
         if: runner.os == 'macOS'
         run: brew list cmake ninja >/dev/null 2>&1 || brew install cmake ninja
@@ -54,6 +54,14 @@ jobs:
           npm run build:native
           node --import tsx scripts/fetch-speech-fixtures.ts
           node --import tsx --test tests/native-speech.test.ts
+      - name: Build Linux bus and check native capture without devices
+        if: runner.os == 'Linux'
+        working-directory: electron
+        run: |
+          node --import tsx scripts/build-linux-bus.ts
+          node --import tsx scripts/build-capture.ts
+          OPENWHISPER_CAPTURE_SYNTHETIC_ADDON="$PWD/native/capture/build/openwhisper_capture.node" \
+            node --import tsx --test tests/capture.test.ts
   linux:
     uses: ./.github/workflows/linux-build.yml
     with:

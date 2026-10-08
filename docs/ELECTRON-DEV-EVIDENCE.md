@@ -1,9 +1,13 @@
 # Electron development evidence
 
-This records the isolated implementation candidate on 2026-10-08, based on
-`351041cece1f49bfc858ff1d8a9c2cbf4f2dfff2` with the following P2/P5 source changes.
-These local checks preceded their commit; candidate CI is tracked in PR #34.
-The base commit's CI does not cover these later changes.
+This records the isolated P2/P5 implementation committed on 2026-10-08 at
+`05170a1770843f34695d774f7b804dd84be3f0bf`, following the foundation commit
+`351041cece1f49bfc858ff1d8a9c2cbf4f2dfff2`. Local checks below preceded that commit.
+The clean shared-UI dependency-resolution correction is
+`ae7c81eae830467a519b024993967ccec9fa042b`.
+[CI 37707104579](https://github.com/juferdinand/OpenWhisper/actions/runs/37707104579)
+passed all four jobs at that exact head: Electron TypeScript/native CPU checks on Ubuntu
+22.04 and macOS, and the existing Linux/macOS packaging and native UI checks.
 The [migration plan](ELECTRON-MIGRATION.md) retains the remaining acceptance gates.
 
 | Check | Result and scope |
@@ -75,7 +79,154 @@ screenshots are retained in the local `p2-owned-speech/run-4` and `p5-owned-ui/r
 These local packets are not GitHub Actions artifacts. No real microphone, running installation
 or stable user profile was changed.
 
-This evidence does not close KDE/GNOME/X11/wlroots bugs, establish genuine Parakeet/GPU
-inference, prove native capture/recovery storage, validate packages/updaters or establish
-real model quality. Those remain explicit work in #33 and the linked issues. User acceptance
+The initial committed evidence above does not close KDE/GNOME/X11/wlroots bugs or validate
+packages/updaters or real model quality. Subsequent scoped evidence is recorded below.
+Full replacement remains explicit work in #33 and the linked issues. User acceptance
 remains required before the functional migration is merged or the installed app is replaced.
+
+## PR disposition
+
+[PR #17](https://github.com/juferdinand/OpenWhisper/pull/17#issuecomment-6049824267)
+is closed as superseded by the reviewed TypeScript manual-preview port and its fresh
+evidence. Its shared contracts and useful regressions are preserved; [issue #11](https://github.com/juferdinand/OpenWhisper/issues/11)
+remains open for real provider/model acceptance and the broader requirements.
+[PR #31](https://github.com/juferdinand/OpenWhisper/pull/31) remains relevant while the
+Cargo packaging/fallback path still exists. The migration [PR #34](https://github.com/juferdinand/OpenWhisper/pull/34)
+remains a draft. KDE/GNOME/X11 bug issues remain open until their exact replacement
+behavior is demonstrated. Closure of duplicate work does not establish desktop support.
+
+## Composed recording and recovery followup
+
+The separately exported candidate index passes 262 ordinary tests, with seven explicit
+opt-in skips (269 total, 3.96 seconds), and the strict Electron/shared UI build. This excludes
+the later model-inventory and macOS-edge work. Native/owned checks below are separate
+scoped executions, not additional ordinary-suite passes.
+
+The next isolated slice combines native sample ownership, complete utility-side preparation,
+Linux silence classification, private WAV/RF64 storage and adaptive inference. Duration-sized
+audio never reaches main/renderer. Native windows use the existing Rust policy: contiguous
+30-second maxima, quiet boundary selection and smaller GPU/CPU retry windows. The fixtures
+include complete logical-hour coverage and actual unchanged Rust WAV/RF64 header comparisons.
+The complete processed transcript is delivered intact, including the focused case above 4 MiB.
+
+| Check | Scoped result |
+| --- | --- |
+| Owned virtual Pulse capture | 305.152 seconds; 14,660,608 frames at 48 kHz → 4,886,869 samples at 16 kHz, full tail retained; Stop 0.542 ms before preparation 711.542 ms |
+| Final Stop error followup | 11 native tests, 30 immediate restarts, source unload → immediate Stop and daemon-loss nonzero salvage |
+| Composed actual Electron utility | Three capture-helper epochs, 528,017 samples, contiguous 401,600 + 126,417 windows, private WAV before every native request |
+| Failed delivery/restart | WAV retained after explicit failed output and helper reap; restored helpers create no capture |
+| Lost confirmed reply | Actual private-Xvfb clipboard write/read, intentionally dropped reply, same-token retry confirmed without a second write; WAV removed only afterward |
+| IPC backing-buffer guard | Actual 128-byte-offset view over 16 MiB normalized to exactly the requested window; main refuses malformed offset/over-backed frames before opening speech |
+| Independent lifecycle review | Reproduced/fixed late Stop/release, cancellation handoff, unbounded backing buffer and receipt eviction; focused regressions retained |
+
+The long capture and final Stop followup use different native artifacts. Long-run addon
+`f966224ff9fd05d3f00f06116cf6533e7200f05d1070e3ec37b506397acb831e` uses C++ source
+`351332866a46bf5459a9b6119406d7495695a8dd26f748f899686593a549c53b`; final addon
+`68050249bc5c419f6a20b8715bb8461eafb8f1a90ba751e45adade4a4b71f67c` uses C++ source
+`c6985ad83c0ff76834a56954136adc850009267508cc245180a5f298bcd268bd`. Its additional
+Stop-time error/snapshot checks leave the ledger/conversion unchanged. This is no claim
+that the final binary completed the long run. The pinned miniaudio read shim retains exact
+positive-length Pulse hole duration as bounded zero samples; it never silently removes time.
+
+Private recovery checks include 600/700 modes, atomic exclusive writes, file/directory sync,
+post-rename durability retry on the same token, finite complete samples, RIFF/RF64 size,
+cancel/discard ownership and deterministic release. The composed test loads capture only
+in its capture utility and speech only in its disposable speech utility; main mappings stay
+clear. Renderer sandbox/Node isolation is checked separately. It uses synthetic native input,
+not the Pulse long-run source or a microphone.
+
+Receipt storage is bounded and belongs to one continuing main/private profile. It reserves
+capacity before native delivery and retains confirmed or uncertain entries; full capacity
+fails before another output. It does not evict unfinished recovery. Proven retirement after
+recovery removal is required before normal/high-volume wiring. This does not establish
+durable receipt behavior after the whole app exits. Mac recovery remains in RAM.
+
+The corrected composed packet is local `p2-owned-recording/run-3`, with source manifest
+`1699ee9ced83d137d0815f7753e86b4aac2001859fe29e6a9bc8f8a1b60e5705` and evidence
+`7fc6a16088825cc5ce510683048be437ca9627e1ee9cf56dc275a013a3b9b049`. Earlier runtime
+and independent-review failures remain retained. The old post-long restart failure's cause
+is unknown; later successful long/short evidence is not presented as its diagnosis.
+
+The normal Dev UI still has no recording command wiring. This evidence does not establish
+desktop grants, real target-app paste, CoreAudio capture, exact packages, signed updates or
+complete stable-data migration. Existing production hosts and desktop bugs remain.
+
+## Native build profiles and public models
+
+Fresh Ubuntu 22.04 build graphs produce separate portable CPU and Vulkan artifacts.
+Eight checksum-pinned archives also pass fresh download, inventory/type/path validation
+and extraction into empty owned directories. That extraction result uses GNU tar;
+macOS bsdtar and Metal build/runtime acceptance remain separate checks.
+
+| Check | Scoped result |
+| --- | --- |
+| Public Parakeet CPU | Three actual inferences, wrong-family rejection, fresh reload and utility-side postprocessing; helper disposed, main has no native speech mapping |
+| Vulkan without a device | Four actual inferences: Whisper/Parakeet with CPU and GPU requested; detected device is null, matching complete fixture transcript hashes |
+| Software-only Vulkan | Four actual inferences; llvmpipe is excluded from the hardware-device result; matching complete fixture transcript hashes |
+| Vulkan loader absent | Actual startup failure and disposal, followed by an explicit fixture-only CPU artifact replacement and successful Whisper inference |
+
+The three current-wrapper GPU runs contain nine successful inferences in total.
+Historical runs are retained separately and are not added to this count. The CPU artifact
+hash is `e1b4c2c738285eb50cea155e65fc0b1eb4481e80a1849ded23bb2a8a679308c3`;
+the Vulkan artifact hash is
+`84797393e5a1efb453945c32a26a7d4158490e53074dcd2fdbacc47b887dff05`.
+Both use CMake source `2435203d4801cde82605cf0dd338dfa930d930ae952cda69d45e58022405ade8`.
+The CPU artifact requires GLIBCXX 3.4.29; Vulkan requires GLIBCXX 3.4.30 and GLIBC 2.34.
+The tested image supplies libstdc++6 12.3.0-1ubuntu1~22.04.3 and Vulkan loader 1.3.204.1-2.
+Portable instruction flags are distinct from these runtime dependencies.
+
+The public Parakeet Q4 fixture is 355,615,679 bytes with SHA-256
+`aa7fe2f5fb47d863ca23e8b1d490632d63a2599f515268b6d6bd656158dad45e`.
+Its NVIDIA model terms apply to the weights; the conversion repository's MIT label does
+not relicense them. Test models are downloaded explicitly and are not bundled in the app.
+
+The local `p6-proposal/GPU-ACCEPTANCE.json` packet has hash
+`03f4946e2f970caeca09d954726a7c7493cc808e31bd2490c5a7ecbd14a10bf3`.
+It retains current/historical wrapper hashes, artifact manifests, loader/device evidence,
+container disposal and the separate empty-source archive checks. All runtime cases use
+UID 1000, no host devices/mounts/network, a sandboxed renderer and an unsandboxed Node
+utility inside the owned container. These results establish neither physical GPU execution
+nor automatic application fallback, packaging or macOS Metal support.
+
+## Private Linux control and early CLI feasibility
+
+A separate GDBus Node-API primitive and TypeScript Dev control owner are opt-in.
+Ordinary startup opens no bus through this owner and has no capture capability.
+The owned primitive probe passes 19 groups; the content-free control probe passes 13
+groups covering UID checks, pinned unique callers, deadlines, rollback before accepted
+Start, preservation after accepted Start, Stop fencing and disposal. The native reply
+boundary means successful local queue acceptance, not proof that the remote client read it.
+The Dev status enum is a spike; production Status JSON parity remains required.
+
+The corrected fatal platform run passes 15 actual groups in 4.131 seconds and all 22
+focused pure bus/control/transport tests. A correlated cleanup failure retains the pending
+request until the parent termination boundary and permanently closes the failed owner.
+The checked old PID is absent before rejection. Local source snapshots are
+`p3-owned-control/run-7`; its evidence JSON hash is
+`8aeaadc6dbfb448c56bda73fa5aa63bf39f1fa14f59f462e5ef64adc2036c414`.
+Earlier compile/runtime failures remain retained; the process-event limitation below still
+applies to general lifecycle claims.
+
+An unmodified Electron 44.7.0 binary can finish a genuine asynchronous private-bus call
+from an early ESM entry and exit before app readiness without a display or external Node.
+The owned probe completes in 0.109 seconds, with a 10.43 ms native call and confirmed bus
+closure. It uses a two-second internal deadline and eight-second outer bound. Chromium
+also attempts deliberately disabled ambient private bus addresses; this does not prove
+zero ambient activation attempts on a real desktop. The local `p3-control-async` packet
+retains the exact binary, fuse wire, pinned upstream bootstrap source and disposal.
+
+Production CLI dispatch, ambient-service prevention, hardened packaged fuses/ASAR,
+installed AppImage/DEB commands and actual compositor bindings remain separate gates.
+These control primitives do not close desktop bugs or claim a working released CLI.
+
+## Process retirement limitation
+
+The owned tests observe process absence at their checked replacement boundaries; this
+does not establish that Electron's generic utility `exit` event always follows OS retirement.
+A fatal-control fixture found the old process still present as a zombie at rejection.
+Pinned Electron source sends a reasoned exit notification before its default Node exit
+handler; Chromium's separate reaper completion is not exposed by that JavaScript event.
+The narrow fatal-control correction keeps the helper closed until the parent terminates it.
+Normal shutdown and the speech helper's self-exit paths still need a bounded independent
+owned-process retirement witness before live replacement wiring. Failed/ambiguous cleanup
+must retain ownership and block replacement. No raw PID signals are introduced.

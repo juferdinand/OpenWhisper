@@ -12,7 +12,8 @@ export const speechModelSchema = z.strictObject({
   family: z.enum(["whisper", "parakeet"]), gpu: z.boolean(),
 });
 export const speechWindowSchema = z.instanceof(Float32Array).refine((samples) =>
-  samples.buffer instanceof ArrayBuffer && samples.length > 0 && samples.length <= MAX_WINDOW_SAMPLES &&
+  samples.buffer instanceof ArrayBuffer && samples.byteOffset === 0 && samples.buffer.byteLength === samples.byteLength &&
+  samples.length > 0 && samples.length <= MAX_WINDOW_SAMPLES &&
   samples.every(Number.isFinite), "A finite, bounded inference window is required.");
 export const speechVocabularySchema = z.string().refine((value) =>
   !value.includes("\0") && new TextEncoder().encode(value).length <= 4 * 1024 * 1024);

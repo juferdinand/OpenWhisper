@@ -86,13 +86,18 @@ The later P2/P5 checks and exact candidate provenance are in the
 P2 ports the shared text fixtures, model catalog and recording state machine to strict
 TypeScript. Synthetic lifecycle tests cover final sample fencing before Stop acknowledgement,
 expired callers, stale results, Linux retained-audio recovery, Mac RAM-only recovery and
-confirmed delivery before removal. Their logical clock/sample ledger exceeds one hour;
-that is separate from the still-required native capture exceeding 300 seconds.
+confirmed delivery before removal. Their logical clock/sample ledger exceeds one hour.
+Separate owned Pulse capture exceeded 300 seconds; its long-run artifact and the later
+Stop-error followup artifact are distinguished in the evidence record.
 
 The native CPU binding uses checksum-pinned whisper.cpp/Parakeet source and Node-API 8
 headers. It is loaded in a disposable worker, never in the application main. No new native
-module is loaded when the ordinary Dev UI starts. The initial binding explicitly disables
-Vulkan and Metal; it does not establish release GPU or Parakeet-model parity.
+module is loaded when the ordinary Dev UI starts. CPU remains the default distribution
+artifact. Explicit CPU/Vulkan/Metal build profiles have separate output directories and
+artifact manifests; GPU profiles are acceptance inputs, without automatic runtime selection
+or release packaging. The owned Linux probes exercise real public Whisper and Parakeet
+models, including absent-device, software-only Vulkan and absent-loader cases. Hardware
+GPU execution and the macOS Metal profile remain separate gates.
 
 ```bash
 cd electron
@@ -109,6 +114,25 @@ recognizes the fixture twice in one context, rejects reuse under an incorrect mo
 reloads the original model and releases the context. CI runs this CPU probe on Linux and
 macOS. Build requires CMake, Ninja and a C/C++ compiler. `npm run build` cleans `dist`, so
 run `build:native` afterward when exercising native workers.
+
+Optional native primitives and GPU profiles can be built explicitly:
+
+```bash
+cd electron
+node --import tsx scripts/build-native.ts --backend vulkan
+node --import tsx scripts/build-linux-bus.ts
+node --import tsx scripts/build-capture.ts
+OPENWHISPER_CAPTURE_SYNTHETIC_ADDON="$PWD/native/capture/build/openwhisper_capture.node" \
+  node --import tsx --test tests/capture.test.ts
+```
+
+Vulkan builds also need the platform Vulkan loader and the pinned shader compiler graph.
+The portable CPU instruction profile does not remove dynamic library requirements.
+The last command uses synthetic native samples and never opens audio. The owned
+[capture](../electron/tests/owned-capture/README.md),
+[control](../electron/tests/owned-control/README.md) and
+[composed recording](../electron/tests/owned-recording/README.md) procedures isolate
+their services in disposable containers. They do not use the running desktop or profile.
 
 The separate [owned utility probe](../electron/tests/owned-speech/README.md) exercises the
 compiled transport in actual Electron 44.7.0 on Ubuntu 22.04, including incompatible-host

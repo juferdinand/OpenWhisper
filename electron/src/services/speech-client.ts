@@ -13,7 +13,7 @@ export interface SpeechChannel {
 }
 /** A rejected factory has rolled back its owner; a returned channel transfers cleanup ownership. */
 export type SpeechChannelFactory = (signal: AbortSignal) => Promise<SpeechChannel>;
-export type SpeechFailureCode = "CANCELLED" | "BUSY" | "START_FAILED" | "WORKER_FAILED" | "TIMEOUT" | "INVALID_REPLY" | "NATIVE_FAILED" | "CLOSED";
+export type SpeechFailureCode = "CANCELLED" | "BUSY" | "START_FAILED" | "TEARDOWN_FAILED" | "WORKER_FAILED" | "TIMEOUT" | "INVALID_REPLY" | "NATIVE_FAILED" | "CLOSED";
 export class SpeechWorkerError extends Error {
   constructor(readonly code: SpeechFailureCode) { super(`Speech worker: ${code}.`); }
 }
@@ -119,7 +119,9 @@ export class SpeechClient {
       this.readyReject = (error) => { clearTimeout(timer); reject(error); };
       // Register the transaction before invoking the factory. Cancellation rejects the
       // request promptly, but a retry waits for any late owner to be confirmed reaped.
-      this.factoryOwnership = Promise.all([previousFactory, previousDisposal]).then(async () => {
+      this.factoryOwnership = Promise.all([previousFactory, previousDisposal]).catch(() => {
+        throw new SpeechWorkerError("TEARDOWN_FAILED");
+      }).then(async () => {
         if (controller.signal.aborted || this.closed || epoch !== this.epoch) return;
         let channel: SpeechChannel;
         try { channel = await this.factory(controller.signal); }
@@ -138,8 +140,10 @@ export class SpeechClient {
         if (epoch !== this.epoch) { offMessage(); offExit(); return; }
         this.detach.push(offMessage, offExit);
       });
-      void this.factoryOwnership.catch(() => {
-        if (!controller.signal.aborted && epoch === this.epoch) this.fail("START_FAILED");
+      void this.factoryOwnership.catch((error: unknown) => {
+        if (!controller.signal.aborted && epoch === this.epoch) {
+          this.fail(error instanceof SpeechWorkerError && error.code === "TEARDOWN_FAILED" ? "TEARDOWN_FAILED" : "START_FAILED");
+        }
       });
     });
     return this.start;

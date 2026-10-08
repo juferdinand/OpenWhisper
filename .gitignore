@@ -42,3 +42,4 @@ __pycache__/
 /electron/.profiles/
 /electron/.local/
 /electron/vendor/
+/electron/native/build-*/
