@@ -269,9 +269,9 @@ bytes, bundle identity and the extracted archive. An owned CI driver launches th
 actual package with a private profile, checks the sandboxed shared UI, exercises
 regular-key setup/removal and exits through normal Quit. It requests no microphone
 or Accessibility permission and sends input only to its own Chromium window.
-The next smoke also passes checksum-pinned public audio and Tiny to the same signed
-CPU speech helper for real recognition; its actual per-architecture result remains
-pending and does not replace microphone/device acceptance.
+The same smoke passes real recognition of checksum-pinned public audio with Tiny
+through the signed CPU speech helper on both architectures in CI37842623817.
+This does not replace physical microphone/device acceptance.
 These artifacts are Dev previews; universal/release signing and stable updates
 remain separate work. See the [evidence](ELECTRON-DEV-EVIDENCE.md).
 

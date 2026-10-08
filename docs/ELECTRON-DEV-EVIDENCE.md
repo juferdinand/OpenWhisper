@@ -1,6 +1,6 @@
 # Electron development evidence
 
-## Packaged Mac CPU inference prepared; actual runtime pending
+## Packaged Mac CPU inference PASS on Apple Silicon and Intel
 
 The existing signed-production-utility smoke now requires the existing pinned
 Tiny/JFK fixture directory. The same verified CPU helper receives one normal
@@ -14,9 +14,14 @@ occurs. Original signed expectations and main's native inventory checks remain.
 Independent review passes after correcting the evidence wording to distinguish
 public fixture inference from microphone capture. Strict typing,49 directly
 affected protocol/bootstrap/Mac-host/entry-graph cases and serialized-callback
-checks pass. The existing Apple Silicon/Intel jobs fetch the same checksum-pinned
-fixtures and run the augmented smoke. Actual per-architecture results are pending;
-the earlier package passes below establish discovery, not transcription.
+checks pass. The actual [Apple Silicon](https://github.com/juferdinand/OpenWhisper/actions/runs/37842623817/job/113535531317)
+and [Intel](https://github.com/juferdinand/OpenWhisper/actions/runs/37842623817/job/113535532048)
+package jobs pass the augmented smoke at branch input104c43d, PR merge tree
+6df25da6e4e52f4ac65606cb9e97870e8cdf41e4. Their original actual-package smokes
+finish at20:54:59UTC (arm64) and20:57:01UTC (x64). Real CPU recognition through
+the signed packaged speech utility, original child exits and normal Quit all pass.
+These are owned macOS15 thin ad-hoc Dev packages. Physical microphone/TCC,
+device changes, target insertion, Metal and stable release signing remain separate.
 
 ## Fresh local Dev installation PASS on Linux, Apple Silicon and Intel
 
@@ -61,9 +66,10 @@ normal sandbox, signed-utility and shortcut checks at branch input0cd12a1. Their
 actual smokes finish at20:41:34UTC (arm64) and20:44:32UTC (x64). Both copied bundles
 pass strict signature checks, the explicit profile starts nonexistent, and repeated
 installation is refused while the original app remains alive/idle. The complete
-original Quit/cleanup checks pass. Legacy Linux in the same CI remains running.
-These are owned macOS15 thin ad-hoc Dev packages; physical permissions/devices,
-packaged transcription and release signing remain separate. Archive download
+original Quit/cleanup checks pass. CI37840925558 completes all six jobs successfully.
+These are owned macOS15 thin ad-hoc Dev packages; the later receipt above establishes
+packaged CPU transcription. Physical permissions/devices and release signing remain
+separate. Archive download
 authenticity, existing-version replacement,
 stable migration, updates and release packaging remain separate work. See
 [Dev installation commands](ELECTRON-DEVELOPMENT.md#install-a-separate-local-dev-copy).

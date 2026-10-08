@@ -13,11 +13,20 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | Plan and architecture | Reviewed plan, repository research answers and issue/PR review recorded | Keep decisions aligned with final implementation |
 | Shared interface and services | Existing design, strict TS bridge, isolated Dev profile, settings, models/history and localized shared-owner tray actions; sandboxed recording overlay connected | Native tray presentation, assembled Mac overlay and remaining platform behaviors |
 | Linux dictation | Normal UI, CPU recognition, clipboard, Retry/Discard and graceful Quit pass on private Ubuntu22 and stock Kubuntu/KDE 5.27 native Wayland with virtual audio; background Wayland publication and actual GTK target insertion also pass | Startup-failure cleanup under resource pressure; remaining desktop control, overlays and accelerated inference in normal Dev |
-| macOS dictation | CPU recording, microphone permission, RAM Retry/Discard, shared tray/overlay and guarded Accessibility paste are connected. Actual Apple Silicon/Intel Dev apps pass startup, sandbox, normal main initialization, signed production capture/speech utility loading/cleanup, keyboard setup/removal and Quit in CI37834933376 | Inference through the packaged speech utility, actual target insertion and device/permission behavior; Metal selection remains open |
+| macOS dictation | CPU recording, microphone permission, RAM Retry/Discard, shared tray/overlay and guarded Accessibility paste are connected. Actual Apple Silicon/Intel Dev apps pass startup, sandbox, signed production utilities, real CPU recognition of pinned public audio, keyboard setup/removal and original Quit in CI37842623817 | Physical microphone/TCC, actual target insertion and device changes; Metal selection remains open |
 | Linux desktop integration | Stock KDE 5.27 native Wayland F8, cancellation, binding Quit/crash recovery and paste into Wayland/XWayland editors pass. The guarded native overlay passes pointer Cancel/Stop and foreground editor keyboard delivery. Genuine X11 native F8 capture, held/repeated keys, CPU dictation, clipboard/history and Retry/Discard pass in private Xvfb | Basic packaged controls remain required; expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
 | Packaging and updates | Ubuntu22-built Dev directory/.deb passes layout and exact-package X11 dictation/recovery/cleanup. Fresh local Dev installation through embedded Node passes the relocated Linux X11 dictation/recovery case in44.08s and actual signed Mac package/utility/shortcut checks on Apple Silicon and Intel in CI37840925558 | Archive download, existing-version replacement/upgrade, Electron AppImage/universal DMG+ZIP, release signing, stable data continuity and old-client update checks |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
+
+Stable data groundwork now includes an independently reviewed fixed-identity
+profile and pure Linux legacy converter. Existing model roots and permissions
+are preserved; new Electron state uses private children. Conversion retains
+settings, full source history and unsupported trigger profiles, and maps old
+timestamped WAV names without losing UUID or chronological metadata. Eighteen
+focused fixture tests and strict typing pass. Production store/bootstrap wiring,
+filesystem migration and the Mac preference adapter remain required; ordinary
+stable startup is not implemented by these helpers.
 
 The current checkpoint includes actual stock KDE keyboard dictation, recovery
 after a held-key/GUI cancellation sequence and same-profile crash recovery. Explicit
