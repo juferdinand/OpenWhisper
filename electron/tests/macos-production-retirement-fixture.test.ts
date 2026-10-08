@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -119,7 +119,7 @@ test("healthy CLI close cancels original supervision while later errors remain s
 });
 test("bundle-only entry refuses relative aliased and nonprivate output before bundling", async () => {
   await assert.rejects(buildMacProductionRetirementFixture("relative"));
-  const root = await mkdtemp(join(tmpdir(), "openwhisper-mac-bundle-contract-")); await chmod(root, 0o700);
+  const root = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-mac-bundle-contract-"))); await chmod(root, 0o700);
   try {
     const directory = join(root, "output"); await mkdir(directory, { mode: 0o755 });
     await assert.rejects(buildMacProductionRetirementFixture(directory)); await chmod(directory, 0o700);
@@ -128,7 +128,7 @@ test("bundle-only entry refuses relative aliased and nonprivate output before bu
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 test("source-only bundles contain actual compiled adapter imports without starting Electron or loading a native module", async () => {
-  const root = await mkdtemp(join(tmpdir(), "openwhisper-mac-bundle-positive-")); await chmod(root, 0o700);
+  const root = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-mac-bundle-positive-"))); await chmod(root, 0o700);
   try {
     const sources = await buildMacProductionRetirementFixture(root); assert.deepEqual(Object.keys(sources), sourceNames);
     for (const name of payloadNames) assert.ok((await readFile(join(root, name))).byteLength > 0);
@@ -140,7 +140,7 @@ test("source-only bundles contain actual compiled adapter imports without starti
 });
 
 async function sandbox(effect: (project: string, fixture: string, node: FixtureInput["nodeExecutable"]) => Promise<void>): Promise<void> {
-  const root = await mkdtemp(join(tmpdir(), "openwhisper-mac-production-contract-")); await chmod(root, 0o700);
+  const root = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-mac-production-contract-"))); await chmod(root, 0o700);
   try {
     const project = join(root, "electron"), fixture = join(root, "fixture"); await mkdir(project); await mkdir(fixture);
     const put = async (name: string, bytes: string): Promise<void> => { const path = join(project, name); await mkdir(dirname(path), { recursive: true }); await writeFile(path, bytes, { mode: 0o600 }); };

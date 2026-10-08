@@ -9,6 +9,22 @@ The distinct Mac production-role build and owned fixture are now explicitly
 scheduled on both Apple architectures. Their source/inert evidence is complete;
 actual production-role execution and normal UI recording remain pending.
 
+[CI37741940367](https://github.com/juferdinand/OpenWhisper/actions/runs/37741940367)
+at `cccde7a` passed Ubuntu Electron checks and both existing packages. Its three
+Mac Electron jobs failed during inert test preparation, before the native gates.
+Source inspection identifies noncanonical temporary roots as the cause; the
+failure logs do not retain their actual resolved paths.
+The test-only correction resolves each newly created temporary root before use;
+production guards are unchanged. An isolated committed-source snapshot with this
+correction passes strict TypeScript and 65 focused tests, with one explicit native
+opt-in skip. Native Mac production-role execution still requires its own result.
+
+The first owned automatic loader-present fallback run reached three completed-job
+checkpoints, then failed its final composition validation. The exact container was
+removed, but the failed predicate and main birth were not retained before failure.
+This does not establish automatic fallback acceptance; bounded diagnostic metadata
+must be retained before that validation in a separately reviewed fixture.
+
 The sections below retain historical evidence with their original source scope.
 
 This records the isolated P2/P5 implementation committed on 2026-10-08 at
