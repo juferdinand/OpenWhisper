@@ -26,6 +26,12 @@ export class DesktopShortcuts {
       nativeAvailable: this.kdeState.available, nativeKey: this.native ? this.kdeState.key : null });
   }
   private publish(): void { this.changed(this.state()); }
+  async prepareKeyCapture(): Promise<void> {
+    if (!this.kde || !this.kdeState.available) throw new Error("KDE keyboard shortcuts are unavailable.");
+    const epoch = ++this.epoch; this.preparing = true; this.publish();
+    try { await this.kde.prepareCapture(); }
+    finally { if (epoch === this.epoch) { this.preparing = false; this.publish(); } }
+  }
   async bind(key: number, hold: boolean): Promise<void> {
     if (!this.kde || !this.kdeState.available) throw new Error("KDE keyboard shortcuts are unavailable.");
     const epoch = ++this.epoch; this.native = true; this.preparing = true; this.publish();

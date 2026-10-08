@@ -11,17 +11,20 @@ import { prepareDevelopmentProfile, resolveDevelopmentProfile } from "../../src/
 import { validateCommandOutput } from "../../src/contracts/ui.js";
 import type { DesktopBridge } from "../../src/contracts/bridge.js";
 import { recordingHostErrorSchema } from "../../src/workers/recording-host-protocol.js";
+import { kdeJournalSchema } from "../../src/platforms/linux/kde/keyboard.js";
 
 declare global { interface Window { openwhisper?: DesktopBridge } }
 const execute = promisify(execFile);
 const payload = resolve(fileURLToPath(new URL("./", import.meta.url)));
 const packageRoot = join(payload, "app"), evidence = "/evidence";
 const stockKde = process.env.OPENWHISPER_STOCK_KDE === "1";
+const kdeLifecycle = process.env.OPENWHISPER_KDE_LIFECYCLE === "1";
 const sha = (value: Uint8Array) => createHash("sha256").update(value).digest("hex");
 const checks: string[] = [];
 let stage = "guard", status = "FAIL", application: ElectronApplication | undefined, page: Page | undefined;
 let failure: { name: string; location: string | null } | undefined;
 let appCloseObserved = false, appOriginalClose: Promise<void> | undefined;
+const appOwners: { original: ChildProcess; closed: Promise<void>; closeObserved: boolean; termination: "quit" | "crash" | null }[] = [];
 let lastState: Readonly<{ status: string; recordingAvailable: boolean; recoveryAvailable: boolean; elapsed: number; progress: number;
   messageCategory: "NONE" | "RECORDING_ERROR" | "ACTION_REFUSED" | "OTHER"; recordingError: string | null }> | undefined;
 const owners: { child: ChildProcess; closed: Promise<void>; closeObserved: boolean }[] = [];
@@ -76,6 +79,7 @@ async function main(): Promise<void> {
   assert.equal(sha(await readFile(process.execPath)), "7fde7b8afa198da66257f42ee2001d874c7355631e6d1579a5fb5ef1f246df4c");
   assert.equal(sha(await readFile(join(packageRoot, "node_modules/electron/dist/electron"))), "10a14d05c6ff4f94075cfb3eeb6ed6571be33ebcc08cbd675b5ce9ff84706564");
   assert.equal(process.env.OPENWHISPER_OWNED_DEV_RECORDING, "1");
+  if (kdeLifecycle) assert.equal(stockKde, true);
   assert.ok((await lstat("/.dockerenv")).isFile());
   for (const device of ["/dev/snd", "/dev/input", "/dev/uinput", "/dev/dri"]) await assert.rejects(lstat(device), { code: "ENOENT" });
   for (const key of ["NODE_OPTIONS", "ELECTRON_RUN_AS_NODE"]) assert.equal(process.env[key], undefined);
@@ -170,6 +174,8 @@ async function main(): Promise<void> {
   env.DISPLAY = display;
   }
   await checkpoint("launch-normal-application");
+  const launchApplication = async () => {
+  appCloseObserved = false;
   const startupWatch = setTimeout(() => {
     // Capture only owned process/resource metadata when bootstrap stalls, never argv or content.
     void Promise.all([execute("/bin/ps", ["-eo", "pid,ppid,comm,stat"], { env, timeout: 5000, maxBuffer: 65_536 }),
@@ -181,10 +187,18 @@ async function main(): Promise<void> {
     application = await _electron.launch({ executablePath: join(packageRoot, "node_modules/electron/dist/electron"),
       args: [packageRoot, "--dev", "--dev-profile", profileRoot, ...(stockKde ? ["--ozone-platform=wayland"] : [])], env, chromiumSandbox: true, timeout: 30_000 });
   } finally { clearTimeout(startupWatch); }
-  application.process().stdout?.on("data", (bytes: Buffer) => { diagnostics.stdoutBytes += bytes.length; });
-  appOriginalClose = new Promise<void>((accept) => application!.process().once("close", () => { appCloseObserved = true; accept(); }));
-  application.process().stderr?.on("data", (bytes: Buffer) => { diagnostics.stderrBytes += bytes.length; });
+  const original = application.process();
+  const owner = { original, closed: Promise.resolve(), closeObserved: false, termination: null as "quit" | "crash" | null };
+  original.stdout?.on("data", (bytes: Buffer) => { diagnostics.stdoutBytes += bytes.length; });
+  owner.closed = new Promise<void>((accept) => original.once("close", () => { owner.closeObserved = true; appCloseObserved = true; accept(); }));
+  appOwners.push(owner); appOriginalClose = owner.closed;
+  original.stderr?.on("data", (bytes: Buffer) => { diagnostics.stderrBytes += bytes.length; });
   page = await application.firstWindow();
+  await expect(page.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev");
+  assert.equal(page.url(), "app://openwhisper/index.html");
+  };
+  await launchApplication();
+  assert.ok(application && page);
   if (stockKde) await writeFile(join(evidence, "window.json"), JSON.stringify(await application.evaluate(({ BrowserWindow, app }) => {
     const window = BrowserWindow.getAllWindows()[0];
     return { visible: window?.isVisible(), loading: window?.webContents.isLoading(), gpu: app.getGPUFeatureStatus() };
@@ -281,6 +295,81 @@ async function main(): Promise<void> {
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await until(async () => !(await state()).recording_shortcut);
     assert.equal((await state()).shortcut, "F8");
+    if (kdeLifecycle) {
+      const journalPath = join(profile.paths.settings, "kde-keyboard-lease.json");
+      const journal = async () => kdeJournalSchema.parse(JSON.parse(await readFile(journalPath, "utf8")));
+      const dbusBoolean = async (destination: string, objectPath: string, method: string, args: string[]) => {
+        const reply = (await execute("/usr/bin/gdbus", ["call", "--session", "--dest", destination,
+          "--object-path", objectPath, "--method", method, ...args], { env, timeout: 3000, maxBuffer: 4096 })).stdout.trim();
+        assert.ok(reply === "(true,)" || reply === "(false,)", "The actual daemon must return one boolean");
+        return reply === "(true,)";
+      };
+      const available = () => dbusBoolean("org.kde.kglobalaccel", "/kglobalaccel", "org.kde.KGlobalAccel.globalShortcutAvailable",
+        ["([16777271, 0, 0, 0],)", ""]);
+      const hasOwner = (connection: string) => dbusBoolean("org.freedesktop.DBus", "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.NameHasOwner", [connection]);
+      const quitActive = async () => {
+        assert.ok(application); const owner = appOwners.at(-1)!; owner.termination = "quit";
+        await application.close(); await owner.closed; assert.equal(owner.closeObserved, true); application = undefined;
+        assert.deepEqual(await journal(), []); assert.equal(await available(), true);
+      };
+      const bindAfterRestart = async () => {
+        assert.ok(application && page);
+        await checkpoint(`lifecycle-${appOwners.length}-focus-window`);
+        await page.locator('[data-tab="general"]').click();
+        await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.focus());
+        await until(async () => application!.evaluate(({ BrowserWindow }) => !!BrowserWindow.getAllWindows()[0]?.isFocused()));
+        await checkpoint(`lifecycle-${appOwners.length}-capture-key`);
+        await page.locator('[data-portal="enable_shortcut"]').click();
+        await until(async () => !!(await state()).recording_shortcut);
+        await stockPress();
+        await checkpoint(`lifecycle-${appOwners.length}-await-confirmation`);
+        await until(async () => (await state()).shortcut === "F8" && !(await state()).shortcut_configuring);
+      };
+      const firstLease = await journal(); assert.equal(firstLease.length, 1);
+      assert.equal(await available(), false); assert.equal(await hasOwner(firstLease[0]!.connection), true);
+      await checkpoint("active-binding-normal-quit"); await quitActive();
+      checks.push("normal Quit with active F8 closes the original app, empties its journal and releases the actual KDE key");
+      await checkpoint("restart-without-startup-binding"); await launchApplication();
+      assert.ok(application && page);
+      assert.equal((await state()).shortcut, null); assert.deepEqual(await journal(), []); assert.equal(await available(), true);
+      assert.equal((await state()).preferences.native_trigger?.kind, "key");
+      await bindAfterRestart();
+      const crashedLease = await journal(); assert.equal(crashedLease.length, 1);
+      assert.notEqual(crashedLease[0]!.component, firstLease[0]!.component);
+      await checkpoint("kill-original-owned-application");
+      const crashedOwner = appOwners.at(-1)!; crashedOwner.termination = "crash";
+      assert.equal(crashedOwner.original.kill("SIGKILL"), true);
+      await until(async () => crashedOwner.closeObserved, 10_000); await crashedOwner.closed; application = undefined;
+      await until(async () => !(await hasOwner(crashedLease[0]!.connection)));
+      assert.deepEqual(await journal(), crashedLease);
+      const availableAfterCrash = await available();
+      await writeFile(join(evidence, "crash-readback.json"), JSON.stringify({ originalMainClosed: crashedOwner.closeObserved,
+        originalBusOwnerAbsent: true, journalRetained: true, availableAfterCrash }), { mode: 0o600 });
+      await checkpoint("restart-preserves-journal-until-explicit-setup"); await launchApplication();
+      assert.ok(application && page);
+      assert.equal((await state()).shortcut, null); assert.deepEqual(await journal(), crashedLease);
+      await bindAfterRestart();
+      const recoveredLease = await journal(); assert.equal(recoveredLease.length, 1);
+      assert.notEqual(recoveredLease[0]!.component, crashedLease[0]!.component);
+      assert.notEqual(recoveredLease[0]!.connection, crashedLease[0]!.connection);
+      assert.equal(await hasOwner(recoveredLease[0]!.connection), true); assert.equal(await available(), false);
+      await stockPress(); await until(async () => (await state()).status === "recording");
+      await page!.locator("#cancel").click(); await until(async () => (await state()).status === "idle");
+      assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
+      checks.push("SIGKILL of original owned main closes its D-Bus owner; same-profile startup preserves journal without binding; explicit setup recovers a fresh working F8 binding");
+      await checkpoint("recovered-active-binding-normal-quit"); await quitActive();
+      assert.equal(appOwners.length, 3); assert.ok(appOwners.every((owner) => owner.closeObserved));
+      assert.equal(sha(await readFile(join(stable, "sentinel"))), stableBefore);
+      const resources = await recordResources("resources.json");
+      assert.match(resources["pids.events"] ?? "", /(?:^|\n)max 0(?:\n|$)/u);
+      assert.equal(resources["pids.max"]?.trim(), "256");
+      await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", checks, activeBindingQuit: true, crashRecovery: true,
+        originalApplicationCloses: appOwners.map((owner) => ({ closed: owner.closeObserved, termination: owner.termination })),
+        availableAfterCrash, recordingAfterRecovery: true, stableSentinelUnchanged: true,
+        physicalMicrophone: "NOT_USED", desktop: "OWNED_STOCK_KDE", recognition: "NOT_TESTED", automaticPaste: "NOT_TESTED" }, null, 2), { mode: 0o600 });
+      status = "PASS"; return;
+    }
     await checkpoint("actual-kde-hold-stale-release");
     await page.evaluate(() => window.openwhisper?.invoke("save_preferences", { changes: { hold_to_record: true } }));
     await stockKey(true); await until(async () => (await state()).status === "recording");

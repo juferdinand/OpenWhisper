@@ -163,6 +163,10 @@ export class DevelopmentPlatformHost {
     const reply = await this.channel.request({ version: 1, id: randomUUID(), command: "bind-key", key, hold });
     if (!reply.ok || reply.value.command !== "bind-key") throw new PlatformChannelError("INVALID_FRAME");
   }
+  async prepareKeyCapture(): Promise<void> {
+    const reply = await this.channel.request({ version: 1, id: randomUUID(), command: "prepare-key" });
+    if (!reply.ok || reply.value.command !== "prepare-key") throw new PlatformChannelError("INVALID_FRAME");
+  }
   close(): Promise<void> {
     this.closeTask ??= Promise.resolve().then(async () => {
       // The utility first closes its portal/CLI leases while capture RPC is live.

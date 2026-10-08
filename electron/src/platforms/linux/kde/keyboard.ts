@@ -132,6 +132,18 @@ export class KdeKeyboard {
     });
     this.operation = operation; void operation.catch(() => {}); return operation;
   }
+  prepareCapture(): Promise<void> {
+    if (this.closed || this.cleanupFailed) return Promise.reject(new BusFailure("TEARDOWN_FAILED"));
+    if (this.operation || this.clearTask) return Promise.reject(new Error("Shortcut setup is busy."));
+    // A crashed session action can consume the key before window capture sees it.
+    // Recover only after explicit setup, before asking the user to choose a key.
+    const operation = (async () => {
+      if (!this.owner) await this.probe(); const owner = this.owner;
+      if (!owner || !this.current.available) throw new BusFailure("REMOTE_ERROR");
+      await this.recover(owner);
+    })().finally(() => { if (this.operation === operation) this.operation = undefined; });
+    this.operation = operation; void operation.catch(() => {}); return operation;
+  }
   private async install(key: number, signal: AbortSignal): Promise<void> {
     let pending: Binding | undefined, journaled = false;
     try {

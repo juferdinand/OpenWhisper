@@ -87,6 +87,11 @@ port.on("message", (message) => {
         });
         return { version: 1, id: request.id, ok: true, value: { command: "bind-key", state: shortcuts.state() } };
       }
+      case "prepare-key": {
+        if (!shortcuts) return { version: 1, id: request.id, ok: false, code: "UNAVAILABLE" };
+        await shortcuts.prepareKeyCapture();
+        return { version: 1, id: request.id, ok: true, value: { command: "prepare-key", state: shortcuts.state() } };
+      }
       case "shutdown": {
         await shortcuts?.close(); await service?.close(); captureClient?.close();
         return { version: 1, id: request.id, ok: true, value: { command: "shutdown" } };

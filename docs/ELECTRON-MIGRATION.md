@@ -34,6 +34,32 @@ it is not a second application host. Audit and minimize it rather than copying a
 third-party application. Remove all Swift/Rust application sources and obsolete build paths
 after their replacement gates pass. Wrapping the existing hosts permanently is outside this plan.
 
+### Why are C/C++ files present?
+
+Electron does not require our own C/C++ application code. The current boundary contains:
+
+- `electron/native/speech_*.cpp`: bindings to the pinned whisper.cpp/Parakeet library for local
+  CPU/GPU inference. These engines are native dependencies; TypeScript orchestrates them.
+- `electron/native/capture/` and `macos-capture/`: miniaudio and CoreAudio bindings for capture
+  and conversion. Browser audio APIs are an alternative subject to the M-CAPTURE parity gate.
+- `electron/native/linux-bus/`: the chosen D-Bus transport binding; KDE/portal policy remains
+  TypeScript. A custom addon is an implementation choice, not an Electron requirement.
+- `electron/native/macos-retirement/`: a process-lifecycle probe and separately gated production
+  source role. This custom kernel boundary is also an implementation choice.
+
+Prefer existing Electron/Node APIs or maintained typed adapters where they meet the same
+behavioral requirements. Keep application logic, new scripts and tests in strict TypeScript.
+C++ is statically typed but does not provide automatic memory safety; native bindings require
+their own validation and lifetime checks. Native libraries may be used through a separate
+executable instead of a custom Node addon; that still leaves a native dependency.
+
+OpenWhispr also uses native components: its
+[Whisper service](https://github.com/OpenWhispr/openwhispr/blob/7ba7a37bf8340cc474cdcb3f5643e8d207fa9dbb/src/helpers/whisperServer.js)
+starts a compiled server, and its
+[Linux paste helper](https://github.com/OpenWhispr/openwhispr/blob/7ba7a37bf8340cc474cdcb3f5643e8d207fa9dbb/resources/linux-fast-paste.c)
+is written in C. This supports the need for some native dependencies, not the necessity of
+every custom binding chosen here.
+
 Pin a supported Electron patch and its lockfile. The audited starting point is
 [Electron 44.7.0](https://github.com/electron/electron/releases/tag/v44.7.0), released
 2026-10-07 with Node 24.21.0. Recheck the patch before implementing. The inspected OpenWhispr

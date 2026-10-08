@@ -1,5 +1,34 @@
 # Electron development evidence
 
+Active-binding Quit and same-profile crash recovery pass in **`stock-kde-lifecycle-4`**
+on the same pinned Kubuntu 24.04 / Plasma 5.27 native Wayland runner. With F8 still
+bound, normal Quit closes the original app, empties its private journal and makes
+the actual KGlobalAccel key available. Restart preserves the preference without
+binding at startup. After SIGKILL of the original owned main, its original D-Bus
+owner disappears but KDE still reserves F8. Explicit setup now recovers that dead
+action **before window key capture**, then registers a fresh component/connection.
+Actual F8 starts recording again; GUI Cancel closes its private virtual stream.
+Normal Quit with the recovered binding releases the key and journal again.
+
+All three original main processes close (Quit, deliberate crash, Quit), private
+servers close and the exact namespace is removed. No forced cleanup is required
+in the final pass. Peak182/cap256, zero task rejections and no OOM are recorded.
+This dedicated lifecycle mode performs no recognition or target paste; the prior
+keyboard dictation receipt below remains separately scoped. The normal app is
+used without process interception or host input/microphone access.
+
+Attempts1/2 reproduce the stale action consuming F8 before window capture, with
+normal active-binding Quit already passing. Attempt3 separately retains the
+previously observed initial-source enumeration failure and forced app cleanup,
+without process-cap exhaustion. Its cause is still unproven; the final pass does
+not close that startup gate. The fix adds only TypeScript recovery orchestration.
+Strict TS, recording build and **861 unit tests** pass (13 native opt-in skips).
+The shared UI source is unchanged from its 58-test passing receipt. At parent
+`180d033`, five CI jobs pass while the legacy Linux job remains in progress in
+[CI37786332970](https://github.com/juferdinand/OpenWhisper/actions/runs/37786332970).
+This new functional revision requires its own CI. No complete platform, package,
+update, advanced-trigger or full-migration gate is inferred from this lifecycle pass.
+
 The KDE keyboard path passes in **`stock-kde-keyboard-9`** on the pinned Kubuntu
 24.04 / Plasma 5.27 native Wayland runner. The normal app captures F8 during explicit
 setup, confirms the real KGlobalAccel assignment, and uses actual outer-XTEST
@@ -32,9 +61,9 @@ Refresh command. The passing final run finds its private source initially.
 Strict TS, recording build, **858 passing unit tests** (13 native opt-in skips)
 and **58 UI tests** pass. All six predecessor CI jobs at `5331be9` pass in
 [CI37777115182](https://github.com/juferdinand/OpenWhisper/actions/runs/37777115182).
-This functional push needs its own CI. Crash-journal recovery/conflict refusal and
+That functional push has its own CI. Crash-journal recovery/conflict refusal and
 concurrent retirement have unit evidence; fresh runtime crash recovery and Quit
-with an active binding remain separate checks. No modifier-only/mouse, KDE X11,
+with an active binding are covered by the later lifecycle receipt above. No modifier-only/mouse, KDE X11,
 GNOME, wlroots, automatic paste, overlay, GPU, Mac-device or release/update gate
 is closed by this regular-key test. The full migration remains incomplete.
 

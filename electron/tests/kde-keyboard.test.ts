@@ -99,6 +99,29 @@ test("KDE recovers a journalled crashed owner only after explicit setup", async 
   await keyboard.bind(0x01000037, false); const release = bus.calls.find((call) => call.member === "unregister");
   assert.deepEqual(parseBusValues(release!.body), [text(component), text("_k_session:dictate")]); await keyboard.close();
 });
+test("KDE explicit capture preparation releases a crashed action before any new key registration", async () => {
+  const { bus, capture, journal, keyboard } = await fixture();
+  const component = `io.github.whisperfree.dev.trigger.${randomUUID().replaceAll("-", "")}`;
+  journal.entries = [{ component, connection: ":1.90" }]; assert.equal(bus.calls.length, 0);
+  await keyboard.prepareCapture();
+  assert.deepEqual(bus.calls.map((call) => call.member), ["NameHasOwner", "unregister"]);
+  assert.deepEqual(parseBusValues(bus.calls[1]!.body), [text(component), text("_k_session:dictate")]);
+  assert.deepEqual(journal.entries, []); assert.equal(keyboard.state().key, null); assert.equal(capture.started, 0);
+  await keyboard.close();
+});
+test("KDE capture preparation preserves the current active key while choosing a replacement", async () => {
+  const { bus, journal, keyboard } = await fixture(); await keyboard.bind(0x01000037, false);
+  const entries = journal.snapshot(), calls = bus.calls.length;
+  await keyboard.prepareCapture(); assert.equal(bus.calls.length, calls);
+  assert.deepEqual(journal.entries, entries); assert.equal(keyboard.state().key, 0x01000037); await keyboard.close();
+});
+test("KDE capture preparation refuses a live journal owner without removing its action", async () => {
+  const { bus, journal, keyboard } = await fixture(); bus.live.add(":1.90");
+  journal.entries = [{ component: `io.github.whisperfree.dev.trigger.${randomUUID().replaceAll("-", "")}`, connection: ":1.90" }];
+  const entries = journal.snapshot(); await assert.rejects(keyboard.prepareCapture());
+  assert.deepEqual(bus.calls.map((call) => call.member), ["NameHasOwner"]); assert.deepEqual(journal.entries, entries);
+  assert.equal(keyboard.state().key, null); await keyboard.close();
+});
 test("KDE never takes over a journalled live owner", async () => {
   const { bus, journal, keyboard } = await fixture(); bus.live.add(":1.90");
   journal.entries = [{ component: `io.github.whisperfree.dev.trigger.${randomUUID().replaceAll("-", "")}`, connection: ":1.90" }];

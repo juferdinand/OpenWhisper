@@ -297,6 +297,8 @@ async function start(): Promise<void> {
   const shortcutAction = (command: "enable" | "configure" | "clear" | "cancel"): Promise<void> => action(async () => {
     if (!platformHost || ((recording.busy || recording.recoveryAvailable) && command !== "cancel")) throw new Error("Shortcut setup is unavailable.");
     if (command === "enable" && shortcut.nativeAvailable) {
+      await platformHost.prepareKeyCapture();
+      if (shutdownInProgress || !window?.isFocused()) throw new Error("Shortcut setup is unavailable.");
       keyCapture = new KdeKeyCapture(); contents.setIgnoreMenuShortcuts(true); message = ""; notify(); return;
     }
     if (command === "cancel" && keyCapture) { keyCapture = undefined; contents.setIgnoreMenuShortcuts(false); notify(); return; }

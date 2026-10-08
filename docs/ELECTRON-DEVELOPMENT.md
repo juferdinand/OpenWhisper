@@ -86,8 +86,11 @@ are refused. Registration is session-only and begins after explicit setup, with
 the selected profile saved privately. A saved Dev profile does not bind on startup.
 Modifier-only keys use toggle mode; direct mouse support is not yet ported. A private
 recovery journal precedes registration and only dead owners can be recovered.
+Explicit setup recovers a crashed session action before asking for the next key,
+so KDE cannot consume that key first. Startup itself leaves the journal untouched.
 **Remove trigger** releases the owned action. The normal stock KDE F8 setup,
-toggle dictation and held-key/GUI cancellation paths now have owned runtime evidence.
+toggle dictation, held-key/GUI cancellation, Quit with an active binding and
+same-profile crash recovery paths have owned runtime evidence.
 
 On other desktops, **Set trigger** creates a GlobalShortcuts portal session. Setup
 opens only after an explicit click; no global binding is registered on Dev startup.

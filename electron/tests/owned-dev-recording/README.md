@@ -55,5 +55,15 @@ keeping the 256-task limit. Before bounding rendering threads, the stock desktop
 exhausted that cap and the speech helper died during startup. Those failures remain
 retained. The portal still returns no assigned binding; KGlobalAccel supplies the
 regular keyboard path. This is owned nested-compositor evidence, not physical
-hardware coverage. Active-binding Quit, crash recovery, advanced triggers and
-automatic paste remain separate checks. See [the retained evidence](../../../docs/ELECTRON-DEV-EVIDENCE.md).
+hardware coverage. Advanced triggers and automatic paste remain separate checks.
+
+Use `--stock-kde-lifecycle` instead of `--stock-kde` for the narrowly selected
+active-binding Quit and crash-recovery case. It opens the same normal application
+three times with one private profile: Quit while F8 is bound, restart without
+automatic binding, explicitly bind and SIGKILL only the original owned main,
+then restart and explicitly recover a fresh working F8 binding. It reads actual
+KGlobalAccel key availability and original D-Bus owner loss, observes all three
+original main closes and finishes with Quit while the recovered binding is active.
+This mode skips recognition/clipboard and labels its result accordingly. It
+retains source/payload hashes, sandbox/resource and exact namespace cleanup checks.
+See [the retained evidence](../../../docs/ELECTRON-DEV-EVIDENCE.md).

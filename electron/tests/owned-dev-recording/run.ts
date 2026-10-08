@@ -13,7 +13,8 @@ import { waitForOriginalCommandClose } from "../owned-supervisor/run.js";
 const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const args = process.argv.slice(2);
 const absolute = z.string().min(1).max(4096).refine((path) => path === resolve(path) && !path.includes("\0"));
-const stockKde = args[6] === "--stock-kde";
+const kdeLifecycle = args[6] === "--stock-kde-lifecycle";
+const stockKde = args[6] === "--stock-kde" || kdeLifecycle;
 if (args.length !== (stockKde ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
     || process.platform !== "linux" || process.arch !== "x64" || process.getuid?.() === 0) throw new Error("INVALID_EXECUTION");
 const output = absolute.parse(args[1]), planning = absolute.parse(args[3]), fixtures = absolute.parse(args[5]);
@@ -163,14 +164,16 @@ try {
   await required(["exec", "--user", "1000:1000", container, "/usr/bin/chmod", "-R", "a-w", "/payload"]);
   // Bound software rendering threads in the owned desktop, not application
   // inference. Keep the same process cap and genuine compositor/portal path.
-  const command = stockKde ? ["OPENWHISPER_STOCK_KDE=1", "KWIN_COMPOSE=Q", "LP_NUM_THREADS=2", "/usr/bin/python3", "/payload/run-owned-desktop.py", "--session", "kde-wayland",
+  const command = stockKde ? ["OPENWHISPER_STOCK_KDE=1", ...(kdeLifecycle ? ["OPENWHISPER_KDE_LIFECYCLE=1"] : []), "KWIN_COMPOSE=Q", "LP_NUM_THREADS=2", "/usr/bin/python3", "/payload/run-owned-desktop.py", "--session", "kde-wayland",
     "--output", "/tmp/owned-desktop", "--timeout", "180", "--", "/payload/node", "/payload/driver.mjs"]
     : ["/opt/node/bin/node", "/payload/driver.mjs"];
   const observed = await docker(["exec", "--user", "1000:1000", container, "/usr/bin/env", "-i", "PATH=/opt/node/bin:/usr/bin:/bin", "LANG=C.UTF-8",
     "OPENWHISPER_OWNED_DEV_RECORDING=1", ...command], stockKde ? 240_000 : 210_000);
   if (stockKde) await required(["cp", `${container}:/tmp/owned-desktop`, join(output, "owned-desktop")]);
   await required(["cp", `${container}:/evidence/.`, output]); assert.equal(observed.code, 0); assert.equal(observed.closureObserved, true);
-  z.object({ status: z.literal("PASS"), clipboardConfirmed: z.literal(true), recoveryRemoved: z.literal(true), nativeInMain: z.literal(false) })
+  (kdeLifecycle ? z.object({ status: z.literal("PASS"), activeBindingQuit: z.literal(true), crashRecovery: z.literal(true),
+    originalApplicationCloses: z.array(z.object({ closed: z.literal(true) })).length(3) })
+    : z.object({ status: z.literal("PASS"), clipboardConfirmed: z.literal(true), recoveryRemoved: z.literal(true), nativeInMain: z.literal(false) }))
     .parse(JSON.parse(await readFile(join(output, "result.json"), "utf8")));
   z.object({ status: z.literal("PASS"), appClosed: z.literal(true), serverClosesObserved: z.literal(true) })
     .parse(JSON.parse(await readFile(join(output, "lifecycle.json"), "utf8")));

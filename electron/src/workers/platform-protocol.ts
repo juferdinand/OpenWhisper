@@ -14,6 +14,7 @@ export const platformRequestSchema = z.discriminatedUnion("command", [
   z.strictObject({ ...envelope, command: z.literal("status") }),
   z.strictObject({ ...envelope, command: z.literal("shortcut"), action: z.enum(["enable", "configure", "clear", "cancel", "mode"]), hold: z.boolean() }),
   z.strictObject({ ...envelope, command: z.literal("bind-key"), key: kdeKeySchema, hold: z.boolean() }),
+  z.strictObject({ ...envelope, command: z.literal("prepare-key") }),
   z.strictObject({ ...envelope, command: z.literal("shutdown") }),
 ]);
 export const platformReadySchema = z.strictObject({ version: z.literal(1), type: z.literal("ready") });
@@ -24,6 +25,7 @@ export const platformReplySchema = z.discriminatedUnion("ok", [
     z.strictObject({ command: z.literal("status"), status: controlStatusSchema }),
     z.strictObject({ command: z.literal("shortcut"), state: portalShortcutStateSchema }),
     z.strictObject({ command: z.literal("bind-key"), state: portalShortcutStateSchema }),
+    z.strictObject({ command: z.literal("prepare-key"), state: portalShortcutStateSchema }),
     z.strictObject({ command: z.literal("shutdown") }),
   ]) }),
   z.strictObject({ ...envelope, ok: z.literal(false), code: z.enum(["UNAVAILABLE", "BUSY", "INVALID_FRAME", "TEARDOWN_FAILED"]) }),
