@@ -8,7 +8,7 @@ import { Worker } from "node:worker_threads";
 import { z } from "zod";
 import { loadOwnedMacRetirementProbe, OwnedMacRetirementProbe } from "../../src/services/macos-process-retirement.js";
 import type { MacProbeNative, MacTrustedUtility } from "../../src/services/macos-process-retirement.js";
-import { modeSchema, nonceReplySchema, probeStateSchema, readySchema, resultSchema, sdkSchema } from "./contracts.js";
+import { completionOrder, modeSchema, nonceReplySchema, probeStateSchema, readySchema, resultSchema, sdkSchema, WorkerFrames } from "./contracts.js";
 import type { ProbeResult } from "./contracts.js";
 
 // Install categorical failure handling before the first awaited filesystem
@@ -66,22 +66,24 @@ async function run(root: string, distribution: string): Promise<void> {
   type CaseName = ProbeResult["cases"][number]["name"] | "synthetic-environment-cleanup";
   type Stage = "spawn" | "bind" | "retire" | "kill" | "kill-returned" | "post-kill-observe" | "wait-reap" | "exit" | "close" |
     "worker-sdk-before" | "worker-load" | "worker-barrier" | "worker-terminate" | "worker-after-terminate" | "worker-sdk-read" |
-    "worker-assert-cleanup" | "worker-assert-suppressed" | "worker-assert-disposal" | "worker-assert-reservation";
+    "worker-assert-cleanup" | "worker-assert-completion-order" | "worker-assert-frames" | "worker-assert-disposal" | "worker-assert-reservation";
   let checkpoint: Readonly<{ case: CaseName; stage: Stage; configuredHandler: "default" | "delayed" | "ignore";
     killReturnedMilliseconds: number | null; helperExitObserved: boolean | null; observedLevel: "running" | "non-running" | "reaped" | null }> | undefined;
   const checkpoints: NonNullable<typeof checkpoint>[] = [];
   type WorkerFailure = "WORKER_LOAD_FAILED" | "WORKER_ERROR" | "WORKER_EXIT_BEFORE_BARRIER" | "WORKER_REPLY_INVALID" |
-    "WORKER_TERMINATE_FAILED" | "WORKER_SDK_FAILED" | "WORKER_ASSERTION_FAILED";
+    "WORKER_TERMINATE_FAILED" | "WORKER_SDK_FAILED" | "WORKER_ASSERTION_FAILED" | "WORKER_LATE_REPLY";
   let workerFailure: WorkerFailure | undefined, workerBefore: z.infer<typeof sdkSchema> | undefined, workerAfter: z.infer<typeof sdkSchema> | undefined;
   let workerBarrierState: z.infer<typeof probeStateSchema> | undefined;
   let workerBarrierObserved = false, workerExitObserved = false, workerTerminationRequested = false;
   let workerTerminateMilliseconds: number | undefined;
+  const workerFrames = new WorkerFrames();
   const workerDiagnostic = async (): Promise<void> => {
     if (checkpoint?.case !== "synthetic-environment-cleanup") return;
     await writeFile(join(root, "worker-state.json"), JSON.stringify({ stage: checkpoint.stage, code: workerFailure ?? null,
       before: workerBefore ?? null, after: workerAfter ?? null, barrierObserved: workerBarrierObserved, exitObserved: workerExitObserved,
       terminationRequested: workerTerminationRequested, terminateMilliseconds: workerTerminateMilliseconds ?? null,
-      syntheticOnly: true, barrierState: workerBarrierState ?? null }), { mode: 0o600 });
+      syntheticOnly: true, barrierState: workerBarrierState ?? null, framesObserved: workerFrames.frameCount,
+      lateFramesObserved: workerFrames.lateFrames, frameInvalid: workerFrames.invalid }), { mode: 0o600 });
   };
   const record = async (caseName: CaseName, stage: Stage, handler: "default" | "delayed" | "ignore" = "default",
     values: Readonly<{ killReturnedMilliseconds?: number; helperExitObserved?: boolean; observedLevel?: "running" | "non-running" | "reaped" }> = {}): Promise<void> => {
@@ -218,16 +220,23 @@ async function run(root: string, distribution: string): Promise<void> {
     await record("synthetic-environment-cleanup", "worker-load");
     worker = new Worker(join(root, "worker.mjs"), { workerData: { binding: join(distribution, "native/openwhisper_macos_retirement_probe.node") } });
     const barrier = await bounded(new Promise<unknown>((accept, reject) => {
-      worker?.once("message", accept);
-      worker?.once("error", () => { workerFailure = "WORKER_ERROR"; reject(new Error("PROBE_FAILED")); });
+      // Keep this bounded observer through exit and counter validation. Node's
+      // pinned Worker contract emits every sent message before its exit event.
+      worker?.on("message", (message: unknown) => {
+        const kind = workerFrames.receive(message);
+        if (kind === "barrier") accept(message);
+        else { workerFailure = kind === "late" ? "WORKER_LATE_REPLY" : "WORKER_REPLY_INVALID"; reject(new Error("PROBE_FAILED")); }
+      });
+      worker?.on("error", () => { workerFrames.invalidate(); workerFailure = "WORKER_ERROR"; reject(new Error("PROBE_FAILED")); });
+      worker?.on("messageerror", () => { workerFrames.invalidate(); workerFailure = "WORKER_REPLY_INVALID"; reject(new Error("PROBE_FAILED")); });
       worker?.once("exit", () => {
         workerExitObserved = true;
-        if (!workerTerminationRequested) workerFailure = "WORKER_EXIT_BEFORE_BARRIER";
+        if (!workerTerminationRequested) { workerFrames.invalidate(); workerFailure = "WORKER_EXIT_BEFORE_BARRIER"; }
         reject(new Error("PROBE_FAILED"));
       });
     }));
     workerFailure = "WORKER_REPLY_INVALID";
-    workerBarrierState = z.strictObject({ kind: z.literal("barrier-entered"), state: probeStateSchema }).parse(barrier).state;
+    assert.ok(barrier); workerBarrierState = workerFrames.assertClean();
     workerBarrierObserved = true;
     await record("synthetic-environment-cleanup", "worker-barrier"); await workerDiagnostic();
     workerFailure = "WORKER_TERMINATE_FAILED";
@@ -242,8 +251,11 @@ async function run(root: string, distribution: string): Promise<void> {
     workerFailure = "WORKER_ASSERTION_FAILED";
     await record("synthetic-environment-cleanup", "worker-assert-cleanup");
     assert.equal(after.environmentCleanups, before.environmentCleanups + 1);
-    await record("synthetic-environment-cleanup", "worker-assert-suppressed");
-    assert.equal(after.suppressedCompletions, before.suppressedCompletions + 1);
+    workerFailure = workerFrames.lateFrames ? "WORKER_LATE_REPLY" : workerFrames.invalid ? "WORKER_REPLY_INVALID" : "WORKER_ASSERTION_FAILED";
+    await record("synthetic-environment-cleanup", "worker-assert-frames");
+    workerFrames.assertClean(); assert.equal(workerExitObserved, true);
+    await record("synthetic-environment-cleanup", "worker-assert-completion-order");
+    const observedOrder = completionOrder(before, after, workerFrames.lateFrames);
     await record("synthetic-environment-cleanup", "worker-assert-disposal");
     assert.equal(after.totalDisposals, before.totalDisposals + 1);
     await record("synthetic-environment-cleanup", "worker-assert-reservation");
@@ -251,8 +263,10 @@ async function run(root: string, distribution: string): Promise<void> {
     workerFailure = undefined; await workerDiagnostic();
     const result = resultSchema.parse({ fixture: "macos-retirement-probe", architecture: process.arch, sdk: after, cases,
       runtime: { node: process.versions.node, electron: process.versions.electron },
-      workerCleanup: { syntheticOnly: true, kernelQueries: 0, watchAllocations: 0, barrierEntered: true, workerExitObserved: true,
-        environmentCleanupObserved: true, javascriptSettlementSuppressed: true, disposalConfirmed: true, reservedAfterDisposal: 0,
+      workerCleanup: { syntheticOnly: true, kernelQueries: workerBarrierState.kernelQueries, watchAllocations: workerBarrierState.watchAllocations,
+        barrierEntered: workerBarrierState.barrierEntered, workerExitObserved,
+        environmentCleanupObserved: true, completionOrder: observedOrder, lateJavaScriptReplyObserved: false, workerFramesObserved: workerFrames.frameCount,
+        queryCompletionsObserved: after.queryCompletions - before.queryCompletions, disposalConfirmed: true, reservedAfterDisposal: 0,
         terminateMilliseconds: milliseconds, actualKernelCancellationBound: false },
       rendererCreated: webContents.getAllWebContents().length !== 0, microphoneOperations: 0, permissionOperations: 0,
       productionFactoriesChanged: false, productionArchitectureSelected: false, deterministicZombieExercised: false });

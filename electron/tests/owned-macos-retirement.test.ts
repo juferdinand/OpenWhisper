@@ -9,11 +9,54 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { buildMacRetirementFixture } from "./owned-macos-retirement/build-probe.js";
-import { resultSchema } from "./owned-macos-retirement/contracts.js";
+import { completionOrder, resultSchema, sdkSchema, WorkerFrames } from "./owned-macos-retirement/contracts.js";
 
 const enabled = process.env["OPENWHISPER_OWNED_MAC_RETIREMENT_TEST"] === "1";
 const sourceNames = ["src/services/macos-process-retirement.ts", "tests/owned-macos-retirement.test.ts", "tests/owned-macos-retirement/main.ts",
   "tests/owned-macos-retirement/entry.ts", "tests/owned-macos-retirement/worker.ts", "tests/owned-macos-retirement/contracts.ts", "tests/owned-macos-retirement/build-probe.ts"];
+const sdkBefore = sdkSchema.parse({ bsdInfoBytes: 136, keventBytes: 32, zombieLookupArgument: 1, napiVersion: 8, probeOnly: true,
+  reserved: 0, environmentCleanups: 0, suppressedCompletions: 0, totalDisposals: 8, queryCompletions: 9, completionsBeforeCleanup: 9 });
+const validBarrier = { kind: "barrier-entered", state: { busy: true, closing: false, closed: false, descriptorOpen: false,
+  barrierEntered: true, exitSeen: false, zombieSeen: false, queries: 0, disposals: 0, kernelQueries: 0, watchAllocations: 0, synthetic: true, reserved: 1 } };
+
+test("synthetic cleanup certificate accepts measured drain-before-hook and hook-flag completion orders", () => {
+  const clean = { ...sdkBefore, environmentCleanups: 1, totalDisposals: 9, queryCompletions: 10 };
+  assert.equal(completionOrder(sdkBefore, { ...clean, completionsBeforeCleanup: 10 }, 0), "drain-before-hook");
+  assert.equal(completionOrder(sdkBefore, { ...clean, suppressedCompletions: 1 }, 0), "hook-flag-suppressed");
+});
+test("missing duplicate mixed or resource-incomplete synthetic cleanup cannot issue a certificate", () => {
+  const clean = { ...sdkBefore, environmentCleanups: 1, totalDisposals: 9, queryCompletions: 10, completionsBeforeCleanup: 10 };
+  for (const patch of [{ queryCompletions: 9 }, { queryCompletions: 11 }, { completionsBeforeCleanup: 9 },
+    { suppressedCompletions: 1 }, { completionsBeforeCleanup: 8 }, { environmentCleanups: 0 }, { totalDisposals: 8 }, { reserved: 1 }])
+    assert.throws(() => completionOrder(sdkBefore, { ...clean, ...patch }, 0));
+  assert.throws(() => completionOrder(sdkBefore, clean, 1));
+});
+test("continuous Worker observer refuses late success failure duplicate and malformed frames", () => {
+  const clean = new WorkerFrames(); assert.equal(clean.receive(validBarrier), "barrier"); assert.equal(clean.assertClean().kernelQueries, 0);
+  for (const late of [{ kind: "unexpected-settlement" }, { kind: "synthetic-failure" }, validBarrier, null, { arbitrary: "inert" }]) {
+    const observer = new WorkerFrames(); observer.receive(validBarrier); assert.equal(observer.receive(late), "late");
+    assert.equal(observer.lateFrames, 1); assert.throws(() => observer.assertClean());
+  }
+});
+test("Worker observer cannot accept target-bearing malformed or absent barriers and bounds late metadata", () => {
+  assert.throws(() => new WorkerFrames().assertClean());
+  for (const patch of [{ kernelQueries: 1 }, { watchAllocations: 1 }, { synthetic: false }, { descriptorOpen: true }, { barrierEntered: false }, { reserved: 0 }]) {
+    const observer = new WorkerFrames(); assert.equal(observer.receive({ ...validBarrier, state: { ...validBarrier.state, ...patch } }), "invalid");
+    observer.receive(validBarrier); assert.throws(() => observer.assertClean());
+  }
+  const errored = new WorkerFrames(); errored.receive(validBarrier); errored.invalidate(); assert.throws(() => errored.assertClean());
+  const flood = new WorkerFrames(); flood.receive(validBarrier); for (let i = 0; i < 100; i++) flood.receive(null);
+  assert.equal(flood.frameCount, 16); assert.equal(flood.lateFrames, 16); assert.throws(() => flood.assertClean());
+});
+test("unexpected pre-termination Worker exit stays failed after a valid barrier and otherwise complete native cleanup", () => {
+  const observer = new WorkerFrames(); observer.receive(validBarrier);
+  // The main exit listener invalidates this continuing observer before a
+  // later stage can overwrite its categorical diagnostic label.
+  observer.invalidate();
+  const clean = { ...sdkBefore, environmentCleanups: 1, totalDisposals: 9, queryCompletions: 10, completionsBeforeCleanup: 10 };
+  assert.throws(() => { observer.assertClean(); completionOrder(sdkBefore, clean, observer.lateFrames); });
+  assert.equal(observer.invalid, true); assert.equal(observer.lateFrames, 0);
+});
 async function retain(root: string, project: string): Promise<void> {
   const evidence = process.env["OPENWHISPER_MAC_RETIREMENT_EVIDENCE"]; if (!evidence) return;
   const inside = relative(join(project, ".local"), evidence);

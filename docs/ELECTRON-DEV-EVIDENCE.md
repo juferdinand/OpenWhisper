@@ -479,3 +479,28 @@ descriptor's original dev/inode and a different replacement identity. It does no
 infer pathname removal from a platform-specific link count. Catalog source and
 Apple native assertions remain unchanged; the earlier Linux observation is retained
 at its exact historical test source.
+
+### Continuing speech allocation and measured Apple cleanup order
+
+A host-only supervisor now privately owns one allocation for the lifetime of the
+main module. Its 47 inert tests cover captured model leases, manual CPU without GPU
+probing, fixed Vulkan selection, eligible pre-inference fallback, two original-channel
+nonces around matching OS birth, and complete retirement/read closure before reuse.
+Integrity or uncertain cleanup remains terminal across jobs; deadlines retain original
+late operations. An admitted hung helper can be terminated through its original handle
+after a fresh matching kernel observation without requiring responsive helper JavaScript.
+An unadmitted helper still requires fresh channel confirmation. These are policy tests;
+the existing speech entry/factory remains ineligible and is not wired to this supervisor.
+
+At `ad87bd1`, both owned Apple jobs again completed their seven child phases but
+failed the separate synthetic Worker assertion: environment cleanup and disposal each
+increased once, while the addon-hook suppression counter did not increase. Pinned
+Node24.21 source drains pending native work before the cleanup-hook queue. New native
+counters measure completion before versus after that addon hook, without inferring a
+unique shutdown cause from a Node-API exception status. The certificate requires one
+completion, one measured path, one cleanup/disposal and zero outstanding reservation.
+A continuous bounded Worker observer refuses malformed, duplicate or late frames and
+unexpected exit before requested termination. Nineteen focused inert checks pass; fresh
+native compile/runtime evidence on both Mac architectures is still required. Neither
+the old failure nor this source correction establishes complete Apple retirement,
+actual kernel cancellation, production Metal selection or signed helper loading.

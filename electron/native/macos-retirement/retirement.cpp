@@ -24,6 +24,7 @@ namespace {
 constexpr napi_type_tag tag{0x1470b2f58ba847efULL, 0xa61e94598de70c35ULL};
 std::atomic<unsigned> reserved{0};
 std::atomic<unsigned> environmentCleanups{0}, suppressedCompletions{0}, totalDisposals{0};
+std::atomic<unsigned> queryCompletions{0}, completionsBeforeCleanup{0};
 enum class Kind { Record, Absent, Failure };
 struct Snapshot {
   Kind kind = Kind::Failure;
@@ -213,7 +214,11 @@ void execute(napi_env, void* data) {
 void complete(napi_env env, napi_status status, void* data) {
   std::unique_ptr<Work> job(static_cast<Work*>(data));
   auto value = job->owner;
+  queryCompletions.fetch_add(1);
   if (!value->envClosing.load()) {
+    // Node may drain native work before this addon's cleanup hook. Count the
+    // observed order without inferring whether an API8 refusal is shutdown.
+    completionsBeforeCleanup.fetch_add(1);
     try {
       if (status != napi_ok || job->failure) reject(env, job->deferred);
       else {
@@ -416,6 +421,8 @@ napi_value sdk(napi_env env, napi_callback_info) {
     put(env, out, "probeOnly", boolean(env, true)); put(env, out, "reserved", number(env, reserved.load()));
     put(env, out, "environmentCleanups", number(env, environmentCleanups.load()));
     put(env, out, "suppressedCompletions", number(env, suppressedCompletions.load()));
+    put(env, out, "queryCompletions", number(env, queryCompletions.load()));
+    put(env, out, "completionsBeforeCleanup", number(env, completionsBeforeCleanup.load()));
     put(env, out, "totalDisposals", number(env, totalDisposals.load())); return out;
   } catch (...) { return fail(env); }
 }
