@@ -12,6 +12,10 @@ type Refusal = "Denied" | "Busy" | "Expired" | "InvalidRequest" | "Unavailable";
 
 /** Each lease owns only its acquisition. Stop resolves after closure/sample fencing. */
 export interface ControlCaptureLease { stop(): Promise<void>; cancel(): Promise<void> }
+/** A different immutable recording owner proves this lease has already ended. */
+export class ControlCaptureLeaseError extends Error {
+  constructor() { super("Recording owner changed."); this.name = "ControlCaptureLeaseError"; }
+}
 export interface ControlCapturePort {
   status(): ControlStatus | Promise<ControlStatus>;
   start(signal: AbortSignal): Promise<ControlCaptureLease>;

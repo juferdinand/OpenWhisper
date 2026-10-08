@@ -30,6 +30,8 @@ import { saveDevelopmentTranscript } from "../services/development-transcripts.j
 import { DevelopmentPlatformHost } from "./development-platform-host.js";
 import { createRecordingControlPort } from "./recording-control.js";
 import { portalShortcutStateSchema } from "../platforms/linux/shared/portal-shortcuts.js";
+import { KdeKeyCapture } from "../platforms/linux/kde/key-capture.js";
+import { modifierOnly } from "../platforms/linux/kde/keyboard.js";
 
 const distribution = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let window: BrowserWindow | undefined;
@@ -116,6 +118,7 @@ async function start(): Promise<void> {
   let microphoneAllowed = macRecording && systemPreferences.getMediaAccessStatus("microphone") === "granted";
   let platformHost: DevelopmentPlatformHost | undefined;
   let shortcut = portalShortcutStateSchema.parse({ available: false, configuring: false, label: null, result: "NONE" });
+  let keyCapture: KdeKeyCapture | undefined;
   if (descriptor) {
     host = await DevelopmentRecordingHost.open(resolve(distribution, ".."), descriptor, inventory, {
       recoveryPath: profile.paths.recovery,
@@ -175,10 +178,10 @@ async function start(): Promise<void> {
     installed: installed.map((item) => item.model.id), microphones: sources.map((source) => source.id),
     session: process.env["XDG_SESSION_TYPE"] ?? "unknown",
     desktop: process.env["XDG_CURRENT_DESKTOP"] ?? "unknown", clipboard_available: descriptor !== null,
-    shortcut_portal: shortcut.available, paste_portal: false, shortcut: shortcut.label, native_shortcuts: false,
+    shortcut_portal: shortcut.available, paste_portal: false, shortcut: shortcut.label, native_shortcuts: shortcut.nativeAvailable,
     shortcut_configuring: shortcut.configuring,
     native_x11: false, native_paste: false, native_mouse: false, native_middle_mouse: false,
-    recording_shortcut: false, paste_ready: false, gpu_available: false, gpu_supported: false,
+    recording_shortcut: !!keyCapture, paste_ready: false, gpu_available: false, gpu_supported: false,
     gpu_device: null, gpu_fallback: false, recovery_available: recording.recoveryAvailable, overlay_available: false,
     download, progress: download ? downloadProgress : inferenceProgress,
     elapsed: Math.min(Number.MAX_SAFE_INTEGER, Math.floor(recording.elapsedMs / 1000)), level: recording.level,
@@ -265,27 +268,58 @@ async function start(): Promise<void> {
       platformHost = await DevelopmentPlatformHost.open({
         descriptor: { root: resolve(distribution, ".."), ...descriptor.platformServices },
         address: process.env.DBUS_SESSION_BUS_ADDRESS ?? "",
+        kdeLeasePath: join(profile.paths.settings, "kde-keyboard-lease.json"),
         shortcuts: (value) => {
           shortcut = value;
           const messages = { NONE: "", ENABLED: "Global shortcut enabled. Your desktop controls its key binding.",
             UNASSIGNED: "No shortcut assigned. Choose a key combination in your desktop's shortcut settings.",
             CANCELLED: "Shortcut setup was cancelled. Window recording remains usable.",
             ENDED: "Shortcut session ended. Enable it again in Settings.",
+            CONFLICT: "This trigger conflicts with an existing desktop shortcut. Choose another trigger.",
             CONFIGURE_UNAVAILABLE: "Change this shortcut in your desktop's settings. Its current binding remains active.",
             FAILED: "Shortcut setup or recording failed. Window recording remains usable." };
-          message = messages[value.result]; notify();
+          message = value.nativeKey !== null && value.result === "ENABLED" ? "" : messages[value.result];
+          const savedTrigger = preferences.snapshot().native_trigger;
+          if (value.nativeKey !== null && value.result === "ENABLED" &&
+              (savedTrigger?.kind !== "key" || savedTrigger.key !== value.nativeKey)) {
+            void preferences.saveNativeTrigger({ kind: "key", key: value.nativeKey }).then(notify,
+              () => { message = "The action could not be completed. Stopped recordings are kept for retry."; notify(); });
+          }
+          notify();
         },
         capture: createRecordingControlPort({ owner: host, snapshot: () => recording, configure: configureRecording,
           serialize: withRecordingControl,
           cleanupSerialize: <T>(operation: () => Promise<T>) => withRecordingControl(operation, true),
-          available: () => !shutdownInProgress && !!audioServer && installed.some((item) => item.model.id === preferences.snapshot().model) }),
+          available: () => !shutdownInProgress && !keyCapture && !!audioServer && installed.some((item) => item.model.id === preferences.snapshot().model) }),
       }, new AbortController().signal);
     } catch { message = "Desktop command control is not available. Window recording remains usable."; }
   }
   const shortcutAction = (command: "enable" | "configure" | "clear" | "cancel"): Promise<void> => action(async () => {
     if (!platformHost || ((recording.busy || recording.recoveryAvailable) && command !== "cancel")) throw new Error("Shortcut setup is unavailable.");
+    if (command === "enable" && shortcut.nativeAvailable) {
+      keyCapture = new KdeKeyCapture(); contents.setIgnoreMenuShortcuts(true); message = ""; notify(); return;
+    }
+    if (command === "cancel" && keyCapture) { keyCapture = undefined; contents.setIgnoreMenuShortcuts(false); notify(); return; }
+    keyCapture = undefined; contents.setIgnoreMenuShortcuts(false);
     await platformHost.shortcut(command, preferences.snapshot().hold_to_record);
+    if (command === "clear") await preferences.saveNativeTrigger(null);
   });
+  contents.on("before-input-event", (event, input) => {
+    if (!keyCapture) return;
+    // Let key-down reach Chromium's key tracking; the shared UI suppresses its
+    // default actions while capturing. Consume the matching release in main.
+    if (input.type === "keyUp" || input.key === "Escape") event.preventDefault();
+    const result = keyCapture.consume(input);
+    if (result.kind === "pending") return;
+    keyCapture = undefined; contents.setIgnoreMenuShortcuts(false);
+    if (result.kind === "key") {
+      if (preferences.snapshot().hold_to_record && modifierOnly(result.key)) {
+        message = "Modifier-only triggers use toggle mode. Use a regular key or mouse button for push to talk."; notify(); return;
+      }
+      void action(async () => { await platformHost?.bindKey(result.key, preferences.snapshot().hold_to_record); });
+    } else { notify(); }
+  });
+  window.on("blur", () => { if (keyCapture) { keyCapture = undefined; contents.setIgnoreMenuShortcuts(false); notify(); } });
   app.on("before-quit", (event) => {
     if (shutdownComplete) return;
     event.preventDefault();
@@ -294,6 +328,7 @@ async function start(): Promise<void> {
       message = "Retry or discard the stopped recording before quitting. Its audio is kept in memory."; notify(); return;
     }
     shutdownInProgress = true; cancelRequested = true; processing.close(); downloadAbort?.abort();
+    keyCapture = undefined; contents.setIgnoreMenuShortcuts(false);
     void (async () => { await recordingOperation?.catch(() => {}); await downloading; await downloads.finalize();
       await platformHost?.close(); await host?.close(); })().then(() => {
       shutdownComplete = true; app.quit();
@@ -316,6 +351,9 @@ async function start(): Promise<void> {
         }
         if (changes.output && changes.output !== "clipboard") throw new Error("The recording Dev build supports clipboard output.");
         if (changes.gpu) throw new Error("The recording Dev build uses CPU inference.");
+        if (changes.hold_to_record && shortcut.nativeKey !== null && modifierOnly(shortcut.nativeKey)) {
+          throw new Error("Modifier-only KDE triggers use toggle mode.");
+        }
         await preferences.patch(changes);
         if (changes.hold_to_record !== undefined) await platformHost?.shortcut("mode", changes.hold_to_record);
         if (["model", "language", "microphone", "vocabulary", "snippets", "gpu"].some((key) => Object.hasOwn(changes, key))) configured = false;

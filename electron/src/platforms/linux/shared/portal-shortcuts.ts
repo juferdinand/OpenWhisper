@@ -10,7 +10,8 @@ const portalName = "org.freedesktop.portal.Desktop";
 const shortcuts = "org.freedesktop.portal.GlobalShortcuts";
 const daemon = "org.freedesktop.DBus";
 export const portalShortcutStateSchema = z.strictObject({ available: z.boolean(), configuring: z.boolean(),
-  label: z.string().max(1024).nullable(), result: z.enum(["NONE", "ENABLED", "UNASSIGNED", "CANCELLED", "ENDED", "FAILED", "CONFIGURE_UNAVAILABLE"]) });
+  label: z.string().max(1024).nullable(), nativeAvailable: z.boolean().default(false), nativeKey: z.int().nullable().default(null),
+  result: z.enum(["NONE", "ENABLED", "UNASSIGNED", "CANCELLED", "ENDED", "FAILED", "CONFLICT", "CONFIGURE_UNAVAILABLE"]) });
 export type PortalShortcutState = z.infer<typeof portalShortcutStateSchema>;
 export interface ShortcutBus {
   readonly uniqueName: string; readonly generation: string; readonly isClosed: boolean;

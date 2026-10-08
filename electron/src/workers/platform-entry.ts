@@ -4,7 +4,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { verifyDevelopmentLinuxBusArtifact } from "../services/development-artifact.js";
-import { PortalShortcuts, type PortalShortcutState } from "../platforms/linux/shared/portal-shortcuts.js";
+import type { PortalShortcutState } from "../platforms/linux/shared/portal-shortcuts.js";
+import { DesktopShortcuts } from "../platforms/linux/shared/desktop-shortcuts.js";
+import { kdeJournalSchema } from "../platforms/linux/kde/keyboard.js";
+import { PrivateStateStore } from "../services/private-state.js";
 import { boundPlatformFrame, platformRequestSchema, platformCaptureReplySchema, PlatformCaptureClient,
   type PlatformReply, type PlatformRequest, type PlatformCaptureRequest } from "./platform-protocol.js";
 
@@ -31,7 +34,7 @@ let closing = false;
 let fatal = false;
 let capture: ControlCapturePort = unavailable;
 let captureClient: PlatformCaptureClient | undefined;
-let shortcuts: PortalShortcuts | undefined;
+let shortcuts: DesktopShortcuts | undefined;
 
 // No bus/native addon is opened until an explicit validated initialize request.
 port.on("message", (message) => {
@@ -65,9 +68,10 @@ port.on("message", (message) => {
           capture = captureClient;
         } else bus = await openLinuxBus(request.address);
         service = await DevControlService.create(bus, capture); generation = bus.generation;
-        if (captureClient) shortcuts = await PortalShortcuts.create(bus, capture, (state) => {
+        const journal = request.kdeLeasePath ? await PrivateStateStore.open(request.kdeLeasePath, kdeJournalSchema, [], 4096) : undefined;
+        if (captureClient) shortcuts = await DesktopShortcuts.create(bus, capture, (state) => {
           port.postMessage({ version: 1, type: "shortcuts", state });
-        });
+        }, journal);
         return { version: 1, id: request.id, ok: true, value: { command: "initialize", generation, captureAvailable: !!captureClient } };
       }
       case "status": return { version: 1, id: request.id, ok: true, value: { command: "status", status: await capture.status() } };
@@ -76,13 +80,20 @@ port.on("message", (message) => {
         shortcuts.command(request.action, request.hold);
         return { version: 1, id: request.id, ok: true, value: { command: "shortcut", state: shortcuts.state() } };
       }
+      case "bind-key": {
+        if (!shortcuts) return { version: 1, id: request.id, ok: false, code: "UNAVAILABLE" };
+        void shortcuts.bind(request.key, request.hold).catch(() => {
+          if (shortcuts) port.postMessage({ version: 1, type: "shortcuts", state: shortcuts.state() });
+        });
+        return { version: 1, id: request.id, ok: true, value: { command: "bind-key", state: shortcuts.state() } };
+      }
       case "shutdown": {
         await shortcuts?.close(); await service?.close(); captureClient?.close();
         return { version: 1, id: request.id, ok: true, value: { command: "shutdown" } };
       }
     }
   })().then((reply) => { port.postMessage(reply); }, (error: unknown) => {
-    if (error instanceof ControlServiceError && error.code === "TEARDOWN_FAILED") { fatal = true; closing = true; }
+    if (closing || error instanceof ControlServiceError && error.code === "TEARDOWN_FAILED") { fatal = true; closing = true; }
     port.postMessage({ version: 1, id: request.id, ok: false, code: closing ? "TEARDOWN_FAILED" : "UNAVAILABLE" });
   }).finally(() => {
     busy = false;

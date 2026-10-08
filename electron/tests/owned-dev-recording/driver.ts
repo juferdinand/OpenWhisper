@@ -119,6 +119,9 @@ async function main(): Promise<void> {
     const desktopFiles = join(env.XDG_DATA_HOME!, "applications"); await mkdir(desktopFiles, { mode: 0o700, recursive: true });
     await writeFile(join(desktopFiles, "io.github.whisperfree.dev.desktop"), "[Desktop Entry]\nType=Application\nName=OpenWhisper Dev\nExec=/payload/app/node_modules/electron/dist/electron /payload/app --dev\n");
     env.QT_QPA_PLATFORM = "wayland";
+    child("/usr/bin/kglobalaccel5", [], env);
+    await until(async () => (await execute("/usr/bin/gdbus", ["call", "--session", "--dest", "org.freedesktop.DBus", "--object-path", "/org/freedesktop/DBus",
+      "--method", "org.freedesktop.DBus.NameHasOwner", "org.kde.kglobalaccel"], { env, timeout: 3000 })).stdout.includes("true"));
     child("/usr/libexec/xdg-permission-store", [], env);
     child("/usr/lib/x86_64-linux-gnu/libexec/xdg-desktop-portal-kde", [], env);
     await until(async () => (await execute("/usr/bin/gdbus", ["call", "--session", "--dest", "org.freedesktop.DBus", "--object-path", "/org/freedesktop/DBus",
@@ -188,6 +191,10 @@ async function main(): Promise<void> {
   })), { mode: 0o600 });
   await expect(page.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev");
   assert.equal(page.url(), "app://openwhisper/index.html");
+  const firstSources = await state();
+  await writeFile(join(evidence, "initial-source-enumeration.json"), JSON.stringify({ count: firstSources.microphones.length,
+    fixturePresent: firstSources.microphones.includes(source) }), { mode: 0o600 });
+  if (!firstSources.microphones.includes(source)) await page.evaluate(() => window.openwhisper?.invoke("refresh_microphones", {}));
   await until(async () => (await state()).microphones.includes(source));
   await checkpoint("initial-state-and-zero-streams");
   const initial = await state(); assert.equal(initial.profile, "development"); assert.equal(initial.recording_available, true);
@@ -231,14 +238,58 @@ async function main(): Promise<void> {
   checks.push("normal main/shared UI/preload; private Tiny inventory; enumeration with zero streams; sandboxed renderer");
   await checkpoint("owned-portal-cancel-and-retry");
   assert.equal((await state()).shortcut_portal, true); assert.equal((await state()).shortcut, null);
+  const stockKey = async (down: boolean) => {
+    assert.equal(stockKde, true); assert.match(env.DISPLAY ?? "", /^:\d+$/u);
+    await execute("/usr/bin/xdotool", [down ? "keydown" : "keyup", "F8"], { env, timeout: 3000 });
+    await delay(60);
+  };
+  const stockPress = async () => { await stockKey(true); await stockKey(false); };
   if (stockKde) {
+    assert.equal((await state()).native_shortcuts, true);
+    await checkpoint("owned-outer-window");
+    const tree = (await execute("/usr/bin/xwininfo", ["-root", "-tree"], { env, timeout: 3000 })).stdout;
+    await writeFile(join(evidence, "owned-outer-windows.txt"), tree, { mode: 0o600 });
+    const windows = [...tree.matchAll(/^\s+(0x[0-9a-f]+)\s+.+\s1100x750[+-]\d+[+-]\d+/gmu)].map((match) => match[1]!);
+    assert.equal(windows.length, 1, "The private outer display must contain exactly one nested KWin surface");
+    await execute("/usr/bin/xdotool", ["windowfocus", "--sync", windows[0]!], { env, timeout: 3000 });
+    assert.ok(tree.includes("Press right control key to grab input"));
+    await execute("/usr/bin/xdotool", ["mousemove", "--window", windows[0]!, "550", "375"], { env, timeout: 3000 });
+    await execute("/usr/bin/xdotool", ["key", "Control_R"], { env, timeout: 3000 });
+    await delay(150);
+    await writeFile(join(evidence, "owned-outer-after-grab.txt"),
+      (await execute("/usr/bin/xwininfo", ["-root", "-tree"], { env, timeout: 3000 })).stdout, { mode: 0o600 });
+    await execute("/usr/bin/xdotool", ["mousemove", "--window", windows[0]!, "550", "35", "click", "1"], { env, timeout: 3000 });
+    await writeFile(join(evidence, "owned-app-focus.json"), JSON.stringify(await application.evaluate(({ BrowserWindow }) =>
+      ({ focused: BrowserWindow.getAllWindows()[0]?.isFocused() }))), { mode: 0o600 });
+    await checkpoint("actual-kde-key-capture");
     await page.locator('[data-portal="enable_shortcut"]').click();
-    await until(async () => !(await state()).shortcut_configuring);
+    await until(async () => !!(await state()).recording_shortcut);
+    await stockPress();
+    const selectedState = await state();
+    await writeFile(join(evidence, "owned-key-capture-state.json"), JSON.stringify({ capturing: selectedState.recording_shortcut,
+      configuring: selectedState.shortcut_configuring, label: selectedState.shortcut, resultMessage: selectedState.message }), { mode: 0o600 });
+    await until(async () => (await state()).shortcut === "F8" && !(await state()).shortcut_configuring);
+    await until(async () => (await state()).preferences.native_trigger?.kind === "key");
+    assert.equal((await state()).status, "idle");
     await page.screenshot({ path: join(evidence, "stock-shortcut.png") });
     const settled = await state();
     await writeFile(join(evidence, "stock-shortcut.json"), JSON.stringify({ available: settled.shortcut_portal,
       label: settled.shortcut, message: settled.message }), { mode: 0o600 });
-    checks.push("ordinary native Wayland Dev UI against installed KDE portal; actual setup response recorded without synthetic activation");
+    checks.push("explicit normal-UI F8 capture from owned outer XTEST; confirmed stock KGlobalAccel binding; no portal signal injection");
+    await page.locator('[data-portal="enable_shortcut"]').click();
+    await until(async () => !!(await state()).recording_shortcut);
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await until(async () => !(await state()).recording_shortcut);
+    assert.equal((await state()).shortcut, "F8");
+    await checkpoint("actual-kde-hold-stale-release");
+    await page.evaluate(() => window.openwhisper?.invoke("save_preferences", { changes: { hold_to_record: true } }));
+    await stockKey(true); await until(async () => (await state()).status === "recording");
+    await page.locator("#cancel").click(); await until(async () => (await state()).status === "idle");
+    await page.locator("#record").click(); await until(async () => (await state()).status === "recording");
+    await stockKey(false); await delay(150); assert.equal((await state()).status, "recording");
+    assert.equal(await control("cancel"), "idle"); await until(async () => (await state()).status === "idle");
+    await page.evaluate(() => window.openwhisper?.invoke("save_preferences", { changes: { hold_to_record: false } }));
+    checks.push("actual stock F8 hold acquisition; GUI Cancel; release cannot stop a later GUI recording; command Cancel");
   } else {
   await portal("PortalMode", "pending"); await page.locator('[data-portal="enable_shortcut"]').click();
   await until(async () => !!(await state()).shortcut_configuring);
@@ -275,7 +326,7 @@ async function main(): Promise<void> {
   assert.deepEqual(await readdir(profile.paths.recovery), []);
   checks.push("private command Start and GUI Cancel; later GUI Start and command Cancel share exact owners");
   await checkpoint("actual-ui-start");
-  if (stockKde) await page.locator("#record").click();
+  if (stockKde) await stockPress();
   else {
     await page.locator('[data-portal="enable_shortcut"]').click(); await until(async () => (await state()).shortcut === "Ctrl+Alt+Space");
     await portal("Press"); await portal("Release");
@@ -292,7 +343,7 @@ async function main(): Promise<void> {
   await execute("/usr/bin/paplay", ["--raw", "--format=float32le", "--rate=48000", "--channels=1", `--device=${sink}`, audioPath], { env, timeout: 30_000, maxBuffer: 1024 });
   await delay(200);
   await checkpoint("actual-ui-stop");
-  if (stockKde) await page.locator("#record").click(); else await portal("Press");
+  if (stockKde) await stockPress(); else await portal("Press");
   await until(async () => {
     const value = await state();
     if (value.status === "error") throw new Error("OWNED_TRANSCRIPTION_FAILED");
@@ -307,10 +358,15 @@ async function main(): Promise<void> {
   assert.equal(sha(await readFile(join(stable, "sentinel"))), stableBefore);
   const maps = await readFile(`/proc/${security.pid}/maps`, "utf8");
   assert.equal(maps.includes("openwhisper_capture.node"), false); assert.equal(maps.includes("openwhisper_speech.node"), false);
-  checks.push(`${stockKde ? "actual UI" : "actual owned portal"} Start/Stop; real CPU Tiny recognition; private clipboard exact readback; history confirmation; recovery removal; native capture/speech absent from main`);
+  checks.push(`${stockKde ? "actual stock KGlobalAccel F8" : "actual owned portal"} Start/Stop; real CPU Tiny recognition; private clipboard exact readback; history confirmation; recovery removal; native capture/speech absent from main`);
   if (stockKde) await page.evaluate(() => window.openwhisper?.invoke("clear_shortcut", {}));
   else await page.locator('[data-portal="clear_shortcut"]').click();
   await until(async () => (await state()).shortcut === null && !(await state()).shortcut_configuring);
+  if (stockKde) {
+    assert.deepEqual(JSON.parse(await readFile(join(profile.paths.settings, "kde-keyboard-lease.json"), "utf8")), []);
+    await stockPress(); await delay(150); assert.equal((await state()).status, "done");
+    checks.push("Remove trigger empties the private recovery journal and actual F8 no longer starts capture");
+  }
   if (!stockKde) assert.match(await portal("PortalStatus"), /uint32 0/u);
   await checkpoint("actual-source-loss-retry");
   await expect(page.locator("#record-label")).toHaveText("Start dictation");
@@ -366,7 +422,7 @@ async function main(): Promise<void> {
     clipboardConfirmed: true, historyConfirmed: true, recoveryRemoved: true, cancelConfirmed: true, retryConfirmed: true, discardConfirmed: true,
     nativeInMain: false, security,
     sourceScope: "owned-generated-PipeWire-Pulse-monitor-only", fixtureSha256: sha(publicSpeech),
-    physicalMicrophone: "NOT_USED", hotkeys: stockKde ? "STOCK_SETUP_ONLY_NO_KEY_EDGES" : "OWNED_SYNTHETIC_PORTAL_SIGNALS_ONLY", portalResourcesClosed: true,
+    physicalMicrophone: "NOT_USED", hotkeys: stockKde ? "OWNED_STOCK_KDE_KGLOBALACCEL_KEY_EDGES" : "OWNED_SYNTHETIC_PORTAL_SIGNALS_ONLY", portalResourcesClosed: true,
     automaticPaste: "NOT_TESTED", gpu: "NOT_TESTED", macos: "NOT_TESTED" }, null, 2), { mode: 0o600 });
   await checkpoint("graceful-normal-quit");
   await application.close(); await appOriginalClose; application = undefined; status = "PASS";

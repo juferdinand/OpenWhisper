@@ -2,10 +2,27 @@ import { test, expect, Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { AppState } from "../../../electron/src/contracts/ui.js";
 
 const catalog = JSON.parse(
   readFileSync(resolve("../models.json"), "utf8"),
 ).models;
+
+test("Linux keyboard-only setup suppresses button defaults and restores normal input after Cancel", async ({ page }) => {
+  await start(page, "linux");
+  await page.evaluate(() => {
+    const host = window as unknown as { testState: AppState; publishState(): void };
+    host.testState.native_shortcuts = true; host.testState.native_mouse = false; host.publishState();
+  });
+  await page.getByRole("button", { name: "General", exact: true }).click();
+  await page.getByRole("button", { name: "Set trigger …", exact: true }).click();
+  await expect(page.getByText("Press and release a keyboard key. Escape cancels.", { exact: true })).toBeVisible();
+  const cancel = page.getByRole("button", { name: "Cancel", exact: true }); await cancel.focus();
+  await page.keyboard.press("Enter");
+  await expect(cancel).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { calls: { command: string }[] }).calls.at(-1)?.command)).toBe("enable_shortcut");
+  await cancel.click(); await expect(cancel).toHaveCount(0);
+});
 
 test("pending desktop consent exposes Cancel and keeps the trigger setup separate from direct input capture", async ({ page }) => {
   await start(page, "linux");

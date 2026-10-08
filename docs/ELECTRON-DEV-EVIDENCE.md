@@ -1,5 +1,45 @@
 # Electron development evidence
 
+The KDE keyboard path passes in **`stock-kde-keyboard-9`** on the pinned Kubuntu
+24.04 / Plasma 5.27 native Wayland runner. The normal app captures F8 during explicit
+setup, confirms the real KGlobalAccel assignment, and uses actual outer-XTEST
+press/release events through the private nested compositor for CPU dictation.
+No synthetic portal signals, process-start interception, or key-event observer is
+used in this final run. The renderer remains sandboxed; audio is exclusively the
+private public-speech fixture. Clipboard/history, GUI/command cancellation,
+source-loss Retry/Discard, binding removal and graceful original Quit pass.
+The journal is empty after Remove and F8 no longer starts capture. Original
+commands and the exact namespace close without forced app termination; task peak
+is 203 of 256, with zero cap rejections and no OOM.
+
+The same run checks a held F8 acquisition, GUI Cancel, a later GUI recording and
+the old key release. That release cannot stop the later recording; command Cancel
+works and subsequent F8 toggle dictation remains usable. Earlier attempt 8 exposed
+a worker-side rejected-promise cache after a guard-only stale Stop. The corrected
+RPC carries `STALE_LEASE` only for a verified immutable owner change and permits
+safe cleanup of that old reference. Invoked native terminal failures remain
+retained and rejected. Regression tests cover both cases through the real main
+lease / worker RPC chain.
+
+Capture commits on release. Attempt 6 observed only key-down when main consumed
+it early; keeping key-down in Chromium's path, suppressing UI defaults during
+setup and consuming the release produces both edges in attempt 7. Attempt 9
+repeats without that observer. Attempts 1/4 retain separate initial enumeration
+and forced-cleanup failures without task exhaustion; their cause remains unproven.
+The fixture records initial source count and may invoke the normal explicit
+Refresh command. The passing final run finds its private source initially.
+
+Strict TS, recording build, **858 passing unit tests** (13 native opt-in skips)
+and **58 UI tests** pass. All six predecessor CI jobs at `5331be9` pass in
+[CI37777115182](https://github.com/juferdinand/OpenWhisper/actions/runs/37777115182).
+This functional push needs its own CI. Crash-journal recovery/conflict refusal and
+concurrent retirement have unit evidence; fresh runtime crash recovery and Quit
+with an active binding remain separate checks. No modifier-only/mouse, KDE X11,
+GNOME, wlroots, automatic paste, overlay, GPU, Mac-device or release/update gate
+is closed by this regular-key test. The full migration remains incomplete.
+
+Earlier checkpoints follow with their original source and scope.
+
 Stock Kubuntu dictation now passes in `ui-run-stock-kde-11`: the ordinary native
 Wayland app performs real Tiny CPU recognition, exact clipboard/history delivery,
 GUI/command cancellation, source-loss Retry/Discard and graceful original app close.

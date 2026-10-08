@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import { developmentArtifactSchema } from "../services/development-artifact.js";
-import { controlStatusSchema, type ControlCaptureLease, type ControlCapturePort, type ControlStatus } from "../platforms/linux/shared/control.js";
+import { controlStatusSchema, ControlCaptureLeaseError, type ControlCaptureLease, type ControlCapturePort, type ControlStatus } from "../platforms/linux/shared/control.js";
 import { boundPlatformFrame, platformCaptureRequestSchema, platformCaptureReplySchema,
   type PlatformCaptureRequest, type PlatformCaptureReply } from "../workers/platform-protocol.js";
 import { createUtilityPlatformChannelFactory, PlatformChannelError, type PlatformChannel } from "./platform-channel.js";
@@ -77,7 +77,7 @@ export class DevelopmentPlatformCaptureBridge {
           return this.success(request, { command: request.command });
         }
       }
-    }).catch(() => this.failed(request, "UNAVAILABLE"));
+    }).catch((error: unknown) => this.failed(request, error instanceof ControlCaptureLeaseError ? "STALE_LEASE" : "UNAVAILABLE"));
     return this.retain(operation);
   }
   private retain(operation: Promise<PlatformCaptureReply>): Promise<PlatformCaptureReply> {
@@ -132,7 +132,7 @@ export class DevelopmentPlatformHost {
   private closeTask: Promise<void> | undefined;
   private constructor(private readonly bridge: DevelopmentPlatformCaptureBridge, private readonly channel: PlatformChannel) {}
   static async open(options: { descriptor: DevelopmentPlatformDescriptor; address: string; capture: ControlCapturePort;
-    shortcuts?: (state: PortalShortcutState) => void },
+    shortcuts?: (state: PortalShortcutState) => void; kdeLeasePath?: string },
     signal: AbortSignal): Promise<DevelopmentPlatformHost> {
     const descriptor = developmentPlatformHostDescriptorSchema.parse(options.descriptor);
     const bridge = new DevelopmentPlatformCaptureBridge(options.capture);
@@ -142,6 +142,7 @@ export class DevelopmentPlatformHost {
     try {
       channel = await factory(signal);
       const reply = await channel.request({ version: 1, id: randomUUID(), command: "initialize", address: options.address,
+        ...(options.kdeLeasePath ? { kdeLeasePath: options.kdeLeasePath } : {}),
         captureBridge: { epoch: bridge.epoch, native: descriptor.bus } });
       if (!reply.ok || reply.value.command !== "initialize" || !reply.value.captureAvailable) throw new PlatformChannelError("UNAVAILABLE");
       return new DevelopmentPlatformHost(bridge, channel);
@@ -157,6 +158,10 @@ export class DevelopmentPlatformHost {
   async shortcut(action: "enable" | "configure" | "clear" | "cancel" | "mode", hold: boolean): Promise<void> {
     const reply = await this.channel.request({ version: 1, id: randomUUID(), command: "shortcut", action, hold });
     if (!reply.ok || reply.value.command !== "shortcut") throw new PlatformChannelError("INVALID_FRAME");
+  }
+  async bindKey(key: number, hold: boolean): Promise<void> {
+    const reply = await this.channel.request({ version: 1, id: randomUUID(), command: "bind-key", key, hold });
+    if (!reply.ok || reply.value.command !== "bind-key") throw new PlatformChannelError("INVALID_FRAME");
   }
   close(): Promise<void> {
     this.closeTask ??= Promise.resolve().then(async () => {

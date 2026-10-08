@@ -797,12 +797,17 @@ function shortcutButton() {
   if (isMac() && state.macos!.recording_shortcut)
     return `<span class="secondary">${esc(t(state.macos!.shortcut_hint))}</span> <button data-command="cancel_shortcut">${esc(t("Cancel"))}</button>`;
   if (!isMac() && state.recording_shortcut)
-    return `<span class="secondary" role="status">${esc(t(state.native_x11 ? "Press and release a keyboard key. Escape cancels." : "Press and release a key or mouse button. Escape cancels."))}</span> <button data-command="cancel_shortcut">${esc(t("Cancel"))}</button>`;
+    return `<span class="secondary" role="status">${esc(t(state.native_x11 || !state.native_mouse ? "Press and release a keyboard key. Escape cancels." : "Press and release a key or mouse button. Escape cancels."))}</span> <button data-command="cancel_shortcut">${esc(t("Cancel"))}</button>`;
   const busy = portalBusy || ["recording", "transcribing"].includes(state.status) || ["downloading", "installing"].includes(state.updates.status);
   const select = `<button data-portal="enable_shortcut" ${(!state.shortcut_portal && !state.native_shortcuts) || busy ? "disabled" : ""}>${state.shortcut ? esc(triggerLabel()) : t("Set trigger …")}</button>`;
   if (isMac()) return select;
   return `<div class="trigger-controls">${select}${state.shortcut || state.preferences.native_trigger || state.preferences.x11_trigger ? ` <button data-portal="clear_shortcut" ${busy ? "disabled" : ""}>${esc(t("Remove trigger"))}</button>` : ""}${state.native_shortcuts && state.shortcut_portal ? ` <button class="quiet" data-portal="desktop_shortcut" ${busy ? "disabled" : ""}>${esc(t("Desktop shortcut dialog"))}</button>` : ""}</div>`;
 }
+
+// Explicit native setup must not activate focused buttons or edit settings.
+for (const name of ["keydown", "keyup"] as const) window.addEventListener(name, (event) => {
+  if (state?.recording_shortcut) event.preventDefault();
+}, { capture: true });
 function snippetRow(s?: Snippet) {
   return `<div class="snippet-row" data-id="${esc(s?.id ?? crypto.randomUUID())}"><input class="switch" type="checkbox" name="enabled" aria-label="${esc(t("Enable snippet"))}" ${!s || s.enabled ? "checked" : ""}><input name="trigger" aria-label="${esc(t("When I say"))}" placeholder="${esc(t("When I say …"))}" value="${esc(s?.trigger ?? "")}" maxlength="128"><span>→</span><textarea name="expansion" aria-label="${esc(t("Insert"))}" placeholder="${esc(t("… insert"))}" rows="2">${esc(s?.expansion ?? "")}</textarea><button type="button" data-remove aria-label="${esc(t("Remove snippet"))}">×</button></div>`;
 }

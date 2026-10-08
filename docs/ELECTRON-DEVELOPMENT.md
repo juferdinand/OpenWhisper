@@ -79,7 +79,17 @@ object `/io/github/whisperfree/dev/Control`, interface `io.github.whisperfree.Co
 `cancel`. An immutable recording lease prevents a delayed command from stopping a later
 recording. This Dev service is separate from the planned packaged `--control` launcher.
 
-In **General**, **Set trigger** now creates a GlobalShortcuts portal session. Setup
+On KDE with a running KWin/KGlobalAccel service, **General → Set trigger** captures
+a keyboard key or chord inside the window. Release the selected key to confirm;
+Escape, Cancel or window focus loss leave the existing binding in place. Conflicts
+are refused. Registration is session-only and begins after explicit setup, with
+the selected profile saved privately. A saved Dev profile does not bind on startup.
+Modifier-only keys use toggle mode; direct mouse support is not yet ported. A private
+recovery journal precedes registration and only dead owners can be recovered.
+**Remove trigger** releases the owned action. The normal stock KDE F8 setup,
+toggle dictation and held-key/GUI cancellation paths now have owned runtime evidence.
+
+On other desktops, **Set trigger** creates a GlobalShortcuts portal session. Setup
 opens only after an explicit click; no global binding is registered on Dev startup.
 The desktop chooses the combination, and the UI shows its confirmed description.
 Pending consent has a **Cancel** action. Toggle uses activation edges; push to talk
@@ -92,8 +102,9 @@ The portal connection registers the separate `io.github.whisperfree.dev` identit
 Its matching `.desktop` launcher must be discoverable by the desktop frontend;
 Dev permissions and bindings must not use the stable application's identity.
 Automated evidence includes a synthetic frontend on a real private D-Bus, virtual
-audio and normal UI. Stock KDE/GNOME portal sessions and specialized KDE/X11
-triggers still need replacement validation; see [the evidence](ELECTRON-DEV-EVIDENCE.md).
+audio and normal UI. Stock KDE 5.27 regular-key control is also checked through
+actual virtual key edges in nested KWin. Specialized KDE/X11, GNOME and remaining
+replacement gates still need validation; see [the evidence](ELECTRON-DEV-EVIDENCE.md).
 
 ## macOS CPU recording Dev build
 

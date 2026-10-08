@@ -1,5 +1,6 @@
 import type { RecordingSnapshot } from "../core/recording.js";
 import type { ControlCaptureLease, ControlCapturePort, ControlStatus } from "../platforms/linux/shared/control.js";
+import { ControlCaptureLeaseError } from "../platforms/linux/shared/control.js";
 import type { RecordingIdentity } from "./development-recording-host.js";
 
 interface RecordingControlOwner {
@@ -37,7 +38,7 @@ export function createRecordingControlPort(options: RecordingControlOptions): Co
           // A later recording proves this old lease is no longer active. Cleanup
           // may finish without targeting it; explicit Stop reports the stale owner.
           if (command === "cancel") return;
-          throw new Error("Recording owner changed.");
+          throw new ControlCaptureLeaseError();
         }
         if (command === "stop" && status() !== "recording") throw new Error("Recording is not active.");
         invoked = true; await options.owner.command(command, identity);

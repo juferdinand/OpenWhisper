@@ -6,6 +6,51 @@ import { DevelopmentPlatformCaptureBridge } from "../src/main/development-platfo
 import { PlatformCaptureClient, platformCaptureRequestSchema, platformCaptureReplySchema,
   type PlatformCaptureRequest } from "../src/workers/platform-protocol.js";
 import type { ControlCaptureLease, ControlStatus } from "../src/platforms/linux/shared/control.js";
+import { createRecordingControlPort } from "../src/main/recording-control.js";
+import { ShortcutRecording } from "../src/platforms/linux/shared/shortcut-recording.js";
+import type { RecordingIdentity } from "../src/main/development-recording-host.js";
+
+test("real main leases and worker RPC recover after held shortcut GUI Cancel and a later GUI acquisition", async () => {
+  let identity: RecordingIdentity = { epoch: randomUUID(), generation: 0 }, phase: "idle" | "recording" = "idle";
+  let failures = 0, staleCleanup = false; const commands: string[] = [];
+  const owner = { currentIdentity: () => identity,
+    async command(command: "start" | "stop" | "cancel", expected?: RecordingIdentity) {
+      assert.ok(!expected || expected.epoch === identity.epoch && expected.generation === identity.generation);
+      commands.push(command);
+      if (command === "start") { identity = { ...identity, generation: identity.generation + 1 }; phase = "recording"; }
+      else phase = "idle"; return identity;
+    } };
+  const port = createRecordingControlPort({ owner, configure: async () => {}, available: () => true,
+    snapshot: () => ({ phase, busy: phase === "recording", recoveryAvailable: false }),
+    serialize: <T>(operation: () => Promise<T>) => Promise.resolve().then(operation) });
+  const bridge = new DevelopmentPlatformCaptureBridge(port); let client: PlatformCaptureClient;
+  client = new PlatformCaptureClient(bridge.epoch, (request) => {
+    void bridge.handle(request).then((reply) => { client.receive(reply); if (request.command === "cancel" && reply.ok) staleCleanup = true; });
+  });
+  const shortcut = new ShortcutRecording(client, () => true, () => { failures++; });
+  shortcut.activate(); await until(() => phase === "recording");
+  await owner.command("cancel"); await owner.command("start");
+  shortcut.deactivate(); await until(() => staleCleanup); await delay(2);
+  assert.equal(phase, "recording"); assert.equal(failures, 0); assert.deepEqual(commands, ["start", "cancel", "start"]);
+  await owner.command("cancel"); shortcut.activate(); await until(() => commands.filter((command) => command === "start").length === 3);
+  assert.equal(phase, "recording"); await shortcut.close(); await bridge.close(); client.close(); assert.equal(failures, 0);
+});
+
+test("worker stale-lease recovery never retries or clears an invoked native terminal failure", async () => {
+  const identity: RecordingIdentity = { epoch: randomUUID(), generation: 1 }; let stops = 0, cancels = 0;
+  const port = createRecordingControlPort({ available: () => true, configure: async () => {},
+    snapshot: () => ({ phase: "recording", busy: true, recoveryAvailable: false }),
+    serialize: <T>(operation: () => Promise<T>) => Promise.resolve().then(operation),
+    owner: { currentIdentity: () => identity, async command(command) {
+      if (command === "stop") { stops++; throw new Error("Native terminal failed."); }
+      if (command === "cancel") cancels++; return identity;
+    } } });
+  const bridge = new DevelopmentPlatformCaptureBridge(port); let client: PlatformCaptureClient;
+  client = new PlatformCaptureClient(bridge.epoch, (request) => { void bridge.handle(request).then((reply) => { client.receive(reply); }); });
+  const lease = await client.currentLease(); assert.ok(lease);
+  await assert.rejects(lease.stop()); await assert.rejects(lease.cancel()); await assert.rejects(bridge.close());
+  assert.equal(stops, 1); assert.equal(cancels, 0); client.close();
+});
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

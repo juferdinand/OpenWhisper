@@ -1,16 +1,19 @@
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { controlStatusSchema, type ControlCaptureLease, type ControlCapturePort, type ControlStatus } from "../platforms/linux/shared/control.js";
+import { controlStatusSchema, ControlCaptureLeaseError, type ControlCaptureLease, type ControlCapturePort, type ControlStatus } from "../platforms/linux/shared/control.js";
 import { developmentArtifactSchema } from "../services/development-artifact.js";
 import { portalShortcutStateSchema } from "../platforms/linux/shared/portal-shortcuts.js";
+import { kdeKeySchema } from "../platforms/linux/kde/keyboard.js";
 
 const envelope = { version: z.literal(1), id: z.uuid() };
 const address = z.string().max(1024).regex(/^unix:(?:path=\/[A-Za-z0-9_./%\-]+|abstract=[A-Za-z0-9_./%\-]+)(?:,guid=[a-fA-F0-9]{32})?$/);
 export const platformRequestSchema = z.discriminatedUnion("command", [
   z.strictObject({ ...envelope, command: z.literal("initialize"), address,
+    kdeLeasePath: z.string().min(1).max(4096).regex(/^\//).optional(),
     captureBridge: z.strictObject({ epoch: z.uuid(), native: developmentArtifactSchema }).optional() }),
   z.strictObject({ ...envelope, command: z.literal("status") }),
   z.strictObject({ ...envelope, command: z.literal("shortcut"), action: z.enum(["enable", "configure", "clear", "cancel", "mode"]), hold: z.boolean() }),
+  z.strictObject({ ...envelope, command: z.literal("bind-key"), key: kdeKeySchema, hold: z.boolean() }),
   z.strictObject({ ...envelope, command: z.literal("shutdown") }),
 ]);
 export const platformReadySchema = z.strictObject({ version: z.literal(1), type: z.literal("ready") });
@@ -20,6 +23,7 @@ export const platformReplySchema = z.discriminatedUnion("ok", [
     z.strictObject({ command: z.literal("initialize"), generation: z.uuid(), captureAvailable: z.boolean() }),
     z.strictObject({ command: z.literal("status"), status: controlStatusSchema }),
     z.strictObject({ command: z.literal("shortcut"), state: portalShortcutStateSchema }),
+    z.strictObject({ command: z.literal("bind-key"), state: portalShortcutStateSchema }),
     z.strictObject({ command: z.literal("shutdown") }),
   ]) }),
   z.strictObject({ ...envelope, ok: z.literal(false), code: z.enum(["UNAVAILABLE", "BUSY", "INVALID_FRAME", "TEARDOWN_FAILED"]) }),
@@ -43,13 +47,13 @@ export const platformCaptureReplySchema = z.discriminatedUnion("ok", [
     z.strictObject({ command: z.literal("lease"), lease: z.uuid().nullable() }),
     ...(["stop", "cancel", "abort-start"] as const).map((command) => z.strictObject({ command: z.literal(command) })),
   ]) }),
-  z.strictObject({ ...captureEnvelope, ok: z.literal(false), code: z.enum(["BUSY", "CANCELLED", "UNAVAILABLE", "INVALID_FRAME", "TEARDOWN_FAILED"]) }),
+  z.strictObject({ ...captureEnvelope, ok: z.literal(false), code: z.enum(["BUSY", "CANCELLED", "UNAVAILABLE", "INVALID_FRAME", "TEARDOWN_FAILED", "STALE_LEASE"]) }),
 ]);
 export type PlatformCaptureRequest = z.infer<typeof platformCaptureRequestSchema>;
 export type PlatformCaptureReply = z.infer<typeof platformCaptureReplySchema>;
 
 export class PlatformCaptureError extends Error {
-  constructor(readonly code: "BUSY" | "CANCELLED" | "UNAVAILABLE" | "INVALID_FRAME" | "TEARDOWN_FAILED") { super(code); }
+  constructor(readonly code: "BUSY" | "CANCELLED" | "UNAVAILABLE" | "INVALID_FRAME" | "TEARDOWN_FAILED" | "STALE_LEASE") { super(code); }
 }
 /** Worker-only content-free capture RPC. Paths, samples and transcripts are never accepted. */
 export class PlatformCaptureClient implements ControlCapturePort {
@@ -84,7 +88,14 @@ export class PlatformCaptureClient implements ControlCapturePort {
     if (this.leases.size >= 16) throw new PlatformCaptureError("BUSY");
     let terminal: Promise<void> | undefined;
     const finish = (command: "stop" | "cancel"): Promise<void> => {
-      terminal ??= this.begin({ command, lease: id }).result.then(() => { this.leases.delete(id); });
+      terminal ??= this.begin({ command, lease: id }).result.then(() => { this.leases.delete(id); }).catch((error: unknown) => {
+        // Only a verified owner change allows safe cleanup of this old reference.
+        // Native terminal failures keep their rejected original promise.
+        if (error instanceof PlatformCaptureError && error.code === "STALE_LEASE") {
+          terminal = undefined; throw new ControlCaptureLeaseError();
+        }
+        throw error;
+      });
       return terminal;
     };
     const lease = Object.freeze({ stop: () => finish("stop"), cancel: () => finish("cancel") });

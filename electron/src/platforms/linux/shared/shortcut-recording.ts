@@ -1,4 +1,5 @@
 import type { ControlCaptureLease, ControlCapturePort } from "./control.js";
+import { ControlCaptureLeaseError } from "./control.js";
 
 /** Portal edges act on immutable recording leases, including a recording started by the UI. */
 export class ShortcutRecording {
@@ -25,7 +26,7 @@ export class ShortcutRecording {
       if (status === "recording" && !holding) {
         const lease = await this.capture.currentLease?.();
         if (lease && !this.closed && !cancellation.signal.aborted) {
-          await lease.stop(); this.acquired.delete(lease);
+          await this.stop(lease);
         }
       } else if (status === "idle") {
         for (const previous of this.acquired) { await previous.cancel(); this.acquired.delete(previous); }
@@ -49,9 +50,15 @@ export class ShortcutRecording {
     this.start?.abort();
     const lease = this.held; this.held = undefined;
     if (!lease) return;
-    const operation = Promise.resolve().then(() => lease.stop()).then(() => { this.acquired.delete(lease); });
+    const operation = Promise.resolve().then(() => this.stop(lease));
     this.operation = operation;
     void operation.catch(this.failed).finally(() => { if (this.operation === operation) this.operation = undefined; });
+  }
+
+  private async stop(lease: ControlCaptureLease): Promise<void> {
+    try { await lease.stop(); }
+    catch (error: unknown) { if (!(error instanceof ControlCaptureLeaseError)) throw error; await lease.cancel(); }
+    this.acquired.delete(lease);
   }
 
   close(): Promise<void> {
