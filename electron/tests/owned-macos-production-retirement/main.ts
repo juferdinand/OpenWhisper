@@ -12,6 +12,7 @@ import { performance } from "node:perf_hooks";
 import { Worker } from "node:worker_threads";
 import { z } from "zod";
 import { captureMacKernelRetirementNative, MacKernelRetirementBoundary } from "../../src/services/macos-retirement-boundary.js";
+import { MacRetirementError, macProcessSnapshotSchema } from "../../src/services/macos-process-retirement.js";
 import { speechChallengeReplySchema, speechChallengeRequestSchema } from "../../src/workers/speech-control.js";
 import { abiSchema, bounded, caseSchema, exportNames, guardSchema, nativeGuardCode, resultSchema, validateOriginalChallenge } from "./contracts.js";
 import type { FixtureResult, Stage } from "./contracts.js";
@@ -45,6 +46,25 @@ interface Child {
   pid: number | undefined; exited: boolean; invalid: boolean; readonly nonces: Set<string>;
   pending: { readonly nonce: string; readonly accept: (reply: unknown) => void; readonly reject: () => void } | undefined;
 }
+const diagnosticBindSchema = z.strictObject({ first: macProcessSnapshotSchema, second: macProcessSnapshotSchema,
+  watched: z.boolean(), exitSeen: z.boolean(), cloexec: z.boolean() });
+function errorCategory(error: unknown): Readonly<{ type: string; code: string }> {
+  const type = error instanceof MacRetirementError ? "MacRetirementError" : error instanceof z.ZodError ? "ZodError" :
+    error instanceof assert.AssertionError ? "AssertionError" : error instanceof Error ? "Error" : "NON_ERROR";
+  const code: unknown = error instanceof Error ? Object.getOwnPropertyDescriptor(error, "code")?.value : undefined;
+  const message: unknown = error instanceof Error ? Object.getOwnPropertyDescriptor(error, "message")?.value : undefined;
+  return { type, code: code === "TEARDOWN_FAILED" || code === "ERR_ASSERTION" ? code :
+    message === "FIXTURE_DEADLINE" ? "FIXTURE_DEADLINE" : "UNCLASSIFIED" };
+}
+function snapshotCategory(snapshot: z.infer<typeof macProcessSnapshotSchema>): Readonly<{ kind: string; category: string | null }> {
+  return { kind: snapshot.kind, category: snapshot.kind === "failure" ? snapshot.category : null };
+}
+interface BindAttempt {
+  readonly child: Child;
+  owner: MacKernelRetirementBoundary | undefined;
+  snapshots: Readonly<{ first: ReturnType<typeof snapshotCategory>; second: ReturnType<typeof snapshotCategory> }> | null;
+  nativeError: ReturnType<typeof errorCategory> | null;
+}
 function environment(root: string): NodeJS.ProcessEnv {
   return { HOME: join(root, "home"), TMPDIR: root, XDG_CONFIG_HOME: join(root, "user-data"), XDG_DATA_HOME: join(root, "user-data"),
     XDG_CACHE_HOME: join(root, "cache"), PATH: "/usr/bin:/bin", LANG: "en_US.UTF-8", OPENWHISPER_OWNED_MAC_PRODUCTION_RETIREMENT_TEST: "1" };
@@ -56,6 +76,7 @@ async function run(root: string, distribution: string, expected: string): Promis
   const cases: FixtureResult["cases"] = [], guards: FixtureResult["guards"] = [];
   const checkpoints: { case: string | null; stage: Stage }[] = [];
   let stage: Stage = "ready", caseName: string | null = null;
+  let bindAttempt: BindAttempt | undefined;
   const record = async (next: Stage): Promise<void> => {
     stage = next; if (checkpoints.length >= 80) throw new Error("FIXTURE_FAILED"); checkpoints.push({ case: caseName, stage });
     await writeFile(join(root, "checkpoint.json"), JSON.stringify({ current: { case: caseName, stage }, trace: checkpoints }), { mode: 0o600 });
@@ -150,8 +171,24 @@ async function run(root: string, distribution: string, expected: string): Promis
       let firstNonceConfirmed = false, secondNonceConfirmed = false, sameBirthRunningConfirmed = false;
       if (name === "early") await bounded(child.exit, until);
       else { await record("first-challenge"); await challenge(child, until); firstNonceConfirmed = true; }
+      const attempt: BindAttempt = { child, owner: undefined, snapshots: null, nativeError: null }; bindAttempt = attempt;
       await record("bind");
-      const owner = new MacKernelRetirementBoundary(native, { pid, uid, parentPid: process.pid, epoch: child.epoch }); owners.push(owner);
+      // Observe the original native promise without replacing it or issuing another bind.
+      // Retain only validated categories; never retain process records or raw errors.
+      const diagnosticNative = Object.freeze({ ...native, bindCandidate: (handle: object): Promise<unknown> => {
+        try {
+          const pending = native.bindCandidate(handle);
+          void pending.then((reply: unknown) => {
+            try {
+              const parsed = diagnosticBindSchema.safeParse(reply);
+              if (parsed.success) attempt.snapshots = { first: snapshotCategory(parsed.data.first), second: snapshotCategory(parsed.data.second) };
+            } catch {}
+          }, (error: unknown) => { attempt.nativeError = errorCategory(error); });
+          return pending;
+        } catch (error: unknown) { attempt.nativeError = errorCategory(error); throw error; }
+      } });
+      const owner = new MacKernelRetirementBoundary(diagnosticNative, { pid, uid, parentPid: process.pid, epoch: child.epoch });
+      owners.push(owner); attempt.owner = owner;
       await bounded(owner.bind(signal), until); const initial = owner.initial;
       if (name !== "early") {
         assert.equal(initial.canAdmit, true); assert.ok(initial.identity);
@@ -181,8 +218,11 @@ async function run(root: string, distribution: string, expected: string): Promis
       productionFactoryWired: false, signedHelperLoadingVerified: false, deterministicZombieVerified: false });
     await writeFile(join(root, "result.json"), JSON.stringify(result), { mode: 0o600 });
     allCleanupConfirmed = true;
-  } catch {
-    await writeFile(join(root, "failure.json"), JSON.stringify({ code: "PRODUCTION_RETIREMENT_FIXTURE_FAILED", case: caseName, stage }), { mode: 0o600 });
+  } catch (error: unknown) {
+    await writeFile(join(root, "failure.json"), JSON.stringify({ code: "PRODUCTION_RETIREMENT_FIXTURE_FAILED", case: caseName, stage,
+      ...((stage as Stage) === "bind" && bindAttempt ? { bindFailure: { error: errorCategory(error), nativeError: bindAttempt.nativeError,
+        helperExited: bindAttempt.child.exited, ownerInitialLevel: bindAttempt.owner?.initial.level ?? null,
+        ownerCurrentLevel: bindAttempt.owner?.current.level ?? null, snapshots: bindAttempt.snapshots } } : {}) }), { mode: 0o600 });
     throw new Error("FIXTURE_FAILED");
   } finally {
     const until = performance.now() + 8000;
