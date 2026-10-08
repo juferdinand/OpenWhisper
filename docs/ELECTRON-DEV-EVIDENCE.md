@@ -7,8 +7,14 @@ locked dependencies, source metadata and native origin notices. It signs native
 inputs before build-time descriptor finalization, then signs and verifies the
 bundle and extracted ZIP. The existing Apple Silicon/Intel CI matrix launches the
 actual package with a fresh private profile to check identity, sandboxed UI,
-owned-window regular-key setup/removal and original clean Quit. That new runtime
-check is pending; Linux fixture checks do not establish a Mac package result.
+owned-window regular-key setup/removal and original clean Quit. The first run,
+37827484622, fails before signing/UI launch on both architectures: the minimum-OS
+parser mistakes linker versions for deployment floors. SHA-checked artifacts show
+the native capture/retirement floor is 14.0 and locked Koffi is 11.0. The corrected
+parser reads only deployment load-command fields and retains the 14.0 requirement;
+strict typing and all six focused package cases pass. Actual packaged UI remains
+pending. The separate legacy Swift DMG check also reports a corrupt image; its
+cause is unresolved. Existing package artifacts are now retained after failure.
 
 The strict TypeScript paste adapter lazily loads fixed Apple frameworks only after
 permission and external-target admission. It refuses held modifiers, changed focus

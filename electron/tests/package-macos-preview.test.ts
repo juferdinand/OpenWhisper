@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
 import { SPEECH_ENTRY_FILES } from "../src/services/speech-entry-graph.js";
-import { captureSignedMacDescriptor, inspectMacBinary, stageMacPreview } from "../scripts/package-macos-preview.js";
+import { captureSignedMacDescriptor, inspectMacBinary, inspectMacMinimumOS, stageMacPreview } from "../scripts/package-macos-preview.js";
 
 async function fixture() {
   const base = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-mac-package-"))), root = join(base, "source/electron");
@@ -115,4 +115,21 @@ test("Mac binary inventory rejects architecture and hardened or entitlement poli
   assert.throws(() => inspectMacBinary(bytes, "x64"), /architecture/);
   bytes.writeUInt32BE(0x10000, 96); assert.throws(() => inspectMacBinary(bytes, "arm64"), /hardened/);
   bytes.writeUInt32BE(5, 76); assert.throws(() => inspectMacBinary(bytes, "arm64"), /entitlements/);
+});
+
+test("Mac deployment inspection ignores actual pinned Koffi and CI linker versions, SDK and source version fields", () => {
+  // Values measured from locked Koffi3.3.2 and run37827484622 capture/retirement Mach-O artifacts.
+  for (const [minimum, sdk, linker] of [["11.0", "11.3", "711.0"], ["14.0", "15.5", "1167.5"]]) {
+    const output = `Load command 8\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform 1\n    minos ${minimum}\n      sdk ${sdk}\n   ntools 1\n     tool 3\n  version ${linker}\nLoad command 9\n      cmd LC_SOURCE_VERSION\n  cmdsize 16\n  version 2053.120.3\n`;
+    assert.equal(inspectMacMinimumOS(output, "dist/native/capture/openwhisper_macos_capture.node"), `${minimum}.0`);
+  }
+  assert.equal(inspectMacMinimumOS("cmd LC_VERSION_MIN_MACOSX\nversion 10.15\nsdk 26.0\ncmd LC_SOURCE_VERSION\nversion 2053.120.3\n", "koffi.node"), "10.15.0");
+});
+
+test("Mac deployment inspection preserves the baseline and names unsupported or missing measured floors", () => {
+  for (const version of ["14.0.1", "14.1", "15.0"]) {
+    assert.throws(() => inspectMacMinimumOS(`cmd LC_BUILD_VERSION\nminos ${version}\nsdk 26.0\n`, "dist/native/speech/cpu/openwhisper_speech.node"),
+      new RegExp(`dist/native/speech/cpu/openwhisper_speech.node.*measured macOS ${version.replaceAll(".", "\\.")}.*14\\.0\\.0`, "u"));
+  }
+  assert.throws(() => inspectMacMinimumOS("cmd LC_SOURCE_VERSION\nversion 14.0\n", "koffi.node"), /koffi\.node.*no measured macOS deployment floor/u);
 });

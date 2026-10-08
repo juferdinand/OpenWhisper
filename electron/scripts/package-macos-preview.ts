@@ -197,6 +197,26 @@ function updatePlist(path: string, values: Readonly<Record<string, string>>): vo
   run("/usr/bin/plutil", ["-lint", path]);
 }
 
+/** otool also prints SDK, linker/tool and LC_SOURCE_VERSION values; only deployment fields are OS floors. */
+export function inspectMacMinimumOS(output: string, path: string): string {
+  const minimums: number[][] = [];
+  let command = "";
+  for (const line of output.split("\n")) {
+    const next = /^\s*cmd\s+(LC_[A-Z0-9_]+)\s*$/u.exec(line)?.[1];
+    if (next) { command = next; continue; }
+    const field = command === "LC_BUILD_VERSION" ? "minos" : command === "LC_VERSION_MIN_MACOSX" ? "version" : undefined;
+    const match = field ? new RegExp(`^\\s*${field} (\\d+)\\.(\\d+)(?:\\.(\\d+))?\\s*$`, "u").exec(line) : null;
+    if (match) minimums.push([Number(match[1]), Number(match[2]), Number(match[3] ?? 0)]);
+  }
+  if (!minimums.length) throw new Error(`Native package input ${path} has no measured macOS deployment floor (LC_BUILD_VERSION minos / LC_VERSION_MIN_MACOSX version).`);
+  const highest = minimums.sort((left, right) => (right[0]! - left[0]!) || (right[1]! - left[1]!) || (right[2]! - left[2]!))[0]!;
+  const floor = highest.join(".");
+  if (highest[0]! > 14 || (highest[0] === 14 && (highest[1]! > 0 || highest[2]! > 0))) {
+    throw new Error(`Native package input ${path} requires measured macOS ${floor}, exceeding the macOS 14.0.0 preview baseline.`);
+  }
+  return floor;
+}
+
 export async function packageMacPreview(output: string, root = defaultRoot): Promise<{ directory: string; archive: string; sha256: string }> {
   if (process.platform !== "darwin" || (process.arch !== "arm64" && process.arch !== "x64") || process.getuid?.() === 0) throw new Error("Mac preview packaging requires a non-root Darwin architecture host.");
   const architecture = process.arch;
@@ -215,12 +235,7 @@ export async function packageMacPreview(output: string, root = defaultRoot): Pro
   const appMach = await machFiles(staged.application, architecture, false);
   const addons = (await files(staged.application)).filter((path) => path.endsWith(".node"));
   if (addons.length < 5 || addons.some((path) => !appMach.includes(path))) throw new Error("Every production native addon must be a matching Mach-O file.");
-  for (const path of appMach) {
-    const minimums = [...run("/usr/bin/otool", ["-l", path]).matchAll(/^\s*(?:minos|version) (\d+)\.(\d+)(?:\.\d+)?\s*$/gmu)];
-    if (!minimums.length || minimums.some((match) => Number(match[1]) > 14 || (Number(match[1]) === 14 && Number(match[2]) > 0))) {
-      throw new Error("Native package inputs exceed the macOS 14 preview baseline.");
-    }
-  }
+  for (const path of appMach) inspectMacMinimumOS(run("/usr/bin/otool", ["-l", path]), relative(staged.application, path));
   const nativeInputs = await Promise.all(appMach.map(async (path) => ({ path: relative(staged.application, path), unsigned: await digest(path) })));
   for (const path of appMach) run("/usr/bin/codesign", ["--force", "--sign", "-", "--timestamp=none", path]);
   // The source build keeps a second capture copy. Keep both signed copies identical.
