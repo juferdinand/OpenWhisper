@@ -246,6 +246,7 @@
   "No shortcut assigned. Choose a key combination in your desktop's shortcut settings.": "Kein Tastenkürzel zugewiesen. Wähle eine Kombination in den Tastenkürzel-Einstellungen deines Desktops.",
   "Automatic paste enabled for this session. No screen capture is requested.": "Automatisches Einfügen für diese Sitzung aktiviert. Es wird keine Bildschirmaufnahme angefragt.",
   "Shortcut session ended. Enable it again in Settings.": "Die Tastenkürzel-Sitzung wurde beendet. Aktiviere sie erneut in den Einstellungen.",
+  "Change this shortcut in your desktop's settings. Its current binding remains active.": "Ändere dieses Tastenkürzel in den Einstellungen deines Desktops. Die aktuelle Belegung bleibt aktiv.",
   "Shortcut setup was cancelled. Window recording remains usable.": "Die Einrichtung des Tastenkürzels wurde abgebrochen. Die Aufnahme über das Fenster bleibt verfügbar.",
   "Shortcut setup or recording failed. Window recording remains usable.": "Die Einrichtung des Tastenkürzels oder die Aufnahme ist fehlgeschlagen. Die Aufnahme über das Fenster bleibt verfügbar.",
   "Keyboard permission unavailable: {error}. Clipboard output still works.": "Tastaturzugriff nicht verfügbar: {error}. Die Zwischenablage-Ausgabe funktioniert weiterhin.",

@@ -1,5 +1,42 @@
 # Electron development evidence
 
+The latest correction preserves confirmed shortcuts when a version-1 portal
+cannot open configuration, retains release edges and binding changes during
+reconfiguration, and keeps unassigned sessions visibly unassigned. The main
+window also shows after its trusted document loads, so initial visibility does
+not depend only on a first-frame event from a hidden Wayland surface.
+Strict TypeScript, the recording build, **843 tests** (13 native opt-in skips),
+and **57 shared UI tests** pass. The normal Ubuntu22 runtime also passes real CPU
+recognition, clipboard/history, shortcut protocol, recovery and graceful Quit in
+`ui-run-shortcuts-6`; its original commands and namespace close successfully,
+including an observed original application close without forced termination.
+
+The existing runner now offers `--stock-kde`, reusing the unchanged owned-desktop
+launcher and a cached Kubuntu image. It runs the ordinary app on native Wayland
+with a real portal frontend/backend, private audio and a test-only QPainter
+compositor. Plasma 5.27.12, portal 1.18.4 and KDE backend 5.27.11 are recorded in
+`ui-run-stock-kde-6`. Setup returns an available portal with no assigned shortcut;
+the UI renders the desktop-settings fallback. GUI and command cancellation pass.
+The earlier hidden-window frame timeout no longer prevents these UI operations.
+This is partial stock evidence: recognition subsequently reports `SPEECH_FAILED`,
+and cleanup reaches the owned launcher's 180-second deadline (exit 124). The
+container and original launcher commands are closed, but graceful application
+shutdown is unproven. Diagnostic follow-up `ui-run-stock-kde-7` preserves the
+finite `SPEECH_FAILED` state and available private recovery before cleanup. It
+fails immediately on terminal recognition errors instead of polling for success;
+cleanup bounds the application wait and observes the original process close after
+forced termination. The owned command fails in about 25 seconds, versus about
+200 seconds in the previous attempt; this is one observed failure-path comparison,
+not a general speed benchmark. The failure screenshot and receipts are retained. Do not
+claim stock recognition, compositor key delivery or full KDE support from it.
+
+All six jobs at shortcut predecessor `8f8b985` pass in
+[CI37766878242](https://github.com/juferdinand/OpenWhisper/actions/runs/37766878242).
+The corrections require their own push CI. Neither the installed stable app nor
+the running Dev build was replaced.
+
+Previous checkpoints follow for their retained scope and provenance.
+
 The Linux shortcut increment adds explicit desktop setup, Cancel, confirmed binding
 descriptions, toggle/hold recording and session cleanup to the normal Dev host.
 Strict TypeScript and the recording-enabled build pass. **840 tests pass**, with

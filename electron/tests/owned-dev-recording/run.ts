@@ -13,14 +13,16 @@ import { waitForOriginalCommandClose } from "../owned-supervisor/run.js";
 const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const args = process.argv.slice(2);
 const absolute = z.string().min(1).max(4096).refine((path) => path === resolve(path) && !path.includes("\0"));
-if (args.length !== 6 || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
+const stockKde = args[6] === "--stock-kde";
+if (args.length !== (stockKde ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
     || process.platform !== "linux" || process.arch !== "x64" || process.getuid?.() === 0) throw new Error("INVALID_EXECUTION");
 const output = absolute.parse(args[1]), planning = absolute.parse(args[3]), fixtures = absolute.parse(args[5]);
 for (const path of [planning, fixtures]) {
   const directory = await lstat(path); assert.ok(directory.isDirectory() && !directory.isSymbolicLink());
   assert.ok(output !== path && !output.startsWith(`${path}/`) || (path === planning && output.startsWith(`${planning}/p4-linux-dev-recording/`)));
 }
-const IMAGE = "sha256:741fe6d91a1dbbb4b371448920d6c02274a28ca3d380e7d71049da5cd666f488";
+const IMAGE = stockKde ? "sha256:796933aebc81829a07ba245ea7e10b594f032b2b90bcaf70002ce8395f2c2b33"
+  : "sha256:741fe6d91a1dbbb4b371448920d6c02274a28ca3d380e7d71049da5cd666f488";
 const capture = join(planning, "p4-linux-dev-recording/native-sources/run-1/openwhisper_capture.node");
 const speech = join(planning, "p6-proposal/gpu-build-1/cpu/openwhisper_speech.node");
 const bus = join(planning, "p3-bus-opening/async-call-legacy-run-3/package/payload/dist/native/openwhisper_linux_bus.node");
@@ -84,6 +86,11 @@ for (const name of ["@playwright/test", "playwright", "playwright-core"]) {
 const sources: Record<string, { bytes: number; sha256: string }> = {};
 for (const name of Object.keys(bundled.metafile.inputs)) sources[name] = await describe(resolve(root, name));
 sources["tests/owned-dev-recording/run.ts"] = await describe(fileURLToPath(import.meta.url));
+if (stockKde) {
+  const launcher = resolve(root, "../linux/scripts/run-owned-desktop.py");
+  await cp(launcher, join(payload, "run-owned-desktop.py"));
+  sources["linux/scripts/run-owned-desktop.py"] = await describe(launcher);
+}
 for (const name of ["portal-service.cpp", "portal-fixture.hpp"]) sources[`tests/owned-bus/${name}`] = await describe(join(root, "tests/owned-bus", name));
 let frozen: Awaited<ReturnType<typeof inventory>>;
 const container = `openwhisper-owned-dev-recording-${randomUUID()}`;
@@ -127,18 +134,24 @@ try {
   z.array(z.object({ State: z.object({ Running: z.literal(false), ExitCode: z.literal(0) }) })).length(1)
     .parse(JSON.parse(await required(["inspect", compiler])));
   await required(["cp", "-a", `${compiler}:/tmp/owned-portal`, join(payload, "owned-bus/owned-portal")]);
+  if (stockKde) await required(["cp", "-a", `${compiler}:/opt/node/bin/node`, join(payload, "node")]);
   await required(["rm", compiler]); compilerCreated = false;
   frozen = await inventory(payload);
   await writeFile(join(output, "assembly.json"), JSON.stringify({ image: IMAGE, sources, originalDescriptor: original, descriptor,
     originalDist: distBefore, payload: frozen, native: { capture: { path: capture, ...captureRecord }, speech: { path: speech, ...speechRecord }, bus: { path: bus, ...busRecord } },
     portalFixture: { compilerImage, binary: await describe(join(payload, "owned-bus/owned-portal")) }, seccomp: { path: seccomp, ...await describe(seccomp) },
-    scope: "Normal Dev UI/capture/platform utilities with retained Ubuntu22 native inputs and a synthetic portal frontend assembled before private runtime." }, null, 2), { mode: 0o600 });
+    scope: stockKde ? "Normal native Wayland Dev UI with retained Ubuntu22 native inputs against stock Kubuntu KDE portal; no synthetic portal signals."
+      : "Normal Dev UI/capture/platform utilities with retained Ubuntu22 native inputs and a synthetic portal frontend assembled before private runtime." }, null, 2), { mode: 0o600 });
   const image = await required(["image", "inspect", IMAGE]); z.array(z.object({ Id: z.literal(IMAGE) })).length(1).parse(JSON.parse(image));
   created = true;
   await required(["create", "--name", container, "--init", "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL",
     "--security-opt", "no-new-privileges", "--security-opt", `seccomp=${seccomp}`, "--pids-limit", "256", "--memory", "4g", "--shm-size", "256m",
     "--ulimit", "core=0:0", "--entrypoint", "/bin/sleep", IMAGE, "500"]);
   await required(["cp", "-a", payload, `${container}:/payload`]);
+  if (stockKde) {
+    const runtimeEvidence = join(output, "runtime-evidence"); await mkdir(runtimeEvidence, { mode: 0o700 });
+    await required(["cp", "-a", runtimeEvidence, `${container}:/evidence`]);
+  }
   const inspected = await required(["inspect", container]); await writeFile(join(output, "container-inspect.json"), inspected, { mode: 0o600 });
   z.array(z.object({ Image: z.literal(IMAGE), State: z.object({ Running: z.literal(false) }), Config: z.object({ User: z.literal("1000:1000") }),
     HostConfig: z.object({ NetworkMode: z.literal("none"), Privileged: z.literal(false), CapDrop: z.array(z.literal("ALL")).length(1),
@@ -148,8 +161,12 @@ try {
   const copied = join(output, "stopped-payload"); await required(["cp", "-a", `${container}:/payload`, copied]); assert.deepEqual(await inventory(copied), frozen);
   await required(["start", container]);
   await required(["exec", "--user", "1000:1000", container, "/usr/bin/chmod", "-R", "a-w", "/payload"]);
+  const command = stockKde ? ["OPENWHISPER_STOCK_KDE=1", "KWIN_COMPOSE=Q", "/usr/bin/python3", "/payload/run-owned-desktop.py", "--session", "kde-wayland",
+    "--output", "/tmp/owned-desktop", "--timeout", "180", "--", "/payload/node", "/payload/driver.mjs"]
+    : ["/opt/node/bin/node", "/payload/driver.mjs"];
   const observed = await docker(["exec", "--user", "1000:1000", container, "/usr/bin/env", "-i", "PATH=/opt/node/bin:/usr/bin:/bin", "LANG=C.UTF-8",
-    "OPENWHISPER_OWNED_DEV_RECORDING=1", "/opt/node/bin/node", "/payload/driver.mjs"], 210_000);
+    "OPENWHISPER_OWNED_DEV_RECORDING=1", ...command], stockKde ? 240_000 : 210_000);
+  if (stockKde) await required(["cp", `${container}:/tmp/owned-desktop`, join(output, "owned-desktop")]);
   await required(["cp", `${container}:/evidence/.`, output]); assert.equal(observed.code, 0); assert.equal(observed.closureObserved, true);
   z.object({ status: z.literal("PASS"), clipboardConfirmed: z.literal(true), recoveryRemoved: z.literal(true), nativeInMain: z.literal(false) })
     .parse(JSON.parse(await readFile(join(output, "result.json"), "utf8")));

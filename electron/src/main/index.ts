@@ -271,6 +271,7 @@ async function start(): Promise<void> {
             UNASSIGNED: "No shortcut assigned. Choose a key combination in your desktop's shortcut settings.",
             CANCELLED: "Shortcut setup was cancelled. Window recording remains usable.",
             ENDED: "Shortcut session ended. Enable it again in Settings.",
+            CONFIGURE_UNAVAILABLE: "Change this shortcut in your desktop's settings. Its current binding remains active.",
             FAILED: "Shortcut setup or recording failed. Window recording remains usable." };
           message = messages[value.result]; notify();
         },
@@ -418,6 +419,9 @@ async function start(): Promise<void> {
     microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted"; notify();
   });
   await window.loadURL(MAIN_URL);
+  // A hidden Wayland surface may wait for mapping before producing its first
+  // frame. Do not make initial visibility depend only on ready-to-show.
+  if (window && !window.isDestroyed() && !window.isVisible()) window.show();
 }
 
 void start().catch(() => {

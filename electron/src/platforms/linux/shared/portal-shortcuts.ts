@@ -10,7 +10,7 @@ const portalName = "org.freedesktop.portal.Desktop";
 const shortcuts = "org.freedesktop.portal.GlobalShortcuts";
 const daemon = "org.freedesktop.DBus";
 export const portalShortcutStateSchema = z.strictObject({ available: z.boolean(), configuring: z.boolean(),
-  label: z.string().max(1024).nullable(), result: z.enum(["NONE", "ENABLED", "UNASSIGNED", "CANCELLED", "ENDED", "FAILED"]) });
+  label: z.string().max(1024).nullable(), result: z.enum(["NONE", "ENABLED", "UNASSIGNED", "CANCELLED", "ENDED", "FAILED", "CONFIGURE_UNAVAILABLE"]) });
 export type PortalShortcutState = z.infer<typeof portalShortcutStateSchema>;
 export interface ShortcutBus {
   readonly uniqueName: string; readonly generation: string; readonly isClosed: boolean;
@@ -99,6 +99,7 @@ export class PortalShortcuts {
     }
     if (this.operation || this.clearTask) return;
     const setup = new AbortController(); this.setup = setup; this.publish({ configuring: true, result: "NONE" });
+    const existingSession = this.session;
     const operation = (async () => {
       try {
         if (!this.owner) await this.probe();
@@ -130,6 +131,10 @@ export class PortalShortcuts {
         const bound = await this.request(owner, "BindShortcuts", [object(session), list, string("")], {}, setup.signal);
         const label = description(field(bound, "shortcuts")); this.publish({ label, result: label ? "ENABLED" : "UNASSIGNED" });
       } catch (error: unknown) {
+        if (existingSession && !setup.signal.aborted) {
+          // A missing/failed settings dialog does not revoke an existing grant.
+          this.publish({ result: this.current.label ? "CONFIGURE_UNAVAILABLE" : "UNASSIGNED" }); return;
+        }
         await this.releaseSession();
         this.publish({ result: setup.signal.aborted || error instanceof BusFailure && error.code === "CANCELLED" ? "CANCELLED" : "FAILED" });
       } finally {
@@ -152,7 +157,7 @@ export class PortalShortcuts {
       void this.clear("ENDED").catch(() => this.publish({ result: "FAILED" }));
     });
     await add(desktop, shortcuts, "ShortcutsChanged", (event) => {
-      if (this.current.configuring) return;
+      if (this.current.configuring && !this.current.label) return;
       if (event.signature !== "oa(sa{sv})" || event.body[0]?.type !== "o" || event.body[0].value !== session) return;
       try {
         const label = description(event.body[1]); this.publish({ label, result: label ? "ENABLED" : "UNASSIGNED" });
@@ -162,7 +167,7 @@ export class PortalShortcuts {
     });
     for (const member of ["Activated", "Deactivated"] as const) await add(desktop, shortcuts, member, (event) => {
       const [handle, id, timestamp] = event.body;
-      if (this.current.configuring || !this.current.label || event.signature !== "osta{sv}" || handle?.type !== "o" || handle.value !== session ||
+      if (!this.current.label || event.signature !== "osta{sv}" || handle?.type !== "o" || handle.value !== session ||
         id?.type !== "s" || id.value !== "dictate" || timestamp?.type !== "t" || !/^[0-9]+$/u.test(timestamp.value)) return;
       const time = BigInt(timestamp.value); if (time < this.lastTimestamp) return; this.lastTimestamp = time;
       if (member === "Activated") this.trigger?.activate(); else this.trigger?.deactivate();

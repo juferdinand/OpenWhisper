@@ -25,8 +25,10 @@ async function until(condition: () => boolean): Promise<void> {
 }
 class FakeBus implements ShortcutBus {
   uniqueName = ":1.5"; generation = randomUUID(); isClosed = false;
-  present = true; portalOwner = ":1.8"; version = 2; code = 0; delayBinding = false; badSession = false;
+  present = true; portalOwner = ":1.8"; version = 2; code = 0; delayBinding = false; badSession = false; configureFails = false;
   session = ""; request = ""; methods: BusMethod[] = [];
+  configureGate: Promise<void> | undefined;
+  bindingLabel: string | null = "Ctrl+Alt+Space";
   subscriptions = new Map<BusFilter, (event: BusEvent) => void>();
   async owner(): Promise<string> { if (!this.present) throw new BusFailure("REMOTE_ERROR"); return this.portalOwner; }
   async subscribe(filter: BusFilter, callback: (event: BusEvent) => void): Promise<() => Promise<void>> {
@@ -35,6 +37,8 @@ class FakeBus implements ShortcutBus {
   async call(method: BusMethod): Promise<BusReply> {
     const input = parseBusValues(method.body);
     assert.equal(input.map(signatureOf).join(""), method.inputSignature); this.methods.push(method);
+    if (method.member === "ConfigureShortcuts" && this.configureFails) throw new BusFailure("REMOTE_ERROR");
+    if (method.member === "ConfigureShortcuts") await this.configureGate;
     let body: BusValue[] = [];
     if (method.member === "Get") body = [{ type: "v", signature: "u", value: { type: "u", value: this.version } }];
     if (method.member === "CreateSession" || method.member === "BindShortcuts") {
@@ -55,7 +59,7 @@ class FakeBus implements ShortcutBus {
         connection: this.generation, sender, path, interface: interfaceName, member, signature, body });
     }
   }
-  response(code: number, values = dict({ shortcuts: bound("Ctrl+Alt+Space") })): void {
+  response(code: number, values = dict({ shortcuts: bound(this.bindingLabel) })): void {
     this.emit(this.request, "Response", "ua{sv}", [{ type: "u", value: code }, values], this.portalOwner, "org.freedesktop.portal.Request");
   }
   edge(member: "Activated" | "Deactivated", session = this.session, sender = this.portalOwner, time = "1"): void {
@@ -73,8 +77,9 @@ class Capture implements ControlCapturePort {
       cancel: async () => { this.cancelled.push(id); this.phase = "idle"; } }; this.current = lease; return lease;
   }
 }
-async function enabled(hold = false) {
-  const bus = new FakeBus(), capture = new Capture(); const service = await PortalShortcuts.create(bus, capture, () => {}, 1000);
+async function enabled(hold = false, version = 2) {
+  const bus = new FakeBus(), capture = new Capture(); bus.version = version;
+  const service = await PortalShortcuts.create(bus, capture, () => {}, 1000);
   service.command("enable", hold); await until(() => !service.state().configuring);
   assert.equal(service.state().label, "Ctrl+Alt+Space"); return { bus, capture, service };
 }
@@ -156,6 +161,34 @@ test("reconfiguration uses the existing session and never binds it twice", async
   const { bus, service } = await enabled(); service.command("configure", false); await until(() => !service.state().configuring);
   assert.equal(bus.methods.filter((method) => method.member === "BindShortcuts").length, 1);
   assert.equal(bus.methods.at(-1)?.member, "ConfigureShortcuts"); await service.close();
+});
+test("version-1 portals and failed configuration preserve the confirmed binding and recording", async () => {
+  for (const version of [1, 2]) {
+    const { bus, capture, service } = await enabled(false, version); bus.configureFails = true;
+    const original = bus.session; service.command("configure", false); await until(() => !service.state().configuring);
+    assert.equal(service.state().result, "CONFIGURE_UNAVAILABLE"); assert.equal(service.state().label, "Ctrl+Alt+Space");
+    assert.equal(bus.session, original); assert.equal(bus.methods.some((method) => method.member === "Close"), false);
+    bus.edge("Activated"); await until(() => capture.phase === "recording"); assert.equal(capture.started, 1);
+    await service.close(); assert.deepEqual(capture.cancelled, [1]);
+  }
+});
+test("reconfiguration retains release edges and consumes changes before the method reply", async () => {
+  const { bus, capture, service } = await enabled(true);
+  bus.edge("Activated"); await until(() => capture.phase === "recording");
+  let finish!: () => void; bus.configureGate = new Promise<void>((resolve) => { finish = resolve; });
+  service.command("configure", true); await until(() => bus.methods.at(-1)?.member === "ConfigureShortcuts");
+  bus.edge("Deactivated"); await until(() => capture.stopped.length === 1);
+  bus.emit(desktop, "ShortcutsChanged", "oa(sa{sv})", [{ type: "o", value: bus.session }, bound("Ctrl+Shift+Space")]);
+  assert.equal(service.state().label, "Ctrl+Shift+Space"); finish();
+  await until(() => !service.state().configuring); await service.close();
+});
+test("an unassigned version-1 session never reports an active binding after a settings failure", async () => {
+  const bus = new FakeBus(), capture = new Capture(); bus.version = 1; bus.bindingLabel = null;
+  const service = await PortalShortcuts.create(bus, capture, () => {}); service.command("enable", false);
+  await until(() => !service.state().configuring); assert.equal(service.state().result, "UNASSIGNED");
+  service.command("configure", false); await until(() => !service.state().configuring);
+  assert.equal(service.state().result, "UNASSIGNED"); assert.equal(service.state().label, null);
+  bus.edge("Activated"); await delay(5); assert.equal(capture.started, 0); await service.close();
 });
 test("portal replacement closes the original unique owner and probes the replacement without binding automatically", async () => {
   const { bus, capture, service } = await enabled(true); bus.edge("Activated"); await until(() => capture.phase === "recording");

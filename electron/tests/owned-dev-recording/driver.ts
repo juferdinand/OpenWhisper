@@ -16,9 +16,12 @@ declare global { interface Window { openwhisper?: DesktopBridge } }
 const execute = promisify(execFile);
 const payload = resolve(fileURLToPath(new URL("./", import.meta.url)));
 const packageRoot = join(payload, "app"), evidence = "/evidence";
+const stockKde = process.env.OPENWHISPER_STOCK_KDE === "1";
 const sha = (value: Uint8Array) => createHash("sha256").update(value).digest("hex");
 const checks: string[] = [];
 let stage = "guard", status = "FAIL", application: ElectronApplication | undefined, page: Page | undefined;
+let failure: { name: string; location: string | null } | undefined;
+let appCloseObserved = false, appOriginalClose: Promise<void> | undefined;
 let lastState: Readonly<{ status: string; recordingAvailable: boolean; recoveryAvailable: boolean; elapsed: number; progress: number;
   messageCategory: "NONE" | "RECORDING_ERROR" | "ACTION_REFUSED" | "OTHER"; recordingError: string | null }> | undefined;
 const owners: { child: ChildProcess; closed: Promise<void>; closeObserved: boolean }[] = [];
@@ -68,7 +71,15 @@ async function main(): Promise<void> {
   assert.equal(process.env.OPENWHISPER_OWNED_DEV_RECORDING, "1");
   assert.ok((await lstat("/.dockerenv")).isFile());
   for (const device of ["/dev/snd", "/dev/input", "/dev/uinput", "/dev/dri"]) await assert.rejects(lstat(device), { code: "ENOENT" });
-  for (const key of ["PULSE_SERVER", "DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS", "NODE_OPTIONS", "ELECTRON_RUN_AS_NODE"]) assert.equal(process.env[key], undefined);
+  for (const key of ["NODE_OPTIONS", "ELECTRON_RUN_AS_NODE"]) assert.equal(process.env[key], undefined);
+  if (stockKde) {
+    assert.equal(process.env.WF_OWNED_DESKTOP_TEST, process.env.XDG_RUNTIME_DIR);
+    assert.match(process.env.XDG_RUNTIME_DIR ?? "", /^\/tmp\/ow-runtime-[A-Za-z0-9_-]+$/u);
+    assert.equal(process.env.DBUS_SESSION_BUS_ADDRESS?.split(",")[0], `unix:path=${process.env.XDG_RUNTIME_DIR}/session-bus`);
+    assert.equal(process.env.PULSE_SERVER, `unix:${process.env.XDG_RUNTIME_DIR}/pulse/native`);
+    assert.equal((await lstat(process.env.XDG_RUNTIME_DIR!)).uid, 1000);
+    assert.equal(process.env.XDG_SESSION_TYPE, "wayland");
+  } else for (const key of ["PULSE_SERVER", "DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS"]) assert.equal(process.env[key], undefined);
   const root = await mkdtemp("/tmp/openwhisper-owned-dev-recording-"); await chmod(root, 0o700);
   const home = join(root, "home"), runtime = join(root, "runtime"), config = join(home, "config");
   for (const path of [home, runtime, config, join(home, "data"), join(home, "cache")]) await mkdir(path, { mode: 0o700 });
@@ -76,7 +87,7 @@ async function main(): Promise<void> {
   await mkdir(join(config, "wireplumber/bluetooth.lua.d"), { recursive: true, mode: 0o700 });
   await writeFile(join(config, "wireplumber/main.lua.d/89-owned-no-devices.lua"), "alsa_monitor.enabled = false\nv4l2_monitor.enabled = false\nlibcamera_monitor.enabled = false\n", { mode: 0o600 });
   await writeFile(join(config, "wireplumber/bluetooth.lua.d/89-owned-no-devices.lua"), "bluez_monitor.enabled = false\n", { mode: 0o600 });
-  const env: Record<string, string> = {
+  const env: Record<string, string> = stockKde ? Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)) : {
     HOME: home, PATH: "/opt/node/bin:/usr/bin:/bin", LANG: "C.UTF-8", LC_ALL: "C.UTF-8",
     XDG_CONFIG_HOME: config, XDG_DATA_HOME: join(home, "data"), XDG_CACHE_HOME: join(home, "cache"),
     XDG_RUNTIME_DIR: runtime, PIPEWIRE_RUNTIME_DIR: runtime, PIPEWIRE_REMOTE: "pipewire-0",
@@ -91,10 +102,26 @@ async function main(): Promise<void> {
   assert.equal(model.length, 77691713); assert.equal(sha(model), "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21");
   await copyFile(join(payload, "fixtures/ggml-tiny.bin"), join(profile.paths.models, "ggml-tiny.bin"));
   await chmod(join(profile.paths.models, "ggml-tiny.bin"), 0o600);
-  const stable = join(home, "data", "whisperfree"); await mkdir(stable, { mode: 0o700 });
+  const stable = join(env.XDG_DATA_HOME!, "whisperfree"); await mkdir(stable, { mode: 0o700 });
   await writeFile(join(stable, "sentinel"), "Owned stable sentinel", { mode: 0o600 });
   const stableBefore = sha(await readFile(join(stable, "sentinel")));
   await checkpoint("private-session");
+  if (stockKde) {
+    const config = join(env.XDG_CONFIG_HOME!, "xdg-desktop-portal"); await mkdir(config, { mode: 0o700 });
+    await writeFile(join(config, "portals.conf"), "[preferred]\ndefault=none\norg.freedesktop.impl.portal.GlobalShortcuts=kde\norg.freedesktop.impl.portal.Settings=kde\n");
+    const desktopFiles = join(env.XDG_DATA_HOME!, "applications"); await mkdir(desktopFiles, { mode: 0o700, recursive: true });
+    await writeFile(join(desktopFiles, "io.github.whisperfree.dev.desktop"), "[Desktop Entry]\nType=Application\nName=OpenWhisper Dev\nExec=/payload/app/node_modules/electron/dist/electron /payload/app --dev\n");
+    env.QT_QPA_PLATFORM = "wayland";
+    child("/usr/libexec/xdg-permission-store", [], env);
+    child("/usr/lib/x86_64-linux-gnu/libexec/xdg-desktop-portal-kde", [], env);
+    await until(async () => (await execute("/usr/bin/gdbus", ["call", "--session", "--dest", "org.freedesktop.DBus", "--object-path", "/org/freedesktop/DBus",
+      "--method", "org.freedesktop.DBus.NameHasOwner", "org.freedesktop.impl.portal.desktop.kde"], { env, timeout: 3000 })).stdout.includes("true"));
+    child("/usr/libexec/xdg-desktop-portal", [], env);
+    await until(async () => (await execute("/usr/bin/gdbus", ["call", "--session", "--dest", "org.freedesktop.DBus", "--object-path", "/org/freedesktop/DBus",
+      "--method", "org.freedesktop.DBus.NameHasOwner", "org.freedesktop.portal.Desktop"], { env, timeout: 3000 })).stdout.includes("true"));
+    const versions = await execute("/usr/bin/dpkg-query", ["-W", "plasma-workspace", "xdg-desktop-portal", "xdg-desktop-portal-kde"], { env, timeout: 3000 });
+    await writeFile(join(evidence, "stock-versions.txt"), versions.stdout, { mode: 0o600 });
+  } else {
   const bus = child("/usr/bin/dbus-daemon", ["--session", "--nofork", `--address=unix:path=${runtime}/bus`], env); await waitSocket(join(runtime, "bus"), bus);
   const portalBinary = join(payload, "owned-bus/owned-portal");
   const portalOwner = child(portalBinary, [env.DBUS_SESSION_BUS_ADDRESS!], env);
@@ -103,13 +130,17 @@ async function main(): Promise<void> {
     return (await execute("/usr/bin/dbus-send", ["--session", "--type=method_call", "--print-reply", "--dest=org.freedesktop.DBus",
       "/org/freedesktop/DBus", "org.freedesktop.DBus.NameHasOwner", "string:org.freedesktop.portal.Desktop"], { env, timeout: 5000, maxBuffer: 8192 })).stdout.includes("boolean true");
   });
+  }
   const portal = async (member: "PortalMode" | "PortalStatus" | "Press" | "Release" | "Unassign" | "End", mode?: "grant" | "pending" | "deny") => {
+    assert.equal(stockKde, false, "Stock desktop checks must never inject fixture portal signals.");
     return (await execute("/usr/bin/dbus-send", ["--session", "--type=method_call", "--print-reply", "--dest=org.freedesktop.portal.Desktop",
       "/owned", `org.openwhisper.Owned.${member}`, ...(mode ? [`string:${mode}`] : [])], { env, timeout: 5000, maxBuffer: 8192 })).stdout;
   };
+  if (!stockKde) {
   const pipewire = child("/usr/bin/pipewire", [], env); await waitSocket(join(runtime, "pipewire-0"), pipewire);
   child("/usr/bin/wireplumber", [], env);
   const pulse = child("/usr/bin/pipewire-pulse", [], env); await waitSocket(join(runtime, "pulse/native"), pulse);
+  }
   const pactl = async (args: string[]) => (await execute("/usr/bin/pactl", args, { env, timeout: 15_000, maxBuffer: 1024 * 1024 })).stdout;
   const sourceNames = async () => (await pactl(["list", "short", "sources"])).trim().split("\n").filter(Boolean).map((row) => row.split("\t")[1]);
   assert.ok((await sourceNames()).every((name) => name === "auto_null.monitor"));
@@ -118,6 +149,7 @@ async function main(): Promise<void> {
   await pactl(["set-default-sink", sink]); await pactl(["set-default-source", source]);
   await until(async () => JSON.stringify(await sourceNames()) === JSON.stringify([source]));
   assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
+  if (!stockKde) {
   const xvfb = child("/usr/bin/Xvfb", ["-displayfd", "3", "-screen", "0", "1280x900x24", "-nolisten", "tcp"], env, true);
   const display = await new Promise<string>((accept, reject) => {
     const timer = setTimeout(() => reject(new Error("OWNED_DISPLAY_UNAVAILABLE")), 10_000); let value = "";
@@ -126,6 +158,7 @@ async function main(): Promise<void> {
     pipe.on("data", (bytes: Buffer) => { value += bytes.toString(); if (/^\d+\n$/u.test(value)) { clearTimeout(timer); accept(`:${value.trim()}`); } });
   });
   env.DISPLAY = display;
+  }
   await checkpoint("launch-normal-application");
   const startupWatch = setTimeout(() => {
     // Capture only owned process/resource metadata when bootstrap stalls, never argv or content.
@@ -136,11 +169,16 @@ async function main(): Promise<void> {
   }, 10_000);
   try {
     application = await _electron.launch({ executablePath: join(packageRoot, "node_modules/electron/dist/electron"),
-      args: [packageRoot, "--dev", "--dev-profile", profileRoot], env, chromiumSandbox: true, timeout: 30_000 });
+      args: [packageRoot, "--dev", "--dev-profile", profileRoot, ...(stockKde ? ["--ozone-platform=wayland"] : [])], env, chromiumSandbox: true, timeout: 30_000 });
   } finally { clearTimeout(startupWatch); }
   application.process().stdout?.on("data", (bytes: Buffer) => { diagnostics.stdoutBytes += bytes.length; });
+  appOriginalClose = new Promise<void>((accept) => application!.process().once("close", () => { appCloseObserved = true; accept(); }));
   application.process().stderr?.on("data", (bytes: Buffer) => { diagnostics.stderrBytes += bytes.length; });
   page = await application.firstWindow();
+  if (stockKde) await writeFile(join(evidence, "window.json"), JSON.stringify(await application.evaluate(({ BrowserWindow, app }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    return { visible: window?.isVisible(), loading: window?.webContents.isLoading(), gpu: app.getGPUFeatureStatus() };
+  })), { mode: 0o600 });
   await expect(page.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev");
   assert.equal(page.url(), "app://openwhisper/index.html");
   await until(async () => (await state()).microphones.includes(source));
@@ -158,6 +196,7 @@ async function main(): Promise<void> {
   assert.deepEqual(initial.installed, ["tiny"]); assert.equal(initial.preferences.gpu, false); assert.equal(initial.preferences.output, "clipboard");
   assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "", "Initialization and enumeration must open no recording stream.");
   await checkpoint("actual-ui-complete-setup");
+  if (stockKde) await page.screenshot({ path: join(evidence, "initial-ui.png"), timeout: 5000 });
   await page.locator('[data-command="complete_setup"]').click();
   await page.locator('[data-tab="general"]').click();
   await checkpoint("actual-ui-language");
@@ -185,6 +224,15 @@ async function main(): Promise<void> {
   checks.push("normal main/shared UI/preload; private Tiny inventory; enumeration with zero streams; sandboxed renderer");
   await checkpoint("owned-portal-cancel-and-retry");
   assert.equal((await state()).shortcut_portal, true); assert.equal((await state()).shortcut, null);
+  if (stockKde) {
+    await page.locator('[data-portal="enable_shortcut"]').click();
+    await until(async () => !(await state()).shortcut_configuring);
+    await page.screenshot({ path: join(evidence, "stock-shortcut.png") });
+    const settled = await state();
+    await writeFile(join(evidence, "stock-shortcut.json"), JSON.stringify({ available: settled.shortcut_portal,
+      label: settled.shortcut, message: settled.message }), { mode: 0o600 });
+    checks.push("ordinary native Wayland Dev UI against installed KDE portal; actual setup response recorded without synthetic activation");
+  } else {
   await portal("PortalMode", "pending"); await page.locator('[data-portal="enable_shortcut"]').click();
   await until(async () => !!(await state()).shortcut_configuring);
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -202,6 +250,7 @@ async function main(): Promise<void> {
   assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), ""); assert.match(await portal("PortalStatus"), /uint32 0/u);
   await page.evaluate(() => window.openwhisper?.invoke("save_preferences", { changes: { hold_to_record: false } }));
   checks.push("actual native D-Bus portal protocol: cancelled pending consent, explicit retry, granted binding, session loss and hold binding revoke close only the original private capture");
+  }
   await checkpoint("actual-ui-cancel");
   await page.locator("#record").click(); await until(async () => (await state()).status === "recording");
   await page.locator("#cancel").click(); await until(async () => (await state()).status === "idle");
@@ -219,8 +268,12 @@ async function main(): Promise<void> {
   assert.deepEqual(await readdir(profile.paths.recovery), []);
   checks.push("private command Start and GUI Cancel; later GUI Start and command Cancel share exact owners");
   await checkpoint("actual-ui-start");
-  await page.locator('[data-portal="enable_shortcut"]').click(); await until(async () => (await state()).shortcut === "Ctrl+Alt+Space");
-  await portal("Press"); await portal("Release"); await until(async () => (await state()).status === "recording");
+  if (stockKde) await page.locator("#record").click();
+  else {
+    await page.locator('[data-portal="enable_shortcut"]').click(); await until(async () => (await state()).shortcut === "Ctrl+Alt+Space");
+    await portal("Press"); await portal("Release");
+  }
+  await until(async () => (await state()).status === "recording");
   await until(async () => (await pactl(["list", "short", "source-outputs"])).trim().split("\n").filter(Boolean).length === 1);
   assert.deepEqual(await sourceNames(), [source]);
   const publicSpeech = await readFile(join(payload, "fixtures/jfk.f32"));
@@ -232,8 +285,12 @@ async function main(): Promise<void> {
   await execute("/usr/bin/paplay", ["--raw", "--format=float32le", "--rate=48000", "--channels=1", `--device=${sink}`, audioPath], { env, timeout: 30_000, maxBuffer: 1024 });
   await delay(200);
   await checkpoint("actual-ui-stop");
-  await portal("Press");
-  await until(async () => (await state()).status === "done", 120_000);
+  if (stockKde) await page.locator("#record").click(); else await portal("Press");
+  await until(async () => {
+    const value = await state();
+    if (value.status === "error") throw new Error("OWNED_TRANSCRIPTION_FAILED");
+    return value.status === "done";
+  }, 120_000);
   const result = await state(); assert.match(result.transcript.toLowerCase(), /country/u);
   assert.equal(result.gpu_available, false); assert.equal(result.preferences.gpu, false); assert.equal(result.recovery_available, false);
   assert.equal(await application.evaluate(async ({ clipboard }, expected) => await clipboard.readText() === expected, result.transcript), true);
@@ -243,9 +300,11 @@ async function main(): Promise<void> {
   assert.equal(sha(await readFile(join(stable, "sentinel"))), stableBefore);
   const maps = await readFile(`/proc/${security.pid}/maps`, "utf8");
   assert.equal(maps.includes("openwhisper_capture.node"), false); assert.equal(maps.includes("openwhisper_speech.node"), false);
-  checks.push("actual owned portal Start/Stop; real CPU Tiny recognition; private clipboard exact readback; history confirmation; recovery removal; native capture/speech absent from main");
-  await page.locator('[data-portal="clear_shortcut"]').click(); await until(async () => (await state()).shortcut === null && !(await state()).shortcut_configuring);
-  assert.match(await portal("PortalStatus"), /uint32 0/u);
+  checks.push(`${stockKde ? "actual UI" : "actual owned portal"} Start/Stop; real CPU Tiny recognition; private clipboard exact readback; history confirmation; recovery removal; native capture/speech absent from main`);
+  if (stockKde) await page.evaluate(() => window.openwhisper?.invoke("clear_shortcut", {}));
+  else await page.locator('[data-portal="clear_shortcut"]').click();
+  await until(async () => (await state()).shortcut === null && !(await state()).shortcut_configuring);
+  if (!stockKde) assert.match(await portal("PortalStatus"), /uint32 0/u);
   await checkpoint("actual-source-loss-retry");
   await expect(page.locator("#record-label")).toHaveText("Start dictation");
   await page.locator("#record").click(); await until(async () => (await state()).status === "recording");
@@ -295,22 +354,50 @@ async function main(): Promise<void> {
     clipboardConfirmed: true, historyConfirmed: true, recoveryRemoved: true, cancelConfirmed: true, retryConfirmed: true, discardConfirmed: true,
     nativeInMain: false, security,
     sourceScope: "owned-generated-PipeWire-Pulse-monitor-only", fixtureSha256: sha(publicSpeech),
-    physicalMicrophone: "NOT_USED", hotkeys: "OWNED_SYNTHETIC_PORTAL_SIGNALS_ONLY", portalResourcesClosed: true,
+    physicalMicrophone: "NOT_USED", hotkeys: stockKde ? "STOCK_SETUP_ONLY_NO_KEY_EDGES" : "OWNED_SYNTHETIC_PORTAL_SIGNALS_ONLY", portalResourcesClosed: true,
     automaticPaste: "NOT_TESTED", gpu: "NOT_TESTED", macos: "NOT_TESTED" }, null, 2), { mode: 0o600 });
   await checkpoint("graceful-normal-quit");
-  await application.close(); application = undefined; status = "PASS";
+  await application.close(); await appOriginalClose; application = undefined; status = "PASS";
 }
-try { await main(); } catch { process.exitCode = 1; }
+try { await main(); } catch (error: unknown) {
+  failure = { name: error instanceof Error ? error.name : "UNKNOWN",
+    location: error instanceof Error ? error.stack?.split("\n").find((line) => line.includes("file:///payload/driver.mjs:"))?.trim() ?? null : null };
+  process.exitCode = 1;
+  await writeFile(join(evidence, "failure.json"), JSON.stringify({ stage, lastState, failure }), { mode: 0o600 });
+  if (page && stockKde) {
+    try {
+      const controls = await page.locator("button").evaluateAll((buttons) => buttons.slice(0, 40).map((button) => ({
+        command: button.getAttribute("data-command"), tab: button.getAttribute("data-tab"), label: button.textContent?.slice(0, 80),
+        disabled: button instanceof HTMLButtonElement && button.disabled, visible: button.getClientRects().length > 0 })));
+      await writeFile(join(evidence, "failure-controls.json"), JSON.stringify(controls), { mode: 0o600 });
+      await page.screenshot({ path: join(evidence, "failure.png"), timeout: 5000 });
+    } catch { /* Keep teardown independent of renderer diagnostics. */ }
+  }
+}
 finally {
   let appClosed = application === undefined;
-  if (application) { try { await application.close(); appClosed = true; } catch {} }
+  let forcedAppTermination = false;
+  if (application) {
+    const original = application.process();
+    let timer: NodeJS.Timeout | undefined;
+    const closing = application.close().then(() => appOriginalClose); void closing.catch(() => {});
+    try {
+      await Promise.race([closing, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("OWNED_APP_CLOSE_TIMEOUT")), 10_000); })]);
+      appClosed = appCloseObserved;
+    } catch {
+      forcedAppTermination = true; original.kill("SIGKILL");
+      if (timer) clearTimeout(timer);
+      try { await Promise.race([appOriginalClose, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("OWNED_APP_EXIT_MISSING")), 5000); })]);
+        appClosed = appCloseObserved; } catch {}
+    } finally { if (timer) clearTimeout(timer); }
+  }
   for (const owner of owners.toReversed()) {
     if (!owner.closeObserved) owner.child.kill("SIGTERM");
     let timer: NodeJS.Timeout | undefined;
     try { await Promise.race([owner.closed, new Promise<never>((_, reject) => { timer = setTimeout(() => { owner.child.kill("SIGKILL"); reject(new Error("OWNED_CLOSE_TIMEOUT")); }, 5000); })]); } catch { process.exitCode = 1; }
     finally { if (timer) clearTimeout(timer); }
   }
-  await writeFile(join(evidence, "lifecycle.json"), JSON.stringify({ status, stage, checks, lastState, appClosed,
+  await writeFile(join(evidence, "lifecycle.json"), JSON.stringify({ status, stage, checks, lastState, failure, appClosed, forcedAppTermination,
     serverClosesObserved: owners.every((owner) => owner.closeObserved), diagnostics }), { mode: 0o600 });
   if (status !== "PASS" || !appClosed || !owners.every((owner) => owner.closeObserved)) process.exitCode = 1;
 }

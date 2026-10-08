@@ -246,6 +246,7 @@
   "No shortcut assigned. Choose a key combination in your desktop's shortcut settings.": "No shortcut assigned. Choose a key combination in your desktop's shortcut settings.",
   "Automatic paste enabled for this session. No screen capture is requested.": "Automatic paste enabled for this session. No screen capture is requested.",
   "Shortcut session ended. Enable it again in Settings.": "Shortcut session ended. Enable it again in Settings.",
+  "Change this shortcut in your desktop's settings. Its current binding remains active.": "Change this shortcut in your desktop's settings. Its current binding remains active.",
   "Shortcut setup was cancelled. Window recording remains usable.": "Shortcut setup was cancelled. Window recording remains usable.",
   "Shortcut setup or recording failed. Window recording remains usable.": "Shortcut setup or recording failed. Window recording remains usable.",
   "Keyboard permission unavailable: {error}. Clipboard output still works.": "Keyboard permission unavailable: {error}. Clipboard output still works.",

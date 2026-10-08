@@ -38,3 +38,13 @@ It sends synthetic portal signals; it does not press compositor keys or grant ho
 Original commands, processes and exact container cleanup are retained. Physical microphones,
 stock KDE/GNOME dialogs and key delivery, automatic paste, hardware GPU, Mac recording and
 release signing are separate gates.
+
+Append `--stock-kde` to reuse `linux/scripts/run-owned-desktop.py` and the pinned
+cached Kubuntu 24.04 portal image. This mode opens the normal app with native
+Wayland and installed KDE portal services, never the synthetic frontend. It uses
+QPainter only for the nested compositor without GPU devices, and copies the same
+verified Node runtime into the stopped payload. It records the actual setup
+response and uses GUI recording; it does not generate compositor key edges.
+The current stock run remains a failure: the portal returns no assigned binding,
+recognition reports `SPEECH_FAILED`, and graceful application shutdown does not
+finish before the desktop deadline. See [the retained evidence](../../../docs/ELECTRON-DEV-EVIDENCE.md).
