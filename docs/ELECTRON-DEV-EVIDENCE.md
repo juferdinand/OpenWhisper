@@ -1,5 +1,21 @@
 # Electron development evidence
 
+The normal native Wayland Dev app also pastes into an **owned inner XWayland GTK
+editor** in `stock-kde-xwayland-paste-2`. The actual KWin-owned Xwayland server is
+verified before target startup; only the editor changes display backend. Real F8
+Start/Stop, private public-speech audio and CPU recognition produce 105 bytes that
+match the editor, history and independent Wayland clipboard exactly while the app
+remains unfocused. Permission revoke, empty recovery, graceful original Quit and
+private-service/namespace cleanup pass. Peak214/cap256, no cap rejection or OOM;
+the selected runner takes **24.52 seconds**. Attempt1 also passes at 23.99 seconds;
+attempt2 covers the final nonempty launcher-file readiness check and its frozen
+driver hash matches the committed source.
+
+Strict TypeScript checking passes. This increment changes only the test harness
+and documentation; unchanged application unit/UI/native inputs are reused from
+the checks below, without an app rebuild. This is the pinned KDE Wayland-to-XWayland
+boundary, not standalone X11 desktop acceptance or GNOME consent evidence.
+
 Keyboard-only paste passes in **`stock-kde-paste-3`** on the pinned Kubuntu 24.04 /
 Plasma 5.27.12 native Wayland runner with portal frontend 1.18.4 and KDE backend
 5.27.11. The normal app explicitly grants a RemoteDesktop keyboard session through
@@ -30,7 +46,7 @@ its preparation deterministic and asserts entry into the intended blocked phase;
 its product deadline and late-error containment remain unchanged.
 
 This is owned stock KDE **legacy immediate grant**, not dialog Deny/Approve or
-identity-associated consent evidence. Inner XWayland targets, GNOME combined
+identity-associated consent evidence. GNOME combined
 hold/paste, advanced triggers, overlays, normal Dev GPU, packages/signatures/updates
 and full host replacement remain open. #21/#29/#30 are not closed by this result.
 Stable0.2.5 and the running Dev build are unchanged.

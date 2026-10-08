@@ -87,4 +87,12 @@ keyboard permission, actual F8 capture/CPU recognition and production Ctrl+V int
 a separate GTK target. Require target == history == independent `wl-paste` bytes;
 Electron's unfocused local cache is retained only as a diagnostic. The selected
 case checks revoke, recovery removal, original Quit and resource/namespace cleanup.
-It does not repeat Retry/Discard or prove dialogs, GNOME or XWayland behavior.
+It does not repeat Retry/Discard or prove dialogs or GNOME behavior.
+
+Use `--stock-kde-xwayland-paste` for the same acceptance case with the separate
+GTK editor on the private KWin-owned inner XWayland server. The normal app and
+clipboard publisher stay on Wayland. Before starting the editor, the driver
+checks the launcher-owned environment file, distinct inner display and socket,
+actual Xwayland descendant of the private KWin bus owner, and authentication path.
+This case proves the Wayland-to-XWayland delivery boundary on the pinned KDE
+fixture; it does not establish standalone X11 desktop support.

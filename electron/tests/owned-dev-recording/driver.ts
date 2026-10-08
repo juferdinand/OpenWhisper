@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 import { _electron, expect, type ElectronApplication, type Page } from "@playwright/test";
+import { z } from "zod";
 import { prepareDevelopmentProfile, resolveDevelopmentProfile } from "../../src/services/profiles.js";
 import { validateCommandOutput } from "../../src/contracts/ui.js";
 import type { DesktopBridge } from "../../src/contracts/bridge.js";
@@ -19,7 +20,8 @@ const payload = resolve(fileURLToPath(new URL("./", import.meta.url)));
 const packageRoot = join(payload, "app"), evidence = "/evidence";
 const stockKde = process.env.OPENWHISPER_STOCK_KDE === "1";
 const kdeLifecycle = process.env.OPENWHISPER_KDE_LIFECYCLE === "1";
-const kdePaste = process.env.OPENWHISPER_KDE_PASTE === "wayland";
+const kdeXwaylandPaste = process.env.OPENWHISPER_KDE_PASTE === "xwayland";
+const kdePaste = process.env.OPENWHISPER_KDE_PASTE === "wayland" || kdeXwaylandPaste;
 const sha = (value: Uint8Array) => createHash("sha256").update(value).digest("hex");
 const checks: string[] = [];
 let stage = "guard", status = "FAIL", application: ElectronApplication | undefined, page: Page | undefined;
@@ -322,9 +324,80 @@ async function main(): Promise<void> {
       for (const path of [targetHelper, focusScript]) {
         const value = await lstat(path); assert.ok(value.isFile() && !value.isSymbolicLink());
       }
-      const pasted = join(root, "pasted-wayland.txt");
-      await checkpoint("owned-native-wayland-target");
-      const target = child("/usr/bin/python3", [targetHelper, "--typing-target", pasted], { ...env, GDK_BACKEND: "wayland" });
+      const targetBackend = kdeXwaylandPaste ? "XWAYLAND" : "WAYLAND";
+      let targetEnvironment = { ...env, GDK_BACKEND: "wayland" };
+      if (kdeXwaylandPaste) {
+        await checkpoint("owned-inner-xwayland-ownership");
+        const environmentFile = env.WF_OWNED_XWAYLAND_ENV_FILE;
+        assert.ok(environmentFile && environmentFile === resolve(environmentFile));
+        await until(async () => {
+          try { const value = await lstat(environmentFile); return value.isFile() && value.size > 0; }
+          catch (error: unknown) {
+            if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+            throw error;
+          }
+        });
+        const fileStat = await lstat(environmentFile), directoryStat = await lstat(dirname(environmentFile));
+        assert.ok(fileStat.isFile() && !fileStat.isSymbolicLink() && fileStat.size <= 4096);
+        assert.equal(fileStat.uid, 1000);
+        assert.ok(directoryStat.isDirectory() && !directoryStat.isSymbolicLink());
+        assert.equal(directoryStat.uid, 1000); assert.equal(directoryStat.mode & 0o077, 0);
+        const inner = z.strictObject({ DISPLAY: z.string().regex(/^:\d+$/u), XAUTHORITY: z.string().max(4096).nullable(),
+          WAYLAND_DISPLAY: z.literal("openwhisper-owned") }).parse(JSON.parse(await readFile(environmentFile, "utf8")));
+        assert.notEqual(inner.DISPLAY, env.DISPLAY);
+        const socket = await lstat(join("/tmp/.X11-unix", `X${inner.DISPLAY.slice(1)}`));
+        assert.ok(socket.isSocket()); assert.equal(socket.uid, 1000);
+        const authority = inner.XAUTHORITY ?? "";
+        if (authority) {
+          assert.equal(authority, resolve(authority));
+          const authStat = await lstat(authority);
+          assert.ok(authStat.isFile() && !authStat.isSymbolicLink()); assert.equal(authStat.uid, 1000);
+        }
+        const innerEnvironment = { ...env, DISPLAY: inner.DISPLAY, XAUTHORITY: authority };
+        // Wake KWin's lazy inner server through an inert connection, never input.
+        await execute("/usr/bin/xwininfo", ["-root"], { env: innerEnvironment, timeout: 3000, maxBuffer: 16_384 });
+        const daemonCall = async (method: string, argument: string) =>
+          (await execute("/usr/bin/gdbus", ["call", "--session", "--dest", "org.freedesktop.DBus", "--object-path", "/org/freedesktop/DBus",
+            "--method", `org.freedesktop.DBus.${method}`, argument], { env, timeout: 3000, maxBuffer: 4096 })).stdout.trim();
+        const ownerReply = /^\('(:\d+\.\d+)',\)$/u.exec(await daemonCall("GetNameOwner", "org.kde.KWin"));
+        assert.ok(ownerReply); const kwinOwner = ownerReply[1]!;
+        const pidReply = /^\((?:uint32 )?([1-9]\d*),\)$/u.exec(await daemonCall("GetConnectionUnixProcessID", kwinOwner));
+        assert.ok(pidReply); const kwinPid = Number(pidReply[1]);
+        assert.ok(Number.isSafeInteger(kwinPid) && kwinPid <= 2_147_483_647);
+        const pending = [kwinPid], seen = new Set<number>();
+        let xwayland: { pid: number; argv: string[] } | undefined;
+        while (pending.length && seen.size < 64) {
+          const current = pending.pop()!; if (seen.has(current)) continue; seen.add(current);
+          const proc = `/proc/${current}`;
+          try {
+            assert.equal((await lstat(proc)).uid, 1000);
+            const argv = (await readFile(`${proc}/cmdline`, "utf8")).split("\0");
+            assert.equal(argv.pop(), "");
+            if (argv[0] && basename(argv[0]) === "Xwayland" && argv.includes(inner.DISPLAY)) {
+              xwayland = { pid: current, argv }; break;
+            }
+            const children = (await readFile(`${proc}/task/${current}/children`, "utf8")).trim();
+            for (const value of children ? children.split(/\s+/u) : []) {
+              assert.match(value, /^[1-9]\d*$/u); const childPid = Number(value);
+              assert.ok(Number.isSafeInteger(childPid) && childPid <= 2_147_483_647); pending.push(childPid);
+            }
+          } catch (error: unknown) {
+            if (!(error instanceof Error) || !("code" in error) || (error.code !== "ENOENT" && error.code !== "ESRCH")) throw error;
+          }
+        }
+        assert.ok(xwayland && xwayland.pid !== kwinPid, "Inner display must belong to an actual owned KWin descendant Xwayland");
+        const authFlags = xwayland.argv.map((value, index) => value === "-auth" ? index : -1).filter((index) => index !== -1);
+        if (authority) {
+          assert.equal(authFlags.length, 1); assert.equal(xwayland.argv[authFlags[0]! + 1], authority);
+        } else assert.equal(authFlags.length, 0, "Inner Xwayland must not require an unrecorded cookie");
+        assert.equal(await daemonCall("GetNameOwner", "org.kde.KWin"), `('${kwinOwner}',)`);
+        await writeFile(join(evidence, "inner-xwayland-ownership.json"), JSON.stringify({ uid: 1000, kwinPid, xwaylandPid: xwayland.pid,
+          display: inner.DISPLAY, xauthority: authority, ownerStable: true, descendantsInspected: seen.size }, null, 2), { mode: 0o600 });
+        targetEnvironment = { ...innerEnvironment, GDK_BACKEND: "x11" };
+      }
+      const pasted = join(root, kdeXwaylandPaste ? "pasted-xwayland.txt" : "pasted-wayland.txt");
+      await checkpoint(kdeXwaylandPaste ? "owned-inner-xwayland-target" : "owned-native-wayland-target");
+      const target = child("/usr/bin/python3", [targetHelper, "--typing-target", pasted], targetEnvironment);
       await until(async () => {
         assert.equal(target.closeObserved, false);
         try { const value = await lstat(pasted); return value.isFile() && value.uid === 1000 && !(value.mode & 0o077); }
@@ -395,7 +468,7 @@ async function main(): Promise<void> {
         waylandClipboard = { failure: killed || code === "ETIMEDOUT" ? "TIMEOUT"
           : code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" ? "OUTPUT_LIMIT" : code === "ENOENT" ? "UNAVAILABLE" : "FAILED" };
       }
-      await writeFile(join(evidence, "paste-readback.json"), JSON.stringify({
+      await writeFile(join(evidence, kdeXwaylandPaste ? "paste-readback-xwayland.json" : "paste-readback.json"), JSON.stringify({
         expectedLength: Buffer.byteLength(result.transcript), expectedHash: sha(Buffer.from(result.transcript)),
         targetLength: Buffer.byteLength(targetText), targetHash: sha(Buffer.from(targetText)), targetMatches: targetText === result.transcript,
         historyMatches: readbackState.history[0] === result.transcript,
@@ -417,7 +490,7 @@ async function main(): Promise<void> {
       const maps = await readFile(`/proc/${security.pid}/maps`, "utf8");
       assert.equal(maps.includes("openwhisper_capture.node"), false); assert.equal(maps.includes("openwhisper_speech.node"), false);
       assert.equal(sha(await readFile(join(stable, "sentinel"))), stableBefore);
-      checks.push("real F8 Start/Stop and CPU Tiny recognition; production portal Ctrl+V into owned GTK Wayland target equals private clipboard and history; recovery removed");
+      checks.push(`real F8 Start/Stop and CPU Tiny recognition; production portal Ctrl+V into owned GTK ${targetBackend} target equals private Wayland clipboard and history; recovery removed`);
 
       await checkpoint("actual-keyboard-session-revoke");
       await page.evaluate(() => window.openwhisper?.invoke("disable_paste", {}));
@@ -438,7 +511,7 @@ async function main(): Promise<void> {
       assert.equal(resources["pids.max"]?.trim(), "256");
       for (const field of ["oom", "oom_kill"]) assert.match(resources["memory.events"] ?? "", new RegExp(`(?:^|\\n)${field} 0(?:\\n|$)`, "u"));
       await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", clipboardConfirmed: true, recoveryRemoved: true,
-        nativeInMain: false, pasteConfirmed: true, permissionRevoked: true, targetBackend: "WAYLAND", consentMode: "LEGACY_IMMEDIATE_GRANT" }, null, 2), { mode: 0o600 });
+        nativeInMain: false, pasteConfirmed: true, permissionRevoked: true, targetBackend, consentMode: "LEGACY_IMMEDIATE_GRANT" }, null, 2), { mode: 0o600 });
       status = "PASS"; return;
     }
     if (kdeLifecycle) {
