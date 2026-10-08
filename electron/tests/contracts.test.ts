@@ -7,6 +7,7 @@ import {
   validateCommandInput, validateCommandName, validateCommandOutput, validateEvent,
   validateEventName, type AppState, type CommandInput, type CommandOutput,
 } from "../src/contracts/ui.js";
+import { defaultLocalProcessingProfile } from "../src/contracts/local-processing.js";
 
 function state(): AppState {
   return {
@@ -62,7 +63,7 @@ test("schema-derived command maps cover all current renderer actions", async () 
     "enable_paste", "disable_paste", "enable_shortcut", "desktop_shortcut", "clear_shortcut",
     "retry_transcription", "discard_recovery", "toggle_recording", "cancel_recording", "check_updates", "install_update",
   ]) assert.doesNotThrow(() => validateCommandName(name));
-  assert.equal(Object.keys(commandInputSchemas).length, 28);
+  assert.equal(Object.keys(commandInputSchemas).length, 31);
   assert.deepEqual(Object.keys(commandOutputSchemas).sort(), Object.keys(commandInputSchemas).sort());
 });
 
@@ -85,7 +86,7 @@ test("validated preference patches preserve text and reject host-owned fields", 
   const patch = { ui_language: "de", vocabulary: text, keep_history: false, output: "clipboard" };
   assert.deepEqual(validateCommandInput("save_preferences", { changes: patch }), { changes: patch });
   assert.deepEqual(preferencePatchSchema.parse({}), {});
-  for (const language of ["auto", "de", "zh", "ja", "ko", "ar", "cs", "uk"]) {
+  for (const language of ["auto", "de", "zh", "ja", "ko", "ar", "cs", "uk", "yue"]) {
     assert.deepEqual(preferencePatchSchema.parse({ language }), { language });
   }
   for (const field of ["setup_completed", "gpu_configured", "native_trigger", "x11_trigger", "unknown"]) {
@@ -95,6 +96,24 @@ test("validated preference patches preserve text and reject host-owned fields", 
     assert.throws(() => validateCommandInput("save_preferences", { changes }));
   }
   assert.throws(() => validateCommandInput("save_preferences", { changes: patch, preferences: state().preferences }));
+});
+
+test("optional preview commands validate a separate profile and fixed categorical results", () => {
+  const profile = defaultLocalProcessingProfile();
+  assert.deepEqual(appStateSchema.parse({ ...state(), local_processing: profile }).local_processing, profile);
+  assert.throws(() => validateCommandInput("save_preferences", { changes: { local_processing: profile } }));
+  assert.deepEqual(validateCommandInput("save_local_processing", { changes: { model: "owned 日本語" } }),
+    { changes: { model: "owned 日本語" } });
+  assert.throws(() => validateCommandInput("save_local_processing", { changes: { api_key: "private" } }));
+  assert.throws(() => validateCommandInput("preview_local_processing", { requestId: "owned", text: "", endpoint: "https://example.com" }));
+  assert.deepEqual(validateCommandOutput("preview_local_processing", { ok: true, text: "Café 日本語" }),
+    { ok: true, text: "Café 日本語" });
+  assert.deepEqual(validateCommandOutput("preview_local_processing", { ok: false, code: "CONNECTION_FAILED" }),
+    { ok: false, code: "CONNECTION_FAILED" });
+  for (const value of ["text", { ok: true, text: "" }, { ok: false, code: "private server diagnostic" },
+    { ok: false, code: "HTTP_REJECTED", detail: "private body" }]) {
+    assert.throws(() => validateCommandOutput("preview_local_processing", value));
+  }
 });
 
 test("legacy Mac blank and whitespace snippet drafts survive snapshots and saves unchanged", () => {

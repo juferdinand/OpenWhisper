@@ -76,7 +76,29 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     stableFiles.push(path);
   }
   const stableBefore = await Promise.all(stableFiles.map(hash));
-  const server = createServer((_request, response) => {
+  let previewMode: "normal" | "hold" | "reject" = "normal";
+  let previewRequests = 0;
+  const previewText = "Owned Deutsch 👩‍💻 العربية 日本語 <img src=x onerror=alert(1)>";
+  const previewResult = "Owned structured plan: Deutsch 👩‍💻 العربية 日本語 <script>fixture</script>";
+  const previewBodies: unknown[] = [];
+  const server = createServer((request, response) => {
+    if (request.method === "POST" && request.url === "/v1/chat/completions") {
+      previewRequests += 1;
+      const blocks: Buffer[] = [];
+      request.on("data", (block: Buffer) => { blocks.push(block); });
+      request.on("end", () => {
+        const input: unknown = JSON.parse(Buffer.concat(blocks).toString("utf8"));
+        previewBodies.push(input);
+        if (previewMode === "hold") return;
+        if (previewMode === "reject") {
+          response.writeHead(401); response.end("Owned private diagnostic must never appear in the UI"); return;
+        }
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ choices: [{ finish_reason: "stop",
+          message: { role: "assistant", content: previewResult } }] }));
+      });
+      return;
+    }
     requests += 1;
     response.writeHead(200, { "Content-Type": "text/plain" });
     response.end("Owned network control");
@@ -293,6 +315,66 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await page.locator('[data-ui-language="en"]').click();
     await expect(page.locator("#page-title")).toHaveText("General");
     await page.screenshot({ path: join(evidence, "dev-general-en.png") });
+    await page.locator('[data-tab="models"]').click();
+    await expect(page.locator("#processing-preview h2")).toHaveText("Text processing preview");
+    await expect(page.locator("#processing-enabled")).not.toBeChecked();
+    assert.equal(previewRequests, 0, "Opening optional controls must not contact a model server.");
+    await page.locator("#processing-endpoint").fill(`http://127.0.0.1:${address.port}/v1`);
+    await page.locator("#processing-model").fill("owned-model 日本語");
+    await page.locator("#processing-enabled").check();
+    await expect.poll(async () => {
+      const value = validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {})));
+      return value.local_processing;
+    }).toMatchObject({ enabled: true, model: "owned-model 日本語", endpoint: `http://127.0.0.1:${address.port}/v1` });
+    const enabledNode = await page.locator("#processing-enabled").elementHandle();
+    assert.ok(enabledNode);
+    await page.locator("#processing-input").fill(previewText);
+    await page.locator("#processing-send").click();
+    await expect(page.locator("#processing-result")).toHaveValue(previewResult);
+    await expect(page.locator("#processing-feedback")).toHaveText("Preview ready. Review it before using it.");
+    assert.equal(await enabledNode.evaluate((node) => node === document.querySelector("#processing-enabled")), true);
+    const body = z.object({ model: z.string(), messages: z.array(z.object({ role: z.string(), content: z.string() })) }).parse(previewBodies[0]);
+    assert.equal(body.model, "owned-model 日本語");
+    assert.equal(body.messages.find((message) => message.role === "user")?.content, previewText);
+    assert.equal(await page.locator("#processing-preview script").count(), 0);
+    assert.equal(await page.locator("#processing-preview img").count(), 0);
+    const previewState = validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {})));
+    assert.equal(previewState.transcript, "");
+    assert.deepEqual(previewState.history, []);
+    const featureFile = join(profile, "config", "settings", "local-processing.json");
+    assert.equal((await lstat(featureFile)).mode & 0o777, 0o600);
+    assert.equal((await readFile(featureFile, "utf8")).includes(previewText), false);
+    assert.equal((await readFile(featureFile, "utf8")).includes(previewResult), false);
+    previewMode = "hold";
+    await page.locator("#processing-send").click();
+    await expect.poll(() => previewRequests).toBe(2);
+    await page.locator("#processing-cancel").click();
+    await expect(page.locator("#processing-feedback")).toHaveText("Text processing cancelled; your dictation is unchanged");
+    await expect(page.locator("#processing-input")).toHaveValue(previewText);
+    previewMode = "normal";
+    await page.locator("#processing-send").click();
+    await expect(page.locator("#processing-result")).toHaveValue(previewResult);
+    await expect.poll(() => previewRequests).toBe(3);
+    previewMode = "reject";
+    await page.locator("#processing-send").click();
+    await expect(page.locator("#processing-feedback")).toHaveText("The local server rejected the request; check its model and authentication settings");
+    await expect(page.locator("#processing-input")).toHaveValue(previewText);
+    assert.equal((await page.locator("body").textContent())?.includes("Owned private diagnostic"), false);
+    await page.locator('[data-ui-language="de"]').click();
+    await expect(page.locator("#processing-preview h2")).toHaveText("Textverarbeitung ausprobieren");
+    await expect(page.locator("#processing-input")).toHaveValue(previewText);
+    await page.locator("#processing-preview h2").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(evidence, "dev-processing-profile-de.png") });
+    await page.locator("#processing-result").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(evidence, "dev-processing-de.png") });
+    await page.locator('[data-ui-language="en"]').click();
+    await expect(page.locator("#processing-preview h2")).toHaveText("Text processing preview");
+    await page.locator("#processing-preview h2").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(evidence, "dev-processing-profile-en.png") });
+    await page.locator("#processing-result").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(evidence, "dev-processing-en.png") });
+    assert.equal(await page.locator("main").evaluate((main) => main.scrollWidth <= main.clientWidth + 1), true);
+    checks.push("actual Dev model-preview IPC, intact multilingual request, escaped renderer-only result, manual cancel/retry, categorical HTTP error, private 0600 profile and EN/DE");
     const saved = validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {})));
     assert.equal(saved.preferences.hold_to_record, true);
     assert.equal(saved.preferences.vocabulary, "Kubernetes, Grüß Gott, 東京");
@@ -301,18 +383,47 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     application = undefined;
     const restarted = await launch();
     const reopened = await restarted.firstWindow();
+    currentPage = reopened;
     await expect(reopened.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev");
     const restored = validateCommandOutput("get_state", await reopened.evaluate(() => window.openwhisper?.invoke("get_state", {})));
     assert.deepEqual(restored.preferences, saved.preferences);
+    assert.deepEqual(restored.local_processing, saved.local_processing);
+    await reopened.locator('[data-tab="models"]').click();
+    await expect(reopened.locator("#processing-enabled")).toBeChecked();
+    await expect(reopened.locator("#processing-input")).toHaveValue("");
+    await expect(reopened.locator("#processing-result")).toHaveValue("");
+    assert.equal(restored.transcript, "");
+    assert.deepEqual(restored.history, []);
+    await restarted.close();
+    application = undefined;
+    await writeFile(featureFile, "{owned invalid optional profile", { mode: 0o600 });
+    const recoveredApp = await launch();
+    const recoveredPage = await recoveredApp.firstWindow();
+    currentPage = recoveredPage;
+    await expect(recoveredPage.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev");
+    const recovered = validateCommandOutput("get_state", await recoveredPage.evaluate(() => window.openwhisper?.invoke("get_state", {})));
+    assert.deepEqual(recovered.preferences, saved.preferences);
+    assert.equal(recovered.local_processing?.enabled, false);
+    assert.equal(recovered.local_processing_invalid_profile, true);
+    assert.equal(await readFile(featureFile, "utf8"), "{owned invalid optional profile");
+    await recoveredPage.locator('[data-tab="models"]').click();
+    await expect(recoveredPage.locator("#processing-profile-warning")).toBeVisible();
+    await expect(recoveredPage.locator("#processing-enabled")).not.toBeChecked();
+    await recoveredPage.locator("#processing-model").fill("owned repaired profile");
+    await recoveredPage.locator("#processing-model").press("Tab");
+    await expect(recoveredPage.locator("#processing-profile-warning")).toBeHidden();
+    assert.equal((await readFile(featureFile, "utf8")).includes("owned repaired profile"), true);
+    assert.equal(previewRequests, 4, "Corrupt profile recovery must not silently send any text.");
+    checks.push("actual Dev startup preserves invalid optional bytes with disabled defaults; explicit edit repairs only its profile");
     assert.deepEqual(await Promise.all(stableFiles.map(hash)), stableBefore);
     const persisted = join(profile, "config", "settings", "preferences.json");
     assert.equal((await lstat(persisted)).mode & 0o777, 0o600);
     checks.push("EN/DE patches, focused editor and stable toggle node, restart persistence, stable sentinels unchanged");
     await writeFile(join(evidence, "result.json"), JSON.stringify({
-      result: "PASS", scope: "P1 owned development UI only; no dictation parity", checks,
+      result: "PASS", scope: "P1/P5 owned development UI with fake model protocol; no dictation or real model quality parity", checks,
       root, display, stableBefore, stableAfter: await Promise.all(stableFiles.map(hash)),
       driverNote: "Canceled external navigation leaves Playwright pending; actual URL, DOM and General click were verified before private profile restart.",
-      preferenceFileMode: "0600", screenshotFiles: ["dev-general-de.png", "dev-general-en.png", "dev-about.png", "dev-models.png"],
+      preferenceFileMode: "0600", screenshotFiles: ["dev-general-de.png", "dev-general-en.png", "dev-about.png", "dev-models.png", "dev-processing-profile-de.png", "dev-processing-profile-en.png", "dev-processing-de.png", "dev-processing-en.png"],
     }, null, 2));
   } catch (error: unknown) {
     await writeFile(join(evidence, "failure.json"), JSON.stringify({

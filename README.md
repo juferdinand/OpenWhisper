@@ -409,6 +409,8 @@ These are plans, not promised release dates.
 ## Development
 
 The isolated TypeScript Electron preview has its own [development instructions](docs/ELECTRON-DEVELOPMENT.md).
+Its optional [manual LM Studio/Ollama preview](docs/LOCAL_MODELS.md) is development work;
+the installed 0.2.5 release remains unchanged.
 It keeps the current UI and separate Dev data; recording and platform parity are still being implemented.
 
 ```bash

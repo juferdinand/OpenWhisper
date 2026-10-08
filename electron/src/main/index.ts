@@ -10,6 +10,11 @@ import {
   type AppState, type EventName, type EventPayload,
 } from "../contracts/ui.js";
 import { DevelopmentPreferenceStore } from "../services/preferences.js";
+import { PrivateStateStore } from "../services/private-state.js";
+import { LocalProcessingService, LocalProcessingError } from "../services/local-processing.js";
+import {
+  localProcessingProfileSchema, defaultLocalProcessingProfile, applyLocalProcessingProfilePatch,
+} from "../contracts/local-processing.js";
 import { prepareDevelopmentProfile, resolveDevelopmentProfile } from "../services/profiles.js";
 import { CONTENT_SECURITY_POLICY, MAIN_URL, readApplicationAsset } from "./assets.js";
 import { createUiDispatcher, uiFailure, type UiSender } from "./ipc.js";
@@ -66,6 +71,12 @@ async function start(): Promise<void> {
   app.on("window-all-closed", () => { app.quit(); });
   await app.whenReady();
   const preferences = await DevelopmentPreferenceStore.open(profile);
+  const processingProfile = await PrivateStateStore.open(
+    join(profile.paths.settings, "local-processing.json"), localProcessingProfileSchema, defaultLocalProcessingProfile(),
+    1024 * 1024, { invalidContent: "preserve-and-default" },
+  );
+  const processing = new LocalProcessingService();
+  app.once("before-quit", () => { processing.close(); });
   const rawCatalog: unknown = JSON.parse(await readFile(join(distribution, "resources/models.json"), "utf8"));
   const catalog = z.object({ models: z.array(modelSchema).min(1).max(128) }).parse(rawCatalog);
   const version = (await readFile(join(distribution, "resources/VERSION"), "utf8")).trim();
@@ -93,6 +104,8 @@ async function start(): Promise<void> {
     download: null, progress: 0, elapsed: 0, level: 0, model_directory: profile.paths.models,
     profile: "development", recording_available: false,
     development_build: `${build.commit.slice(0, 12)}${build.modified ? "+modified" : ""}`,
+    local_processing: processingProfile.snapshot(),
+    local_processing_invalid_profile: processingProfile.invalidContent,
   });
 
   const uiSession = session.defaultSession;
@@ -151,6 +164,20 @@ async function start(): Promise<void> {
         await preferences.completeSetup();
         emit("state", state());
       },
+      save_local_processing: async ({ changes }) => {
+        await processingProfile.update((current) => applyLocalProcessingProfilePatch(current, changes));
+        const current = state();
+        emit("state", current);
+        return current;
+      },
+      preview_local_processing: async (input) => {
+        try { return { ok: true, text: await processing.preview(input, processingProfile.snapshot()) }; }
+        catch (error: unknown) {
+          if (error instanceof LocalProcessingError) return { ok: false, code: error.code };
+          throw error;
+        }
+      },
+      cancel_local_processing: ({ requestId }) => { processing.cancel(requestId); },
     },
   });
   ipcMain.handle("openwhisper:invoke", async (event, request: unknown) => {
@@ -164,7 +191,7 @@ async function start(): Promise<void> {
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
   contents.on("will-navigate", (event) => { event.preventDefault(); });
   contents.on("will-attach-webview", (event) => { event.preventDefault(); });
-  window.on("closed", () => { ipcMain.removeHandler("openwhisper:invoke"); window = undefined; });
+  window.on("closed", () => { processing.close(); ipcMain.removeHandler("openwhisper:invoke"); window = undefined; });
   window.once("ready-to-show", () => { window?.show(); });
   await window.loadURL(MAIN_URL);
 }

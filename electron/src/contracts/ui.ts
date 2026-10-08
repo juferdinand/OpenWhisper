@@ -1,4 +1,9 @@
 import { z } from "zod";
+import { speechLanguageSchema } from "./speech.js";
+import {
+  localProcessingProfileSchema, localProcessingProfilePatchSchema, localProcessingOutputSchema,
+  previewLocalProcessingInputSchema, cancelLocalProcessingInputSchema,
+} from "./local-processing.js";
 
 // Transport limits reject oversized messages; they never shorten user text or limit recording.
 export const MAX_UI_REQUEST_BYTES = 8 * 1024 * 1024;
@@ -59,7 +64,7 @@ export const preferencesSchema = z.strictObject({
   ui_language: uiLanguageSchema,
   setup_completed: z.boolean(),
   model: modelId,
-  language: z.string().regex(/^(?:auto|[a-z]{2})$/),
+  language: speechLanguageSchema,
   microphone: utf8(1024),
   vocabulary: utf8(8192),
   snippets: z.array(snippetSchema).max(100),
@@ -165,6 +170,8 @@ export const appStateSchema = z.strictObject({
   model_directory: utf8(4096),
   profile: z.literal("development").optional(),
   recording_available: z.boolean().optional(),
+  local_processing: localProcessingProfileSchema.optional(),
+  local_processing_invalid_profile: z.boolean().optional(),
 }).refine(
   (state) => state.platform !== "macos" || state.macos !== undefined,
   { message: "macOS state requires its capability snapshot", path: ["macos"] },
@@ -178,11 +185,22 @@ export type State = AppState;
 const noArgs = z.strictObject({});
 const modelArgs = z.strictObject({ id: modelId });
 const actionResult = z.union([z.null(), z.undefined()]);
+export const localProcessingFailureSchema = z.enum([
+  "INVALID_REQUEST", "INVALID_PROFILE", "DISABLED", "MODEL_REQUIRED", "BUSY", "CANCELLED", "CLOSED",
+  "TIMEOUT", "CONNECTION_FAILED", "HTTP_REJECTED", "RESPONSE_TOO_LARGE", "RESPONSE_READ_FAILED", "INVALID_RESPONSE",
+]);
+export const localProcessingPreviewResultSchema = z.discriminatedUnion("ok", [
+  z.strictObject({ ok: z.literal(true), text: localProcessingOutputSchema }),
+  z.strictObject({ ok: z.literal(false), code: localProcessingFailureSchema }),
+]);
 
 /** Fixed renderer capabilities. Host-only bulk settings and arbitrary paths are not commands. */
 export const commandInputSchemas = {
   get_state: noArgs,
   save_preferences: z.strictObject({ changes: preferencePatchSchema }),
+  save_local_processing: z.strictObject({ changes: localProcessingProfilePatchSchema }),
+  preview_local_processing: previewLocalProcessingInputSchema,
+  cancel_local_processing: cancelLocalProcessingInputSchema,
   toggle_recording: noArgs,
   cancel_recording: noArgs,
   retry_transcription: noArgs,
@@ -215,6 +233,9 @@ export type CommandName = z.infer<typeof commandNameSchema>;
 export const commandOutputSchemas = {
   get_state: appStateSchema,
   save_preferences: appStateSchema,
+  save_local_processing: appStateSchema,
+  preview_local_processing: localProcessingPreviewResultSchema,
+  cancel_local_processing: actionResult,
   toggle_recording: actionResult,
   cancel_recording: actionResult,
   retry_transcription: actionResult,

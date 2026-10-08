@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "build": "tsx scripts/build.ts",
+    "build:native": "tsx scripts/build-native.ts",
     "dev": "tsx scripts/dev.ts"
   },
   "dependencies": {

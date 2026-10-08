@@ -160,6 +160,9 @@ export function createUiDispatcher(options: {
   const routes = {
     get_state: route("get_state", handlers.get_state),
     save_preferences: route("save_preferences", handlers.save_preferences),
+    save_local_processing: route("save_local_processing", handlers.save_local_processing),
+    preview_local_processing: route("preview_local_processing", handlers.preview_local_processing),
+    cancel_local_processing: route("cancel_local_processing", handlers.cancel_local_processing),
     toggle_recording: route("toggle_recording", handlers.toggle_recording),
     cancel_recording: route("cancel_recording", handlers.cancel_recording),
     retry_transcription: route("retry_transcription", handlers.retry_transcription),

@@ -1,7 +1,7 @@
 # Isolated Electron development
 
 The [migration plan](ELECTRON-MIGRATION.md) defines replacement and acceptance gates.
-The first implementation slice starts **OpenWhisper Dev** with the existing settings UI,
+The implementation starts **OpenWhisper Dev** with the existing settings UI,
 a schema-validated sandboxed bridge and private settings/session directories. Recording,
 global triggers, automatic paste, autostart and stable updates are unavailable in this slice.
 It does not replace the released 0.2.5 application or establish desktop/speech parity.
@@ -78,8 +78,57 @@ fields and switch nodes, and checked EN/DE persistence, Dev build/profile identi
 and unchanged synthetic stable settings/models/history/recovery/autostart files.
 These checks cover P1. Native macOS permissions, Linux compositor adapters and complete
 recording/recognition/package/update behavior remain unproven for Electron.
+The later P2/P5 checks and exact candidate provenance are in the
+[development evidence record](ELECTRON-DEV-EVIDENCE.md).
 
-The native CPU probe is separate P2 work. It uses checksum-pinned whisper.cpp/Parakeet
-source and Node-API headers, with a narrow compiled binding loaded only in a disposable
-test process. GPU/native capture and packaged Electron worker parity remain separate gates.
-Do not substitute this probe for a complete replacement or delete the existing hosts.
+## CPU speech and lifecycle work
+
+P2 ports the shared text fixtures, model catalog and recording state machine to strict
+TypeScript. Synthetic lifecycle tests cover final sample fencing before Stop acknowledgement,
+expired callers, stale results, Linux retained-audio recovery, Mac RAM-only recovery and
+confirmed delivery before removal. Their logical clock/sample ledger exceeds one hour;
+that is separate from the still-required native capture exceeding 300 seconds.
+
+The native CPU binding uses checksum-pinned whisper.cpp/Parakeet source and Node-API 8
+headers. It is loaded in a disposable worker, never in the application main. No new native
+module is loaded when the ordinary Dev UI starts. The initial binding explicitly disables
+Vulkan and Metal; it does not establish release GPU or Parakeet-model parity.
+
+```bash
+cd electron
+npm run build
+npm run build:native
+node --import tsx scripts/fetch-speech-fixtures.ts
+OPENWHISPER_NATIVE_TEST_MODEL="$PWD/.local/speech-fixtures/ggml-tiny.bin" \
+OPENWHISPER_NATIVE_TEST_AUDIO="$PWD/.local/speech-fixtures/jfk.f32" \
+  node --import tsx --test tests/native-speech.test.ts
+```
+
+The public test model/audio are checksum-pinned and never use a microphone. The probe
+recognizes the fixture twice in one context, rejects reuse under an incorrect model family,
+reloads the original model and releases the context. CI runs this CPU probe on Linux and
+macOS. Build requires CMake, Ninja and a C/C++ compiler. `npm run build` cleans `dist`, so
+run `build:native` afterward when exercising native workers.
+
+The separate [owned utility probe](../electron/tests/owned-speech/README.md) exercises the
+compiled transport in actual Electron 44.7.0 on Ubuntu 22.04, including incompatible-host
+ABI containment, context reuse, native failures, crashes, an intentionally stopped helper,
+confirmed force-reap before replacement and malformed frames. Its Node utility process
+is not an OS sandbox; the private, unprivileged test container is the isolation boundary.
+No desktop, capture, GPU or complete replacement claim follows from these checks.
+
+## Optional text-model preview
+
+P5 adds a disabled-by-default manual preview at the end of **Models**. Its numeric-loopback
+LM Studio/Ollama requests originate in the host and use separate private settings. Input
+and replies are transient and are not persisted by the host; the renderer retains them for
+that session and the selected server receives the submitted input. They do not change dictation, history,
+clipboard delivery or recovery. See [manual model preview](LOCAL_MODELS.md) for setup,
+privacy, limits and acceptance steps. This development feature is absent from release 0.2.5.
+
+The owned UI fixture also exercises actual Dev IPC against its own synthetic model server:
+send, cancel, retry, categorical HTTP errors, transient multilingual text, English/German
+controls, private profile persistence and unchanged synthetic stable data. These fixtures
+prove protocol/UI behavior, not the quality of a user-selected model. Native capture,
+platform adapters, universal packaging, existing-data migration and signed old-client
+updates remain separate gates. Keep the existing application hosts until those gates pass.

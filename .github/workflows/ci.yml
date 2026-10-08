@@ -39,6 +39,21 @@ jobs:
           npm run typecheck
           npm test
           npm run build
+      - name: Install native CPU build tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Install native CPU build tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew list cmake ninja >/dev/null 2>&1 || brew install cmake ninja
+      - name: Check native CPU binding with pinned public audio
+        working-directory: electron
+        env:
+          OPENWHISPER_NATIVE_TEST_MODEL: ${{ github.workspace }}/electron/.local/speech-fixtures/ggml-tiny.bin
+          OPENWHISPER_NATIVE_TEST_AUDIO: ${{ github.workspace }}/electron/.local/speech-fixtures/jfk.f32
+        run: |
+          npm run build:native
+          node --import tsx scripts/fetch-speech-fixtures.ts
+          node --import tsx --test tests/native-speech.test.ts
   linux:
     uses: ./.github/workflows/linux-build.yml
     with:

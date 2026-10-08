@@ -897,3 +897,8 @@ html.overlay,
 .row.approval > span:first-child { flex-shrink: 1; }
 
 .trigger-controls { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.processing-preview .processing-field { display: flex; flex-direction: column; gap: 8px; margin: 16px 0; }
+.processing-preview input:not(.switch), .processing-preview textarea { width: 100%; }
+.processing-limits, .processing-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+.processing-limits label { flex: 1; min-width: 180px; }
+#processing-destination { overflow-wrap: anywhere; }

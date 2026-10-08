@@ -1,6 +1,8 @@
 import { invoke, listen } from "./bridge";
 import { setLocale, t, type UILanguage } from "./i18n";
 import "./style.css";
+import { mountProcessingPreview } from "./local-processing";
+import type { LocalProcessingProfilePatch } from "../../../electron/src/contracts/local-processing";
 
 import {
   preferencePatchSchema, validateCommandName, validateCommandInput,
@@ -16,6 +18,7 @@ let shellKey = "";
 let renderedTab: Tab | undefined;
 let preferenceQueue = Promise.resolve();
 let pendingPreferences = 0;
+let processingQueue = Promise.resolve();
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const overlay =
   new URLSearchParams(location.search).has("overlay") ||
@@ -122,6 +125,28 @@ async function savePreferences(changes: PreferencePatch): Promise<boolean> {
 }
 async function preference(name: string, value: unknown) {
   return savePreferences(preferencePatchSchema.parse({ [name]: value }));
+}
+async function saveProcessingProfile(changes: LocalProcessingProfilePatch): Promise<boolean> {
+  const saved = processingQueue.then(async () => {
+    try {
+      state = await invoke("save_local_processing", { changes });
+      render();
+      return true;
+    } catch {
+      notice("Invalid text processing profile");
+      try { state = await invoke("get_state"); render(); } catch { /* Retain the last confirmed state. */ }
+      return false;
+    }
+  });
+  processingQueue = saved.then(() => {});
+  return saved;
+}
+function syncProcessingPreview() {
+  const root = document.querySelector<HTMLElement>("#processing-preview");
+  if (root && state.local_processing) {
+    mountProcessingPreview(root, state.local_processing, state.transcript, saveProcessingProfile,
+      state.local_processing_invalid_profile ?? false);
+  }
 }
 function syncPreferenceControls() {
   if (pendingPreferences) return;
@@ -233,6 +258,7 @@ function render() {
     .querySelectorAll<HTMLButtonElement>("[data-tab]")
     .forEach((b) => b.classList.toggle("selected", b.dataset.tab === tab));
   syncPreferenceControls();
+  syncProcessingPreview();
   const triggerBusy = portalBusy || ["recording", "transcribing"].includes(state.status) || ["downloading", "installing"].includes(state.updates.status);
   document.querySelectorAll<HTMLButtonElement>('[data-portal="enable_shortcut"], [data-portal="clear_shortcut"], [data-portal="desktop_shortcut"]').forEach(button => {
     button.disabled = triggerBusy || (button.dataset.portal === "enable_shortcut" && !state.native_shortcuts && !state.shortcut_portal);
@@ -265,6 +291,7 @@ function render() {
     state.updates,
     state.overlay_available,
     state.gpu_supported, state.gpu_available, state.gpu_device, state.gpu_fallback,
+    state.local_processing !== undefined,
     portalBusy,
   ], (_key, value) => {
     // Native bridge replies and state events may serialize dictionaries in different orders.
@@ -535,7 +562,8 @@ function render() {
         isMac()
           ? t("All models run locally using whisper.cpp. Download once from Hugging Face or import a compatible ggml file.")
           : t("All models run locally using whisper.cpp. Download once from Hugging Face; downloads are checked against its SHA-256 metadata. Custom model import is not yet available on Linux."),
-      );
+      ) + (state.local_processing ? '<section id="processing-preview"></section>' : "");
+    syncProcessingPreview();
     content
       .querySelectorAll<HTMLButtonElement>("[data-delete]")
       .forEach(
