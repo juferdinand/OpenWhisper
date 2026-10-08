@@ -282,6 +282,24 @@ Do not adopt Electron's default product-named userData path accidentally. Test e
 profiles and repeat migration, interrupted updates and rollback. Keep published legacy binaries
 immutable. The already documented 0.2.4 manual update is separate from this future 0.2.5 transition.
 
+The stable profile keeps legacy model locations and their safe existing permissions.
+New Electron state lives in private sibling children. On Linux, prepare a complete
+`config/electron` unit privately before publishing it with a no-replace rename:
+exact source backups, normalized settings/history and mapped recording copies.
+An existing completed migration must retain later edits and discarded recordings;
+an incomplete destination must be preserved and refused. Run this transition before
+model/download/transcript consumers can prepare their directories. Audio copying
+belongs in an isolated worker and must stream without a recording-duration limit.
+macOS conversion receives native model/hardware/login facts explicitly and preserves
+opaque native trigger data; an Electron accelerator must never be guessed from it.
+Stable preference stores require migrated state. Dev stores retain their separate
+defaults and restrictions. These helpers do not establish update or release acceptance.
+The startup boundary resolves the stable profile in main without preparation,
+passes only validated profile inputs to a fixed compiled Node worker, and waits
+for its original clean exit before opening stores. Migration audio never passes
+through main or the renderer. The packaged build must establish stable identity
+before selecting this boundary; Dev packages must continue to reject stable startup.
+
 ## Safe development builds and first AI preview
 
 Create the development bootstrap before inviting side-by-side testing. A different binary

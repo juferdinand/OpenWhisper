@@ -106,12 +106,18 @@ export function resolveStableProfile(options: unknown): StableProfile {
   validate(context); resolved.set(profile, context); return profile;
 }
 
-/** Create directories only. Never chmod, delete, rename or read existing legacy data. */
-export function prepareStableProfile(profile: StableProfile): StableProfile {
+/** Recheck trusted profile provenance and directories without creating anything. */
+export function validateStableProfile(profile: StableProfile): StableProfile {
   const context = resolved.get(profile);
   if (!context) throw new Error("Stable profiles must be resolved in this process before preparation.");
-  validate(context);
-  for (const directory of context.directories) for (const path of ancestry(directory)) {
+  validate(context); return profile;
+}
+
+function prepare(profile: StableProfile, storageOnly: boolean): StableProfile {
+  validateStableProfile(profile);
+  const context = resolved.get(profile)!;
+  const publication = join(profile.roots.config, "electron");
+  for (const directory of context.directories.filter((path) => !storageOnly || !contains(publication, path))) for (const path of ancestry(directory)) {
     if (!existing(path)) {
       for (const ancestor of ancestry(dirname(path))) {
         const value = existing(ancestor); if (!value) throw new Error("Stable profile ancestor disappeared."); check(ancestor, value, context);
@@ -123,3 +129,9 @@ export function prepareStableProfile(profile: StableProfile): StableProfile {
   }
   validate(context); return profile;
 }
+
+/** Leave the complete config/electron unit for atomic migration publication. */
+export function prepareStableProfileStorage(profile: StableProfile): StableProfile { return prepare(profile, true); }
+
+/** Create directories only. Never chmod, delete, rename or read existing legacy data. */
+export function prepareStableProfile(profile: StableProfile): StableProfile { return prepare(profile, false); }

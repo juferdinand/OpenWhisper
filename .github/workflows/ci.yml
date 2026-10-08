@@ -39,6 +39,10 @@ jobs:
           npm run typecheck
           npm test
           npm run build
+      - name: Check compiled stable migration and production stores
+        if: runner.os == 'Linux'
+        working-directory: electron
+        run: node --import tsx tests/owned-stable-startup.ts
       - name: Install native CPU build tools (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build pkg-config libglib2.0-dev

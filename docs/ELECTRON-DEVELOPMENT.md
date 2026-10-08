@@ -282,6 +282,7 @@ cd electron
 npm run typecheck
 npm test
 npm run build
+node --import tsx tests/owned-stable-startup.ts # Linux only; compiled worker, disposable legacy home
 cd ../shared/ui
 npm run test:ui
 ```

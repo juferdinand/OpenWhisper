@@ -1,5 +1,38 @@
 # Electron development evidence
 
+## Stable data services and compiled Linux migration worker PASS
+
+Stable profiles now work with the existing preference, model/download and complete
+transcript stores. Dev startup/update restrictions remain. Safe legacy model files
+stay in place with their original modes; new publications remain0600. The Mac
+pure converter preserves source defaults, editable snippet drafts, full original
+history and opaque native trigger/editor details with explicit review categories.
+Mac plist decoding/filesystem transition remains separate.
+
+The Linux worker stages a complete private config unit, backs up exact bounded
+source JSON and streams timestamped WAV copies in64KiB blocks. It copies the
+captured source size and rejects growth/early EOF; unchanged long recordings have
+no duration cutoff. It preserves non-WAV leftovers and refuses unknown WAV names.
+FD-relative no-replace publication, final source/parent checks, retained interrupted
+stages and independent cleanup review pass. Both handles close even if destination
+closure fails. Existing completed state retains later edits and discarded recordings.
+
+The normal compiled startup worker and production consumers pass an owned Linux
+filesystem fixture, including actual saved-WAV read, edits/repeat, Discard without
+replay, exact original bytes, partial-state refusal and clean original worker exit.
+The existing Ubuntu CI job runs this same check after its normal build. Independent
+review passes for conversion, profile/storage, model consumers, preferences and
+startup boundaries. The full service suite passes1005 cases with14 explicit skips,
+zero failures in17.57s; strict typing and the normal shared-UI/app build pass.
+An actual fresh non-recording Dev directory also passes the same bundled fixture
+through its own embedded Electron44.7.0/Node24.21.0 runtime in0.57s. The worker,
+Koffi and production stores load from that package's own resources/app; packaged
+dist, manifest and lock match the frozen inputs. Producer metadata remains
+85db6e5+modified with a null recording descriptor; no old artifact is relabeled.
+This is owned filesystem/embedded-Node worker evidence. Stable GUI selection,
+normal browser-host execution, Mac native data transition, autostart, signed updates and
+release packaging remain unproven by this fixture.
+
 ## Packaged Mac CPU inference PASS on Apple Silicon and Intel
 
 The existing signed-production-utility smoke now requires the existing pinned

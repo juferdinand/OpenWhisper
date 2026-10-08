@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 import { modelDownloadURL, type CatalogModel } from "../core/model-catalog.js";
 import { MAX_MODEL_BYTES, ModelInventory, ModelInventoryError, type ImportedModel, type ModelPublicationReceipt } from "./model-inventory.js";
-import { prepareDevelopmentProfile, type DevelopmentProfile } from "./profiles.js";
+import { prepareHostProfile, type HostProfile } from "./host-profile.js";
 import { createModelDownloadTransport, MODEL_DOWNLOAD_CHUNK_BYTES, type DownloadHeaders, type ModelDownloadExchange,
   type ModelDownloadTransport } from "./model-download-transport.js";
 
@@ -129,11 +129,11 @@ const downloads = new Map<string, DownloadState>();
 
 export class ModelDownloads {
   private readonly owner = Symbol("catalog download service");
-  private constructor(private readonly profile: DevelopmentProfile, private readonly inventory: ModelInventory,
+  private constructor(private readonly profile: HostProfile, private readonly inventory: ModelInventory,
     private readonly state: DownloadState, private readonly host: ModelDownloadHost, private readonly limits: Limits,
     private readonly io: ModelDownloadIO) {}
-  static async open(profile: DevelopmentProfile, inventory: ModelInventory, host: ModelDownloadHost = {}): Promise<ModelDownloads> {
-    try { prepareDevelopmentProfile(profile); if (!inventory.belongsToProfile(profile)) fail("INVALID_PROFILE"); }
+  static async open(profile: HostProfile, inventory: ModelInventory, host: ModelDownloadHost = {}): Promise<ModelDownloads> {
+    try { prepareHostProfile(profile); if (!inventory.belongsToProfile(profile)) fail("INVALID_PROFILE"); }
     catch { fail("INVALID_PROFILE"); }
     const limits = limitsSchema.parse(host.limits ?? {}), parent = await directory(profile.paths.cache);
     let state = downloads.get(profile.paths.cache);

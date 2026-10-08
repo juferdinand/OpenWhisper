@@ -19,14 +19,18 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | Packaging and updates | Ubuntu22-built Dev directory/.deb passes layout and exact-package X11 dictation/recovery/cleanup. Fresh local Dev installation through embedded Node passes the relocated Linux X11 dictation/recovery case in44.08s and actual signed Mac package/utility/shortcut checks on Apple Silicon and Intel in CI37840925558 | Archive download, existing-version replacement/upgrade, Electron AppImage/universal DMG+ZIP, release signing, stable data continuity and old-client update checks |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
-Stable data groundwork now includes an independently reviewed fixed-identity
-profile and pure Linux legacy converter. Existing model roots and permissions
-are preserved; new Electron state uses private children. Conversion retains
-settings, full source history and unsupported trigger profiles, and maps old
-timestamped WAV names without losing UUID or chronological metadata. Eighteen
-focused fixture tests and strict typing pass. Production store/bootstrap wiring,
-filesystem migration and the Mac preference adapter remain required; ordinary
-stable startup is not implemented by these helpers.
+Stable data services now accept resolved stable profiles while retaining Dev
+restrictions. Existing safe models remain at their original locations and modes;
+new downloads remain private. Pure Linux/Mac converters preserve source settings,
+history and unsupported trigger details. The compiled Linux startup worker passes
+an owned filesystem fixture: complete initial migration, production preferences/
+model reads, actual saved-WAV recovery, repeat after settings edits, Discard without
+replay, original-data preservation and partial-state refusal. Publication cannot
+replace existing data, and audio copying uses bounded memory without a recording
+duration limit. This proves the Node worker and services, not ordinary GUI startup.
+The same fixture also passes through a fresh Dev package's own embedded Node.
+Verified stable package selection and ordinary GUI/browser-host execution,
+Mac plist/filesystem migration, autostart/updater and release continuity remain open.
 
 The current checkpoint includes actual stock KDE keyboard dictation, recovery
 after a held-key/GUI cancellation sequence and same-profile crash recovery. Explicit

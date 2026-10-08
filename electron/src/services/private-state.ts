@@ -7,6 +7,7 @@ import type { ZodType } from "zod";
 interface ParentIdentity { readonly dev: number; readonly ino: number }
 export interface PrivateStateOpenPolicy {
   readonly invalidContent?: "reject" | "preserve-and-default";
+  readonly requireExisting?: boolean;
 }
 
 async function privateParent(path: string, expected?: ParentIdentity): Promise<ParentIdentity> {
@@ -68,6 +69,7 @@ export class PrivateStateStore<T> {
       if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
         throw new Error("Private development state could not be opened safely.");
       }
+      if (policy.requireExisting) throw new Error("Required private state is missing.");
     }
     if (file) {
       try {

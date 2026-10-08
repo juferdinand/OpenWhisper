@@ -3,7 +3,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { test } from "node:test";
-import { prepareStableProfile, resolveStableProfile, stableProfileSchema, type StableProfile } from "../src/services/stable-profile.js";
+import { prepareStableProfile, prepareStableProfileStorage, resolveStableProfile, stableProfileSchema, validateStableProfile, type StableProfile } from "../src/services/stable-profile.js";
 
 function fixture(run: (home: string, root: string) => void): void {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "openwhisper-stable-profile-")), home = join(root, "home");
@@ -135,5 +135,19 @@ test("forged or serialized stable profiles cannot authorize directory preparatio
     assert.throws(() => prepareStableProfile(stableProfileSchema.parse(profile)), /resolved in this process/);
     const altered: StableProfile = { ...profile, paths: { ...profile.paths, settings: home } };
     assert.throws(() => prepareStableProfile(altered), /resolved in this process/); assert.deepEqual(snapshot(root), before);
+  });
+});
+
+test("storage-only preparation reserves config publication for migration while validation creates nothing", () => {
+  fixture((home, root) => {
+    const before = snapshot(root), profile = resolveStableProfile({ home, platform: "linux" });
+    assert.strictEqual(validateStableProfile(profile), profile); assert.deepEqual(snapshot(root), before);
+    assert.throws(() => validateStableProfile(stableProfileSchema.parse(profile)), /resolved in this process/);
+    assert.throws(() => prepareStableProfileStorage(stableProfileSchema.parse(profile)), /resolved in this process/);
+    prepareStableProfileStorage(profile);
+    assert.ok(existsSync(profile.roots.config)); assert.ok(existsSync(profile.paths.models));
+    assert.ok(existsSync(profile.paths.session)); assert.ok(existsSync(profile.paths.downloads));
+    assert.equal(existsSync(join(profile.roots.config, "electron")), false);
+    assert.strictEqual(validateStableProfile(profile), profile);
   });
 });
