@@ -74,7 +74,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
+          node-version: '24.21.0'
           cache: npm
           cache-dependency-path: |
             electron/package-lock.json
@@ -131,6 +131,28 @@ jobs:
             electron/dist/native/openwhisper_macos_retirement_probe.node
             electron/dist/native/macos-retirement-probe-notices/
             electron/native/macos-retirement/build/*/compile_commands.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Build and test the distinct production Mac retirement role
+        working-directory: electron
+        env:
+          OPENWHISPER_OWNED_MAC_PRODUCTION_RETIREMENT_TEST: '1'
+          OPENWHISPER_MAC_PRODUCTION_RETIREMENT_EVIDENCE: ${{ github.workspace }}/electron/.local/owned-mac-production-retirement
+        run: |
+          node --import tsx scripts/build-macos-retirement-production.ts
+          node --import tsx --test tests/owned-macos-production-retirement.test.ts
+      - name: Upload production Mac retirement role provenance and results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Electron-macOS-production-retirement-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            electron/.local/owned-mac-production-retirement/
+            electron/dist/native/openwhisper_macos_retirement.node
+            electron/dist/native/macos-retirement-notices/
+            electron/native/macos-retirement/build-production/*/build-manifest.json
+            electron/native/macos-retirement/build-production/*/compile_commands.json
+            electron/native/macos-retirement/build-production/*/openwhisper_macos_retirement.node
           if-no-files-found: warn
           retention-days: 14
   linux:

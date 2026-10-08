@@ -1,5 +1,16 @@
 # Electron development evidence
 
+Current source checkpoint: real Linux CPU inventory/pool composition is verified,
+and recording uses that same host-owned factory in source. The isolated source
+passes strict checking, 710 tests (11 explicit opt-in skips) and the shared UI/app
+build. [CI37736411869](https://github.com/juferdinand/OpenWhisper/actions/runs/37736411869)
+passes all six jobs at `4b7137a`; later source changes require their own CI.
+The distinct Mac production-role build and owned fixture are now explicitly
+scheduled on both Apple architectures. Their source/inert evidence is complete;
+actual production-role execution and normal UI recording remain pending.
+
+The sections below retain historical evidence with their original source scope.
+
 This records the isolated P2/P5 implementation committed on 2026-10-08 at
 `05170a1770843f34695d774f7b804dd84be3f0bf`, following the foundation commit
 `351041cece1f49bfc858ff1d8a9c2cbf4f2dfff2`. Local checks below preceded that commit.
@@ -735,3 +746,31 @@ the source/UI build; independent source review passes. These are policy and
 private-filesystem results. Actual recording through this new factory, utility
 controls, microphone/permission enumeration, clipboard/history, model actions,
 shutdown and development UI wiring remain subsequent composition gates.
+
+### Explicit Mac production-role build and owned fixture
+
+The shared TypeScript builder preserves the historical probe target and default
+paths. A separate explicit entry builds only `openwhisper_macos_retirement`, with
+its own build directory, binary and notices. It checks exact source/header hashes,
+Node-API8, production-only compile definitions and minimum macOS14 Mach-O metadata.
+The historical probe is retained and its result is not a production-role result.
+
+The opt-in production fixture captures native/source/distribution/runtime input
+hashes before launch. It tests the real production ABI and fixed exports, actual
+browser/main/UID guards, target-free Worker and ordinary pinned Node refusal, then
+five original utility-child identity/retirement cases. Two fresh original-channel
+nonces surround admission; full native retirement and read closure precede reuse.
+The fixture has no renderer, audio, permission, Metal or production-factory work.
+Original CLI/Node/Worker errors poison acceptance without replacing their actual
+close/exit obligations. Deadline/escalation remains until original close; stdout
+overflow and late monotonic acceptance cannot become success after exit0.
+
+Independent review checks the exact eleven source files, unchanged native and
+historical fixtures, inert lifetime regressions and source-only generated bundles.
+Strict checking, the full suite (710 passing tests) and build pass; eleven runtime tests
+are explicitly skipped unless their fixture is enabled. The existing Intel and
+Apple Silicon CI jobs now build and execute this distinct role after their original
+capture/probe gates, using Node24.21.0 and separate always-retained artifacts.
+Actual new native/runtime evidence is pending that CI. This source does not wire
+ordinary Mac supervisor/Metal or establish signing, minimum-OS runtime, microphone,
+TCC, device or desktop parity.
