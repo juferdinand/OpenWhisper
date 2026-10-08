@@ -354,3 +354,40 @@ execution of this new probe are pending at this source checkpoint. Deployment ta
 14 does not establish macOS 14 runtime acceptance. Production factory wiring, observer
 placement, deterministic zombies/PID reuse, signed loading and uninterruptible kernel
 shutdown remain open.
+
+
+### Apple process probe CI correction
+
+[CI 37722721367](https://github.com/juferdinand/OpenWhisper/actions/runs/37722721367)
+completed with four successful jobs and two failed owned Apple jobs at `ee2cc05`.
+Apple Silicon compiled the process addon and passed capture again. Its process
+fixture completed clean exit, nonzero exit, owned UtilityProcess kill and delayed
+SIGTERM phases before failing; it did not produce a complete acceptance result.
+Intel failed a pure success-path test before the native build: its 30 ms synthetic
+wall-clock budget expired during scheduling. No Intel native probe result follows.
+
+The correction gives that inert success-path test a fixed clock while retaining
+its separate actual-expiry tests. It also removes an unsupported assertion that a
+child must still be alive after UtilityProcess.kill returns: the pinned Chromium
+implementation may synchronously wait for the child. Fixed categorical checkpoint,
+kill elapsed time and actual helper exit metadata replace that assumption. Native
+observer source, ownership fences, runtime deadlines and cleanup guards are unchanged.
+Both corrected architectures still require fresh CI evidence.
+
+### Host speech resource catalog
+
+A standalone strict TypeScript catalog validates fixed CPU/Vulkan/Metal destinations,
+host architecture, Node-API 8, exact speech-source pins, byte count and SHA-256 before
+any future native load. Verification checks genuine selected ancestry and a bounded
+NOFOLLOW descriptor, including identity before/after streaming and actual descriptor
+closure. A manual CPU selection visits only its CPU artifact.
+
+Independent private filesystem regressions found that replacing a root directory,
+or racing two preparations around that replacement, could escape an outstanding
+close obligation. Persistent logical-path and physical-identity ownership now retain
+that obligation across fresh handles and awaited metadata. Original six and four
+independent tests pass 10/10; the retained failing reproductions precede their fixes.
+Rejected or synchronous close stays terminal and is never retried or certified by a
+new handle. No native loader, factory, worker, package or UI consumes this catalog yet.
+This detects the tested mutations; it is not an immutable lease against later
+same-UID modification, publisher authentication, or a process-wide allocation fence.
