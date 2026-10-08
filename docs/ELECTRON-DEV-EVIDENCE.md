@@ -551,8 +551,13 @@ and four pinned header hashes per architecture. Seven actual child cases fully
 reap and dispose; the target-free synthetic Worker again completes exactly once
 during the work drain, followed by one cleanup/disposal and zero reservation.
 The runtime is Electron 44.7 with Node 24.21. Tested binding hashes agree with
-their build manifests. These diagnostic artifacts do not contain the binary
-itself or establish production factory, Metal, device/TCC or signing acceptance.
+their build manifests and the independently reread native binaries; their Mach-O
+architectures also match. This establishes neither production factory, Metal,
+device/TCC nor signing acceptance.
+
+All six jobs in that exact `2f0099f` run now pass, including the existing Linux
+package and CPU fallback checks. This is a completed checkpoint; later source
+changes require their own checks.
 
 ### Owned HTTPS transport and retained cleanup
 
@@ -583,3 +588,27 @@ This is actual local TLS with synthetic model publication. Public provider/catal
 behavior, model authenticity, native compatibility, crash recovery, interprocess
 locking and live UI download wiring remain separate work. No production CA or
 destination override was introduced.
+
+### Fixed Linux speech host and original transport
+
+The new main-only Linux edge captures opaque native and entry catalogs, verifies
+them before the original fork, and uses the strict bootstrap controls with the
+genuine procfs retirement wrapper. The resolved witness and original binding
+transaction remain owned even when conversion refuses. Fifty-six focused inert
+checks pass. Source-only compilation records 265 fixed graph entries and 101
+actual resolution inputs, including the speech contracts and application/Zod
+package metadata. No generated helper was executed during those checks.
+
+Caller cancellation retains accepted private controls and the original spawn.
+Malformed frames never signal a child implicitly. Explicit supervisor-authorized
+termination invokes the original handle once and waits its independent bounded
+acknowledgment even after channel failure; the first refusal remains terminal.
+This does not establish successful recovery from corrupt admitted channels.
+Generic exit and termination acknowledgment still cannot release the continuing
+allocation; full kernel retirement and accepted read closure remain required.
+
+The reviewed source manifest is
+`43a1121b6c7f653355550bf6e5bf5119f9d6a28cf23f080197b375dbc456883d`.
+Actual composition of this factory, the continuing supervisor, private model
+leases and native inference remains the next separately checked gate. Ordinary
+recording/UI wiring and automatic application fallback are not established.
