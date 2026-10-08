@@ -504,3 +504,12 @@ unexpected exit before requested termination. Nineteen focused inert checks pass
 native compile/runtime evidence on both Mac architectures is still required. Neither
 the old failure nor this source correction establishes complete Apple retirement,
 actual kernel cancellation, production Metal selection or signed helper loading.
+
+The `4cb0bae` CI passed the complete owned Apple Silicon gate. Intel stopped before
+native execution because two inert supervisor success cases exceeded their short
+40/80 ms fixture budgets under scheduling load. A downloader whole-deadline test
+also incorrectly assumed HEAD must start before expiry. Test-only success budgets
+now allow scheduling; explicit expiry/late-settlement cases retain their short
+budgets. The whole-download test allows zero or one early HEAD and proves the request
+count cannot increase after expiry/gate release. Production deadlines and failure
+categories are unchanged. Fresh Intel native evidence remains required.

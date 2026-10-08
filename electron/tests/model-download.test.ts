@@ -125,8 +125,12 @@ test("held headers and separate idle or whole deadlines issue no late additional
     const transport = new FakeTransport(records), service = await ModelDownloads.open(ctx.profile, await ctx.inventory(), {
       transport: () => transport, limits: { headersMs: kind === "headers" ? 15 : 1000, idleMs: 15, totalMs: kind === "whole" ? 15 : 2000 } });
     await assert.rejects(service.download("tiny"), failure("TIMEOUT"));
+    const requestsAtExpiry = transport.requests.length;
+    // The whole deadline includes private preparation, so it may expire before HEAD.
+    if (kind === "whole") assert.ok(requestsAtExpiry === 0 || requestsAtExpiry === 1);
+    else assert.equal(requestsAtExpiry, kind === "idle" ? 2 : 1);
     await assert.rejects(service.download("tiny"), failure("BUSY")); gate.accept(); assert.equal(await service.finalize(), null);
-    assert.equal(transport.requests.length, kind === "idle" ? 2 : 1); assert.deepEqual(await readdir(ctx.profile.paths.models), []);
+    assert.equal(transport.requests.length, requestsAtExpiry); assert.deepEqual(await readdir(ctx.profile.paths.models), []);
   });
 });
 test("held transport closure prevents a second download until the same close settles", { timeout: 5000 }, async () => fixture(async (ctx) => {

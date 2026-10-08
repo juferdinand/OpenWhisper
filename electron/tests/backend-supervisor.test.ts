@@ -91,7 +91,7 @@ interface OwnerRecord {
   terminates: number;
   readSettled: boolean;
 }
-function fixture() {
+function fixture(deadlines: Partial<{ startupMs: number; requestMs: number; cleanupMs: number }> = {}) {
   const controls: Controls = { discovery: "Owned hardware-category fixture", initial: "running", infer: "success", challenge: "normal", discoveryReply: "normal",
     changedBirth: false, changedUid: false, invalidReady: false, extraResource: false, badResourceBackend: false,
     verifyFailure: undefined, openFailure: undefined, noOwner: undefined, openGate: undefined, verifyGate: undefined,
@@ -180,7 +180,7 @@ function fixture() {
     },
   };
   const bindings: BackendBindings = { host, catalog: Object.freeze({}), effects,
-    deadlines: { startupMs: 40, requestMs: 40, cleanupMs: 80 } };
+    deadlines: { startupMs: 3000, requestMs: 3000, cleanupMs: 3000, ...deadlines } };
   const lease = (gpu = true, family: "whisper" | "parakeet" = "whisper"): BackendLease => ({
     model: { ...baseModel, gpu, family }, validate: async () => { events.push("validate-lease"); if (controls.leaseFailure) throw new Error("Owned changed lease."); },
   });
@@ -269,7 +269,7 @@ test("explicit trusted no-owner startup rollback is eligible for CPU fallback", 
 
 for (const [name, mode] of [["discovery-timeout", "hang"], ["discovery-exit", "exit"]] as const) {
   test(`${name} is eligible only after admitted owner retirement and reader closure`, async () => {
-    const f = fixture(); f.controls.discoveryReply = mode;
+    const f = fixture(name === "discovery-timeout" ? { requestMs: 40 } : {}); f.controls.discoveryReply = mode;
     const main = await fresh(name, f.bindings), job = main.createJob(f.lease());
     assert.equal((await job.prepare()).detection, "unavailable");
     assert.deepEqual(f.verifies, ["vulkan", "cpu"]); assert.equal(f.owners[0]?.readSettled, true);
@@ -315,7 +315,7 @@ test("cancelled held verification never opens an owner after its actual completi
 });
 
 test("admitted native timeout can retire without a responsive JS challenge and retry only after reap", async () => {
-  const f = fixture(), main = await fresh("hung-admitted", f.bindings), job = main.createJob(f.lease());
+  const f = fixture({ requestMs: 40 }), main = await fresh("hung-admitted", f.bindings), job = main.createJob(f.lease());
   await job.prepare(); const initialChallenges = f.owners[0]?.challenges.length;
   f.controls.challenge = "hang"; f.controls.infer = "hang"; f.controls.reapGate = deferred();
   await assert.rejects(job.transcribeWindow(baseModel, samples, "en", ""), failure("TIMEOUT"));
@@ -329,7 +329,7 @@ test("admitted native timeout can retire without a responsive JS challenge and r
 });
 
 test("unadmitted late owner with a hung original-channel challenge is never signaled or replaced", async () => {
-  const f = fixture(); f.controls.openGate = deferred();
+  const f = fixture({ cleanupMs: 80 }); f.controls.openGate = deferred();
   const main = await fresh("hung-unadmitted", f.bindings), job = main.createJob(f.lease(false)), abort = new AbortController();
   const pending = job.prepare(abort.signal); await until(() => f.events.includes("open:cpu")); abort.abort();
   await assert.rejects(pending, failure("CANCELLED")); f.controls.challenge = "hang"; f.controls.openGate.resolve();
@@ -345,7 +345,7 @@ for (const name of ["birth", "uid"] as const) test(`admitted owner with changed 
 });
 
 test("read closure timeout remains terminal even after later actual effect settlement", async () => {
-  const f = fixture(), main = await fresh("read-timeout", f.bindings), job = main.createJob(f.lease(false)); await job.prepare();
+  const f = fixture({ cleanupMs: 80 }), main = await fresh("read-timeout", f.bindings), job = main.createJob(f.lease(false)); await job.prepare();
   f.controls.readsGate = deferred(); await assert.rejects(job.close(), failure("TEARDOWN_FAILED"));
   f.controls.readsGate.resolve(); await delay(1); assert.throws(() => main.createJob(f.lease(false)), failure("TEARDOWN_FAILED"));
 });
@@ -445,14 +445,14 @@ test("model identity, manual CPU and exact window validation precede all start e
 });
 
 test("admission success after a blocked event-loop deadline never admits native work", async () => {
-  const f = fixture(); f.controls.holdAdmissionLoopMs = 60;
+  const f = fixture({ startupMs: 40 }); f.controls.holdAdmissionLoopMs = 60;
   const main = await fresh("late-admission", f.bindings), job = main.createJob(f.lease(false));
   await assert.rejects(job.prepare(), failure("TIMEOUT")); await job.close();
   assert.equal(f.requests.length, 0); assert.equal(f.owners[0]?.readSettled, true);
 });
 
 test("cleanup completion after an elapsed monotonic deadline cannot release the allocation", async () => {
-  const f = fixture(), main = await fresh("late-cleanup", f.bindings), job = main.createJob(f.lease(false));
+  const f = fixture({ cleanupMs: 80 }), main = await fresh("late-cleanup", f.bindings), job = main.createJob(f.lease(false));
   await job.prepare(); f.controls.holdReadLoopMs = 100;
   await assert.rejects(job.close(), failure("TEARDOWN_FAILED"));
   assert.equal(f.owners[0]?.level, "reaped"); assert.equal(f.owners[0]?.readSettled, true);
@@ -460,7 +460,7 @@ test("cleanup completion after an elapsed monotonic deadline cannot release the 
 });
 
 test("late integrity rejection preserves terminal category despite elapsed startup deadline", async () => {
-  const f = fixture(); f.controls.holdVerifyLoopMs = 60; f.controls.verifyFailure = "INTEGRITY_FAILED";
+  const f = fixture({ startupMs: 40 }); f.controls.holdVerifyLoopMs = 60; f.controls.verifyFailure = "INTEGRITY_FAILED";
   const main = await fresh("late-integrity", f.bindings), job = main.createJob(f.lease());
   await assert.rejects(job.prepare(), failure("INTEGRITY_FAILED")); assert.equal(f.owners.length, 0);
   assert.throws(() => main.createJob(f.lease()), failure("INTEGRITY_FAILED"));
