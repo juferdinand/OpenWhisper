@@ -42,6 +42,9 @@ release signing are separate gates.
 Append `--stock-kde` to reuse `linux/scripts/run-owned-desktop.py` and the pinned
 cached Kubuntu 24.04 portal image. This mode opens the normal app with native
 Wayland and installed KDE portal services, never the synthetic frontend. It uses
+no synthetic portal source or compiler execution. Only the verified Node runtime
+is copied from a stopped image. The runner records each Docker command duration
+and its total elapsed time in `launcher-result.json`.
 QPainter and two Mesa rendering threads only for the nested desktop without GPU devices, and copies the same
 verified Node runtime into the stopped payload. It starts the installed KGlobalAccel
 daemon and selects the single nested-compositor surface from the private outer
@@ -67,3 +70,12 @@ original main closes and finishes with Quit while the recovered binding is activ
 This mode skips recognition/clipboard and labels its result accordingly. It
 retains source/payload hashes, sandbox/resource and exact namespace cleanup checks.
 See [the retained evidence](../../../docs/ELECTRON-DEV-EVIDENCE.md).
+
+During platform development, run `npm run test:platform` for portal,
+delivery receipt, preference and platform-channel regressions. Add the directly
+affected test file to a focused invocation for changes outside that selection. Run one relevant
+owned desktop mode after the focused checks pass. Reuse the built normal app and
+verified native inputs while they remain unchanged. Build shared UI assets before
+UI checks when their sources change. Run the full `npm test` once before handing
+over a completed increment; repeat it only for relevant changes or new failures.
+The focused command is development feedback, not full replacement acceptance.

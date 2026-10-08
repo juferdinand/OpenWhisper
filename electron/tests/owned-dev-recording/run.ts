@@ -11,6 +11,7 @@ import { developmentRecordingDescriptorSchema } from "../../src/main/development
 import { waitForOriginalCommandClose } from "../owned-supervisor/run.js";
 
 const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
+const launcherStarted = performance.now();
 const args = process.argv.slice(2);
 const absolute = z.string().min(1).max(4096).refine((path) => path === resolve(path) && !path.includes("\0"));
 const kdeLifecycle = args[6] === "--stock-kde-lifecycle";
@@ -74,8 +75,10 @@ const descriptor = developmentRecordingDescriptorSchema.parse({ ...original,
 await build({ stdin: { contents: `export const DEVELOPMENT_RECORDING_BUILD: unknown = ${JSON.stringify(descriptor)};`, loader: "ts", resolveDir: root },
   outfile: join(app, "dist/main/development-recording-build.js"), platform: "node", format: "esm", target: "node24", sourcemap: false });
 await mkdir(join(payload, "fixtures"), { mode: 0o700 });
-await mkdir(join(payload, "owned-bus"), { mode: 0o700 });
-for (const name of ["portal-service.cpp", "portal-fixture.hpp"]) await cp(join(root, "tests/owned-bus", name), join(payload, "owned-bus", name));
+if (!stockKde) {
+  await mkdir(join(payload, "owned-bus"), { mode: 0o700 });
+  for (const name of ["portal-service.cpp", "portal-fixture.hpp"]) await cp(join(root, "tests/owned-bus", name), join(payload, "owned-bus", name));
+}
 for (const name of ["ggml-tiny.bin", "jfk.f32"]) await cp(join(fixtures, name), join(payload, "fixtures", name), { errorOnExist: true, force: false });
 const bundled = await build({ entryPoints: [join(root, "tests/owned-dev-recording/driver.ts")], outfile: join(payload, "driver.mjs"),
   platform: "node", format: "esm", target: "node24", bundle: true, external: ["@playwright/test"], metafile: true, sourcemap: false });
@@ -92,15 +95,16 @@ if (stockKde) {
   await cp(launcher, join(payload, "run-owned-desktop.py"));
   sources["linux/scripts/run-owned-desktop.py"] = await describe(launcher);
 }
-for (const name of ["portal-service.cpp", "portal-fixture.hpp"]) sources[`tests/owned-bus/${name}`] = await describe(join(root, "tests/owned-bus", name));
+if (!stockKde) for (const name of ["portal-service.cpp", "portal-fixture.hpp"]) sources[`tests/owned-bus/${name}`] = await describe(join(root, "tests/owned-bus", name));
 let frozen: Awaited<ReturnType<typeof inventory>>;
 const container = `openwhisper-owned-dev-recording-${randomUUID()}`;
 const compiler = `${container}-compiler`, compilerImage = "sha256:403f066a165681074f19f1977b2b46617d3dd7b072cb7037400dbe01676ed3cb";
 let compilerCreated = false;
 const dockerConfig = join(output, "docker-config"); await mkdir(dockerConfig, { mode: 0o700 });
-const commands: { args: string[]; code: number; expired: boolean; overflow: boolean; errored: boolean; closureObserved: boolean }[] = [];
+const commands: { args: string[]; elapsedMs: number; code: number; expired: boolean; overflow: boolean; errored: boolean; closureObserved: boolean }[] = [];
 const outstanding = new Set<Promise<unknown>>(); let sequence = 0, created = false, result = "FAIL", namespaceRemoved = false;
 async function docker(args: string[], milliseconds = 30_000) {
+  const started = performance.now();
   const end = performance.now() + milliseconds;
   const process = spawn("/usr/bin/docker", ["--config", dockerConfig, "--host", "unix:///var/run/docker.sock", ...args],
     { env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" }, shell: false, stdio: ["ignore", "pipe", "pipe"] });
@@ -118,7 +122,7 @@ async function docker(args: string[], milliseconds = 30_000) {
   try { observed = await Promise.race([originalClose, new Promise<never>((_, reject) => { expiry = setTimeout(() => reject(new Error("ORIGINAL_CLOSE_MISSING")), milliseconds + 5000); })]); }
   catch { stop(); } finally { if (expiry) clearTimeout(expiry); }
   await writeFile(join(output, `${String(++sequence).padStart(2, "0")}-docker.log`), log, { mode: 0o600 });
-  commands.push({ args, ...observed, closureObserved }); return { ...observed, stdout, closureObserved };
+  commands.push({ args, elapsedMs: performance.now() - started, ...observed, closureObserved }); return { ...observed, stdout, closureObserved };
 }
 async function required(args: string[], milliseconds?: number) {
   const value = await docker(args, milliseconds); assert.equal(value.code, 0); assert.equal(value.closureObserved, true); return value.stdout.trim();
@@ -127,20 +131,27 @@ try {
   const buildImage = await required(["image", "inspect", compilerImage]); z.array(z.object({ Id: z.literal(compilerImage) })).length(1).parse(JSON.parse(buildImage));
   compilerCreated = true;
   await required(["create", "--name", compiler, "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL",
-    "--security-opt", "no-new-privileges", "--pids-limit", "64", "--memory", "1g", "--ulimit", "core=0:0", "--entrypoint", "/usr/bin/c++", compilerImage,
+    "--security-opt", "no-new-privileges", "--pids-limit", "64", "--memory", "1g", "--ulimit", "core=0:0", "--entrypoint",
+    stockKde ? "/bin/true" : "/usr/bin/c++", compilerImage, ...(stockKde ? [] : [
     "-std=c++17", "-Wall", "-Wextra", "-Werror", "/tmp/sources/portal-service.cpp", "-I/usr/include/glib-2.0",
-    "-I/usr/lib/x86_64-linux-gnu/glib-2.0/include", "-o", "/tmp/owned-portal", "-lgio-2.0", "-lgobject-2.0", "-lglib-2.0", "-pthread"]);
-  await required(["cp", "-a", join(payload, "owned-bus"), `${compiler}:/tmp/sources`]);
-  await required(["start", "--attach", compiler], 60_000);
-  z.array(z.object({ State: z.object({ Running: z.literal(false), ExitCode: z.literal(0) }) })).length(1)
-    .parse(JSON.parse(await required(["inspect", compiler])));
-  await required(["cp", "-a", `${compiler}:/tmp/owned-portal`, join(payload, "owned-bus/owned-portal")]);
-  if (stockKde) await required(["cp", "-a", `${compiler}:/opt/node/bin/node`, join(payload, "node")]);
+    "-I/usr/lib/x86_64-linux-gnu/glib-2.0/include", "-o", "/tmp/owned-portal", "-lgio-2.0", "-lgobject-2.0", "-lglib-2.0", "-pthread"])]);
+  if (stockKde) {
+    // Stock KDE uses its installed portal; only copy Node from the stopped image.
+    await required(["cp", "-a", `${compiler}:/opt/node/bin/node`, join(payload, "node")]);
+  } else {
+    await required(["cp", "-a", join(payload, "owned-bus"), `${compiler}:/tmp/sources`]);
+    await required(["start", "--attach", compiler], 60_000);
+    z.array(z.object({ State: z.object({ Running: z.literal(false), ExitCode: z.literal(0) }) })).length(1)
+      .parse(JSON.parse(await required(["inspect", compiler])));
+    await required(["cp", "-a", `${compiler}:/tmp/owned-portal`, join(payload, "owned-bus/owned-portal")]);
+  }
   await required(["rm", compiler]); compilerCreated = false;
   frozen = await inventory(payload);
   await writeFile(join(output, "assembly.json"), JSON.stringify({ image: IMAGE, sources, originalDescriptor: original, descriptor,
     originalDist: distBefore, payload: frozen, native: { capture: { path: capture, ...captureRecord }, speech: { path: speech, ...speechRecord }, bus: { path: bus, ...busRecord } },
-    portalFixture: { compilerImage, binary: await describe(join(payload, "owned-bus/owned-portal")) }, seccomp: { path: seccomp, ...await describe(seccomp) },
+    portalFixture: stockKde ? null : { compilerImage, binary: await describe(join(payload, "owned-bus/owned-portal")) },
+    ...(stockKde ? { nodeRuntime: { sourceImage: compilerImage, ...await describe(join(payload, "node")) } } : {}),
+    seccomp: { path: seccomp, ...await describe(seccomp) },
     scope: stockKde ? "Normal native Wayland Dev UI with retained Ubuntu22 native inputs against stock Kubuntu KDE portal; no synthetic portal signals."
       : "Normal Dev UI/capture/platform utilities with retained Ubuntu22 native inputs and a synthetic portal frontend assembled before private runtime." }, null, 2), { mode: 0o600 });
   const image = await required(["image", "inspect", IMAGE]); z.array(z.object({ Id: z.literal(IMAGE) })).length(1).parse(JSON.parse(image));
@@ -187,7 +198,8 @@ try {
       namespaceRemoved = absent.code === 0 && absent.closureObserved && absent.stdout.trim() === ""; } catch {}
   }
   await writeFile(join(output, "launcher-result.json"), JSON.stringify({ status: namespaceRemoved && outstanding.size === 0 ? result : "FAIL",
-    image: IMAGE, container, namespaceRemoved, originalClosesConfirmed: outstanding.size === 0, commands }, null, 2), { mode: 0o600 });
+    image: IMAGE, container, namespaceRemoved, originalClosesConfirmed: outstanding.size === 0,
+    elapsedMs: performance.now() - launcherStarted, commands }, null, 2), { mode: 0o600 });
   assert.equal(namespaceRemoved, true); assert.equal(outstanding.size, 0);
 }
 assert.equal(result, "PASS");

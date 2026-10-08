@@ -32,7 +32,7 @@ build; [automated evidence](ELECTRON-DEV-EVIDENCE.md) records its exact tested s
 
 The complete 0.3.0 migration remains the objective. Deliver one runnable behavior
 at a time. Regular KDE keyboard control is now checked against the owned stock
-desktop; next verify its active-binding lifecycle, then insertion and ordinary desktop controls. Reuse the
+desktop, including active-binding Quit/crash recovery; next verify insertion and ordinary desktop controls. Reuse the
 current desktop harness; do not build another general evidence framework.
 
 Keep implementation and diagnosis rounds to about 30 minutes before reporting a
@@ -43,6 +43,14 @@ once per completed increment. Reuse successful checks until relevant changes or
 new failures justify repeating them. Observe the existing CI run rather than
 dispatching replacements. Do not restart broad agent reviews; delegate only a
 bounded task with a specific deliverable when it materially shortens delivery.
+
+The measured bottleneck is implementation and fixture diagnosis, not normal test
+execution: the current full unit suite takes about 17 seconds. Use
+`npm run test:platform` and directly affected test files during development, then
+one matching owned desktop scenario. Stock KDE no longer builds an unused synthetic
+C++ portal. Its runner records command and total durations; the selected lifecycle
+case passes in 10.58 seconds including assembly and cleanup. These measurements
+do not imply that broader desktop or migration acceptance is complete.
 
 Keep the installed stable application and the running Dev build unchanged until
 the user accepts a replacement. Present runnable increments for acceptance before

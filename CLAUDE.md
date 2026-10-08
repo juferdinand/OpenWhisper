@@ -31,9 +31,14 @@ or subscription. The project is open source under the MIT License.
 
 - `electron/`: isolated strict TypeScript development host for the planned migration.
   Main/preload IPC use runtime schemas and a sandboxed renderer; Dev storage is separate.
+  Author new application code, scripts and tests in strict TypeScript. Avoid custom C/C++
+  where existing Electron/Node APIs or typed adapters meet the requirements; document
+  the required native capability before adding a binding. Native speech remains a dependency.
   Recording and native platform replacement are incomplete. Follow `docs/ELECTRON-DEVELOPMENT.md`
   and `docs/ELECTRON-MIGRATION.md`; preserve the stable hosts until replacement gates pass.
   Run `npm run typecheck`, `npm test`, and `npm run build` in `electron/` for its changes.
+  Use `npm run test:platform` for focused platform feedback during implementation;
+  run the complete required checks once for a completed increment.
 - `macos/`: native Swift app, SwiftPM, Swift 5.10 language mode, macOS 14+.
   It can be built with the Xcode Command Line Tools without a full Xcode installation.
   - `Sources/OpenWhisperCore/`: testable logic: `TranscriptCleaner`, `VocabularyCorrector`,

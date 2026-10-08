@@ -49,6 +49,9 @@ Electron does not require our own C/C++ application code. The current boundary c
 
 Prefer existing Electron/Node APIs or maintained typed adapters where they meet the same
 behavioral requirements. Keep application logic, new scripts and tests in strict TypeScript.
+The user's preference is to avoid custom C/C++ where possible. Before adding any new native
+source, identify the required capability and explain why an existing API or executable
+does not meet it. A chosen custom transport is not proof that the transport requires C++.
 C++ is statically typed but does not provide automatic memory safety; native bindings require
 their own validation and lifetime checks. Native libraries may be used through a separate
 executable instead of a custom Node addon; that still leaves a native dependency.
@@ -300,6 +303,14 @@ and UI checks. Those fixtures prove protocol/failure behavior, not generated-tex
 Optional additional/cloud models follow explicit provider consent and secure credential storage.
 The feature order stays **model communication → optional speech output → structured Obsidian**;
 agent handoff has its own explicit, reviewed action boundary.
+
+Optional local-server startup is a later model-communication feature. Electron's main
+process can launch installed programs with typed Node `spawn`/`execFile`, without opening
+a terminal or adding native bindings. Detect and reuse an existing server first; offer an
+explicit start action for [Ollama `serve`](https://github.com/ollama/ollama/blob/main/docs/cli.mdx)
+or [LM Studio `lms server start`](https://lmstudio.ai/docs/developer/core/server).
+Use fixed executable/argument boundaries and the local API for subsequent communication.
+Ordinary dictation must not start a model server implicitly.
 
 ## Implementation sequence and completion evidence
 
