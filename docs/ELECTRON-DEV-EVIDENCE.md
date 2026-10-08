@@ -334,3 +334,23 @@ ownership and cannot allocate again. Arbitrary exception code fields stay generi
 All 12 combined client/factory lifecycle tests pass; the initial two failing regressions
 are retained privately. This fence belongs to the continuing client instance. It does
 not prove a process-wide allocation fence, native retirement or automatic fallback.
+
+### Prepared owned Apple process probe
+
+A standalone probe uses public libproc SDK records with zombie-inclusive queries,
+current UID/direct-parent/birth checks, and a private NOTE_EXIT kqueue. The strict
+TypeScript adapter requires matching A/watch/B observations, a fresh nonce on the
+original owned UtilityProcess channel, and matching C before admission. Non-running
+and fully reaped remain separate states. Native work, descriptor closure and the
+asynchronous environment cleanup hook keep one owner through delayed operations;
+a failed close remains failed on repeated calls.
+
+Fourteen focused pure tests pass. The separately reviewed CI fixture now builds and
+runs on the existing macOS 15 Apple Silicon and Intel jobs, after their capture gate.
+It covers seven owned child cases plus target-free synthetic Worker cleanup, with
+separate provenance artifacts. Private preparation precedes readiness; categorical
+handlers and a watchdog precede asynchronous preparation. Native compilation and
+execution of this new probe are pending at this source checkpoint. Deployment target
+14 does not establish macOS 14 runtime acceptance. Production factory wiring, observer
+placement, deterministic zombies/PID reuse, signed loading and uninterruptible kernel
+shutdown remain open.

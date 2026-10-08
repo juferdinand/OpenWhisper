@@ -63,7 +63,7 @@ jobs:
           OPENWHISPER_CAPTURE_SYNTHETIC_ADDON="$PWD/native/capture/build/openwhisper_capture.node" \
             node --import tsx --test tests/capture.test.ts
   mac_capture:
-    name: Electron synthetic Mac capture (${{ matrix.os }})
+    name: Electron owned Mac native tests (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -111,6 +111,26 @@ jobs:
             electron/native/macos-capture/build/*/compile_commands.json
             electron/native/macos-capture/build/*/openwhisper_macos_capture.node
             electron/dist/native/macos-capture-notices/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Build and test the owned Mac process retirement probe
+        working-directory: electron
+        env:
+          OPENWHISPER_OWNED_MAC_RETIREMENT_TEST: '1'
+          OPENWHISPER_MAC_RETIREMENT_EVIDENCE: ${{ github.workspace }}/electron/.local/owned-mac-retirement
+        run: |
+          node --import tsx scripts/build-macos-retirement.ts
+          node --import tsx --test tests/owned-macos-retirement.test.ts
+      - name: Upload owned Mac process retirement provenance and results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Electron-macOS-retirement-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            electron/.local/owned-mac-retirement/
+            electron/dist/native/openwhisper_macos_retirement_probe.node
+            electron/dist/native/macos-retirement-probe-notices/
+            electron/native/macos-retirement/build/*/compile_commands.json
           if-no-files-found: warn
           retention-days: 14
   linux:
