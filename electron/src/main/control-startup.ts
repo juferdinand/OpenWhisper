@@ -6,6 +6,9 @@ import { controlFailureOutput, runApplicationControl, type ControlClientOptions,
 export async function routeControlStartup(options: { readonly argv: unknown; readonly layout: TrustedArgumentLayout;
   readonly platform: string; readonly build: unknown;
   readonly prepare: (identity: BuildIdentity) => Promise<Omit<ControlClientOptions, "kind">> }): Promise<ControlCliOutput | undefined> {
+  // Electron and inspector launches may retain engine prefixes. Their ordinary
+  // GUI path must not be subjected to the exact command-client argument layout.
+  if (Array.isArray(options.argv) && !options.argv.includes("--control")) return undefined;
   const selection = parseLaunchArguments(options.argv, options.layout);
   if (selection.kind === "gui") return undefined;
   if (selection.kind === "invalid") return Object.freeze({ exitCode: 2, stdout: "", stderr: `${CONTROL_USAGE}\n` });

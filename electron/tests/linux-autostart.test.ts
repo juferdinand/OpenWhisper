@@ -55,6 +55,7 @@ test("Opening and status are read-only; explicit enable, reopen and disable pres
   assert.equal((await filesystem.lstat(input.entry)).mode & 0o7777, 0o600);
   assert.equal((await filesystem.lstat(dirname(input.entry))).mode & 0o7777, 0o700);
   const validate = spawnSync("desktop-file-validate", [input.entry], { encoding: "utf8" });
+  assert.ifError(validate.error);
   assert.equal(validate.status, 0, validate.stderr);
   const reopened = await LinuxAutostart.open({ appId: identity.appId, configHome: input.configHome, configDirs: input.configDirs, executable: input.executable });
   assert.deepEqual(await reopened.status(), { requested: true });

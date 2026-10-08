@@ -17,7 +17,8 @@ import type { HostProfile } from "../services/host-profile.js";
 import type { BuildIdentity } from "../contracts/build-identity.js";
 import { APPLICATION_BUILD } from "./application-build.js";
 import { selectApplicationBuild } from "./build-selection.js";
-import { initializeStableLinuxProfile, initializeStableMacosProfile } from "./stable-profile-startup.js";
+import { formatBootstrapFailure, initializeStableLinuxProfile, initializeStableMacosProfile, observeBootstrapLoginStatus,
+  type ApplicationBootstrapStage, type ApplicationBootstrapLoginStatus } from "./stable-profile-startup.js";
 import { verifyMacApplicationBundle, macosMigrationContext } from "./macos-stable-admission.js";
 import { StableMigrationError } from "../contracts/stable-migration.js";
 import { PrivateStateStore } from "../services/private-state.js";
@@ -76,6 +77,8 @@ function sender(event: IpcMainInvokeEvent): UiSender {
   };
 }
 
+let bootstrapStage: ApplicationBootstrapStage = "package-identity";
+let bootstrapLoginStatus: ApplicationBootstrapLoginStatus = "not-observed";
 interface ApplicationBootstrap {
   readonly identity: BuildIdentity;
   readonly profile: HostProfile;
@@ -115,9 +118,15 @@ async function prepareApplication(): Promise<ApplicationBootstrap> {
   };
   let profile: HostProfile;
   if (identity.kind === "stable" && process.platform === "darwin") {
+    bootstrapStage = "mac-bundle";
     verifyMacApplicationBundle(identity, version, await realpath(process.execPath));
+    bootstrapStage = "mac-context";
     let loginStatus: unknown;
-    try { loginStatus = app.getLoginItemSettings({ type: "mainAppService" }).status; }
+    bootstrapLoginStatus = "unavailable";
+    try {
+      loginStatus = app.getLoginItemSettings({ type: "mainAppService" }).status;
+      bootstrapLoginStatus = observeBootstrapLoginStatus(loginStatus);
+    }
     catch { /* Preserve an unknown service fact instead of treating it as disabled. */ }
     let context: unknown;
     try {
@@ -128,14 +137,19 @@ async function prepareApplication(): Promise<ApplicationBootstrap> {
       // A completed migration can retain edited state without querying unavailable initial login facts.
       if (!(error instanceof StableMigrationError && error.code === "LOGIN_STATE_UNKNOWN")) throw error;
     }
+    bootstrapStage = "stable-migration";
     profile = await initializeStableMacosProfile({ home: storage.home, platform: "darwin" }, context);
   } else if (identity.kind === "stable") {
+    bootstrapStage = "stable-migration";
     profile = await initializeStableLinuxProfile({ ...storage, platform: "linux" });
   } else {
+    bootstrapStage = "development-profile";
     const explicitRoot = selectedProfile();
     profile = prepareDevelopmentProfile(resolveDevelopmentProfile({ ...storage, ...(explicitRoot ? { explicitRoot } : {}) }));
   }
+  bootstrapStage = "pre-ready";
   if (app.isReady()) throw new Error("Application profile setup must precede Electron readiness.");
+  bootstrapStage = "private-paths";
   app.setName(profile.productName);
   app.setPath("userData", identity.kind === "stable" ? dirname(profile.paths.settings) : profile.roots.config);
   app.setPath("sessionData", profile.paths.session);
@@ -807,9 +821,9 @@ const control = await routeControlStartup({ argv: process.argv,
 if (control) {
   process.stdout.write(control.stdout); process.stderr.write(control.stderr); app.exit(control.exitCode);
 } else {
-  const bootstrap = await prepareApplication().catch(() => {
+  const bootstrap = await prepareApplication().catch((error: unknown) => {
     // Startup diagnostics are categorical: no preferences, paths, audio or user text.
-    console.error("OpenWhisper could not initialize its application profile.");
+    console.error(formatBootstrapFailure(bootstrapStage, error, bootstrapLoginStatus));
     app.exit(1);
     return undefined;
   });

@@ -33,6 +33,9 @@ jobs:
         run: |
           npm ci --prefix shared/ui
           npm ci --prefix electron
+      - name: Install native CPU and desktop validation tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build pkg-config libglib2.0-dev desktop-file-utils
       - name: Check isolated Electron foundation
         working-directory: electron
         run: |
@@ -43,9 +46,6 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: electron
         run: node --import tsx tests/owned-stable-startup.ts
-      - name: Install native CPU build tools (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build pkg-config libglib2.0-dev
       - name: Install native CPU build tools (macOS)
         if: runner.os == 'macOS'
         run: brew list cmake ninja >/dev/null 2>&1 || brew install cmake ninja

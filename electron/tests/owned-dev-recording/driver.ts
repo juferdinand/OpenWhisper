@@ -25,9 +25,11 @@ const execute = promisify(execFile);
 const payload = resolve(fileURLToPath(new URL("./", import.meta.url)));
 const packaged = process.env.OPENWHISPER_PACKAGE_DIRECTORY === "/payload/package";
 const stablePackage = process.env.OPENWHISPER_STABLE_PACKAGE === "1";
+const installedDebian = process.env.OPENWHISPER_INSTALLED_DEBIAN === "1";
 const sourcePackageRoot = packaged ? "/payload/package/resources/app" : join(payload, "app"), evidence = "/evidence";
 const sourceExecutable = packaged ? `/payload/package/${stablePackage ? "openwhisper" : "openwhisper-dev"}` : join(sourcePackageRoot, "node_modules/electron/dist/electron");
-let packageRoot = sourcePackageRoot, executable = sourceExecutable;
+let packageRoot = installedDebian ? "/opt/openwhisper/resources/app" : sourcePackageRoot;
+let executable = installedDebian ? "/opt/openwhisper/openwhisper" : sourceExecutable;
 const installPackage = process.env.OPENWHISPER_INSTALL_PACKAGE === "1";
 const stockKde = process.env.OPENWHISPER_STOCK_KDE === "1";
 const kdeLifecycle = process.env.OPENWHISPER_KDE_LIFECYCLE === "1";
@@ -94,6 +96,15 @@ async function until(predicate: () => Promise<boolean>, milliseconds = 20_000) {
   while (performance.now() < end) { if (await predicate()) return; await delay(100); }
   throw new Error("OWNED_CONDITION_UNMET");
 }
+async function assertInstalledPackage(source = "/payload/package", installed = "/opt/openwhisper"): Promise<void> {
+  const expected = await lstat(source), actual = await lstat(installed);
+  assert.equal(actual.isSymbolicLink(), false); assert.equal(actual.uid, 0); assert.equal(actual.mode & 0o7777, expected.mode & 0o7777);
+  assert.equal(actual.isDirectory(), expected.isDirectory()); assert.equal(actual.isFile(), expected.isFile());
+  if (expected.isDirectory()) {
+    const entries = (await readdir(source)).sort(); assert.deepEqual((await readdir(installed)).sort(), entries);
+    for (const name of entries) await assertInstalledPackage(join(source, name), join(installed, name));
+  } else { assert.equal(expected.isFile(), true); assert.equal(sha(await readFile(installed)), sha(await readFile(source))); }
+}
 async function main(): Promise<void> {
   assert.equal(process.platform, "linux"); assert.equal(process.arch, "x64"); assert.equal(process.getuid?.(), 1000);
   assert.equal(process.versions.node, "24.21.0");
@@ -119,6 +130,10 @@ async function main(): Promise<void> {
   if (process.env.OPENWHISPER_PACKAGE_DIRECTORY !== undefined) { assert.equal(packaged, true); assert.equal(nativeX11, true); }
   if (process.env.OPENWHISPER_INSTALL_PACKAGE !== undefined) { assert.equal(installPackage, true); assert.equal(packaged, true); assert.equal(nativeX11, true); }
   if (process.env.OPENWHISPER_STABLE_PACKAGE !== undefined) { assert.equal(stablePackage, true); assert.equal(packaged && nativeX11, true); assert.equal(installPackage, false); }
+  if (process.env.OPENWHISPER_INSTALLED_DEBIAN !== undefined) {
+    assert.equal(installedDebian, true); assert.equal(stablePackage && packaged && nativeX11, true); assert.equal(installPackage, false);
+    await assertInstalledPackage();
+  }
   assert.ok((await lstat("/.dockerenv")).isFile());
   for (const device of ["/dev/snd", "/dev/input", "/dev/uinput", "/dev/dri"]) await assert.rejects(lstat(device), { code: "ENOENT" });
   for (const key of ["NODE_OPTIONS", "ELECTRON_RUN_AS_NODE"]) assert.equal(process.env[key], undefined);
@@ -145,6 +160,7 @@ async function main(): Promise<void> {
     DBUS_SYSTEM_BUS_ADDRESS: `unix:path=${runtime}/disabled-system-bus`,
     XDG_SESSION_TYPE: "x11", XDG_CURRENT_DESKTOP: "Owned X11", LIBGL_ALWAYS_SOFTWARE: "1", GALLIUM_DRIVER: "llvmpipe",
   };
+  if (installedDebian) { env.XDG_CONFIG_DIRS = join(home, "system-config"); await mkdir(env.XDG_CONFIG_DIRS, { mode: 0o700 }); }
   const profileRoot = join(installPackage ? home : root, "dev-profile");
   const stable = join(env.XDG_DATA_HOME!, "whisperfree"); await mkdir(stable, { mode: 0o700 });
   await writeFile(join(stable, "sentinel"), "Owned stable sentinel", { mode: 0o600 });
@@ -196,11 +212,16 @@ async function main(): Promise<void> {
     assert.equal(publicBytes.length, 704000); assert.equal(sha(publicBytes), "ebd52851100536db02d12c49fddd010372dcdc70243562e057553d476b706ae0");
     const paths = [profile.legacy.settings, profile.legacy.history, join(profile.legacy.recovery!, "recording-00000001791410537123-12345678-1234-4567-8123-123456789abc.wav")];
     await writeFile(paths[0]!, JSON.stringify({ ui_language: "en", setup_completed: true, model: "tiny", language: "en", output: "clipboard",
-      gpu: true, gpu_configured: true, keep_history: true, launch_at_login: false, auto_check_updates: false }), { mode: 0o600 });
+      gpu: true, gpu_configured: true, keep_history: true, launch_at_login: installedDebian, auto_check_updates: false }), { mode: 0o600 });
     await writeFile(paths[1]!, JSON.stringify(legacyHistory), { mode: 0o600 });
     await writeFile(paths[2]!, Buffer.concat([recoveryWavHeader(BigInt(publicBytes.length / 4)), publicBytes]), { mode: 0o600 });
     await mkdir(dirname(devSentinel), { recursive: true, mode: 0o700 }); await writeFile(devSentinel, "Owned separate Dev sentinel", { mode: 0o600 });
     for (const path of [...paths, devSentinel]) originals[path] = sha(await readFile(path));
+    if (installedDebian) {
+      const devAutostart = join(home, "dev-config/autostart/io.github.whisperfree.dev.desktop");
+      await mkdir(dirname(devAutostart), { recursive: true, mode: 0o700 });
+      await writeFile(devAutostart, "Owned separate Dev autostart sentinel", { mode: 0o600 }); originals[devAutostart] = sha(await readFile(devAutostart));
+    }
     await assert.rejects(lstat(dirname(profile.paths.settings)), { code: "ENOENT" });
     checks.push("private legacy settings/history, Tiny0644 and pinned JFK WAV seeded before ordinary stable startup; config/electron remains absent; separate Dev sentinel");
   }
@@ -208,6 +229,28 @@ async function main(): Promise<void> {
     for (const [path, expected] of Object.entries(originals)) assert.equal(sha(await readFile(path)), expected);
     const current = await lstat(modelPath); assert.equal(current.dev, modelIdentity.dev); assert.equal(current.ino, modelIdentity.ino);
     assert.equal(current.mode & 0o777, stablePackage ? 0o644 : 0o600); assert.equal(sha(await readFile(modelPath)), sha(model));
+  };
+  const autostartPath = join(config, "autostart/io.github.whisperfree.desktop");
+  const enabledAutostart = "[Desktop Entry]\nType=Application\nName=OpenWhisper\nComment=Free, local dictation\nExec=\"/opt/openwhisper/openwhisper\"\nIcon=io.github.whisperfree\nStartupWMClass=io.github.whisperfree\nTerminal=false\n";
+  const disabledAutostart = "[Desktop Entry]\nType=Application\nName=OpenWhisper\nHidden=true\n";
+  let enabledAutostartIdentity: Awaited<ReturnType<typeof lstat>> | undefined;
+  let generatedExecRestart = false, startupAutostartReadOnly = false, uiEnableDisableVerified = false;
+  const persistedLogin = async () => z.object({ launch_at_login: z.boolean() })
+    .parse(JSON.parse(await readFile(join(profile.paths.settings, "preferences.json"), "utf8"))).launch_at_login;
+  const assertAutostart = async (enabled: boolean) => {
+    const file = await lstat(autostartPath), parent = await lstat(dirname(autostartPath));
+    assert.equal(file.isFile() && !file.isSymbolicLink(), true); assert.equal(file.uid, 1000); assert.equal(file.mode & 0o7777, 0o600);
+    assert.equal(parent.isDirectory() && !parent.isSymbolicLink(), true); assert.equal(parent.uid, 1000); assert.equal(parent.mode & 0o7777, 0o700);
+    assert.equal(await readFile(autostartPath, "utf8"), enabled ? enabledAutostart : disabledAutostart);
+    assert.equal(await persistedLogin(), enabled);
+    if (enabled && enabledAutostartIdentity) { assert.equal(file.dev, enabledAutostartIdentity.dev); assert.equal(file.ino, enabledAutostartIdentity.ino);
+      assert.equal(file.mtimeMs, enabledAutostartIdentity.mtimeMs); assert.equal(file.ctimeMs, enabledAutostartIdentity.ctimeMs); }
+    await assertStableOriginals();
+  };
+  const focusRefresh = async () => {
+    assert.ok(application); await application.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0]; if (!window) throw new Error("MISSING_WINDOW"); window.blur(); window.focus();
+    }); await delay(200);
   };
   await checkpoint("private-session");
   if (stockKde) {
@@ -425,6 +468,15 @@ async function main(): Promise<void> {
     assert.equal(initial.development_build, undefined); assert.equal(initial.preferences.setup_completed, true);
     assert.deepEqual(initial.history, legacyHistory); assert.equal(initial.recovery_available, true); await assertStableOriginals();
   }
+  if (installedDebian) {
+    await checkpoint("installed-autostart-read-only-startup");
+    assert.equal(initial.launch_at_login_available, true); assert.equal(initial.preferences.launch_at_login, false);
+    assert.equal(initial.macos?.launch_at_login_pending ?? false, false); assert.equal(await persistedLogin(), true);
+    await assert.rejects(lstat(dirname(autostartPath)), { code: "ENOENT" });
+    await focusRefresh(); assert.equal((await state()).preferences.launch_at_login, false); assert.equal(await persistedLogin(), true);
+    await assert.rejects(lstat(dirname(autostartPath)), { code: "ENOENT" }); await assertStableOriginals(); startupAutostartReadOnly = true;
+    checks.push("installed stable startup/focus exposes actual autostart false while preserving legacy requested true privately; no registration or autostart directory created");
+  }
   const capturedControl = packaged ? parseApplicationBuildModule(await readFile(join(packageRoot, "dist/main/application-build.js"), "utf8")) : undefined;
   if (capturedControl) assert.equal(capturedControl.kind, stablePackage ? "stable" : "development");
   const target = controlTarget(capturedControl?.kind ?? "development");
@@ -506,6 +558,14 @@ async function main(): Promise<void> {
   if (stockKde) await page.screenshot({ path: join(evidence, "initial-ui.png"), timeout: 5000 });
   if (!stablePackage) await page.locator('[data-command="complete_setup"]').click();
   await page.locator('[data-tab="general"]').click();
+  if (installedDebian) {
+    await checkpoint("installed-autostart-ui-enable");
+    const checkbox = page.locator('[data-pref="launch_at_login"]'); await expect(checkbox).toBeEnabled(); await expect(checkbox).not.toBeChecked();
+    await checkbox.check(); await until(async () => (await state()).preferences.launch_at_login === true && await persistedLogin());
+    await assertAutostart(true); enabledAutostartIdentity = await lstat(autostartPath);
+    await focusRefresh(); assert.equal((await state()).preferences.launch_at_login, true); await assertAutostart(true);
+    checks.push("ordinary shared UI enables the verified private fixed-name desktop entry at the permanent Debian executable; focus/status leave its identity and bytes unchanged");
+  }
   await checkpoint("actual-ui-language");
   await page.locator('[data-pref="language"]').selectOption("en");
   await until(async () => (await state()).preferences.language === "en");
@@ -1372,6 +1432,13 @@ async function main(): Promise<void> {
     const historyBeforeRestart = (await state()).history;
     appOwners.at(-1)!.termination = "quit"; await application.close(); await appOriginalClose;
     assert.equal(appOwners.at(-1)!.closeObserved, true); application = undefined; page = undefined;
+    if (installedDebian) {
+      await assertAutostart(true);
+      // Closed fixture form only: do not execute a shell or reuse production parsing.
+      const lines = (await readFile(autostartPath, "utf8")).split("\n").filter((line) => line.startsWith("Exec="));
+      assert.equal(lines.length, 1); const target = /^Exec="(\/opt\/openwhisper\/openwhisper)"$/u.exec(lines[0]!);
+      assert.ok(target); executable = target[1]!; generatedExecRestart = true;
+    }
     const reopened = await launchApplication(); application = reopened.application; page = reopened.page;
     await until(async () => !!(await state()).recording_available); const restarted = await state();
     assert.equal(restarted.profile, undefined); assert.equal(restarted.preferences.vocabulary, "Owned edited stable setting");
@@ -1381,6 +1448,18 @@ async function main(): Promise<void> {
     assert.equal(sha(await readFile(join(stable, "sentinel"))), stableBefore);
     const restartedPid = await application.evaluate(() => process.pid), restartedMaps = await readFile(`/proc/${restartedPid}/maps`, "utf8");
     assert.equal(restartedMaps.includes("openwhisper_capture.node"), false); assert.equal(restartedMaps.includes("openwhisper_speech.node"), false);
+    if (installedDebian) {
+      assert.equal(restarted.launch_at_login_available, true); assert.equal(restarted.preferences.launch_at_login, true); await assertAutostart(true);
+      await page.locator('[data-tab="general"]').click(); await checkpoint("installed-autostart-ui-disable");
+      const checkbox = page.locator('[data-pref="launch_at_login"]'); await expect(checkbox).toBeEnabled(); await expect(checkbox).toBeChecked();
+      await checkbox.uncheck(); await until(async () => !(await state()).preferences.launch_at_login && !(await persistedLogin()));
+      await assertAutostart(false); const disabledIdentity = await lstat(autostartPath);
+      await focusRefresh(); assert.equal((await state()).preferences.launch_at_login, false); await assertAutostart(false);
+      const unchanged = await lstat(autostartPath); assert.equal(unchanged.dev, disabledIdentity.dev); assert.equal(unchanged.ino, disabledIdentity.ino);
+      assert.equal(unchanged.mtimeMs, disabledIdentity.mtimeMs); assert.equal(unchanged.ctimeMs, disabledIdentity.ctimeMs);
+      await assertInstalledPackage(); uiEnableDisableVerified = true;
+      checks.push("generated fixed Exec target restarts the exact installed stable package and private edited profile; ordinary UI disable verifies Hidden=true and read-only refresh; actual login-session launch not tested");
+    }
     checks.push("original stable app quits and normal package restarts with edited settings/history and no replay after Discard; legacy originals/in-place model/Dev sentinel retained; no Dev control owner");
   }
   if (stockKde) {
@@ -1400,6 +1479,8 @@ async function main(): Promise<void> {
     ...(packaged ? { packagedApplication: true, packageAppPath: packageRoot, executable, packageControl: { allCommands: true, noDisplay: true,
       profileAbsent: true, absentOwnerRefused: true, processesClosed: true } } : {}),
     ...(installation ? { installedRuntime: true, installation } : {}),
+    ...(installedDebian ? { debianInstalled: true, installedGeneratedExecRestart: generatedExecRestart, startupAutostartReadOnly,
+      uiEnableDisableVerified, actualLoginSession: "NOT_TESTED" } : {}),
     ...(stablePackage ? { stableRuntime: true, stableMigration: { legacyRetry: true, cpuFallback: true, editedStateRetained: true,
       discardNotReplayed: true, originalsPreserved: true, devSentinelUnchanged: true, devControlAbsent: true } } : {}),
     physicalMicrophone: "NOT_USED", hotkeys: stockKde ? "OWNED_STOCK_KDE_KGLOBALACCEL_KEY_EDGES" : nativeX11 ? "OWNED_XVFB_NATIVE_XTEST_KEYS" : "OWNED_SYNTHETIC_PORTAL_SIGNALS_ONLY", portalResourcesClosed: true,

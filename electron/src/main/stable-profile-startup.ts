@@ -1,6 +1,29 @@
 import { Worker } from "node:worker_threads";
-import { stableMigrationReplySchema, type StableMigrationReply } from "../contracts/stable-migration.js";
+import { stableMigrationFailureSchema, stableMigrationReplySchema, type StableMigrationReply } from "../contracts/stable-migration.js";
 import { resolveStableProfile, stableProfileInputSchema, stableMacosMigrationRequestSchema, validateStableProfile, type StableProfile } from "../services/stable-profile.js";
+
+const bootstrapStages = ["bootstrap", "package-identity", "mac-bundle", "mac-context", "stable-migration",
+  "development-profile", "pre-ready", "private-paths"] as const;
+export type ApplicationBootstrapStage = typeof bootstrapStages[number];
+const nativeLoginStatuses = ["not-registered", "enabled", "requires-approval", "not-found"] as const;
+export type ApplicationBootstrapLoginStatus = typeof nativeLoginStatuses[number] | "unavailable" | "not-observed";
+
+/** Observe only native service categories; unrecognized values never reach diagnostics. */
+export function observeBootstrapLoginStatus(value: unknown): ApplicationBootstrapLoginStatus {
+  return nativeLoginStatuses.find((status) => status === value) ?? "unavailable";
+}
+
+/** Worker failures are plain Error(code); emit only exact closed categories and fixed stages. */
+export function formatBootstrapFailure(stage: ApplicationBootstrapStage, error: unknown,
+  login: ApplicationBootstrapLoginStatus = "not-observed"): string {
+  const selectedStage = bootstrapStages.includes(stage) ? stage : "bootstrap";
+  let code: unknown;
+  try { if (error instanceof Error) code = error.message; }
+  catch { /* Unreadable exception fields stay generic. */ }
+  const category = stableMigrationFailureSchema.safeParse(code);
+  const selectedLogin = login === "not-observed" ? login : observeBootstrapLoginStatus(login);
+  return `OpenWhisper could not initialize its application profile. stage=${selectedStage} code=${category.success ? category.data : "BOOTSTRAP_FAILED"} login=${selectedLogin}`;
+}
 
 /** Select only after the host's packaged stable identity is verified. Never runs in Dev bootstrap. */
 export async function initializeStableLinuxProfile(options: unknown): Promise<StableProfile> {

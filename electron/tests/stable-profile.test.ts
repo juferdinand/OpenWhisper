@@ -4,6 +4,27 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { test } from "node:test";
 import { prepareStableProfile, prepareStableProfileStorage, resolveStableProfile, stableProfileSchema, validateStableProfile, type StableProfile } from "../src/services/stable-profile.js";
+import { formatBootstrapFailure, observeBootstrapLoginStatus, type ApplicationBootstrapStage, type ApplicationBootstrapLoginStatus } from "../src/main/stable-profile-startup.js";
+import { StableMigrationError } from "../src/contracts/stable-migration.js";
+
+test("bootstrap diagnostics preserve closed worker categories without exception or stage content", () => {
+  const prefix = "OpenWhisper could not initialize its application profile.";
+  assert.equal(formatBootstrapFailure("stable-migration", new Error("LOGIN_STATE_UNKNOWN"), "not-found"),
+    `${prefix} stage=stable-migration code=LOGIN_STATE_UNKNOWN login=not-found`);
+  assert.equal(formatBootstrapFailure("mac-context", new StableMigrationError("PREFERENCES_SNAPSHOT_UNAVAILABLE")),
+    `${prefix} stage=mac-context code=PREFERENCES_SNAPSHOT_UNAVAILABLE login=not-observed`);
+  const privateText = "/Users/owned/private-path private preference, transcript and device sentinel";
+  const unreadable = new Error(); Object.defineProperty(unreadable, "message", { get() { throw new Error(privateText); } });
+  for (const error of [new Error(privateText), new Error(`LOGIN_STATE_UNKNOWN ${privateText}`), unreadable,
+    { message: privateText }, privateText, undefined]) {
+    assert.equal(formatBootstrapFailure("pre-ready", error), `${prefix} stage=pre-ready code=BOOTSTRAP_FAILED login=not-observed`);
+  }
+  assert.equal(observeBootstrapLoginStatus(privateText), "unavailable");
+  assert.equal(formatBootstrapFailure("mac-context", new Error(privateText), privateText as ApplicationBootstrapLoginStatus),
+    `${prefix} stage=mac-context code=BOOTSTRAP_FAILED login=unavailable`);
+  assert.equal(formatBootstrapFailure(privateText as ApplicationBootstrapStage, new Error(privateText)),
+    `${prefix} stage=bootstrap code=BOOTSTRAP_FAILED login=not-observed`);
+});
 
 function fixture(run: (home: string, root: string) => void): void {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "openwhisper-stable-profile-")), home = join(root, "home");

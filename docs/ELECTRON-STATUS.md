@@ -75,8 +75,23 @@ are connected: Debian uses only its verified permanent `/opt` layout; Mac uses
 typed `mainAppService` facts, including pending approval. Startup only reads facts;
 registration changes require an explicit settings action. Persisted requests survive
 unavailable capabilities, and late status reads cannot overwrite newer facts.
-Strict typing and 1078 local tests pass with 25 explicit skips; package/runtime
-acceptance of these changes and the normal stable Mac smoke are still pending.
+Strict typing and 1078 local tests pass with 25 explicit skips. The first
+[CI run at `9349566`](https://github.com/juferdinand/OpenWhisper/actions/runs/37858180435)
+fails the Ubuntu autostart test because its external desktop validator is missing;
+both normal stable Mac packages also exit during profile preparation before the
+first window. Existing Mac Dev package gates pass. The retained Mac failure lacks
+a specific category. Fixed, content-free bootstrap stages, failure categories and
+native login-state observations now preserve that diagnostic without changing
+admission. An owned Linux auth fixture additionally finds ordinary
+inspector-prefixed GUI launches rejected by the new CLI router. Narrow corrections
+restore ordinary GUI routing and install the validator before the Linux test job.
+Independent reviews, strict typing and the corrective suite pass: 1079 tests,
+25 explicit skips, zero failures in 17.78s. The existing recording harness also
+accepts a matching stable Debian archive for container-only installation, UI
+autostart and generated permanent-target restart checks; actual login-session
+launch remains explicitly untested. Fresh package/runtime acceptance remains
+required. These failures do
+not invalidate the separately attributed earlier migration and dictation evidence.
 
 The current checkpoint includes actual stock KDE keyboard dictation, recovery
 after a held-key/GUI cancellation sequence and same-profile crash recovery. Explicit

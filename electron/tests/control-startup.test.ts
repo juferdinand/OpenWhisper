@@ -9,10 +9,14 @@ test("early GUI invalid and unsupported-host routing does not prepare a bus or a
   let prepares = 0, opens = 0;
   const prepare = async () => { prepares++; return { uid: 1000, factory: async () => { opens++; throw new Error("Must not open."); } }; };
   assert.equal(await routeControlStartup({ argv: [layout.executable], layout, platform: "linux", build, prepare }), undefined);
+  assert.equal(await routeControlStartup({ argv: [layout.executable, "--inspect=0", "--remote-debugging-port=0", "/owned/app", "--dev"],
+    layout: { kind: "development", executable: layout.executable, application: "/owned/app" }, platform: "linux", build, prepare }), undefined);
   for (const args of [["--control"], ["--control", "status", "extra"], ["--dev", "--control", "start"]]) {
     const result = await routeControlStartup({ argv: [layout.executable, ...args], layout, platform: "linux", build, prepare });
     assert.equal(result?.exitCode, 2); assert.equal(result?.stdout, "");
   }
+  assert.equal((await routeControlStartup({ argv: [layout.executable, "--inspect=0", "/owned/app", "--control", "status"],
+    layout: { kind: "development", executable: layout.executable, application: "/owned/app" }, platform: "linux", build, prepare }))?.exitCode, 2);
   const unsupported = await routeControlStartup({ argv: [layout.executable, "--control", "status"], layout, platform: "darwin", build, prepare });
   assert.equal(unsupported?.exitCode, 1); assert.equal(prepares, 0); assert.equal(opens, 0);
 });

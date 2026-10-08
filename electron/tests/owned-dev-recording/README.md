@@ -64,6 +64,27 @@ package hashes are checked before copying, in the stopped container and after
 execution. The same native-X11 recording and cleanup checks apply. This proves
 owned package execution, independently of host installation or signed releases.
 
+For a stable-profile package use `--native-x11 --package-directory /absolute/path/OpenWhisper-Linux-x64 --stable-package`.
+Append `--debian-package /absolute/path/matching-stable-package.deb` to select installation
+inside the same disposable container at `/opt/openwhisper`. The archive's metadata,
+control-only members, exact application bytes/modes, launcher, icon and license must match
+the frozen package directory. Existing package/path conflicts refuse installation; missing
+dependencies fail the normal unforced dpkg command. No apt or host installation is used. Only the
+container's `dpkg --install` command runs as UID0, under the existing namespace restrictions.
+The normal app, input/audio helpers and full recording/control case run as UID1000.
+
+The installed variant seeds a private legacy autostart request of true with no existing
+autostart entry. Ordinary startup and focus refresh must retain the stored request while
+reporting actual disabled state without registration. The normal shared UI checkbox must
+enable and disable the fixed private 0600 desktop entry beneath a 0700 directory. The existing
+stable restart validates the generated single fixed Exec target independently, then executes
+that exact installed target through the normal Playwright boundary with owned X11/CDP
+instrumentation. This verifies the permanent executable and edited private profile, and
+explicitly records `actualLoginSession: "NOT_TESTED"`; it does not exercise session-manager
+login or desktop-launcher activation. The same full Retry/record/cancel/recognition/history/
+discard/control assertions remain, with original legacy/model/Dev sentinels and archive,
+source-directory and installed-tree checks. This mode is incompatible with `--install-package`.
+
 Append `--install-package` as the final argument after that exact package path
 to run the same recording case from a fresh installation inside the fixture's
 private home. The source package's own executable runs its compiled
