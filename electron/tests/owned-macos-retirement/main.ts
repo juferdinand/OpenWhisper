@@ -63,6 +63,20 @@ async function run(root: string, distribution: string): Promise<void> {
   const children: Child[] = [], owners: OwnedMacRetirementProbe[] = [];
   let native: MacProbeNative | undefined, worker: Worker | undefined;
   const cases: ProbeResult["cases"] = [], phases: string[] = [];
+  type CaseName = ProbeResult["cases"][number]["name"] | "synthetic-environment-cleanup";
+  type Stage = "spawn" | "bind" | "retire" | "kill" | "kill-returned" | "post-kill-observe" | "wait-reap" | "exit" | "close" | "worker";
+  let checkpoint: Readonly<{ case: CaseName; stage: Stage; configuredHandler: "default" | "delayed" | "ignore";
+    killReturnedMilliseconds: number | null; helperExitObserved: boolean | null; observedLevel: "running" | "non-running" | "reaped" | null }> | undefined;
+  const checkpoints: NonNullable<typeof checkpoint>[] = [];
+  const record = async (caseName: CaseName, stage: Stage, handler: "default" | "delayed" | "ignore" = "default",
+    values: Readonly<{ killReturnedMilliseconds?: number; helperExitObserved?: boolean; observedLevel?: "running" | "non-running" | "reaped" }> = {}): Promise<void> => {
+    checkpoint = Object.freeze({ case: caseName, stage, configuredHandler: handler,
+      killReturnedMilliseconds: values.killReturnedMilliseconds ?? null, helperExitObserved: values.helperExitObserved ?? null,
+      observedLevel: values.observedLevel ?? null });
+    if (checkpoints.length >= 80) throw new Error("PROBE_FAILED");
+    checkpoints.push(checkpoint);
+    await writeFile(join(root, "checkpoint.json"), JSON.stringify({ current: checkpoint, trace: checkpoints }), { mode: 0o600 });
+  };
   try {
     native = await loadOwnedMacRetirementProbe(distribution);
     assert.equal(sdkSchema.parse(native.sdk()).reserved, 0);
@@ -110,18 +124,32 @@ async function run(root: string, distribution: string): Promise<void> {
       { name: "ignored-sigterm", mode: "ignore", action: "ignore" },
     ] as const;
     for (const setting of settings) {
+      const handler = setting.mode === "delayed" || setting.mode === "ignore" ? setting.mode : "default";
+      await record(setting.name, "spawn", handler);
       const child = await spawn(setting.mode), probe = acquire(child);
+      await record(setting.name, "bind", handler);
       const first = await probe.bind(); assert.equal(first.canAdmit, true); assert.ok(first.identity);
       assert.equal(first.identity.parentPid, process.pid); assert.equal(first.identity.uid, process.getuid?.());
       const started = performance.now();
-      if (setting.action === "retire") child.utility.postMessage({ kind: "retire" });
-      else { if (setting.action === "ignore") child.utility.postMessage({ kind: "retire" }); assert.equal(child.utility.kill(), true); }
-      if (setting.action === "ignore") {
-        await new Promise<void>((accept) => { setTimeout(accept, 75); });
-        assert.equal(child.state.exited, false); assert.notEqual((await probe.observe()).level, "reaped");
+      if (setting.action === "retire") {
+        await record(setting.name, "retire", handler); child.utility.postMessage({ kind: "retire" });
+      } else {
+        await record(setting.name, "kill", handler);
+        if (setting.action === "ignore") child.utility.postMessage({ kind: "retire" });
+        const killStarted = performance.now(), accepted = child.utility.kill();
+        const returned = { killReturnedMilliseconds: performance.now() - killStarted, helperExitObserved: child.state.exited };
+        await record(setting.name, "kill-returned", handler, returned); assert.equal(accepted, true);
+        // Apple's pinned Chromium implementation may synchronously wait/reap
+        // inside kill(). A configured handler does not prove post-return life.
+        await record(setting.name, "post-kill-observe", handler, returned);
+        const observed = await probe.observe();
+        await record(setting.name, "wait-reap", handler, { ...returned, observedLevel: observed.level });
       }
-      await probe.waitForFullReap(); const code = await bounded(child.exit);
+      if (setting.action === "retire") await record(setting.name, "wait-reap", handler);
+      await probe.waitForFullReap(); await record(setting.name, "exit", handler);
+      const code = await bounded(child.exit);
       if (setting.mode === "nonzero") assert.equal(code, 17);
+      await record(setting.name, "close", handler, { helperExitObserved: child.state.exited });
       await probe.close(); const state = probeStateSchema.parse(probe.probeState(edge));
       assert.equal(state.closed, true); assert.equal(state.descriptorOpen, false); assert.equal(state.reserved, 0); assert.equal(state.disposals, 1);
       cases.push({ name: setting.name, admitted: true, originalNonceConfirmed: child.state.challenged, sameUid: true, directParent: true,
@@ -131,7 +159,9 @@ async function run(root: string, distribution: string): Promise<void> {
       phases.push(setting.name); await writeFile(join(root, "phases.json"), JSON.stringify(phases), { mode: 0o600 });
     }
     {
+      await record("early-exit", "spawn");
       const child = await spawn("early"); await bounded(child.exit);
+      await record("early-exit", "bind", "default", { helperExitObserved: child.state.exited });
       const probe = acquire(child), started = performance.now(), first = await probe.bind();
       assert.equal(first.canAdmit, false); assert.equal(first.level, "reaped"); assert.equal(child.state.challenged, false);
       await probe.close(); const state = probeStateSchema.parse(probe.probeState(edge));
@@ -142,6 +172,7 @@ async function run(root: string, distribution: string): Promise<void> {
       phases.push("early-exit"); await writeFile(join(root, "phases.json"), JSON.stringify(phases), { mode: 0o600 });
     }
     {
+      await record("held-observation", "spawn");
       const child = await spawn("clean"), probe = acquire(child); assert.equal((await probe.bind()).canAdmit, true);
       probe.holdNext(edge); const controller = new AbortController(), observation = probe.observe(controller.signal);
       await until(() => probeStateSchema.parse(probe.probeState(edge)).barrierEntered);
@@ -164,6 +195,7 @@ async function run(root: string, distribution: string): Promise<void> {
         deadlineRetainedOwner: true, refusedSecondOwner: true, retirementMilliseconds: performance.now() - started });
       phases.push("held-observation"); await writeFile(join(root, "phases.json"), JSON.stringify(phases), { mode: 0o600 });
     }
+    await record("synthetic-environment-cleanup", "worker");
     const before = sdkSchema.parse(edge.sdk());
     worker = new Worker(join(root, "worker.mjs"), { workerData: { binding: join(distribution, "native/openwhisper_macos_retirement_probe.node") } });
     const barrier = await bounded(new Promise<unknown>((accept, reject) => {
@@ -186,7 +218,8 @@ async function run(root: string, distribution: string): Promise<void> {
     await writeFile(join(root, "result.json"), JSON.stringify(result, null, 2), { flag: "wx", mode: 0o600 });
   } catch {
     process.exitCode = 1;
-    await writeFile(join(root, "failure.json"), JSON.stringify({ code: "MAC_RETIREMENT_PROBE_FAILED", phases }), { mode: 0o600 });
+    await writeFile(join(root, "failure.json"), JSON.stringify({ code: "MAC_RETIREMENT_PROBE_FAILED", phases,
+      ...(checkpoint ? { checkpoint } : {}) }), { mode: 0o600 });
   } finally {
     if (worker) { try { await bounded(worker.terminate()); } catch { process.exitCode = 1; } }
     if (native) for (const owner of owners) {

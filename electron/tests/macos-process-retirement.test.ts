@@ -131,7 +131,12 @@ test("Mac full-reap polling never accepts a sequence containing only NOTE_EXIT a
   await rejects(probe.waitForFullReap()); await probe.close();
 });
 test("Mac full-reap polling accepts zombie-inclusive absence after original binding", async () => {
-  const { native, probe } = fixture(); await probe.bind();
+  // This tests the fixed observation sequence, independently of CI scheduling.
+  // The real timer and monotonic-expiry cases above/below retain real deadlines.
+  const native = new FakeNative();
+  const probe = new OwnedMacRetirementProbe(native, { pid: 123, challenge: async (nonce, epoch) => ({ kind: "nonce", nonce, epoch }) },
+    randomUUID(), { uid: 501, parentPid: 100, now: () => 0 }, { deadlineMs: 30, pollMs: 1 });
+  await probe.bind();
   native.replies = [{ second: { ...record, state: "zombie" }, ...flags, exitSeen: true }, { second: { kind: "absent" }, ...flags, exitSeen: true }];
   await probe.waitForFullReap(); await probe.close();
 });

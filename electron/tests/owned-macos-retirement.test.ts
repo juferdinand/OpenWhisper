@@ -22,7 +22,7 @@ async function retain(root: string, project: string): Promise<void> {
   const owner = await lstat(evidence);
   assert.ok(owner.isDirectory() && !owner.isSymbolicLink()); assert.equal(owner.uid, process.getuid?.());
   assert.equal(owner.mode & 0o7777, 0o700); assert.equal(await realpath(evidence), resolve(evidence));
-  for (const name of ["result.json", "failure.json", "lifecycle.json", "phases.json", "retained.json", "startup.json"]) {
+  for (const name of ["result.json", "failure.json", "lifecycle.json", "phases.json", "retained.json", "startup.json", "checkpoint.json"]) {
     try { await cp(join(root, name), join(evidence, name)); }
     catch (error: unknown) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
   }
@@ -34,7 +34,7 @@ async function retain(root: string, project: string): Promise<void> {
   await writeFile(join(evidence, "run-manifest.json"), JSON.stringify({ bindingSha256: createHash("sha256").update(await readFile(binding)).digest("hex"), sourceHashes,
     electronVersion: z.object({ version: z.string() }).parse(require("electron/package.json")).version, architecture: process.arch, uid: process.getuid?.(),
     probeOnly: true, mainOnlyKernel: true, workerSyntheticOnly: true, productionArchitectureSelected: false,
-    scope: "Owned Apple CI VM; main public-SDK/trusted Electron child topology plus separate target-free synthetic Worker environment lifetime. No production factory, audio/TCC, deterministic zombie or signed package evidence." }, null, 2), { mode: 0o600 });
+    scope: "Owned Apple CI VM; main public-SDK/trusted Electron child topology plus separate target-free synthetic Worker environment lifetime. Delayed/ignored scenario names configure handlers; signal delivery, survival and delay are not inferred. No production factory, audio/TCC, deterministic zombie or signed package evidence." }, null, 2), { mode: 0o600 });
 }
 
 test("owned Apple parent-native retirement probe measures SDK identity and asynchronous resource lifetime without audio", { skip: !enabled, timeout: 180_000 }, async () => {
