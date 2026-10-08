@@ -4,6 +4,18 @@ import { OwnedDaemon, daemonDiagnosisSchema, type DaemonHandle, type DaemonWitne
 import { WitnessRefusal, type Birth, type Observation } from "./process-witness.js";
 import { setTimeout as pause } from "node:timers/promises";
 
+// Setup and success cases allow scheduler latency on shared CI runners. The
+// explicit expiry cases still consume one real monotonic deadline, with no
+// production budget or clock changes.
+const successBudgetMs = 3_000;
+const expiryBudgetMs = 3_000;
+function holdPastDeadline(): void {
+  const until = performance.now() + expiryBudgetMs + 25;
+  const cell = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+  // Block the inert callback beyond the real deadline without a CPU spin. The
+  // expired timer cannot run until this callback returns.
+  while (performance.now() < until) Atomics.wait(cell, 0, 0, until - performance.now());
+}
 const birth: Birth = { pid: 77, parentPid: 42, ticks: "123" };
 const running: Observation = { level: "running", reason: "same-birth" };
 const absent: Observation = { level: "absent", reason: "absence" };
@@ -36,8 +48,8 @@ function fixture(overrides: Partial<DaemonWitness> = {}, persist: (value: Return
   return { handle, owner, counts: () => ({ binds, observations, finals }) };
 }
 test("original listeners cannot miss synchronous signal exit and close and final kernel proof is required", async () => {
-  const f = fixture(); await f.owner.admitAfterReadiness(42, 100);
-  const first = f.owner.retire(100); assert.equal(f.owner.retire(100), first);
+  const f = fixture(); await f.owner.admitAfterReadiness(42, successBudgetMs);
+  const first = f.owner.retire(successBudgetMs); assert.equal(f.owner.retire(successBudgetMs), first);
   assert.deepEqual(await first, absent); assert.deepEqual(f.counts(), { binds: 1, observations: 1, finals: 1 });
   assert.equal(f.handle.signals, 1); assert.deepEqual(f.owner.snapshot().birth, birth);
   const stages = f.owner.snapshot().stages.map((value) => value.stage);
@@ -45,44 +57,44 @@ test("original listeners cannot miss synchronous signal exit and close and final
   assert.ok(stages.indexOf("DAEMON_CLOSE_OBSERVED") < stages.indexOf("DAEMON_FINAL_OBSERVATION"));
 });
 test("exit alone cannot certify or trigger final lookup while the original close event is held", async () => {
-  const f = fixture(); await f.owner.admitAfterReadiness(42, 100); f.handle.emitExit();
-  let settled = false; const pending = f.owner.retire(100).finally(() => { settled = true; });
+  const f = fixture(); await f.owner.admitAfterReadiness(42, successBudgetMs); f.handle.emitExit();
+  let settled = false; const pending = f.owner.retire(successBudgetMs).finally(() => { settled = true; });
   await pause(5); assert.equal(settled, false); assert.equal(f.counts().finals, 0); assert.equal(f.handle.signals, 0);
   f.handle.emitClose(); assert.deepEqual(await pending, absent); assert.equal(f.counts().finals, 1);
 });
 test("already exited daemon still needs fresh kernel proof and never rebinds a late PID", async () => {
   const f = fixture({ nonRunning: async () => { throw new WitnessRefusal("BIRTH_CHANGED", "LOOKUP"); } });
-  await f.owner.admitAfterReadiness(42, 100); f.handle.emitExit(); f.handle.emitClose();
-  await assert.rejects(f.owner.retire(100)); assert.equal(f.handle.signals, 0); assert.equal(f.counts().binds, 1);
+  await f.owner.admitAfterReadiness(42, successBudgetMs); f.handle.emitExit(); f.handle.emitClose();
+  await assert.rejects(f.owner.retire(successBudgetMs)); assert.equal(f.handle.signals, 0); assert.equal(f.counts().binds, 1);
   assert.equal(f.owner.snapshot().refusal?.witness?.reason, "BIRTH_CHANGED");
   assert.equal(f.owner.snapshot().finalObservation, null); assert.equal(f.counts().finals, 1);
-  await assert.rejects(f.owner.admitAfterReadiness(42, 100)); assert.equal(f.counts().binds, 1);
+  await assert.rejects(f.owner.admitAfterReadiness(42, successBudgetMs)); assert.equal(f.counts().binds, 1);
 });
 test("null-event lag with a same-birth zombie waits for original events before fresh final observation", async () => {
   const f = fixture({ observe: async () => ({ level: "non-running", reason: "zombie" }) });
-  await f.owner.admitAfterReadiness(42, 100);
-  let settled = false; const pending = f.owner.retire(100).finally(() => { settled = true; });
+  await f.owner.admitAfterReadiness(42, successBudgetMs);
+  let settled = false; const pending = f.owner.retire(successBudgetMs).finally(() => { settled = true; });
   await pause(5); assert.equal(settled, false); assert.equal(f.handle.signals, 0); assert.equal(f.counts().finals, 0);
   f.handle.emitExit(); f.handle.emitClose(); assert.deepEqual(await pending, absent); assert.equal(f.counts().finals, 1);
 });
 test("held original completion consumes one cleanup deadline and cannot allocate a second budget", async () => {
-  const f = fixture(); f.handle.signal = () => f.handle.emitExit(); await f.owner.admitAfterReadiness(42, 100);
-  const pending = f.owner.retire(10); await assert.rejects(pending); f.handle.emitClose();
-  assert.equal(f.owner.retire(100), pending); await assert.rejects(f.owner.retire(100));
+  const f = fixture(); f.handle.signal = () => f.handle.emitExit(); await f.owner.admitAfterReadiness(42, successBudgetMs);
+  const pending = f.owner.retire(expiryBudgetMs); await assert.rejects(pending); assert.equal(f.handle.signals, 1); f.handle.emitClose();
+  assert.equal(f.owner.retire(successBudgetMs), pending); await assert.rejects(f.owner.retire(successBudgetMs));
   assert.equal(f.counts().finals, 0); assert.equal(f.owner.snapshot().refusal?.witness?.reason, "DEADLINE_EXPIRED");
 });
 test("late completion and late final kernel observation are refused after the same monotonic deadline", async () => {
   for (const late of ["completion", "final"] as const) {
     const f = fixture({ nonRunning: async () => {
-      if (late === "final") { const end = performance.now() + 15; while (performance.now() < end) { /* Inert delayed lookup. */ } }
+      if (late === "final") { holdPastDeadline(); }
       return absent;
     } });
-    await f.owner.admitAfterReadiness(42, 100);
+    await f.owner.admitAfterReadiness(42, successBudgetMs);
     f.handle.signal = () => {
-      if (late === "completion") { const end = performance.now() + 15; while (performance.now() < end) { /* Inert delayed terminal events. */ } }
+      if (late === "completion") { holdPastDeadline(); }
       f.handle.emitExit(); f.handle.emitClose();
     };
-    await assert.rejects(f.owner.retire(5)); assert.equal(f.owner.snapshot().refusal?.witness?.reason, "DEADLINE_EXPIRED");
+    await assert.rejects(f.owner.retire(expiryBudgetMs)); assert.equal(f.owner.snapshot().refusal?.witness?.reason, "DEADLINE_EXPIRED");
     assert.equal(f.owner.snapshot().finalObservation, null);
     assert.equal(f.counts().finals, late === "completion" ? 0 : 1);
     assert.equal(f.owner.snapshot().stages.some((value) => value.stage === "DAEMON_FINAL_OBSERVATION"), late === "final");
@@ -92,10 +104,10 @@ test("ESRCH before signal or after original completion remains a sticky refusal"
   for (const boundary of ["before", "final"] as const) {
     const refusal = (): Promise<Observation> => Promise.reject(new WitnessRefusal("READ_REFUSED", "FIRST_STAT", "ESRCH"));
     const f = fixture(boundary === "before" ? { observe: refusal } : { nonRunning: refusal });
-    await f.owner.admitAfterReadiness(42, 100);
+    await f.owner.admitAfterReadiness(42, successBudgetMs);
     if (boundary === "final") { f.handle.emitExit(); f.handle.emitClose(); }
-    const cleanup = f.owner.retire(100); await assert.rejects(cleanup);
-    assert.equal(f.handle.signals, 0); assert.equal(f.owner.retire(100), cleanup);
+    const cleanup = f.owner.retire(successBudgetMs); await assert.rejects(cleanup);
+    assert.equal(f.handle.signals, 0); assert.equal(f.owner.retire(successBudgetMs), cleanup);
     assert.deepEqual(f.owner.snapshot().refusal?.witness, { reason: "READ_REFUSED", component: "FIRST_STAT", ioCode: "ESRCH" });
     assert.equal(f.owner.snapshot().finalObservation, null);
   }
@@ -104,22 +116,22 @@ test("diagnostic persistence cannot hide an expired budget before the retirement
   let held = false;
   const f = fixture({}, (value) => {
     if (!held && value.stages.at(-1)?.stage === "DAEMON_RETIRED") {
-      held = true; const end = performance.now() + 15; while (performance.now() < end) { /* Inert held evidence write. */ }
+      held = true; holdPastDeadline();
     }
   });
-  await f.owner.admitAfterReadiness(42, 100); await assert.rejects(f.owner.retire(5));
+  await f.owner.admitAfterReadiness(42, successBudgetMs); await assert.rejects(f.owner.retire(expiryBudgetMs));
   assert.equal(held, true); assert.equal(f.owner.snapshot().refusal?.witness?.reason, "DEADLINE_EXPIRED");
   assert.equal(f.owner.snapshot().stages.at(-1)?.stage, "DAEMON_RETIREMENT_REFUSED");
 });
 test("identity refusal and original process error retain categorical metadata without allowing a signal", async () => {
   for (const reason of ["UID_CHANGED", "TOPOLOGY_CHANGED", "BIRTH_CHANGED"] as const) {
     const f = fixture({ observe: async () => { throw new WitnessRefusal(reason, "SECOND_STAT"); } });
-    await f.owner.admitAfterReadiness(42, 100); await assert.rejects(f.owner.retire(100));
+    await f.owner.admitAfterReadiness(42, successBudgetMs); await assert.rejects(f.owner.retire(successBudgetMs));
     assert.equal(f.handle.signals, 0); assert.equal(f.owner.snapshot().refusal?.witness?.reason, reason);
   }
-  const f = fixture(); await f.owner.admitAfterReadiness(42, 100);
+  const f = fixture(); await f.owner.admitAfterReadiness(42, successBudgetMs);
   f.handle.emitError(Object.assign(new Error("arbitrary process detail"), { code: "EPERM" }));
-  await assert.rejects(f.owner.retire(100)); assert.equal(f.handle.signals, 0);
+  await assert.rejects(f.owner.retire(successBudgetMs)); assert.equal(f.handle.signals, 0);
   assert.equal(JSON.stringify(f.owner.snapshot()).includes("arbitrary process detail"), false);
   assert.equal(f.owner.snapshot().refusal?.code, "EPERM");
   assert.equal(daemonDiagnosisSchema.safeParse({ ...f.owner.snapshot(), rawStatus: "untrusted" }).success, false);

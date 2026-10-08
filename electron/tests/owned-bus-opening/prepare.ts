@@ -15,7 +15,10 @@ export const additionalSources = Object.freeze(["native/node-headers.json", "tes
   "tests/owned-bus-opening/prepare-retained.ts", "tests/owned-bus-opening/execute-retained.ts", "tests/owned-bus-opening/run-retained.ts",
   "tests/owned-bus-opening/daemon-owner.ts", "tests/owned-bus-opening/daemon-owner.test.ts",
   "tests/owned-bus-opening/remaining-contracts.ts", "tests/owned-bus-opening/prepare-remaining.ts",
-  "tests/owned-bus-opening/execute-remaining.ts", "tests/owned-bus-opening/run-remaining.ts", "tests/owned-bus-opening/remaining.test.ts"]);
+  "tests/owned-bus-opening/execute-remaining.ts", "tests/owned-bus-opening/run-remaining.ts", "tests/owned-bus-opening/remaining.test.ts",
+  "tests/owned-bus-opening/legacy-diagnostics.ts", "tests/owned-bus-opening/legacy-diagnostics.test.ts",
+  "tests/owned-bus-opening/legacy-retained-contracts.ts", "tests/owned-bus-opening/prepare-legacy.ts",
+  "tests/owned-bus-opening/execute-legacy.ts", "tests/owned-bus-opening/run-legacy.ts", "tests/owned-bus-opening/legacy-retained.test.ts"]);
 export async function prepare(output: string, headers: string, seccomp: string): Promise<void> {
   if (process.platform !== "linux" || process.arch !== "x64" || process.getuid?.() !== 1000) throw new Error("Owned preparation requires Linux x64 UID1000.");
   await mkdir(dirname(output), { recursive: true, mode: 0o700 }); await mkdir(output, { mode: 0o700 });

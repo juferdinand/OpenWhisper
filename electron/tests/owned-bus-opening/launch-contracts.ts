@@ -29,7 +29,7 @@ export const frozenCore: Readonly<Record<string, string>> = Object.freeze({
   "tests/owned-bus-opening/entry.ts": "84b97f7903bc951e56fd9ea877051b514164e0681af4ecd8458abf90274b13df",
   "tests/owned-bus-opening/README.md": "0373d15377903a9c62cb2721f57e3b039468d387b2c4ff743e7732d41a187632",
   "tests/owned-bus/service.cpp": "6f122f6c3bcb831979ac9eb07256261297d902966b78bba6837bbdfaae116451",
-  "tests/owned-bus/entry.ts": "7d0dc46f07430549066d86eec26de951ee40bde2138f99c1acb4f24bdb8f7233",
+  "tests/owned-bus/entry.ts": "d63ab3e3a04b020d7b3a4e5dc70e5080a7b67331902ce0923a3d6ac32b12ec75",
 });
 /** The complete pre-start check is deliberately stronger than a nominal image tag. */
 export function validateContainer(value: unknown, seccompBody: string): void {

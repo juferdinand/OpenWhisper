@@ -1,5 +1,8 @@
-// Standalone owned SDK/lifetime probe. No production factory uses this addon.
+// Shared public-SDK retirement mechanics. No production factory is wired yet.
 // All syscall work and descriptor closure run asynchronously; TS owns policy.
+#if (defined(OPENWHISPER_RETIREMENT_PROBE) + defined(OPENWHISPER_RETIREMENT_PRODUCTION)) != 1
+#error "Exactly one retirement artifact role is required"
+#endif
 #include <node_api.h>
 #include <libproc.h>
 #include <sys/proc_info.h>
@@ -42,12 +45,16 @@ struct Owner {
   std::atomic<bool> busy{false}, closing{false}, closed{false}, envClosing{false};
   std::atomic<bool> watched{false}, exitSeen{false}, cloexec{false};
   std::atomic<bool> zombieSeen{false};
+#if defined(OPENWHISPER_RETIREMENT_PROBE)
   std::atomic<bool> barrierArmed{false}, barrierEntered{false}, barrierReleased{false};
+#endif
   std::atomic<unsigned> queries{0}, disposals{0};
   std::atomic<unsigned> kernelQueries{0}, watchAllocations{0};
+#if defined(OPENWHISPER_RETIREMENT_PROBE)
   std::mutex barrierMutex;
   std::condition_variable barrierCondition;
   unsigned automaticReleaseMs = 0;
+#endif
   napi_async_work closeWork = nullptr;
   napi_async_cleanup_hook_handle cleanup = nullptr;
   std::shared_ptr<Owner>* cleanupOwner = nullptr;
@@ -130,6 +137,7 @@ bool owns(const Owner& value, const Snapshot& info) {
   return info.kind == Kind::Record && info.pid == static_cast<uint32_t>(value.pid)
       && info.parent == static_cast<uint32_t>(value.parent) && info.uid == value.uid && info.real == value.uid && info.saved == value.uid;
 }
+#if defined(OPENWHISPER_RETIREMENT_PROBE)
 void barrier(Owner& value) {
   if (!value.barrierArmed.exchange(false)) return;
   std::unique_lock<std::mutex> lock(value.barrierMutex);
@@ -139,6 +147,7 @@ void barrier(Owner& value) {
     value.barrierReleased.store(true);
   } else value.barrierCondition.wait(lock, [&] { return value.barrierReleased.load(); });
 }
+#endif
 void bind(Work& job) {
   Owner& value = *job.owner;
   value.kernelQueries.fetch_add(1);
@@ -204,7 +213,10 @@ void startClose(Owner& value);
 void execute(napi_env, void* data) {
   auto& job = *static_cast<Work*>(data);
   try {
-    barrier(*job.owner); job.owner->queries.fetch_add(1);
+#if defined(OPENWHISPER_RETIREMENT_PROBE)
+    barrier(*job.owner);
+#endif
+    job.owner->queries.fetch_add(1);
     if (job.owner->synthetic) job.second.category = "SYNTHETIC_ONLY";
     else if (job.operation == Operation::Bind) bind(job); else observe(job);
     if ((job.first.kind == Kind::Record && !std::strcmp(job.first.state, "zombie")) ||
@@ -336,12 +348,13 @@ napi_value create(napi_env env, napi_callback_info info) {
     char name[16]{}; size_t size = 0; check(napi_get_value_string_utf8(env, type, name, sizeof(name), &size));
     if (size != 7 || std::strcmp(name, "browser")) throw std::runtime_error("NATIVE_FAILED");
     const auto pid = integer(env, args[0]), uid = integer(env, args[1]), parent = integer(env, args[2]);
-    if (!pid || pid == static_cast<uint32_t>(getpid()) || parent != static_cast<uint32_t>(getpid()) || uid != getuid() || uid != geteuid()) {
+    if (!pid || !uid || pid == static_cast<uint32_t>(getpid()) || parent != static_cast<uint32_t>(getpid()) || uid != getuid() || uid != geteuid()) {
       throw std::runtime_error("NATIVE_FAILED");
     }
     return createOwner(env, static_cast<pid_t>(pid), uid, static_cast<pid_t>(parent), false);
   } catch (...) { return fail(env); }
 }
+#if defined(OPENWHISPER_RETIREMENT_PROBE)
 napi_value createSynthetic(napi_env env, napi_callback_info info) {
   try {
     size_t count = 0; check(napi_get_cb_info(env, info, &count, nullptr, nullptr, nullptr));
@@ -350,6 +363,7 @@ napi_value createSynthetic(napi_env env, napi_callback_info info) {
     return createOwner(env, 0, getuid(), 0, true);
   } catch (...) { return fail(env); }
 }
+#endif
 napi_value query(napi_env env, napi_callback_info info, Operation operation) {
   std::shared_ptr<Owner> value; bool acquired = false;
   std::unique_ptr<Work> job;
@@ -383,6 +397,7 @@ napi_value closeCall(napi_env env, napi_callback_info info) {
     value->closing.store(true); startClose(*value); return promise;
   } catch (...) { return fail(env); }
 }
+#if defined(OPENWHISPER_RETIREMENT_PROBE)
 napi_value probeState(napi_env env, napi_callback_info info) {
   try {
     size_t count = 1; napi_value arg; check(napi_get_cb_info(env, info, &count, &arg, nullptr, nullptr)); if (count != 1) throw std::runtime_error("NATIVE_FAILED");
@@ -426,21 +441,51 @@ napi_value sdk(napi_env env, napi_callback_info) {
     put(env, out, "totalDisposals", number(env, totalDisposals.load())); return out;
   } catch (...) { return fail(env); }
 }
+#else
+void productionMain(napi_env env) {
+  if (!pthread_main_np() || getuid() == 0 || getuid() != geteuid()) throw std::runtime_error("NATIVE_FAILED");
+  napi_value global, process, type; check(napi_get_global(env, &global));
+  check(napi_get_named_property(env, global, "process", &process));
+  check(napi_get_named_property(env, process, "type", &type));
+  char name[16]{}; size_t size = 0; check(napi_get_value_string_utf8(env, type, name, sizeof(name), &size));
+  if (size != 7 || std::strcmp(name, "browser")) throw std::runtime_error("NATIVE_FAILED");
+}
+napi_value abi(napi_env env, napi_callback_info) {
+  try {
+    productionMain(env);
+    napi_value out; check(napi_create_object(env, &out));
+    put(env, out, "version", number(env, 1)); put(env, out, "role", text(env, "production"));
+    put(env, out, "napiVersion", number(env, 8)); put(env, out, "mainOnly", boolean(env, true));
+    put(env, out, "zombieLookupArgument", number(env, 1)); put(env, out, "probeOnly", boolean(env, false));
+    return out;
+  } catch (...) { return fail(env); }
+}
+#endif
 }  // namespace
 
 NAPI_MODULE_INIT() {
+#if defined(OPENWHISPER_RETIREMENT_PROBE)
   const char* github = std::getenv("GITHUB_ACTIONS"), *optIn = std::getenv("OPENWHISPER_OWNED_MAC_RETIREMENT_TEST");
   if (getuid() == 0 || !github || std::strcmp(github, "true") || !optIn || std::strcmp(optIn, "1")) return fail(env);
+#else
+  try { productionMain(env); } catch (...) { return fail(env); }
+#endif
   const napi_property_descriptor methods[] = {
     {"create", nullptr, create, nullptr, nullptr, nullptr, napi_default, nullptr},
+#if defined(OPENWHISPER_RETIREMENT_PROBE)
     {"createSynthetic", nullptr, createSynthetic, nullptr, nullptr, nullptr, napi_default, nullptr},
+#endif
     {"bindCandidate", nullptr, bindCandidate, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"observe", nullptr, observeCall, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"close", nullptr, closeCall, nullptr, nullptr, nullptr, napi_default, nullptr},
+#if defined(OPENWHISPER_RETIREMENT_PROBE)
     {"probeState", nullptr, probeState, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"holdNext", nullptr, holdNext, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"releaseBarrier", nullptr, releaseBarrier, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"sdk", nullptr, sdk, nullptr, nullptr, nullptr, napi_default, nullptr},
+#else
+    {"abi", nullptr, abi, nullptr, nullptr, nullptr, napi_default, nullptr},
+#endif
   };
   if (napi_define_properties(env, exports, sizeof(methods) / sizeof(methods[0]), methods) != napi_ok) return fail(env);
   return exports;

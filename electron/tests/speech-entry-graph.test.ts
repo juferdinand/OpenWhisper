@@ -2,13 +2,17 @@ import assert from "node:assert/strict";
 import { chmod, lstat, link, mkdir, mkdtemp, open, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import test from "node:test";
+import test, { after } from "node:test";
 import { buildSpeechEntryGraph } from "../scripts/build-speech-entry-graph.js";
 import { captureSpeechEntryGraph, prepareSpeechEntryGraph, verifySpeechEntryGraph, SPEECH_ENTRY_FILES, speechEntryGraphSchema, type SpeechEntryFiles } from "../src/services/speech-entry-graph.js";
 import { deferred, turn } from "./fixtures/speech-port.js";
 
 const actual: SpeechEntryFiles = { lstat: (path) => lstat(path, { bigint: true }), realpath, open, readdir: (path) => readdir(path, { withFileTypes: true }) };
-async function owned(run: (root: string) => Promise<void>): Promise<void> {
+const retainedRoots = new Set<string>();
+after(async () => {
+  for (const root of retainedRoots) await rm(root, { recursive: true, force: true });
+});
+async function owned(run: (root: string) => Promise<void>, retainRoot = false): Promise<void> {
   const root = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-entry-graph-")));
   try {
     await chmod(root, 0o700);
@@ -24,7 +28,12 @@ async function owned(run: (root: string) => Promise<void>): Promise<void> {
       await writeFile(path, value, { mode: 0o600, flag: "wx" });
     }
     await run(root);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    // A refused owner stays pinned for the process. Fixture-only FD cleanup must
+    // not let the filesystem recycle its inode into a different test's root.
+    if (retainRoot) retainedRoots.add(root);
+    else await rm(root, { recursive: true, force: true });
+  }
 }
 test("fixed graph includes compiled contracts, package metadata and all Zod runtime files", async () => owned(async (root) => {
   const expected = await captureSpeechEntryGraph(root), token = await prepareSpeechEntryGraph(root, expected);
@@ -133,7 +142,7 @@ for (const failure of ["file", "root"] as const) {
       assert.equal(closes, 1);
       for (const file of rootHandles) assert.equal((await file.stat({ bigint: true })).isDirectory(), true);
     } finally { for (const file of new Set([...handles, ...rootHandles])) { try { await file.close(); } catch { /* Fixture-only cleanup. */ } } }
-  }));
+  }, true));
 }
 test("source-only build records actual resolution inputs without executing bundled code", async () => owned(async (root) => {
   const captured = await buildSpeechEntryGraph(root);

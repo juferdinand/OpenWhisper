@@ -626,11 +626,52 @@ becomes absent before completion. This is observed ordering/non-running evidence
 not a universal cleanup-hook or full-reap guarantee.
 
 The remaining transport fixture stops with a categorical `TIMEOUT` before its
-complete nineteen-case result or foreign-UID stage. Its exact failing operation
-is not observable in the original fixture. That failure is retained; a finite
-operation ledger is being prepared before any diagnostic retry or semantic fix.
+complete nineteen-case result or foreign-UID stage. A separately reviewed finite
+diagnostic with both binaries reused completes the first eight original checks,
+then records `CONTROL_STATUS` entered and `TIMEOUT`. Its 83-transition ledger
+preserves that operation through completed final bus/child cleanup. The aggregate
+execution lasts about3.41s against a45s watchdog; the original method has a3s
+native bound. This supports method expiry, without proving the underlying cause
+or an exact per-call duration. The original failed run remains immutable; source
+causal analysis precedes any semantic fix or further runtime retry.
 The utility's separately observed same-birth zombie is non-running, not reaped.
 The actual fixed test-service compile and its Ubuntu 22 ABI metadata pass; native
 code was reused unchanged. Original receipts and exact container removal/absence
 were independently checked. These results do not establish live desktop,
 capture, installed CLI or production adapter acceptance.
+
+### Separate production Mac retirement source
+
+The excluded-by-default production target now shares the public-SDK native
+lifecycle with the historical probe, but omits every probe/synthetic/barrier
+export. A main-only ABI capture and challenge-free retirement boundary retain
+original launch facts, accepted queries and the same cleanup operation. Thirty
+new inert cases and the fourteen unchanged probe tests pass against the complete
+committed base. The continuing supervisor remains responsible for its two
+original-channel challenges and model/allocation release. This source slice
+has not compiled the production target or connected a verified main loader.
+Actual native compilation, both Mac architectures, supervisor composition,
+signed loading and minimum macOS14 runtime remain separate gates.
+
+### Ordinary CI ownership fixture correction
+
+CI37733983352 failed before native tests in three Intel inert cases and one
+Linux filesystem case. The Intel fixture used 5–100ms budgets for setup and
+success, allowing scheduler latency to expire before the intended boundary.
+Setup/success now allow 3000ms. Explicit expiry tests still consume one real
+monotonic deadline, hold the actual inert boundary beyond it, require refusal
+and prevent a second cleanup budget. Production deadlines are unchanged.
+
+The Linux close-refusal fixture physically closed its synthetic handles and
+removed its directory while the process-wide failed owner remained pinned.
+A recycled inode could then alias that failed owner in the next independent
+case. Both refused fixture directories now remain allocated until this test
+file completes, when private cleanup removes them. The production registry,
+failed-owner retention and fresh-handle refusal remain unchanged. All51 focused
+inert checks pass; exact failed CI logs remain retained before the correction.
+
+The eleven finite legacy diagnostic/service-reuse contract cases are also
+registered in ordinary CI. They preserve the exact original nineteen assertions
+and compile receipts and provide a closed active-operation/completed-prefix
+ledger. The separate actual legacy-only runner reuses both previously verified
+binaries; importing these inert tests starts no bus, process, container or build.
