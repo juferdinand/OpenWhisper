@@ -13,7 +13,7 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | Plan and architecture | Reviewed plan, repository research answers and issue/PR review recorded | Keep decisions aligned with final implementation |
 | Shared interface and services | Existing design, strict TS bridge, isolated Dev profile, settings, models/history and localized shared-owner tray actions; sandboxed recording overlay connected | Native tray presentation, assembled Mac overlay and remaining platform behaviors |
 | Linux dictation | Normal UI, CPU recognition, clipboard, Retry/Discard and graceful Quit pass on private Ubuntu22 and stock Kubuntu/KDE 5.27 native Wayland with virtual audio; background Wayland publication and actual GTK target insertion also pass | Startup-failure cleanup under resource pressure; remaining desktop control, overlays and accelerated inference in normal Dev |
-| macOS dictation | Normal CPU Dev recording, explicit permission button and RAM Retry/Discard are now connected; focused synthetic tests pass | Validate the assembled Mac build and physical permission/device behavior; add Metal selection |
+| macOS dictation | Normal CPU Dev recording, explicit microphone permission, RAM Retry/Discard, shared tray/overlay and regular-key toggle setup are connected; focused source/UI tests pass | Run the assembled Mac app on both CI architectures; complete target insertion and packages, then device/permission acceptance; Metal selection remains open |
 | Linux desktop integration | Stock KDE 5.27 native Wayland F8, cancellation, binding Quit/crash recovery and paste into Wayland/XWayland editors pass. The guarded native overlay passes pointer Cancel/Stop and foreground editor keyboard delivery. Genuine X11 native F8 capture, held/repeated keys, CPU dictation, clipboard/history and Retry/Discard pass in private Xvfb | Basic packaged controls remain required; expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
 | Packaging and updates | Ubuntu22-built unsigned Dev directory/.deb passes archive/layout checks and exact-package X11 CPU dictation/recovery/cleanup with unchanged captured inputs | Installation/upgrade acceptance, Electron AppImage/universal DMG+ZIP, signing, stable data continuity and actual old-client update checks |
@@ -67,6 +67,16 @@ the pinned Kubuntu24.04 image; host installation, other distributions and signed
 release acceptance remain separate.
 
 ## Delivery order and execution limits
+
+The Mac regular-key adapter uses Electron globalShortcut and the same immutable
+recording control leases. Explicit press/release setup, Escape/blur restoration,
+conflicts, removal and shutdown have nine inert checks. The saved Mac accelerator
+is host-owned and independent of Linux profiles; Dev startup does not bind it.
+The shared UI explains toggle-only mode and disables hold selection.
+Fn, modifier-only and mouse input are not implemented by this adapter. Strict
+typing/build and 31 focused integration cases pass; the full unit suite has 929
+passes and 14 explicit skips, and all 60 shared UI cases pass. Actual assembled
+Mac shortcut/package execution remains a separate CI check.
 
 Owner scope adjustment, 2026-10-08: finish the current genuine-X11 increment,
 then defer expanded Linux desktop/special-input matrices to existing bug reports.

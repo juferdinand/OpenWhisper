@@ -217,7 +217,8 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false, f
           state.recording_shortcut = false;
         }
         if (command === "clear_shortcut") {
-          if (state.native_x11) state.preferences.x11_trigger = null;
+          if (platform === "macos" && state.macos.shortcut_toggle_only) state.preferences.macos_shortcut = null;
+          else if (state.native_x11) state.preferences.x11_trigger = null;
           else state.preferences.native_trigger = null;
           state.shortcut = null;
         }
@@ -582,6 +583,31 @@ test("Linux exposes the detected GPU and keeps the CPU choice independent of aut
   await page.reload();
   await expect(gpu).toBeChecked();
   await expect(page.getByText("No compatible GPU detected.", { exact: false })).not.toBeVisible();
+});
+
+test("Mac Dev regular-key controls explain toggle mode and remove only their own profile", async ({ page }) => {
+  await start(page, "macos");
+  await page.evaluate(() => {
+    const host = window as unknown as { testState: import("../../../electron/src/contracts/ui").AppState; publishState(): void };
+    if (!host.testState.macos) throw new Error("Missing Mac capabilities");
+    host.testState.macos.shortcut_toggle_only = true;
+    host.testState.native_shortcuts = true; host.testState.shortcut_portal = false;
+    host.testState.shortcut = "Command+Shift+Space";
+    host.testState.preferences.macos_shortcut = "Command+Shift+Space";
+    host.testState.preferences.native_trigger = { kind: "mouse", button: 8 };
+    host.publishState();
+  });
+  await page.getByRole("button", { name: "General", exact: true }).click();
+  await expect(page.getByLabel("Recording mode")).toBeDisabled();
+  await expect(page.getByLabel("Recording mode")).toHaveValue("false");
+  await expect(page.getByText("Regular keyboard shortcuts use toggle mode in this build.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Command+Shift+Space", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Remove trigger", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Set trigger …", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => {
+    const host = window as unknown as { testState: import("../../../electron/src/contracts/ui").AppState };
+    return { mac: host.testState.preferences.macos_shortcut, linux: host.testState.preferences.native_trigger };
+  })).toEqual({ mac: null, linux: { kind: "mouse", button: 8 } });
 });
 
 test("macOS shows pending login approval without changing the idle overlay", async ({ page }) => {

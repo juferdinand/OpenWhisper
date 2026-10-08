@@ -390,5 +390,7 @@
   "Use latest dictation": "Use latest dictation",
   "Text processing preview is unavailable": "Text processing preview is unavailable",
   "Could not complete the preview; your dictation is unchanged": "Could not complete the preview; your dictation is unchanged",
-  "Saved text processing preferences are invalid. Previews are disabled; edit this profile to replace the saved file.": "Saved text processing preferences are invalid. Previews are disabled; edit this profile to replace the saved file."
+  "Saved text processing preferences are invalid. Previews are disabled; edit this profile to replace the saved file.": "Saved text processing preferences are invalid. Previews are disabled; edit this profile to replace the saved file.",
+  "Use a regular key or shortcut. Fn and mouse triggers are not available in this build.": "Use a regular key or shortcut. Fn and mouse triggers are not available in this build.",
+  "Regular keyboard shortcuts use toggle mode in this build.": "Regular keyboard shortcuts use toggle mode in this build."
 }

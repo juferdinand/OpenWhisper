@@ -83,6 +83,7 @@ const languages = () => {
     .join("")}</select>`;
 };
 const isMac = () => state.platform === "macos";
+const macToggleOnly = () => isMac() && state.macos?.shortcut_toggle_only === true;
 const outputs = () =>
   `<div class="radio-group">${[["paste", t("Paste at the cursor")], ["clipboard", t("Copy to clipboard only")], ...(isMac() ? [["editor", t("Open in a text editor")]] : [])].map(([v, l]) => `<label><input type="radio" name="output" data-pref="output" value="${v}" ${state.preferences.output === v ? "checked" : ""}>${l}</label>`).join("")}</div>`;
 
@@ -383,9 +384,9 @@ function render() {
           step(
             6,
             t("Set a trigger and try it"),
-            isMac() || state.native_mouse
+            (isMac() && !macToggleOnly()) || state.native_mouse
               ? t("Choose a key, shortcut, or mouse button. Place the cursor in a text field, press the trigger, speak, then press it again.")
-              : state.native_x11 ? t("Choose a keyboard key or shortcut. Place the cursor in a text field, press the trigger, speak, then press it again.") : t("Choose a shortcut in your desktop’s dialog. Place the cursor in a text field, press the trigger, speak, then press it again."),
+              : state.native_x11 || macToggleOnly() ? t("Choose a keyboard key or shortcut. Place the cursor in a text field, press the trigger, speak, then press it again.") : t("Choose a shortcut in your desktop’s dialog. Place the cursor in a text field, press the trigger, speak, then press it again."),
             !!state.shortcut,
             shortcutButton(),
           ),
@@ -395,14 +396,15 @@ function render() {
       section(
         t("Recording"),
         row(t("Trigger"), shortcutButton()) +
-          (!isMac()
+          (!isMac() || macToggleOnly()
             ? `<p class="secondary">${esc(triggerHelp())}</p>`
             : "") +
           row(
             t("Mode"),
-            `<select data-pref="hold_to_record" aria-label="${esc(t("Recording mode"))}" ${modifierOnlyTrigger() ? "disabled" : ""}>${option("false", t("Toggle"), String(p.hold_to_record))}${option("true", t("Push to talk"), String(p.hold_to_record))}</select>`,
+            `<select data-pref="hold_to_record" aria-label="${esc(t("Recording mode"))}" ${modifierOnlyTrigger() || macToggleOnly() ? "disabled" : ""}>${option("false", t("Toggle"), String(p.hold_to_record))}${option("true", t("Push to talk"), String(p.hold_to_record))}</select>`,
           ) +
           (modifierOnlyTrigger() ? `<p class="secondary">${esc(t("Modifier-only triggers use toggle mode. Use a regular key or mouse button for push to talk."))}</p>` : "") +
+          (macToggleOnly() ? `<p class="secondary">${esc(t("Regular keyboard shortcuts use toggle mode in this build."))}</p>` : "") +
           row(t("Language"), languages()) +
           (p.model.startsWith("parakeet")
             ? `<p class="secondary">${esc(t("The active Parakeet model detects the language automatically. This selection only applies to Whisper models."))}</p>`
@@ -787,6 +789,7 @@ function triggerLabel() {
   return state.shortcut ?? t("Set trigger …");
 }
 function triggerHelp() {
+  if (macToggleOnly()) return t("Use a regular key or shortcut. Fn and mouse triggers are not available in this build.");
   if (state.native_x11) return t("Choose a regular keyboard key or shortcut. X11 reserves the selected key while OpenWhisper is running. Existing shortcuts are not replaced.");
   if (state.native_mouse) return t("Choose a single key, shortcut, or mouse button. The selected trigger is reserved for dictation while OpenWhisper is running.");
   if (state.native_shortcuts) return t("Choose a single key or shortcut. Direct mouse triggers require KDE Plasma 6 on Wayland.");
@@ -802,8 +805,8 @@ function shortcutButton() {
     return `<span class="secondary" role="status">${esc(t(state.native_x11 || !state.native_mouse ? "Press and release a keyboard key. Escape cancels." : "Press and release a key or mouse button. Escape cancels."))}</span> <button data-command="cancel_shortcut">${esc(t("Cancel"))}</button>`;
   const busy = portalBusy || ["recording", "transcribing"].includes(state.status) || ["downloading", "installing"].includes(state.updates.status);
   const select = `<button data-portal="enable_shortcut" ${(!state.shortcut_portal && !state.native_shortcuts) || busy ? "disabled" : ""}>${state.shortcut ? esc(triggerLabel()) : t("Set trigger …")}</button>`;
-  if (isMac()) return select;
-  return `<div class="trigger-controls">${select}${state.shortcut || state.preferences.native_trigger || state.preferences.x11_trigger ? ` <button data-portal="clear_shortcut" ${busy ? "disabled" : ""}>${esc(t("Remove trigger"))}</button>` : ""}${state.native_shortcuts && state.shortcut_portal ? ` <button class="quiet" data-portal="desktop_shortcut" ${busy ? "disabled" : ""}>${esc(t("Desktop shortcut dialog"))}</button>` : ""}</div>`;
+  if (isMac() && !macToggleOnly()) return select;
+  return `<div class="trigger-controls">${select}${state.shortcut || state.preferences.native_trigger || state.preferences.x11_trigger || state.preferences.macos_shortcut ? ` <button data-portal="clear_shortcut" ${busy ? "disabled" : ""}>${esc(t("Remove trigger"))}</button>` : ""}${state.native_shortcuts && state.shortcut_portal ? ` <button class="quiet" data-portal="desktop_shortcut" ${busy ? "disabled" : ""}>${esc(t("Desktop shortcut dialog"))}</button>` : ""}</div>`;
 }
 
 // Explicit native setup must not activate focused buttons or edit settings.

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, protocol, screen, session, shell, systemPreferences, Tray } from "electron";
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, protocol, screen, session, shell, systemPreferences, Tray } from "electron";
 import { deliverClipboard } from "../services/clipboard-output.js";
 import { WaylandClipboard } from "../services/wayland-clipboard.js";
 import { portalPasteStateSchema } from "../platforms/linux/shared/portal-paste.js";
@@ -38,6 +38,7 @@ import { modifierOnly } from "../platforms/linux/kde/keyboard.js";
 import { buildTrayMenu } from "./tray-menu.js";
 import { overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "./recording-overlay.js";
 import { WaylandRecordingOverlay } from "./wayland-recording-overlay.js";
+import { MacosShortcut } from "./macos-shortcut.js";
 
 const distribution = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let window: BrowserWindow | undefined;
@@ -113,6 +114,7 @@ async function start(): Promise<void> {
   let overlay: BrowserWindow | undefined, overlayReady = false;
   let waylandOverlay: WaylandRecordingOverlay | undefined;
   let tray: Tray | undefined, trayKey = "";
+  let macShortcut: MacosShortcut | undefined;
   let recording = recordingSnapshotSchema.parse({ phase: "idle", generation: 0, elapsedMs: 0, level: 0,
     busy: false, recoveryAvailable: false, error: null, transcript: "" });
   let message = "", inferenceProgress = 0;
@@ -127,6 +129,7 @@ async function start(): Promise<void> {
   const refreshModels = async (): Promise<void> => { installed = await inventory.installed(); };
   const descriptor = DEVELOPMENT_RECORDING_BUILD === null ? null : developmentRecordingDescriptorSchema.parse(DEVELOPMENT_RECORDING_BUILD);
   const macRecording = descriptor?.platform === "darwin";
+  if (macRecording && preferences.snapshot().hold_to_record) await preferences.patch({ hold_to_record: false });
   const waylandClipboard = descriptor?.platform === "linux" && process.env["XDG_SESSION_TYPE"] === "wayland"
     ? new WaylandClipboard() : undefined;
   const clipboardOutput = waylandClipboard ?? clipboard;
@@ -192,7 +195,8 @@ async function start(): Promise<void> {
     updates: { configured: false, status: "idle", version: null, progress: 0, error: null, package: "development" },
     platform,
     ...(platform === "macos" ? { macos: {
-      microphone_allowed: microphoneAllowed, recording_shortcut: false, shortcut_hint: "Not configured",
+      microphone_allowed: microphoneAllowed, recording_shortcut: macShortcut?.state().configuring ?? false,
+      shortcut_toggle_only: macRecording, shortcut_hint: "Press and release a keyboard key. Escape cancels.",
       editor: "", recommended: [], updates_configured: false, launch_at_login_pending: false,
     } } : {}),
     version, status: recording.phase === "starting" ? "recording"
@@ -207,10 +211,11 @@ async function start(): Promise<void> {
     installed: installed.map((item) => item.model.id), microphones: sources.map((source) => source.id),
     session: process.env["XDG_SESSION_TYPE"] ?? "unknown",
     desktop: process.env["XDG_CURRENT_DESKTOP"] ?? "unknown", clipboard_available: descriptor !== null,
-    shortcut_portal: shortcut.available, paste_portal: pasteState.available, shortcut: shortcut.label, native_shortcuts: shortcut.nativeAvailable,
+    shortcut_portal: shortcut.available, paste_portal: pasteState.available, shortcut: macShortcut?.state().label ?? shortcut.label,
+    native_shortcuts: macShortcut?.state().available ?? shortcut.nativeAvailable,
     shortcut_configuring: shortcut.configuring && !shortcut.nativeX11,
     native_x11: shortcut.nativeX11 ?? false, native_paste: false, native_mouse: false, native_middle_mouse: false,
-    recording_shortcut: !!keyCapture || !!shortcut.nativeX11 && shortcut.configuring,
+    recording_shortcut: (macShortcut?.state().configuring ?? false) || !!keyCapture || !!shortcut.nativeX11 && shortcut.configuring,
     paste_ready: pasteState.ready, paste_configuring: pasteState.configuring, gpu_available: false, gpu_supported: false,
     gpu_device: null, gpu_fallback: false, recovery_available: recording.recoveryAvailable,
     overlay_available: !!overlay && !overlay.isDestroyed() && (!waylandOverlay || waylandOverlay.available),
@@ -348,6 +353,28 @@ async function start(): Promise<void> {
   const cancelRecording = (): Promise<void> => action(async () => {
     cancelRequested = true; if (host?.isConfigured()) await host.command("cancel");
   });
+  if (host && macRecording && process.platform === "darwin") {
+    macShortcut = new MacosShortcut({ shortcuts: globalShortcut,
+      allowed: () => !shutdownInProgress && !recordingControl && !recording.recoveryAvailable &&
+        !["stopping", "transcribing", "restoring", "discarding"].includes(recording.phase),
+      capture: createRecordingControlPort({ owner: host, snapshot: () => recording, configure: configureRecording,
+        available: () => !shutdownInProgress && state().recording_available === true,
+        serialize: withRecordingControl, cleanupSerialize: (operation) => withRecordingControl(operation, true) }),
+      changed: (value) => {
+        contents.setIgnoreMenuShortcuts(value.configuring);
+        const messages = { NONE: "", ENABLED: "", CANCELLED: "Shortcut setup was cancelled. Window recording remains usable.",
+          UNSUPPORTED: "Use a regular key or shortcut. Fn and mouse triggers are not available in this build.",
+          CONFLICT: "This trigger conflicts with an existing desktop shortcut. Choose another trigger.",
+          FAILED: "Shortcut setup or recording failed. Window recording remains usable." };
+        message = messages[value.result];
+        if (value.result === "ENABLED" && value.accelerator && preferences.snapshot().macos_shortcut !== value.accelerator) {
+          void preferences.saveMacShortcut(value.accelerator).then(notify,
+            () => { message = "The action could not be completed. Stopped recordings are kept for retry."; notify(); });
+        }
+        notify();
+      } });
+    notify();
+  }
   if (host && descriptor?.platform === "linux" && descriptor.platformServices) {
     try {
       platformHost = await DevelopmentPlatformHost.open({
@@ -394,6 +421,16 @@ async function start(): Promise<void> {
     } catch { message = "Desktop command control is not available. Window recording remains usable."; }
   }
   const shortcutAction = (command: "enable" | "configure" | "clear" | "cancel"): Promise<void> => action(async () => {
+    if (macShortcut) {
+      if (shutdownInProgress || (recording.busy || recording.recoveryAvailable) && command !== "cancel") throw new Error("Shortcut setup is unavailable.");
+      if (command === "enable") {
+        if (!window?.isFocused()) throw new Error("Shortcut setup is unavailable.");
+        macShortcut.prepareCapture();
+      } else if (command === "cancel") macShortcut.cancelSetup();
+      else if (command === "clear") { macShortcut.clear(); await preferences.saveMacShortcut(null); }
+      else throw new Error("Shortcut setup is unavailable.");
+      return;
+    }
     if (!platformHost || ((recording.busy || recording.recoveryAvailable) && command !== "cancel")) throw new Error("Shortcut setup is unavailable.");
     if (command === "enable" && shortcut.nativeAvailable) {
       if (shortcut.nativeX11) {
@@ -417,6 +454,11 @@ async function start(): Promise<void> {
     }
   });
   contents.on("before-input-event", (event, input) => {
+    if (macShortcut?.state().configuring) {
+      // Preserve Chromium key tracking; the shared UI suppresses setup defaults.
+      if (input.type === "keyUp" || input.key === "Escape") event.preventDefault();
+      macShortcut.consume(input); return;
+    }
     if (!keyCapture) return;
     // Let key-down reach Chromium's key tracking; the shared UI suppresses its
     // default actions while capturing. Consume the matching release in main.
@@ -431,7 +473,7 @@ async function start(): Promise<void> {
       void action(async () => { await platformHost?.bindKey(result.key, preferences.snapshot().hold_to_record); });
     } else { notify(); }
   });
-  window.on("blur", () => { if (keyCapture) { keyCapture = undefined; contents.setIgnoreMenuShortcuts(false); notify(); } });
+  window.on("blur", () => { macShortcut?.focusLost(); if (keyCapture) { keyCapture = undefined; contents.setIgnoreMenuShortcuts(false); notify(); } });
   app.on("before-quit", (event) => {
     if (shutdownComplete) return;
     event.preventDefault();
@@ -442,7 +484,7 @@ async function start(): Promise<void> {
     shutdownInProgress = true; cancelRequested = true; processing.close(); downloadAbort?.abort();
     keyCapture = undefined; contents.setIgnoreMenuShortcuts(false);
     void (async () => { await recordingOperation?.catch(() => {}); await downloading; await downloads.finalize();
-      await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); await waylandOverlay?.close(); })().then(() => {
+      await macShortcut?.close(); await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); await waylandOverlay?.close(); })().then(() => {
       shutdownComplete = true; tray?.destroy(); tray = undefined;
       overlay?.destroy(); app.quit();
     }, () => {
@@ -466,6 +508,7 @@ async function start(): Promise<void> {
           throw new Error("The recording Dev build does not support this output.");
         }
         if (changes.gpu) throw new Error("The recording Dev build uses CPU inference.");
+        if (macRecording && changes.hold_to_record) throw new Error("Regular keyboard shortcuts use toggle mode in this build.");
         if (changes.hold_to_record && shortcut.nativeKey !== null && modifierOnly(shortcut.nativeKey)) {
           throw new Error("Modifier-only KDE triggers use toggle mode.");
         }

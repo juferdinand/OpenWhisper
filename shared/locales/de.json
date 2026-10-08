@@ -390,5 +390,7 @@
   "Use latest dictation": "Letztes Diktat übernehmen",
   "Text processing preview is unavailable": "Die Vorschau zur Textverarbeitung ist nicht verfügbar",
   "Could not complete the preview; your dictation is unchanged": "Die Vorschau konnte nicht abgeschlossen werden; dein Diktat bleibt unverändert",
-  "Saved text processing preferences are invalid. Previews are disabled; edit this profile to replace the saved file.": "Die gespeicherten Einstellungen zur Textverarbeitung sind ungültig. Vorschauen sind deaktiviert; bearbeite dieses Profil, um die gespeicherte Datei zu ersetzen."
+  "Saved text processing preferences are invalid. Previews are disabled; edit this profile to replace the saved file.": "Die gespeicherten Einstellungen zur Textverarbeitung sind ungültig. Vorschauen sind deaktiviert; bearbeite dieses Profil, um die gespeicherte Datei zu ersetzen.",
+  "Use a regular key or shortcut. Fn and mouse triggers are not available in this build.": "Nutze eine normale Taste oder Tastenkombination. Fn- und Mausauslöser sind in diesem Build nicht verfügbar.",
+  "Regular keyboard shortcuts use toggle mode in this build.": "Normale Tastaturkürzel nutzen in diesem Build den Umschaltmodus."
 }

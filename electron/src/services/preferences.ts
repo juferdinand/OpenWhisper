@@ -75,8 +75,11 @@ export class DevelopmentPreferenceStore {
   saveX11Trigger(trigger: X11Trigger | null): Promise<Preferences> {
     return this.update({ x11_trigger: trigger === null ? null : x11TriggerSchema.parse(trigger) });
   }
+  saveMacShortcut(accelerator: string | null): Promise<Preferences> {
+    return this.update({ macos_shortcut: preferencesSchema.shape.macos_shortcut.parse(accelerator) });
+  }
 
-  private update(changes: PreferencePatch | Pick<Preferences, "setup_completed"> | Pick<Preferences, "native_trigger"> | Pick<Preferences, "x11_trigger">): Promise<Preferences> {
+  private update(changes: PreferencePatch | Pick<Preferences, "setup_completed"> | Pick<Preferences, "native_trigger"> | Pick<Preferences, "x11_trigger"> | Pick<Preferences, "macos_shortcut">): Promise<Preferences> {
     const updated = this.queue.then(async () => {
       const preferences = preferencesSchema.parse({ ...this.preferences, ...changes });
       enforceDevelopmentPolicy(preferences);

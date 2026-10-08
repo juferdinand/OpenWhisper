@@ -197,11 +197,18 @@ refused while a stopped recording still needs delivery or explicit discard. Ther
 fixed recording duration limit. CPU recognition uses the continuing supervisor with the
 actual original child identity and full process retirement before replacement.
 
+The Mac recording Dev exposes **Set trigger** for a regular key or chord through
+Electron globalShortcut. Confirm on release; Escape, Cancel and main-window focus
+loss restore the previous binding. Conflicts are refused and **Remove trigger**
+removes only this adapter's binding/profile. Dev registration starts only after
+explicit setup. This adapter uses toggle mode; Fn, modifier-only, mouse and hold
+triggers remain unavailable. The shared UI explains that restriction.
+
 The normal Mac composition is implemented and covered by synthetic/unit tests. Physical
 microphone permission, default-device changes and signed-helper behavior still require
 their acceptance checks; do not treat native CI conversion tests as hardware validation.
-Global Fn/modifier/mouse triggers, automatic paste, non-activating overlays, Metal selection
-and signed release packages remain incomplete.
+Global Fn/modifier/mouse triggers, automatic paste, assembled overlay behavior,
+Metal selection and signed release packages remain incomplete.
 
 ## Automated checks
 

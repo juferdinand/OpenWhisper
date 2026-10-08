@@ -72,6 +72,7 @@ export const preferencesSchema = z.strictObject({
   hold_to_record: z.boolean(),
   native_trigger: nativeTriggerSchema.nullable().optional(),
   x11_trigger: x11TriggerSchema.nullable().optional(),
+  macos_shortcut: utf8(128).min(1).nullable().optional(),
   gpu: z.boolean(),
   gpu_configured: z.boolean().optional(),
   keep_history: z.boolean(),
@@ -89,6 +90,7 @@ export const preferencePatchSchema = preferencesSchema.omit({
   gpu_configured: true,
   native_trigger: true,
   x11_trigger: true,
+  macos_shortcut: true,
 }).partial().refine(
   (patch) => Object.values(patch).every((value) => value !== undefined),
   { message: "Preference patch values must be defined" },
@@ -110,6 +112,7 @@ export type Model = z.infer<typeof modelSchema>;
 export const macStateSchema = z.strictObject({
   microphone_allowed: z.boolean(),
   recording_shortcut: z.boolean(),
+  shortcut_toggle_only: z.boolean().optional(),
   shortcut_hint: utf8(8192),
   editor: label,
   recommended: z.array(modelId).max(128),

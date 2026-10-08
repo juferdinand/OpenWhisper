@@ -89,7 +89,7 @@ test("validated preference patches preserve text and reject host-owned fields", 
   for (const language of ["auto", "de", "zh", "ja", "ko", "ar", "cs", "uk", "yue"]) {
     assert.deepEqual(preferencePatchSchema.parse({ language }), { language });
   }
-  for (const field of ["setup_completed", "gpu_configured", "native_trigger", "x11_trigger", "unknown"]) {
+  for (const field of ["setup_completed", "gpu_configured", "native_trigger", "x11_trigger", "macos_shortcut", "unknown"]) {
     assert.throws(() => validateCommandInput("save_preferences", { changes: { [field]: true } }));
   }
   for (const changes of [{ gpu: "false" }, { ui_language: "fr" }, { language: "EN" }, { output: "shell" }, { model: undefined }]) {

@@ -1,5 +1,27 @@
 # Electron development evidence
 
+## Basic Mac regular-key control source
+
+The main-owned strict TypeScript adapter connects explicit regular-key toggle
+setup to Electron globalShortcut and the existing immutable recording leases.
+It registers only after explicit setup, commits on matching key release,
+restores the previous binding on Escape/Cancel/blur, refuses conflicts and
+removes only its own binding. Late callbacks and releases cannot retarget a new
+recording. Shutdown waits for and cancels an original acquired Start lease.
+Nine focused inert cases pass; main integration and host-only serialized Mac
+preferences keep Linux profiles independent. A model download cannot disable
+Stop for an already active dictation.
+
+The shared UI states toggle-only behavior and disables hold selection for this
+Dev adapter. Legacy native Mac controls remain compatible without that optional
+capability flag. Fn/modifier-only/mouse/media/keypad input is unsupported. Strict
+typing/build, 31 focused contract/preference/control cases, 929 full-suite passes
+with 14 explicit skips (17.46s), and all 60 shared UI cases (9.4s) pass. The small
+download-admission correction subsequently passes strict typing and 14 affected
+adapter/control cases. These source/Linux-browser checks do not establish actual
+Mac global-key dispatch, packaged loading, permission/device or target insertion.
+The assembled Mac CI package check follows separately.
+
 ## Ubuntu22 native build and exact Dev package execution
 
 The existing production recording builder rebuilds CPU speech, capture and D-Bus
