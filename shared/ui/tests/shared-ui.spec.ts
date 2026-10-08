@@ -7,6 +7,18 @@ import type { AppState } from "../../../electron/src/contracts/ui.js";
 const catalog = JSON.parse(
   readFileSync(resolve("../models.json"), "utf8"),
 ).models;
+declare global { interface Window { testState: AppState; publishState(): void; calls: { command: string }[] } }
+
+test("pending keyboard permission exposes translated Cancel and sends only revocation", async ({ page }) => {
+  await start(page, "linux");
+  await page.evaluate(() => { window.testState.paste_ready = false; window.testState.paste_configuring = true; window.publishState(); });
+  await expect(page.locator('[data-portal="disable_paste"]')).toHaveText("Cancel");
+  await page.evaluate(() => { window.testState.preferences.ui_language = "de"; window.publishState(); });
+  await expect(page.locator('[data-portal="disable_paste"]')).toHaveText("Abbrechen");
+  await page.locator('[data-portal="disable_paste"]').click();
+  await expect.poll(() => page.evaluate(() => window.calls.at(-1)?.command)).toBe("disable_paste");
+  await expect(page.locator('[data-portal="enable_paste"]')).toHaveText("Erlauben");
+});
 
 test("Linux keyboard-only setup suppresses button defaults and restores normal input after Cancel", async ({ page }) => {
   await start(page, "linux");
@@ -210,7 +222,7 @@ async function start(page: Page, platform: "linux" | "macos", overlay = false, f
           state.shortcut = null;
         }
         if (command === "enable_paste") state.paste_ready = true;
-        if (command === "disable_paste") state.paste_ready = false;
+        if (command === "disable_paste") { state.paste_ready = false; state.paste_configuring = false; }
         if (command === "clear_history") state.history = [];
         publish();
         return command === "save_preferences" ? JSON.parse(JSON.stringify(state)) : null;

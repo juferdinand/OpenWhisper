@@ -54,6 +54,7 @@ npm run dev -- --recording --dev-profile /absolute/private/path/openwhisper-dev
 This opt-in build requires CMake, Ninja, a C/C++ compiler and a local Pulse-compatible
 server (PulseAudio or PipeWire-Pulse). Pinned native sources and headers are verified before
 compilation. Linux command control also requires the GLib/GIO development libraries and pkg-config.
+Wayland output requires the installed `wl-clipboard` tools (`wl-copy`, `wl-paste`).
 Build-time descriptors capture the expected capture entry, native addon and speech
 dependency graph; the runtime does not refresh expected hashes from whatever files it finds.
 These development descriptors are integrity checks, not release signing or publisher identity.
@@ -67,6 +68,10 @@ stopped audio saved privately before inference. Retry does not reopen a micropho
 Discard removes its recovery WAV. There is no fixed recording duration limit.
 
 Successful output is copied completely and verified by readback before recovery removal.
+On Wayland, a foreground `wl-copy` process retains the selection and a separate
+`wl-paste` client confirms the exact bytes. Text is supplied through stdin and is
+never included in arguments or logs. The helper is retired before replacement and
+at Quit; missing tools or failed publication leave stopped audio available for retry.
 Large output is not cut to fit the bounded UI preview: Copy retrieves the complete text;
 with history enabled it is also saved as a private `.txt` in the Dev transcripts directory.
 History and models remain separate from the installed release. Recording is independent
@@ -100,6 +105,14 @@ uses actual activation/release edges. A release during pending Start cancels tha
 same acquisition. Session loss, binding removal and application shutdown close
 owned recordings and portal resources; an unrelated GUI recording is preserved.
 An unavailable portal leaves the main recording controls usable.
+
+On Linux, **Allow automatic paste** explicitly opens a keyboard-only RemoteDesktop
+portal session. Pending setup exposes **Cancel**; denial permits an explicit retry.
+Select paste output after granting permission. Permission loss or an uncertain paste
+reply leaves confirmed clipboard output and a visible fallback notice; it cannot
+cause another automatic insertion. Revoke closes the session. No screen capture is
+requested. The stock KDE native Wayland target case passes with its legacy immediate
+grant; GNOME dialogs and inner XWayland target delivery remain separate checks.
 
 The portal connection registers the separate `io.github.whisperfree.dev` identity.
 Its matching `.desktop` launcher must be discoverable by the desktop frontend;

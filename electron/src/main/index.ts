@@ -1,4 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, session, shell, systemPreferences } from "electron";
+import { deliverClipboard } from "../services/clipboard-output.js";
+import { WaylandClipboard } from "../services/wayland-clipboard.js";
+import { portalPasteStateSchema } from "../platforms/linux/shared/portal-paste.js";
 import type { IpcMainInvokeEvent } from "electron";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -115,14 +118,20 @@ async function start(): Promise<void> {
   const refreshModels = async (): Promise<void> => { installed = await inventory.installed(); };
   const descriptor = DEVELOPMENT_RECORDING_BUILD === null ? null : developmentRecordingDescriptorSchema.parse(DEVELOPMENT_RECORDING_BUILD);
   const macRecording = descriptor?.platform === "darwin";
+  const waylandClipboard = descriptor?.platform === "linux" && process.env["XDG_SESSION_TYPE"] === "wayland"
+    ? new WaylandClipboard() : undefined;
+  const clipboardOutput = waylandClipboard ?? clipboard;
   let microphoneAllowed = macRecording && systemPreferences.getMediaAccessStatus("microphone") === "granted";
   let platformHost: DevelopmentPlatformHost | undefined;
   let shortcut = portalShortcutStateSchema.parse({ available: false, configuring: false, label: null, result: "NONE" });
+  let pasteState = portalPasteStateSchema.parse({ available: false, configuring: false, ready: false, result: "NONE" });
   let keyCapture: KdeKeyCapture | undefined;
+  let deliveryNotice = "";
   if (descriptor) {
     host = await DevelopmentRecordingHost.open(resolve(distribution, ".."), descriptor, inventory, {
       recoveryPath: profile.paths.recovery,
-      snapshot: (value) => { recording = value; if (value.phase !== "error") message = ""; notify(); },
+      snapshot: (value) => { recording = value; if (value.phase !== "error") message = "";
+        if (value.phase === "starting" || value.phase === "recording") deliveryNotice = ""; notify(); },
       progress: (value) => { inferenceProgress = recording.elapsedMs > 0
         ? Math.min(1, value.completedSamples / (recording.elapsedMs * 16)) : 0; notify(); },
       delivery: { deliver: async (text, context) => {
@@ -133,8 +142,14 @@ async function start(): Promise<void> {
           catch { return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false }; }
         }
         if (context.signal.aborted) return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
-        await clipboard.writeText(text);
-        if (await clipboard.readText() !== text) return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
+        const wantsPaste = preferences.snapshot().output === "paste" && descriptor.platform === "linux";
+        const delivered = await deliverClipboard(text, context, { writeText: (text) => clipboardOutput.writeText(text), readText: () => clipboardOutput.readText(),
+          ...(wantsPaste ? { paste: async () => {
+            try { return await platformHost?.paste() ?? false; }
+            catch { pasteState = { ...pasteState, ready: false, available: false, result: "FAILED" }; notify(); return false; }
+          } } : {}) });
+        if (!delivered.clipboardConfirmed) return delivered;
+        if (wantsPaste && delivered.outcome === "clipboard") deliveryNotice = "Text copied; automatic paste is unavailable. Paste it from the clipboard.";
         if (!oversized && preferences.snapshot().keep_history) {
           // History is secondary to the already confirmed clipboard commit.
           void history.update((current) => {
@@ -144,7 +159,7 @@ async function start(): Promise<void> {
             return next;
           }).then(notify, () => { message = "Text copied; history could not be saved."; notify(); });
         }
-        return { generation: context.generation, attempt: context.attempt, outcome: "clipboard", clipboardConfirmed: true };
+        return delivered;
       } },
     });
     if (descriptor.platform === "linux") {
@@ -168,7 +183,7 @@ async function start(): Promise<void> {
     } } : {}),
     version, status: recording.phase === "starting" ? "recording"
       : ["stopping", "restoring", "discarding"].includes(recording.phase) ? "transcribing" : recording.phase,
-    message: message || (Buffer.byteLength(recording.transcript, "utf8") > MAX_USER_TEXT_BYTES
+    message: message || deliveryNotice || (Buffer.byteLength(recording.transcript, "utf8") > MAX_USER_TEXT_BYTES
       ? "The complete transcript exceeds the preview size. Use Copy to retrieve the full text."
       : recording.error ? `Recording failed: ${recording.error}.` : descriptor ? "" : "Recording is not available in this development preview."),
     transcript: Buffer.byteLength(recording.transcript, "utf8") <= MAX_USER_TEXT_BYTES ? recording.transcript : "",
@@ -178,10 +193,10 @@ async function start(): Promise<void> {
     installed: installed.map((item) => item.model.id), microphones: sources.map((source) => source.id),
     session: process.env["XDG_SESSION_TYPE"] ?? "unknown",
     desktop: process.env["XDG_CURRENT_DESKTOP"] ?? "unknown", clipboard_available: descriptor !== null,
-    shortcut_portal: shortcut.available, paste_portal: false, shortcut: shortcut.label, native_shortcuts: shortcut.nativeAvailable,
+    shortcut_portal: shortcut.available, paste_portal: pasteState.available, shortcut: shortcut.label, native_shortcuts: shortcut.nativeAvailable,
     shortcut_configuring: shortcut.configuring,
     native_x11: false, native_paste: false, native_mouse: false, native_middle_mouse: false,
-    recording_shortcut: !!keyCapture, paste_ready: false, gpu_available: false, gpu_supported: false,
+    recording_shortcut: !!keyCapture, paste_ready: pasteState.ready, paste_configuring: pasteState.configuring, gpu_available: false, gpu_supported: false,
     gpu_device: null, gpu_fallback: false, recovery_available: recording.recoveryAvailable, overlay_available: false,
     download, progress: download ? downloadProgress : inferenceProgress,
     elapsed: Math.min(Number.MAX_SAFE_INTEGER, Math.floor(recording.elapsedMs / 1000)), level: recording.level,
@@ -255,7 +270,9 @@ async function start(): Promise<void> {
     if (configured && host?.isConfigured()) return;
     if (!host) throw new Error("Recording unavailable.");
     const selected = preferences.snapshot(), model = installed.find((item) => item.model.id === selected.model);
-    if (!model || selected.output !== "clipboard" || selected.gpu) throw new Error("Choose an installed model and CPU clipboard output.");
+    if (!model || selected.output !== "clipboard" && !(selected.output === "paste" && descriptor?.platform === "linux") || selected.gpu) {
+      throw new Error("Choose an installed model, CPU inference and supported output.");
+    }
     // Recovery may be transcribed with the microphone disconnected; resolve sources only on Start.
     const request = recordingRequestSchema.parse({ model: { path: join(profile.paths.models, model.model.file), family: model.model.family, gpu: false },
       language: selected.language, vocabulary: selected.vocabulary, snippets: selected.snippets });
@@ -269,6 +286,15 @@ async function start(): Promise<void> {
         descriptor: { root: resolve(distribution, ".."), ...descriptor.platformServices },
         address: process.env.DBUS_SESSION_BUS_ADDRESS ?? "",
         kdeLeasePath: join(profile.paths.settings, "kde-keyboard-lease.json"),
+        paste: (value) => {
+          pasteState = value;
+          const messages = { NONE: "", ENABLED: "Automatic paste enabled for this session. No screen capture is requested.",
+            CANCELLED: "Keyboard permission setup was cancelled. Clipboard output remains available.",
+            DENIED: "Keyboard permission was denied. Clipboard output remains available.",
+            ENDED: "Keyboard permission ended. Clipboard output remains available.",
+            FAILED: "Keyboard permission failed. Clipboard output remains available." };
+          if (value.result !== "NONE") message = messages[value.result]; notify();
+        },
         shortcuts: (value) => {
           shortcut = value;
           const messages = { NONE: "", ENABLED: "Global shortcut enabled. Your desktop controls its key binding.",
@@ -332,7 +358,7 @@ async function start(): Promise<void> {
     shutdownInProgress = true; cancelRequested = true; processing.close(); downloadAbort?.abort();
     keyCapture = undefined; contents.setIgnoreMenuShortcuts(false);
     void (async () => { await recordingOperation?.catch(() => {}); await downloading; await downloads.finalize();
-      await platformHost?.close(); await host?.close(); })().then(() => {
+      await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); })().then(() => {
       shutdownComplete = true; app.quit();
     }, () => {
       // Preserve uncertain owners and the private recovery files for explicit review.
@@ -351,7 +377,9 @@ async function start(): Promise<void> {
           ["model", "language", "microphone", "vocabulary", "snippets", "gpu", "output", "hold_to_record"].some((key) => Object.hasOwn(changes, key))) {
           throw new Error("Finish or discard the current recording before changing its request.");
         }
-        if (changes.output && changes.output !== "clipboard") throw new Error("The recording Dev build supports clipboard output.");
+        if (changes.output && changes.output !== "clipboard" && !(changes.output === "paste" && descriptor?.platform === "linux")) {
+          throw new Error("The recording Dev build does not support this output.");
+        }
         if (changes.gpu) throw new Error("The recording Dev build uses CPU inference.");
         if (changes.hold_to_record && shortcut.nativeKey !== null && modifierOnly(shortcut.nativeKey)) {
           throw new Error("Modifier-only KDE triggers use toggle mode.");
@@ -385,6 +413,8 @@ async function start(): Promise<void> {
       desktop_shortcut: () => shortcutAction("configure"),
       clear_shortcut: () => shortcutAction("clear"),
       cancel_shortcut: () => shortcutAction("cancel"),
+      enable_paste: () => action(async () => { if (!platformHost) throw new Error("Keyboard permission unavailable."); await platformHost.pastePermission("enable"); }),
+      disable_paste: () => action(async () => { if (!platformHost) throw new Error("Keyboard permission unavailable."); await platformHost.pastePermission("clear"); }),
       toggle_recording: () => recordingAction(async () => {
         if (!host) throw new Error("Recording unavailable.");
         if (recording.phase === "recording" || recording.phase === "starting") await host.command("stop");
@@ -433,8 +463,8 @@ async function start(): Promise<void> {
         notify();
       },
       cancel_download: () => { downloadAbort?.abort(); },
-      copy_transcript: async () => { await clipboard.writeText(recording.transcript); },
-      copy_history: async ({ index }) => { const text = history.snapshot().filter((item) => Buffer.byteLength(item, "utf8") <= MAX_USER_TEXT_BYTES)[index]; if (text !== undefined) await clipboard.writeText(text); },
+      copy_transcript: async () => { await clipboardOutput.writeText(recording.transcript); },
+      copy_history: async ({ index }) => { const text = history.snapshot().filter((item) => Buffer.byteLength(item, "utf8") <= MAX_USER_TEXT_BYTES)[index]; if (text !== undefined) await clipboardOutput.writeText(text); },
       clear_history: () => action(async () => { await history.update(() => []); }),
       show_models_folder: () => action(async () => { if (await shell.openPath(profile.paths.models)) throw new Error("Folder unavailable."); }),
       show_transcripts_folder: () => action(async () => { if (await shell.openPath(profile.paths.transcripts)) throw new Error("Folder unavailable."); }),

@@ -1,4 +1,4 @@
-import { LinuxBus, openLinuxBus } from "../platforms/linux/shared/bus.js";
+import { BusFailure, LinuxBus, openLinuxBus } from "../platforms/linux/shared/bus.js";
 import { ControlServiceError, DevControlService, type ControlCapturePort } from "../platforms/linux/shared/control.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,13 +8,15 @@ import type { PortalShortcutState } from "../platforms/linux/shared/portal-short
 import { DesktopShortcuts } from "../platforms/linux/shared/desktop-shortcuts.js";
 import { kdeJournalSchema } from "../platforms/linux/kde/keyboard.js";
 import { PrivateStateStore } from "../services/private-state.js";
+import { PortalPaste, type PortalPasteState } from "../platforms/linux/shared/portal-paste.js";
 import { boundPlatformFrame, platformRequestSchema, platformCaptureReplySchema, PlatformCaptureClient,
   type PlatformReply, type PlatformRequest, type PlatformCaptureRequest } from "./platform-protocol.js";
 
 interface ParentPort {
   on(event: "message", listener: (event: { data: unknown }) => void): unknown;
   postMessage(value: PlatformReply | PlatformCaptureRequest | { version: 1; type: "ready" } |
-    { version: 1; type: "shortcuts"; state: PortalShortcutState }): void;
+    { version: 1; type: "shortcuts"; state: PortalShortcutState } | { version: 1; type: "paste-state"; state: PortalPasteState } |
+    { version: 1; type: "failure"; code: "TEARDOWN_FAILED" }): void;
 }
 const nativePort: unknown = Reflect.get(process, "parentPort");
 if (process.platform !== "linux" || typeof nativePort !== "object" || nativePort === null) throw new Error("Platform owner unavailable.");
@@ -35,6 +37,7 @@ let fatal = false;
 let capture: ControlCapturePort = unavailable;
 let captureClient: PlatformCaptureClient | undefined;
 let shortcuts: DesktopShortcuts | undefined;
+let paste: PortalPaste | undefined;
 
 // No bus/native addon is opened until an explicit validated initialize request.
 port.on("message", (message) => {
@@ -72,6 +75,8 @@ port.on("message", (message) => {
         if (captureClient) shortcuts = await DesktopShortcuts.create(bus, capture, (state) => {
           port.postMessage({ version: 1, type: "shortcuts", state });
         }, journal);
+        paste = await PortalPaste.create(bus, (state) => port.postMessage({ version: 1, type: "paste-state", state }), undefined,
+          () => { fatal = true; closing = true; port.postMessage({ version: 1, type: "failure", code: "TEARDOWN_FAILED" }); });
         return { version: 1, id: request.id, ok: true, value: { command: "initialize", generation, captureAvailable: !!captureClient } };
       }
       case "status": return { version: 1, id: request.id, ok: true, value: { command: "status", status: await capture.status() } };
@@ -92,13 +97,25 @@ port.on("message", (message) => {
         await shortcuts.prepareKeyCapture();
         return { version: 1, id: request.id, ok: true, value: { command: "prepare-key", state: shortcuts.state() } };
       }
+      case "paste-permission": {
+        if (!paste) return { version: 1, id: request.id, ok: false, code: "UNAVAILABLE" };
+        if (request.action === "enable") paste.enable();
+        else void paste.clear("CANCELLED").catch(() => {});
+        return { version: 1, id: request.id, ok: true, value: { command: "paste-permission", state: paste.state() } };
+      }
+      case "paste": {
+        if (!paste) return { version: 1, id: request.id, ok: false, code: "UNAVAILABLE" };
+        return { version: 1, id: request.id, ok: true, value: { command: "paste", accepted: await paste.paste() } };
+      }
       case "shutdown": {
-        await shortcuts?.close(); await service?.close(); captureClient?.close();
+        const closed = await Promise.allSettled([paste?.close(), shortcuts?.close()]);
+        for (const result of closed) if (result.status === "rejected") throw result.reason;
+        await service?.close(); captureClient?.close();
         return { version: 1, id: request.id, ok: true, value: { command: "shutdown" } };
       }
     }
   })().then((reply) => { port.postMessage(reply); }, (error: unknown) => {
-    if (closing || error instanceof ControlServiceError && error.code === "TEARDOWN_FAILED") { fatal = true; closing = true; }
+    if (closing || (error instanceof ControlServiceError || error instanceof BusFailure) && error.code === "TEARDOWN_FAILED") { fatal = true; closing = true; }
     port.postMessage({ version: 1, id: request.id, ok: false, code: closing ? "TEARDOWN_FAILED" : "UNAVAILABLE" });
   }).finally(() => {
     busy = false;

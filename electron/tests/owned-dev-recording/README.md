@@ -79,3 +79,12 @@ verified native inputs while they remain unchanged. Build shared UI assets befor
 UI checks when their sources change. Run the full `npm test` once before handing
 over a completed increment; repeat it only for relevant changes or new failures.
 The focused command is development feedback, not full replacement acceptance.
+
+Use `--stock-kde-paste` to select only native Wayland target delivery after F8
+setup. The runner reuses the existing `test-owned-portals.py --typing-target`
+helper verbatim and a compiled TypeScript KWin focus script. It exercises explicit
+keyboard permission, actual F8 capture/CPU recognition and production Ctrl+V into
+a separate GTK target. Require target == history == independent `wl-paste` bytes;
+Electron's unfocused local cache is retained only as a diagnostic. The selected
+case checks revoke, recovery removal, original Quit and resource/namespace cleanup.
+It does not repeat Retry/Discard or prove dialogs, GNOME or XWayland behavior.

@@ -105,6 +105,16 @@ test("explicit fatal cleanup reply waits for the held owner exit before rejectin
   child.emit("exit"); await refused; await channel.close(); assert.equal(child.kills, 1);
 });
 
+test("asynchronous paste teardown failure reaps an idle owner and blocks later work", async () => {
+  const { child, channel } = await heldOwner();
+  child.emit("message", { version: 1, type: "failure", code: "TEARDOWN_FAILED" });
+  await delay(5); assert.equal(child.kills, 1);
+  await assert.rejects(channel.request({ version: 1, id: randomUUID(), command: "paste" }), code("CLOSED"));
+  let closed = false; const closing = channel.close().then(() => { closed = true; });
+  await delay(5); assert.equal(closed, false);
+  child.emit("exit"); await closing; assert.equal(closed, true); assert.equal(child.kills, 1);
+});
+
 test("abort and active close share the held-owner request and exit fence", async () => {
   for (const action of ["abort", "close"] as const) {
     const { child, channel, signal } = await heldOwner();

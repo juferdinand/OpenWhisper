@@ -19,6 +19,7 @@ const payload = resolve(fileURLToPath(new URL("./", import.meta.url)));
 const packageRoot = join(payload, "app"), evidence = "/evidence";
 const stockKde = process.env.OPENWHISPER_STOCK_KDE === "1";
 const kdeLifecycle = process.env.OPENWHISPER_KDE_LIFECYCLE === "1";
+const kdePaste = process.env.OPENWHISPER_KDE_PASTE === "wayland";
 const sha = (value: Uint8Array) => createHash("sha256").update(value).digest("hex");
 const checks: string[] = [];
 let stage = "guard", status = "FAIL", application: ElectronApplication | undefined, page: Page | undefined;
@@ -80,6 +81,9 @@ async function main(): Promise<void> {
   assert.equal(sha(await readFile(join(packageRoot, "node_modules/electron/dist/electron"))), "10a14d05c6ff4f94075cfb3eeb6ed6571be33ebcc08cbd675b5ce9ff84706564");
   assert.equal(process.env.OPENWHISPER_OWNED_DEV_RECORDING, "1");
   if (kdeLifecycle) assert.equal(stockKde, true);
+  if (process.env.OPENWHISPER_KDE_PASTE !== undefined) {
+    assert.equal(kdePaste, true); assert.equal(stockKde, true); assert.equal(kdeLifecycle, false);
+  }
   assert.ok((await lstat("/.dockerenv")).isFile());
   for (const device of ["/dev/snd", "/dev/input", "/dev/uinput", "/dev/dri"]) await assert.rejects(lstat(device), { code: "ENOENT" });
   for (const key of ["NODE_OPTIONS", "ELECTRON_RUN_AS_NODE"]) assert.equal(process.env[key], undefined);
@@ -119,7 +123,8 @@ async function main(): Promise<void> {
   await checkpoint("private-session");
   if (stockKde) {
     const config = join(env.XDG_CONFIG_HOME!, "xdg-desktop-portal"); await mkdir(config, { mode: 0o700 });
-    await writeFile(join(config, "portals.conf"), "[preferred]\ndefault=none\norg.freedesktop.impl.portal.GlobalShortcuts=kde\norg.freedesktop.impl.portal.Settings=kde\n");
+    await writeFile(join(config, "portals.conf"), "[preferred]\ndefault=none\norg.freedesktop.impl.portal.GlobalShortcuts=kde\norg.freedesktop.impl.portal.Settings=kde\n"
+      + (kdePaste ? "org.freedesktop.impl.portal.RemoteDesktop=kde\n" : ""));
     const desktopFiles = join(env.XDG_DATA_HOME!, "applications"); await mkdir(desktopFiles, { mode: 0o700, recursive: true });
     await writeFile(join(desktopFiles, "io.github.whisperfree.dev.desktop"), "[Desktop Entry]\nType=Application\nName=OpenWhisper Dev\nExec=/payload/app/node_modules/electron/dist/electron /payload/app --dev\n");
     env.QT_QPA_PLATFORM = "wayland";
@@ -295,6 +300,147 @@ async function main(): Promise<void> {
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await until(async () => !(await state()).recording_shortcut);
     assert.equal((await state()).shortcut, "F8");
+    if (kdePaste) {
+      await checkpoint("actual-keyboard-session-allow");
+      await until(async () => (await state()).paste_portal);
+      assert.equal((await state()).paste_ready, false);
+      await page.locator('[data-portal="enable_paste"]').click();
+      await until(async () => (await state()).paste_ready && !(await state()).paste_configuring, 20_000);
+      await page.evaluate(() => window.openwhisper?.invoke("save_preferences", { changes: { output: "paste" } }));
+      await until(async () => (await state()).preferences.output === "paste");
+      checks.push("explicit shared-UI Allow grants the actual stock KDE keyboard-only session; legacy immediate grant, dialog denial not established");
+
+      const ownedRuntime = env.XDG_RUNTIME_DIR!;
+      assert.equal(env.WF_OWNED_DESKTOP_TEST, ownedRuntime);
+      assert.equal(env.PULSE_SERVER, `unix:${ownedRuntime}/pulse/native`);
+      assert.ok(env.DBUS_SESSION_BUS_ADDRESS?.startsWith(`unix:path=${ownedRuntime}/session-bus`));
+      assert.ok(env.AT_SPI_BUS_ADDRESS?.startsWith(`unix:path=${ownedRuntime}/accessibility-bus`));
+      const runtimeStat = await lstat(ownedRuntime);
+      assert.equal(runtimeStat.uid, 1000); assert.equal(runtimeStat.mode & 0o077, 0);
+      assert.equal(env.WAYLAND_DISPLAY, "openwhisper-owned");
+      const targetHelper = join(payload, "test-owned-portals.py"), focusScript = join(payload, "focus-target.js");
+      for (const path of [targetHelper, focusScript]) {
+        const value = await lstat(path); assert.ok(value.isFile() && !value.isSymbolicLink());
+      }
+      const pasted = join(root, "pasted-wayland.txt");
+      await checkpoint("owned-native-wayland-target");
+      const target = child("/usr/bin/python3", [targetHelper, "--typing-target", pasted], { ...env, GDK_BACKEND: "wayland" });
+      await until(async () => {
+        assert.equal(target.closeObserved, false);
+        try { const value = await lstat(pasted); return value.isFile() && value.uid === 1000 && !(value.mode & 0o077); }
+        catch { return false; }
+      });
+      assert.equal(await readFile(pasted, "utf8"), "");
+      await delay(250);
+      const kwinCall = async (objectPath: string, method: string, args: string[] = []) =>
+        (await execute("/usr/bin/gdbus", ["call", "--session", "--dest", "org.kde.KWin", "--object-path", objectPath,
+          "--method", method, ...args], { env, timeout: 3000, maxBuffer: 16_384 })).stdout.trim();
+      const scriptName = "openwhisper-owned-paste-focus";
+      const loaded = /^\((?:int32 )?(\d+),\)$/u.exec(await kwinCall("/Scripting", "org.kde.kwin.Scripting.loadScript", [focusScript, scriptName]));
+      assert.ok(loaded); const scriptNumber = Number(loaded[1]);
+      assert.ok(Number.isSafeInteger(scriptNumber) && scriptNumber >= 0 && scriptNumber <= 2_147_483_647);
+      try {
+        let scriptPath: string | undefined;
+        for (const candidate of [`/Scripting/Script${scriptNumber}`, `/${scriptNumber}`]) {
+          try {
+            const xml = await kwinCall(candidate, "org.freedesktop.DBus.Introspectable.Introspect");
+            if (xml.includes('name="org.kde.kwin.Script"')) { scriptPath = candidate; break; }
+          } catch (error: unknown) {
+            if (!(error instanceof Error) || !error.message.includes("UnknownObject")) throw error;
+          }
+        }
+        assert.ok(scriptPath, "Owned KWin must expose its loaded script");
+        await kwinCall(scriptPath, "org.kde.kwin.Script.run");
+      } finally { await kwinCall("/Scripting", "org.kde.kwin.Scripting.unloadScript", [scriptName]); }
+      await until(async () => {
+        assert.equal(target.closeObserved, false);
+        return application!.evaluate(({ BrowserWindow }) => !BrowserWindow.getAllWindows()[0]?.isFocused());
+      });
+      await delay(150);
+
+      await checkpoint("actual-f8-start-with-target-focus");
+      await stockPress(); await until(async () => (await state()).status === "recording");
+      await until(async () => (await pactl(["list", "short", "source-outputs"])).trim().split("\n").filter(Boolean).length === 1);
+      assert.deepEqual(await sourceNames(), [source]);
+      const publicSpeech = await readFile(join(payload, "fixtures/jfk.f32"));
+      assert.equal(publicSpeech.length, 704000); assert.equal(sha(publicSpeech), "ebd52851100536db02d12c49fddd010372dcdc70243562e057553d476b706ae0");
+      const audio = Buffer.alloc(publicSpeech.length * 3);
+      for (let index = 0; index < publicSpeech.length / 4; index++) for (let repeat = 0; repeat < 3; repeat++)
+        audio.writeFloatLE(publicSpeech.readFloatLE(index * 4), (index * 3 + repeat) * 4);
+      const audioPath = join(root, "public-generated.f32"); await writeFile(audioPath, audio, { mode: 0o600 });
+      await checkpoint("public-fixture-playback-into-private-source");
+      await execute("/usr/bin/paplay", ["--raw", "--format=float32le", "--rate=48000", "--channels=1", `--device=${sink}`, audioPath],
+        { env, timeout: 30_000, maxBuffer: 1024 });
+      await delay(200);
+      await checkpoint("actual-f8-stop-and-portal-target-insertion");
+      await stockPress();
+      await until(async () => {
+        assert.equal(target.closeObserved, false);
+        const value = await state(); if (value.status === "error") throw new Error("OWNED_TRANSCRIPTION_FAILED");
+        return value.status === "done";
+      }, 120_000);
+      const result = await state(); assert.match(result.transcript.toLowerCase(), /country/u);
+      await checkpoint("actual-target-readback");
+      await delay(100);
+      const targetText = await readFile(pasted, "utf8"), readbackState = await state();
+      const applicationClipboardMatches = await application.evaluate(async ({ clipboard }, expected) => await clipboard.readText() === expected, result.transcript);
+      let waylandClipboard: { bytes: number; sha256: string; matches: boolean }
+        | { failure: "TIMEOUT" | "OUTPUT_LIMIT" | "UNAVAILABLE" | "FAILED" };
+      try {
+        const reply = await execute("/usr/bin/wl-paste", ["--no-newline"], { env, timeout: 3000, maxBuffer: 1024 * 1024 });
+        waylandClipboard = { bytes: Buffer.byteLength(reply.stdout), sha256: sha(Buffer.from(reply.stdout)), matches: reply.stdout === result.transcript };
+      } catch (error: unknown) {
+        const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : undefined;
+        const killed = error instanceof Error && "killed" in error && error.killed === true;
+        waylandClipboard = { failure: killed || code === "ETIMEDOUT" ? "TIMEOUT"
+          : code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" ? "OUTPUT_LIMIT" : code === "ENOENT" ? "UNAVAILABLE" : "FAILED" };
+      }
+      await writeFile(join(evidence, "paste-readback.json"), JSON.stringify({
+        expectedLength: Buffer.byteLength(result.transcript), expectedHash: sha(Buffer.from(result.transcript)),
+        targetLength: Buffer.byteLength(targetText), targetHash: sha(Buffer.from(targetText)), targetMatches: targetText === result.transcript,
+        historyMatches: readbackState.history[0] === result.transcript,
+        applicationFocused: await application.evaluate(({ BrowserWindow }) => !!BrowserWindow.getAllWindows()[0]?.isFocused()),
+        applicationClipboardMatches, pasteReady: readbackState.paste_ready, pasteConfiguring: readbackState.paste_configuring ?? false,
+        output: readbackState.preferences.output, waylandClipboard,
+      }, null, 2), { mode: 0o600 });
+      await until(async () => await readFile(pasted, "utf8") === result.transcript, 5000);
+      await checkpoint("actual-history-readback");
+      await until(async () => (await state()).history[0] === result.transcript, 5000);
+      await checkpoint("actual-cross-client-clipboard-readback");
+      // Background Wayland publication is proved by another client; Electron's
+      // local cache read remains diagnostic and cannot substitute for this check.
+      assert.ok("matches" in waylandClipboard && waylandClipboard.matches);
+      assert.equal(await readFile(pasted, "utf8"), result.transcript);
+      assert.equal(result.gpu_available, false); assert.equal(result.preferences.gpu, false); assert.equal(result.recovery_available, false);
+      assert.deepEqual(await readdir(profile.paths.recovery), []);
+      assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
+      const maps = await readFile(`/proc/${security.pid}/maps`, "utf8");
+      assert.equal(maps.includes("openwhisper_capture.node"), false); assert.equal(maps.includes("openwhisper_speech.node"), false);
+      assert.equal(sha(await readFile(join(stable, "sentinel"))), stableBefore);
+      checks.push("real F8 Start/Stop and CPU Tiny recognition; production portal Ctrl+V into owned GTK Wayland target equals private clipboard and history; recovery removed");
+
+      await checkpoint("actual-keyboard-session-revoke");
+      await page.evaluate(() => window.openwhisper?.invoke("disable_paste", {}));
+      await until(async () => !(await state()).paste_ready && !(await state()).paste_configuring);
+      assert.equal((await state()).paste_ready, false);
+      await checkpoint("graceful-normal-quit-after-paste");
+      const owner = appOwners.at(-1)!; owner.termination = "quit";
+      const closing = application.close().then(() => owner.closed); void closing.catch(() => {});
+      let closeTimer: NodeJS.Timeout | undefined;
+      try {
+        await Promise.race([closing, new Promise<never>((_, reject) => {
+          closeTimer = setTimeout(() => reject(new Error("OWNED_APP_CLOSE_TIMEOUT")), 10_000);
+        })]);
+      } finally { if (closeTimer) clearTimeout(closeTimer); }
+      assert.equal(owner.closeObserved, true); application = undefined;
+      const resources = await recordResources("resources.json");
+      assert.match(resources["pids.events"] ?? "", /(?:^|\n)max 0(?:\n|$)/u);
+      assert.equal(resources["pids.max"]?.trim(), "256");
+      for (const field of ["oom", "oom_kill"]) assert.match(resources["memory.events"] ?? "", new RegExp(`(?:^|\\n)${field} 0(?:\\n|$)`, "u"));
+      await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", clipboardConfirmed: true, recoveryRemoved: true,
+        nativeInMain: false, pasteConfirmed: true, permissionRevoked: true, targetBackend: "WAYLAND", consentMode: "LEGACY_IMMEDIATE_GRANT" }, null, 2), { mode: 0o600 });
+      status = "PASS"; return;
+    }
     if (kdeLifecycle) {
       const journalPath = join(profile.paths.settings, "kde-keyboard-lease.json");
       const journal = async () => kdeJournalSchema.parse(JSON.parse(await readFile(journalPath, "utf8")));

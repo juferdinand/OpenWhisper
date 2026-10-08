@@ -284,6 +284,7 @@ function render() {
     state.shortcut_configuring,
     state.native_shortcuts, state.native_x11, state.native_paste, state.native_mouse, state.native_middle_mouse, state.recording_shortcut, state.preferences.native_trigger, state.preferences.x11_trigger,
     state.paste_ready,
+    state.paste_configuring,
     state.download,
     Math.round(state.progress * 100),
     state.history,
@@ -377,7 +378,7 @@ function render() {
               ? t("Required for automatic insertion and advanced triggers. Clipboard-only output remains available.")
               : nativePaste() ? t("Enable Ctrl+V pasting into the focused application for this X11 session. No screen capture is requested.") : t("Optional permission for automatic pasting. Only keyboard access is requested; no screen capture."),
             state.paste_ready,
-            `<button data-portal="${state.paste_ready ? "disable_paste" : "enable_paste"}" ${!pasteAvailable() || portalBusy ? "disabled" : ""}>${state.paste_ready ? (isMac() ? t("System Settings") : t("Revoke")) : t("Allow")}</button>${!pasteAvailable() ? `<p class="secondary">${esc(t("Your desktop does not expose this portal. Clipboard output remains available."))}</p>` : ""}`,
+            `${permissionButton()}${!pasteAvailable() ? `<p class="secondary">${esc(t("Your desktop does not expose this portal. Clipboard output remains available."))}</p>` : ""}`,
           ) +
           step(
             6,
@@ -755,7 +756,8 @@ function render() {
 function nativePaste() { return !isMac() && !!state.native_paste && !state.paste_portal; }
 function pasteAvailable() { return state.paste_portal || (!isMac() && !!state.native_paste); }
 function permissionButton() {
-  return `<button data-portal="${state.paste_ready ? "disable_paste" : "enable_paste"}" ${!pasteAvailable() || portalBusy ? "disabled" : ""}>${state.paste_ready ? (isMac() ? t("System Settings") : t("Revoke")) : t("Allow")}</button>`;
+  const pending = !isMac() && state.paste_configuring;
+  return `<button data-portal="${state.paste_ready || pending ? "disable_paste" : "enable_paste"}" ${!pasteAvailable() || portalBusy ? "disabled" : ""}>${pending ? t("Cancel") : state.paste_ready ? (isMac() ? t("System Settings") : t("Revoke")) : t("Allow")}</button>`;
 }
 function updateStatus() {
   const u = state.updates;

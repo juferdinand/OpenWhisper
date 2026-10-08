@@ -4,6 +4,7 @@ import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { boundPlatformFrame, platformReadySchema, platformReplySchema, platformRequestSchema, platformShortcutEventSchema,
+  platformPasteEventSchema, platformFailureEventSchema,
   platformCaptureRequestSchema, platformCaptureReplySchema, type PlatformCaptureRequest, type PlatformCaptureReply,
   type PlatformReply, type PlatformRequest } from "../workers/platform-protocol.js";
 import { verifyDevelopmentPlatformEntry, verifyDevelopmentLinuxBusArtifact, type DevelopmentArtifact } from "../services/development-artifact.js";
@@ -11,6 +12,7 @@ import { prepareLinuxSpeechRetirement, type LinuxSpeechRetirementAllocation } fr
 import type { RetirementBoundary } from "../services/backend-supervisor.js";
 import { speechEnvironment } from "./linux-speech-host.js";
 import type { PortalShortcutState } from "../platforms/linux/shared/portal-shortcuts.js";
+import type { PortalPasteState } from "../platforms/linux/shared/portal-paste.js";
 
 export class PlatformChannelError extends Error {
   constructor(readonly code: "CANCELLED" | "START_FAILED" | "WORKER_FAILED" | "CLOSED" | "BUSY" | "INVALID_FRAME" | "TEARDOWN_FAILED" | "UNAVAILABLE") {
@@ -48,7 +50,7 @@ async function fixedFile(parts: readonly string[]): Promise<string> {
 export async function bindPlatformChild(child: PlatformChild, signal: AbortSignal,
   deadlines = { readyMs: 5000, requestMs: 5000, exitMs: 8000 },
   capture?: (request: PlatformCaptureRequest) => Promise<PlatformCaptureReply>,
-  shortcuts?: (state: PortalShortcutState) => void): Promise<PlatformChannel> {
+  shortcuts?: (state: PortalShortcutState) => void, paste?: (state: PortalPasteState) => void): Promise<PlatformChannel> {
   let ready = false, ended = false, closing = false;
   let pending: Pending | undefined;
   let terminalFailure: PlatformChannelError | undefined;
@@ -95,10 +97,16 @@ export async function bindPlatformChild(child: PlatformChild, signal: AbortSigna
     if (closing || ended) return;
     try {
       boundPlatformFrame(input);
+      if (platformFailureEventSchema.safeParse(input).success) { fail("TEARDOWN_FAILED"); return; }
       const shortcut = platformShortcutEventSchema.safeParse(input);
       if (shortcut.success) {
         if (!ready) throw new PlatformChannelError("INVALID_FRAME");
         shortcuts?.(shortcut.data.state); return;
+      }
+      const pasteState = platformPasteEventSchema.safeParse(input);
+      if (pasteState.success) {
+        if (!ready) throw new PlatformChannelError("INVALID_FRAME");
+        paste?.(pasteState.data.state); return;
       }
       const invocation = platformCaptureRequestSchema.safeParse(input);
       if (invocation.success) {
@@ -170,6 +178,7 @@ export function createUtilityPlatformChannelFactory(options?: {
   readonly artifacts: { readonly root: string; readonly entry: DevelopmentArtifact; readonly bus: DevelopmentArtifact };
   readonly capture: (request: PlatformCaptureRequest) => Promise<PlatformCaptureReply>;
   readonly shortcuts?: (state: PortalShortcutState) => void;
+  readonly paste?: (state: PortalPasteState) => void;
 }): (signal: AbortSignal) => Promise<PlatformChannel> {
   return async (signal) => {
     if (process.platform !== "linux" || signal.aborted) throw new PlatformChannelError("CANCELLED");
@@ -219,7 +228,7 @@ export function createUtilityPlatformChannelFactory(options?: {
     };
     let channel: PlatformChannel;
     try {
-      channel = await bindPlatformChild(child, signal, undefined, options.capture, options.shortcuts);
+      channel = await bindPlatformChild(child, signal, undefined, options.capture, options.shortcuts, options.paste);
       if (!boundaryPromise) throw new PlatformChannelError("TEARDOWN_FAILED");
       z.object({ level: z.literal("running"), canAdmit: z.literal(true) }).parse((await boundaryPromise).initial);
     }

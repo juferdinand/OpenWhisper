@@ -158,6 +158,7 @@ export const appStateSchema = z.strictObject({
   recording_shortcut: z.boolean().optional(),
   shortcut_configuring: z.boolean().optional(),
   paste_ready: z.boolean(),
+  paste_configuring: z.boolean().optional(),
   gpu_available: z.boolean(),
   gpu_supported: z.boolean().optional(),
   gpu_device: label.nullable().optional(),

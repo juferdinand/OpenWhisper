@@ -7,6 +7,7 @@ import { boundPlatformFrame, platformCaptureRequestSchema, platformCaptureReplyS
   type PlatformCaptureRequest, type PlatformCaptureReply } from "../workers/platform-protocol.js";
 import { createUtilityPlatformChannelFactory, PlatformChannelError, type PlatformChannel } from "./platform-channel.js";
 import type { PortalShortcutState } from "../platforms/linux/shared/portal-shortcuts.js";
+import type { PortalPasteState } from "../platforms/linux/shared/portal-paste.js";
 
 export const developmentPlatformHostDescriptorSchema = z.strictObject({
   root: z.string().min(1).refine((path) => isAbsolute(path) && resolve(path) === path && !path.includes("\0")),
@@ -132,12 +133,12 @@ export class DevelopmentPlatformHost {
   private closeTask: Promise<void> | undefined;
   private constructor(private readonly bridge: DevelopmentPlatformCaptureBridge, private readonly channel: PlatformChannel) {}
   static async open(options: { descriptor: DevelopmentPlatformDescriptor; address: string; capture: ControlCapturePort;
-    shortcuts?: (state: PortalShortcutState) => void; kdeLeasePath?: string },
+    shortcuts?: (state: PortalShortcutState) => void; paste?: (state: PortalPasteState) => void; kdeLeasePath?: string },
     signal: AbortSignal): Promise<DevelopmentPlatformHost> {
     const descriptor = developmentPlatformHostDescriptorSchema.parse(options.descriptor);
     const bridge = new DevelopmentPlatformCaptureBridge(options.capture);
     const factory = createUtilityPlatformChannelFactory({ artifacts: descriptor, capture: (request) => bridge.handle(request),
-      ...(options.shortcuts ? { shortcuts: options.shortcuts } : {}) });
+      ...(options.shortcuts ? { shortcuts: options.shortcuts } : {}), ...(options.paste ? { paste: options.paste } : {}) });
     let channel: PlatformChannel | undefined;
     try {
       channel = await factory(signal);
@@ -166,6 +167,15 @@ export class DevelopmentPlatformHost {
   async prepareKeyCapture(): Promise<void> {
     const reply = await this.channel.request({ version: 1, id: randomUUID(), command: "prepare-key" });
     if (!reply.ok || reply.value.command !== "prepare-key") throw new PlatformChannelError("INVALID_FRAME");
+  }
+  async pastePermission(action: "enable" | "clear"): Promise<void> {
+    const reply = await this.channel.request({ version: 1, id: randomUUID(), command: "paste-permission", action });
+    if (!reply.ok || reply.value.command !== "paste-permission") throw new PlatformChannelError("INVALID_FRAME");
+  }
+  async paste(): Promise<boolean> {
+    const reply = await this.channel.request({ version: 1, id: randomUUID(), command: "paste" });
+    if (!reply.ok || reply.value.command !== "paste") throw new PlatformChannelError("INVALID_FRAME");
+    return reply.value.accepted;
   }
   close(): Promise<void> {
     this.closeTask ??= Promise.resolve().then(async () => {

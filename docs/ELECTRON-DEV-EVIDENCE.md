@@ -1,5 +1,40 @@
 # Electron development evidence
 
+Keyboard-only paste passes in **`stock-kde-paste-3`** on the pinned Kubuntu 24.04 /
+Plasma 5.27.12 native Wayland runner with portal frontend 1.18.4 and KDE backend
+5.27.11. The normal app explicitly grants a RemoteDesktop keyboard session through
+shared UI, binds real F8, records only the private public-speech fixture and uses
+CPU recognition. While the app remains unfocused, production Ctrl+V inserts into
+a separate owned GTK TextView. Target, history and an independent `wl-paste` client
+agree exactly (105 bytes). Recovery is empty, revocation is requested and normal
+Quit closes the original app and clipboard helper. Original private services and
+the exact namespace close without forced app termination. Peak218/cap256, zero
+task rejections and no OOM; total runner duration is 23.78 seconds.
+
+Attempts1/2 preserve the real failure: Electron's immediate self-read reported a
+commit, but the target stayed empty and subsequent cross-client clipboard read
+failed. The strict TypeScript Wayland adapter owns a foreground `wl-copy`, supplies
+text through stdin, confirms external bytes before requesting paste and retains
+true cleanup failures. The passing test still records Electron's unfocused cache
+read as false; that cache is diagnostic, not authoritative clipboard evidence.
+No native binding or new Python source was added. The existing owned GTK helper
+is reused verbatim; its KWin focus script is compiled from strict TypeScript.
+
+Permission tests cover early/foreign replies, pre-dispatch and pending cancellation,
+denial/retry, session loss, key releases and fatal cleanup propagation to the original
+utility supervisor. Clipboard tests cover exact multilingual text, held retirement,
+failed cleanup, concurrent writes, missing tools and shutdown. Strict TS and recording
+build pass; **885 unit tests** pass (13 native opt-in skips), with **59 shared UI tests**
+passing at their unchanged UI source. A timing-sensitive Intel CI fixture now makes
+its preparation deterministic and asserts entry into the intended blocked phase;
+its product deadline and late-error containment remain unchanged.
+
+This is owned stock KDE **legacy immediate grant**, not dialog Deny/Approve or
+identity-associated consent evidence. Inner XWayland targets, GNOME combined
+hold/paste, advanced triggers, overlays, normal Dev GPU, packages/signatures/updates
+and full host replacement remain open. #21/#29/#30 are not closed by this result.
+Stable0.2.5 and the running Dev build are unchanged.
+
 Active-binding Quit and same-profile crash recovery pass in **`stock-kde-lifecycle-4`**
 on the same pinned Kubuntu 24.04 / Plasma 5.27 native Wayland runner. With F8 still
 bound, normal Quit closes the original app, empties its private journal and makes
@@ -24,7 +59,7 @@ without process-cap exhaustion. Its cause is still unproven; the final pass does
 not close that startup gate. The fix adds only TypeScript recovery orchestration.
 Strict TS, recording build and **861 unit tests** pass (13 native opt-in skips).
 The shared UI source is unchanged from its 58-test passing receipt. At parent
-`180d033`, five CI jobs pass while the legacy Linux job remains in progress in
+`180d033`, all six CI jobs pass in
 [CI37786332970](https://github.com/juferdinand/OpenWhisper/actions/runs/37786332970).
 This new functional revision requires its own CI. No complete platform, package,
 update, advanced-trigger or full-migration gate is inferred from this lifecycle pass.

@@ -15,7 +15,8 @@ const launcherStarted = performance.now();
 const args = process.argv.slice(2);
 const absolute = z.string().min(1).max(4096).refine((path) => path === resolve(path) && !path.includes("\0"));
 const kdeLifecycle = args[6] === "--stock-kde-lifecycle";
-const stockKde = args[6] === "--stock-kde" || kdeLifecycle;
+const kdePaste = args[6] === "--stock-kde-paste";
+const stockKde = args[6] === "--stock-kde" || kdeLifecycle || kdePaste;
 if (args.length !== (stockKde ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
     || process.platform !== "linux" || process.arch !== "x64" || process.getuid?.() === 0) throw new Error("INVALID_EXECUTION");
 const output = absolute.parse(args[1]), planning = absolute.parse(args[3]), fixtures = absolute.parse(args[5]);
@@ -94,6 +95,15 @@ if (stockKde) {
   const launcher = resolve(root, "../linux/scripts/run-owned-desktop.py");
   await cp(launcher, join(payload, "run-owned-desktop.py"));
   sources["linux/scripts/run-owned-desktop.py"] = await describe(launcher);
+}
+if (kdePaste) {
+  const helper = resolve(root, "../linux/scripts/test-owned-portals.py");
+  await cp(helper, join(payload, "test-owned-portals.py"));
+  sources["linux/scripts/test-owned-portals.py"] = await describe(helper);
+  const focus = join(root, "tests/owned-dev-recording/focus-target.ts");
+  await build({ entryPoints: [focus], outfile: join(payload, "focus-target.js"),
+    platform: "neutral", format: "iife", target: "es2015", bundle: true, sourcemap: false });
+  sources["tests/owned-dev-recording/focus-target.ts"] = await describe(focus);
 }
 if (!stockKde) for (const name of ["portal-service.cpp", "portal-fixture.hpp"]) sources[`tests/owned-bus/${name}`] = await describe(join(root, "tests/owned-bus", name));
 let frozen: Awaited<ReturnType<typeof inventory>>;
@@ -175,7 +185,8 @@ try {
   await required(["exec", "--user", "1000:1000", container, "/usr/bin/chmod", "-R", "a-w", "/payload"]);
   // Bound software rendering threads in the owned desktop, not application
   // inference. Keep the same process cap and genuine compositor/portal path.
-  const command = stockKde ? ["OPENWHISPER_STOCK_KDE=1", ...(kdeLifecycle ? ["OPENWHISPER_KDE_LIFECYCLE=1"] : []), "KWIN_COMPOSE=Q", "LP_NUM_THREADS=2", "/usr/bin/python3", "/payload/run-owned-desktop.py", "--session", "kde-wayland",
+  const command = stockKde ? ["OPENWHISPER_STOCK_KDE=1", ...(kdeLifecycle ? ["OPENWHISPER_KDE_LIFECYCLE=1"] : []),
+    ...(kdePaste ? ["OPENWHISPER_KDE_PASTE=wayland"] : []), "KWIN_COMPOSE=Q", "LP_NUM_THREADS=2", "/usr/bin/python3", "/payload/run-owned-desktop.py", "--session", "kde-wayland",
     "--output", "/tmp/owned-desktop", "--timeout", "180", "--", "/payload/node", "/payload/driver.mjs"]
     : ["/opt/node/bin/node", "/payload/driver.mjs"];
   const observed = await docker(["exec", "--user", "1000:1000", container, "/usr/bin/env", "-i", "PATH=/opt/node/bin:/usr/bin:/bin", "LANG=C.UTF-8",
@@ -184,6 +195,8 @@ try {
   await required(["cp", `${container}:/evidence/.`, output]); assert.equal(observed.code, 0); assert.equal(observed.closureObserved, true);
   (kdeLifecycle ? z.object({ status: z.literal("PASS"), activeBindingQuit: z.literal(true), crashRecovery: z.literal(true),
     originalApplicationCloses: z.array(z.object({ closed: z.literal(true) })).length(3) })
+    : kdePaste ? z.object({ status: z.literal("PASS"), clipboardConfirmed: z.literal(true), recoveryRemoved: z.literal(true),
+      nativeInMain: z.literal(false), pasteConfirmed: z.literal(true), permissionRevoked: z.literal(true), targetBackend: z.literal("WAYLAND") })
     : z.object({ status: z.literal("PASS"), clipboardConfirmed: z.literal(true), recoveryRemoved: z.literal(true), nativeInMain: z.literal(false) }))
     .parse(JSON.parse(await readFile(join(output, "result.json"), "utf8")));
   z.object({ status: z.literal("PASS"), appClosed: z.literal(true), serverClosesObserved: z.literal(true) })
