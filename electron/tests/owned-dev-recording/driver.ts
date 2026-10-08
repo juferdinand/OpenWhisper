@@ -17,7 +17,9 @@ import { kdeJournalSchema } from "../../src/platforms/linux/kde/keyboard.js";
 declare global { interface Window { openwhisper?: DesktopBridge } }
 const execute = promisify(execFile);
 const payload = resolve(fileURLToPath(new URL("./", import.meta.url)));
-const packageRoot = join(payload, "app"), evidence = "/evidence";
+const packaged = process.env.OPENWHISPER_PACKAGE_DIRECTORY === "/payload/package";
+const packageRoot = packaged ? "/payload/package/resources/app" : join(payload, "app"), evidence = "/evidence";
+const executable = packaged ? "/payload/package/openwhisper-dev" : join(packageRoot, "node_modules/electron/dist/electron");
 const stockKde = process.env.OPENWHISPER_STOCK_KDE === "1";
 const kdeLifecycle = process.env.OPENWHISPER_KDE_LIFECYCLE === "1";
 const kdeOverlay = process.env.OPENWHISPER_KDE_OVERLAY === "1";
@@ -87,7 +89,7 @@ async function main(): Promise<void> {
   assert.equal(process.platform, "linux"); assert.equal(process.arch, "x64"); assert.equal(process.getuid?.(), 1000);
   assert.equal(process.versions.node, "24.21.0");
   assert.equal(sha(await readFile(process.execPath)), "7fde7b8afa198da66257f42ee2001d874c7355631e6d1579a5fb5ef1f246df4c");
-  assert.equal(sha(await readFile(join(packageRoot, "node_modules/electron/dist/electron"))), "10a14d05c6ff4f94075cfb3eeb6ed6571be33ebcc08cbd675b5ce9ff84706564");
+  assert.equal(sha(await readFile(executable)), "10a14d05c6ff4f94075cfb3eeb6ed6571be33ebcc08cbd675b5ce9ff84706564");
   assert.equal(process.env.OPENWHISPER_OWNED_DEV_RECORDING, "1");
   if (kdeLifecycle) assert.equal(stockKde, true);
   if (process.env.OPENWHISPER_KDE_PASTE !== undefined) {
@@ -105,6 +107,7 @@ async function main(): Promise<void> {
     assert.equal(nativeX11, true); assert.equal(stockKde, false);
     assert.equal(kdeLifecycle || kdePaste || kdeOverlay || kdeWaylandOverlay, false);
   }
+  if (process.env.OPENWHISPER_PACKAGE_DIRECTORY !== undefined) { assert.equal(packaged, true); assert.equal(nativeX11, true); }
   assert.ok((await lstat("/.dockerenv")).isFile());
   for (const device of ["/dev/snd", "/dev/input", "/dev/uinput", "/dev/dri"]) await assert.rejects(lstat(device), { code: "ENOENT" });
   for (const key of ["NODE_OPTIONS", "ELECTRON_RUN_AS_NODE"]) assert.equal(process.env[key], undefined);
@@ -285,8 +288,8 @@ async function main(): Promise<void> {
         JSON.stringify({ processes: processes.stdout, pids, maximum, memory }), { mode: 0o600 })).catch(() => {});
   }, 10_000);
   try {
-    application = await _electron.launch({ executablePath: join(packageRoot, "node_modules/electron/dist/electron"),
-      args: [packageRoot, "--dev", "--dev-profile", profileRoot,
+    application = await _electron.launch({ executablePath: executable,
+      args: [...(packaged ? [] : [packageRoot]), "--dev", "--dev-profile", profileRoot,
         ...(kdeWaylandOverlay ? ["--experimental-wayland-overlay"] : []),
         ...(stockKde ? [kdeOverlay ? "--ozone-platform=x11" : "--ozone-platform=wayland"] : nativeX11 ? ["--ozone-platform=x11"] : [])],
       env: applicationEnvironment, chromiumSandbox: true, timeout: 30_000 });
@@ -324,6 +327,12 @@ async function main(): Promise<void> {
   };
   await launchApplication();
   assert.ok(application && page);
+  if (packaged) {
+    const actual = await application.evaluate(({ app }) => ({ path: app.getAppPath(), packaged: app.isPackaged, executable: process.execPath }));
+    await writeFile(join(evidence, "packaged-application.json"), JSON.stringify(actual), { mode: 0o600 });
+    assert.equal(actual.path, packageRoot); assert.equal(actual.packaged, true); assert.equal(actual.executable, executable);
+    checks.push("actual packaged openwhisper-dev executes its own resources/app with unchanged captured descriptor/native inputs; test dependencies separate");
+  }
   if (stockKde) await writeFile(join(evidence, "window.json"), JSON.stringify(await application.evaluate(({ BrowserWindow, app }) => {
     const window = BrowserWindow.getAllWindows()[0];
     return { visible: window?.isVisible(), loading: window?.webContents.isLoading(), gpu: app.getGPUFeatureStatus() };
@@ -1194,6 +1203,7 @@ async function main(): Promise<void> {
     nativeInMain: false, security,
     sourceScope: "owned-generated-PipeWire-Pulse-monitor-only", fixtureSha256: sha(publicSpeech),
     ...(nativeX11 ? { nativeX11: true, nativeCapture: true, escapePreserved: true, holdStaleReleaseSafe: true, clearedKeyInactive: true } : {}),
+    ...(packaged ? { packagedApplication: true, packageAppPath: packageRoot, executable } : {}),
     physicalMicrophone: "NOT_USED", hotkeys: stockKde ? "OWNED_STOCK_KDE_KGLOBALACCEL_KEY_EDGES" : nativeX11 ? "OWNED_XVFB_NATIVE_XTEST_KEYS" : "OWNED_SYNTHETIC_PORTAL_SIGNALS_ONLY", portalResourcesClosed: true,
     automaticPaste: "NOT_TESTED", gpu: "NOT_TESTED", macos: "NOT_TESTED" }, null, 2), { mode: 0o600 });
   await checkpoint("graceful-normal-quit");

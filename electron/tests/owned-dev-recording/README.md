@@ -54,6 +54,16 @@ Retry/Discard, sandbox, stable-sentinel and original process/container cleanup
 checks remain. This is owned Xvfb evidence, not acceptance of a named X11 desktop,
 physical keyboard, conflict handling across unrelated applications or packages.
 
+For exact-directory package acceptance, append `--package-directory /absolute/path/OpenWhisper-Dev-Linux-x64`
+after `--native-x11`. The runner copies that complete package intact and launches
+its actual `openwhisper-dev --dev --dev-profile <private-profile>`, requiring
+`app.getAppPath()` to equal the package's `resources/app`. Its captured descriptor,
+production dependencies and native inputs are preserved; no fixture recapture or
+native replacement occurs. Playwright remains outside the packaged app. Full
+package hashes are checked before copying, in the stopped container and after
+execution. The same native-X11 recording and cleanup checks apply. This proves
+owned package execution, independently of host installation or signed releases.
+
 Append `--stock-kde` to reuse `linux/scripts/run-owned-desktop.py` and the pinned
 cached Kubuntu 24.04 portal image. This mode opens the normal app with native
 Wayland and installed KDE portal services, never the synthetic frontend. It uses

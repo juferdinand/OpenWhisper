@@ -23,9 +23,11 @@ const nativeX11 = args[6] === "--native-x11";
 const stockKde = args[6] === "--stock-kde" || kdeLifecycle || kdePaste || kdeOverlay || kdeWaylandOverlay;
 const portalFixture = !stockKde && !nativeX11;
 const copiedNode = stockKde || nativeX11;
-if (args.length !== (copiedNode ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
+const packaged = nativeX11 && args[7] === "--package-directory";
+if (args.length !== (packaged ? 9 : copiedNode ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
     || process.platform !== "linux" || process.arch !== "x64" || process.getuid?.() === 0) throw new Error("INVALID_EXECUTION");
 const output = absolute.parse(args[1]), planning = absolute.parse(args[3]), fixtures = absolute.parse(args[5]);
+const packageDirectory = packaged ? absolute.parse(args[8]) : undefined;
 for (const path of [planning, fixtures]) {
   const directory = await lstat(path); assert.ok(directory.isDirectory() && !directory.isSymbolicLink());
   assert.ok(output !== path && !output.startsWith(`${path}/`) || (path === planning && output.startsWith(`${planning}/p4-linux-dev-recording/`)));
@@ -37,7 +39,8 @@ const speech = join(planning, "p6-proposal/gpu-build-1/cpu/openwhisper_speech.no
 const bus = join(planning, "p3-bus-opening/async-call-legacy-run-3/package/payload/dist/native/openwhisper_linux_bus.node");
 const seccomp = join(planning, "p2-owned-speech/run-4/electron-seccomp.json");
 await mkdir(output, { mode: 0o700, recursive: false });
-const payload = join(output, "payload"), app = join(payload, "app"); await mkdir(payload, { mode: 0o700 });
+const payload = join(output, "payload"), app = packaged ? join(payload, "package/resources/app") : join(payload, "app");
+await mkdir(payload, { mode: 0o700 });
 const describe = async (path: string) => { const bytes = await readFile(path); return { bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") }; };
 async function inventory(directory: string, prefix = ""): Promise<Record<string, { bytes: number; sha256: string }>> {
   const values: Record<string, { bytes: number; sha256: string }> = {};
@@ -48,7 +51,30 @@ async function inventory(directory: string, prefix = ""): Promise<Record<string,
   }
   return values;
 }
-const distBefore = await inventory(join(root, "dist"));
+type Artifact = { bytes: number; sha256: string };
+let distBefore: Record<string, Artifact>, original: z.infer<typeof developmentRecordingDescriptorSchema>, descriptor: z.infer<typeof developmentRecordingDescriptorSchema>;
+let captureRecord: Artifact, speechRecord: Artifact, busRecord: Artifact;
+let packageBefore: Record<string, Artifact> | undefined;
+if (packageDirectory) {
+  const directory = await lstat(packageDirectory); assert.ok(directory.isDirectory() && !directory.isSymbolicLink());
+  assert.ok(output !== packageDirectory && !output.startsWith(`${packageDirectory}/`) && !packageDirectory.startsWith(`${output}/`));
+  packageBefore = await inventory(packageDirectory);
+  await cp(packageDirectory, join(payload, "package"), { recursive: true, errorOnExist: true, force: false });
+  assert.deepEqual(await inventory(join(payload, "package")), packageBefore);
+  distBefore = await inventory(join(app, "dist"));
+  const module: unknown = await import(pathToFileURL(join(app, "dist/main/development-recording-build.js")).href);
+  original = z.object({ DEVELOPMENT_RECORDING_BUILD: developmentRecordingDescriptorSchema }).parse(module).DEVELOPMENT_RECORDING_BUILD;
+  descriptor = original;
+  if (descriptor.platform !== "linux") throw new Error("INVALID_PACKAGE_PLATFORM");
+  captureRecord = await describe(join(app, "dist/native/capture/openwhisper_capture.node"));
+  speechRecord = await describe(join(app, "dist/native/speech/cpu/openwhisper_speech.node"));
+  busRecord = await describe(join(app, "dist/native/openwhisper_linux_bus.node"));
+  assert.deepEqual(captureRecord, descriptor.capture); assert.deepEqual(busRecord, descriptor.platformServices?.bus);
+  const cpu = descriptor.speech.entries.find((entry) => entry.backend === "cpu"); assert.ok(cpu);
+  assert.deepEqual(speechRecord, { bytes: cpu.bytes, sha256: cpu.sha256 });
+  assert.equal((await describe(join(payload, "package/openwhisper-dev"))).sha256, "10a14d05c6ff4f94075cfb3eeb6ed6571be33ebcc08cbd675b5ce9ff84706564");
+} else {
+distBefore = await inventory(join(root, "dist"));
 await cp(join(root, "dist"), join(app, "dist"), { recursive: true, errorOnExist: true, force: false });
 await cp(join(root, "package.json"), join(app, "package.json"), { errorOnExist: true, force: false });
 await mkdir(join(app, "node_modules"), { mode: 0o700 });
@@ -60,8 +86,8 @@ for (const name of ["koffi", "@koromix/koffi-linux-x64"]) {
   assert.equal(z.object({ version: z.literal("3.3.2") }).parse(JSON.parse(await readFile(join(app, "node_modules", name, "package.json"), "utf8"))).version, "3.3.2");
 }
 assert.deepEqual(await inventory(join(root, "dist")), distBefore);
-const captureRecord = await describe(capture), speechRecord = await describe(speech);
-const busRecord = await describe(bus);
+captureRecord = await describe(capture); speechRecord = await describe(speech);
+busRecord = await describe(bus);
 assert.equal(busRecord.sha256, "0d32cffa96fb5255bb49ec95ca6404c30887b068bf159fdcc966b7ceb7d2d0e1");
 assert.equal(captureRecord.sha256, "5a1ddfef8381d750b059f28416279557c50039161f312e3b5d4b31fdbdae3ba2"); assert.equal(captureRecord.bytes, 433280);
 assert.equal(speechRecord.sha256, "e1b4c2c738285eb50cea155e65fc0b1eb4481e80a1849ded23bb2a8a679308c3");
@@ -71,12 +97,12 @@ assert.equal((await describe(join(app, "node_modules/electron/dist/electron"))).
 await cp(join(planning, "p6-proposal/gpu-build-1/cpu/build-manifest.json"), join(output, "cpu-build-manifest.json"));
 await cp(join(planning, "p4-linux-dev-recording/native-sources/run-1/source-manifest.json"), join(output, "capture-source-manifest.json"));
 const originalModule: unknown = await import(pathToFileURL(join(root, "dist/main/development-recording-build.js")).href);
-const original = z.object({ DEVELOPMENT_RECORDING_BUILD: developmentRecordingDescriptorSchema }).parse(originalModule).DEVELOPMENT_RECORDING_BUILD;
+original = z.object({ DEVELOPMENT_RECORDING_BUILD: developmentRecordingDescriptorSchema }).parse(originalModule).DEVELOPMENT_RECORDING_BUILD;
 await cp(capture, join(app, "dist/native/capture/openwhisper_capture.node"));
 await cp(speech, join(app, "dist/native/speech/cpu/openwhisper_speech.node"));
 await cp(bus, join(app, "dist/native/openwhisper_linux_bus.node"));
 const graph = await buildSpeechEntryGraph(app);
-const descriptor = developmentRecordingDescriptorSchema.parse({ ...original,
+descriptor = developmentRecordingDescriptorSchema.parse({ ...original,
   capture: captureRecord, captureEntry: await describe(join(app, "dist/workers/capture-entry.js")), speechEntryGraph: graph.graph,
   platformServices: { entry: await describe(join(app, "dist/workers/platform-entry.js")), bus: busRecord },
   speech: { ...original.speech, entries: [{ backend: "cpu", ...speechRecord }] } });
@@ -84,6 +110,8 @@ const descriptor = developmentRecordingDescriptorSchema.parse({ ...original,
 // typed record; runtime never refreshes expected hashes from its current files.
 await build({ stdin: { contents: `export const DEVELOPMENT_RECORDING_BUILD: unknown = ${JSON.stringify(descriptor)};`, loader: "ts", resolveDir: root },
   outfile: join(app, "dist/main/development-recording-build.js"), platform: "node", format: "esm", target: "node24", sourcemap: false });
+}
+assert.equal((await describe(seccomp)).sha256, "4bcf8ff0af5c805b491cb621380b3980bea2aaed270c68e794687b57d811c49e");
 await mkdir(join(payload, "fixtures"), { mode: 0o700 });
 if (portalFixture) {
   await mkdir(join(payload, "owned-bus"), { mode: 0o700 });
@@ -92,10 +120,10 @@ if (portalFixture) {
 for (const name of ["ggml-tiny.bin", "jfk.f32"]) await cp(join(fixtures, name), join(payload, "fixtures", name), { errorOnExist: true, force: false });
 const bundled = await build({ entryPoints: [join(root, "tests/owned-dev-recording/driver.ts")], outfile: join(payload, "driver.mjs"),
   platform: "node", format: "esm", target: "node24", bundle: true, external: ["@playwright/test"], metafile: true, sourcemap: false });
-// The driver resolves Playwright from its sibling normal application's dependencies.
+// Test dependencies stay outside the packaged application's production tree.
 for (const name of ["@playwright/test", "playwright", "playwright-core"]) {
   await mkdir(dirname(join(payload, "node_modules", name)), { recursive: true, mode: 0o700 });
-  await cp(join(app, "node_modules", name), join(payload, "node_modules", name), { recursive: true });
+  await cp(join(root, "node_modules", name), join(payload, "node_modules", name), { recursive: true });
 }
 const sources: Record<string, { bytes: number; sha256: string }> = {};
 for (const name of Object.keys(bundled.metafile.inputs)) sources[name] = await describe(resolve(root, name));
@@ -167,7 +195,11 @@ try {
   await required(["rm", compiler]); compilerCreated = false;
   frozen = await inventory(payload);
   await writeFile(join(output, "assembly.json"), JSON.stringify({ image: IMAGE, sources, originalDescriptor: original, descriptor,
-    originalDist: distBefore, payload: frozen, native: { capture: { path: capture, ...captureRecord }, speech: { path: speech, ...speechRecord }, bus: { path: bus, ...busRecord } },
+    originalDist: distBefore, payload: frozen,
+    ...(packageDirectory ? { packageInput: { directory: packageDirectory, files: packageBefore, capturedDescriptorPreserved: true } } : {}),
+    native: { capture: { path: packageDirectory ? join(packageDirectory, "resources/app/dist/native/capture/openwhisper_capture.node") : capture, ...captureRecord },
+      speech: { path: packageDirectory ? join(packageDirectory, "resources/app/dist/native/speech/cpu/openwhisper_speech.node") : speech, ...speechRecord },
+      bus: { path: packageDirectory ? join(packageDirectory, "resources/app/dist/native/openwhisper_linux_bus.node") : bus, ...busRecord } },
     portalFixture: portalFixture ? { compilerImage, binary: await describe(join(payload, "owned-bus/owned-portal")) } : null,
     ...(copiedNode ? { nodeRuntime: { sourceImage: compilerImage, ...await describe(join(payload, "node")) } } : {}),
     seccomp: { path: seccomp, ...await describe(seccomp) },
@@ -192,7 +224,8 @@ try {
       Ulimits: z.array(z.object({ Name: z.literal("core"), Soft: z.literal(0), Hard: z.literal(0) })).length(1) }), Mounts: z.array(z.unknown()).length(0) })).length(1).parse(JSON.parse(inspected));
   const copied = join(output, "stopped-payload"); await required(["cp", "-a", `${container}:/payload`, copied]); assert.deepEqual(await inventory(copied), frozen);
   await required(["start", container]);
-  await required(["exec", "--user", "1000:1000", container, "/usr/bin/chmod", "-R", "a-w", "/payload"]);
+  await required(["exec", "--user", "1000:1000", container, "/usr/bin/chmod", "-R", "a-w",
+    ...(packaged ? ["/payload/driver.mjs", "/payload/node", "/payload/fixtures", "/payload/node_modules"] : ["/payload"])]);
   // Bound software rendering threads in the owned desktop, not application
   // inference. Keep the same process cap and genuine compositor/portal path.
   const command = stockKde ? ["OPENWHISPER_STOCK_KDE=1", ...(kdeLifecycle ? ["OPENWHISPER_KDE_LIFECYCLE=1"] : []),
@@ -201,7 +234,7 @@ try {
     ...(kdePaste ? [`OPENWHISPER_KDE_PASTE=${kdeXwaylandPaste ? "xwayland" : "wayland"}`] : []), "KWIN_COMPOSE=Q", "LP_NUM_THREADS=2", "/usr/bin/python3", "/payload/run-owned-desktop.py", "--session", "kde-wayland",
     ...(kdeXwaylandPaste || kdeOverlay ? ["--kde-xwayland"] : []),
     "--output", "/tmp/owned-desktop", "--timeout", "180", "--", "/payload/node", "/payload/driver.mjs"]
-    : nativeX11 ? ["OPENWHISPER_NATIVE_X11=1", "/payload/node", "/payload/driver.mjs"]
+    : nativeX11 ? ["OPENWHISPER_NATIVE_X11=1", ...(packaged ? ["OPENWHISPER_PACKAGE_DIRECTORY=/payload/package"] : []), "/payload/node", "/payload/driver.mjs"]
     : ["/opt/node/bin/node", "/payload/driver.mjs"];
   const observed = await docker(["exec", "--user", "1000:1000", container, "/usr/bin/env", "-i", "PATH=/opt/node/bin:/usr/bin:/bin", "LANG=C.UTF-8",
     "OPENWHISPER_OWNED_DEV_RECORDING=1", ...command], stockKde ? 240_000 : 210_000);
@@ -223,7 +256,12 @@ try {
     .parse(JSON.parse(await readFile(join(output, "result.json"), "utf8")));
   z.object({ status: z.literal("PASS"), appClosed: z.literal(true), serverClosesObserved: z.literal(true) })
     .parse(JSON.parse(await readFile(join(output, "lifecycle.json"), "utf8")));
-  assert.deepEqual(await inventory(payload), frozen); result = "PASS";
+  assert.deepEqual(await inventory(payload), frozen);
+  if (packageDirectory) {
+    const returned = join(output, "returned-package"); await required(["cp", "-a", `${container}:/payload/package`, returned]);
+    assert.deepEqual(await inventory(returned), packageBefore); assert.deepEqual(await inventory(packageDirectory), packageBefore);
+  }
+  result = "PASS";
 } finally {
   if (compilerCreated) await docker(["rm", "--force", compiler], 20_000);
   if (created) {

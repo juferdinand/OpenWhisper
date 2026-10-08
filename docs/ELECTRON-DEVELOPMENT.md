@@ -174,10 +174,13 @@ inputs, copies the locked production dependencies and retains notices. It uses
 the separate Dev package, launcher and `/opt/openwhisper-dev` destination. Archives
 are unsigned previews and do not replace the stable application.
 
-Native inputs must be built on the intended distribution baseline. The current
-host-built speech addon needs GLIBC 2.43, which the generated Debian dependency
-declares. It cannot run on Ubuntu 22.04 or Debian 13. Archive metadata/extraction
-checks do not establish installed runtime, AppImage, updates or release acceptance.
+Native inputs must be built on the intended distribution baseline. A fresh private
+Ubuntu22 build of the existing production recording scripts now produces a Dev
+package whose native ELF requirements are at most GLIBC2.34/GLIBCXX3.4.29. Its
+actual executable passes the owned X11 dictation/recovery case with its captured
+inputs intact. A newer host build may require newer libraries; the package metadata
+declares the inspected floor. Host installation, AppImage, updates and release
+acceptance remain separate checks. See the [exact evidence](ELECTRON-DEV-EVIDENCE.md).
 
 ## macOS CPU recording Dev build
 

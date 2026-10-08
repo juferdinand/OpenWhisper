@@ -1,5 +1,35 @@
 # Electron development evidence
 
+## Ubuntu22 native build and exact Dev package execution
+
+The existing production recording builder rebuilds CPU speech, capture and D-Bus
+in the pinned Ubuntu22 compiler image, offline and UID1000, using a fresh private
+source copy. Source/UI/script inputs remain unchanged; only captured native/build
+outputs change. All 13 shipped ELF files require at most GLIBC2.34/GLIBCXX3.4.29;
+the Debian package declares libc6>=2.35. Metadata, extracted-tree equality,
+launcher, existing icon and notices pass. The `.deb` SHA-256 is
+`f728495c0796b0130ba5eb039c7384a571a9da8ba9927e7bb87bf6317838350a`.
+
+**`packaged-x11-1` passes in 41.78 seconds.** The existing owned X11 runner copies
+the complete directory intact and executes its actual `openwhisper-dev`, requiring
+`app.isPackaged=true` and the package's own `resources/app`. Playwright stays
+outside the app. No native input or captured descriptor is replaced or recaptured.
+Original, copied, stopped-container, returned and final source package hashes agree.
+Actual F8 setup, Escape restoration, hold/repeat/stale-release safety, Stop/Cancel,
+CPU recognition, clipboard/history, trigger removal, source-loss Retry and Discard
+pass. The renderer remains sandboxed; original Quit/private services and exact
+namespace cleanup pass without forced termination. No host installation, physical
+microphone, GPU or automatic target paste is used.
+
+The runtime uses the pinned private Kubuntu24.04/Xvfb image. Ubuntu22 is the native
+build baseline, not a newly claimed installed-desktop test. Frozen app metadata
+remains de495e6+modified, without relabeling it as the subsequent source commit.
+The first host-native preview and its GLIBC2.43 limitation remain historical
+evidence below. Final strict typing/diff checks pass; application/UI/native-source
+checks are reused because this step changes only the existing runner. Further
+Linux matrices are deferred by the owner; Mac basics, installation/updates and
+release acceptance remain open.
+
 ## Genuine X11 setup and Dev package preview checkpoint
 
 **`native-x11-triggers-7` passes**, 40.99 seconds. The existing owned

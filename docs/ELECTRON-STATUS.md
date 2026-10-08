@@ -16,7 +16,7 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | macOS dictation | Normal CPU Dev recording, explicit permission button and RAM Retry/Discard are now connected; focused synthetic tests pass | Validate the assembled Mac build and physical permission/device behavior; add Metal selection |
 | Linux desktop integration | Stock KDE 5.27 native Wayland F8, cancellation, binding Quit/crash recovery and paste into Wayland/XWayland editors pass. The guarded native overlay passes pointer Cancel/Stop and foreground editor keyboard delivery. Genuine X11 native F8 capture, held/repeated keys, CPU dictation, clipboard/history and Retry/Discard pass in private Xvfb | Basic packaged controls remain required; expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
-| Packaging and updates | An unsigned Dev directory/.deb preview preserves captured inputs and passes archive/layout checks; current host native inputs require GLIBC 2.43 | Portable native baseline and installed runtime checks, Electron AppImage/universal DMG+ZIP, signing, stable data continuity and actual old-client update checks |
+| Packaging and updates | Ubuntu22-built unsigned Dev directory/.deb passes archive/layout checks and exact-package X11 CPU dictation/recovery/cleanup with unchanged captured inputs | Installation/upgrade acceptance, Electron AppImage/universal DMG+ZIP, signing, stable data continuity and actual old-client update checks |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 The current checkpoint includes actual stock KDE keyboard dictation, recovery
@@ -58,9 +58,13 @@ the first captured candidate; later mapping changes still retire a captured or
 active binding. The owned case passes real F8 setup, Escape preservation,
 held/repeated keys, safe cancellation, CPU dictation, clipboard/history,
 trigger removal, Retry/Discard and original cleanup in 40.99 seconds.
-See the [exact evidence](ELECTRON-DEV-EVIDENCE.md). The package preview is a separate
-frozen metadata/layout result, predating the final X11 corrections; it is not a
-runnable Ubuntu/Debian or release acceptance result.
+See the [exact evidence](ELECTRON-DEV-EVIDENCE.md). A separate private Ubuntu22
+native build removes the first host preview's GLIBC2.43 dependency. Its actual
+packaged executable passes the same X11 dictation/recovery checks in 41.78 seconds,
+with its own resources/app, captured descriptor and native inputs unchanged.
+Its frozen metadata remains de495e6+modified. This is owned package execution on
+the pinned Kubuntu24.04 image; host installation, other distributions and signed
+release acceptance remain separate.
 
 ## Delivery order and execution limits
 
