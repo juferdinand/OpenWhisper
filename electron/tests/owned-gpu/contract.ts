@@ -15,9 +15,9 @@ export const ownedGpuResultSchema = z.strictObject({ result: z.literal("PASS"), 
   inference: z.array(z.strictObject({ family: z.enum(["whisper", "parakeet"]), requestedGpu: z.boolean(),
     sha256: digest, characters: z.number().int().positive().max(16384), seconds: z.number().finite().nonnegative(),
   })).min(1).max(4),
-  nativeDevice: z.null(), startupFailure: z.literal("WORKER_FAILED").nullable(),
+  nativeDevice: z.null(), startupFailure: z.literal("START_FAILED").nullable(),
   explicitFixtureCpuReplacement: z.boolean(), versions: z.record(z.string(), z.string()), scope: z.string().max(4096),
 }).refine((value) => value.mode === "loader-absent"
-  ? value.startupFailure === "WORKER_FAILED" && value.explicitFixtureCpuReplacement && value.inference.length === 1
+  ? value.startupFailure === "START_FAILED" && value.explicitFixtureCpuReplacement && value.inference.length === 1
   : value.startupFailure === null && !value.explicitFixtureCpuReplacement && value.inference.length === 4,
 "Owned backend result must describe its actual test mode.");

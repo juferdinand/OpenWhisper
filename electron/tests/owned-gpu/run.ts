@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { cp, lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { fileSha256 } from "../../scripts/native-dependencies.js";
@@ -94,7 +94,16 @@ try {
   await buildOwnedGpuProbe(join(output, "probe.mjs"));
   const sources: Record<string, string> = {};
   for (const path of ["tests/owned-gpu/run.ts", "tests/owned-gpu/probe.ts", "tests/owned-gpu/contract.ts", "tests/owned-gpu/acceptance.test.ts",
-    "tests/owned-gpu/build-probe.ts", "tests/fixtures/parakeet-model.ts", "tests/owned-gpu/Dockerfile", "tests/owned-gpu/LoaderAbsent.Dockerfile"]) sources[path] = await fileSha256(join(root, path));
+    "tests/owned-gpu/build-probe.ts", "tests/fixtures/speech-bootstrap-channel.ts",
+    "src/workers/speech-bootstrap.ts", "src/workers/speech-control.ts", "src/workers/speech-entry.ts", "src/workers/speech-protocol.ts", "src/services/speech-client.ts", "tests/fixtures/parakeet-model.ts", "tests/owned-gpu/Dockerfile", "tests/owned-gpu/LoaderAbsent.Dockerfile"]) {
+    sources[path] = await fileSha256(join(root, path));
+    const destination = join(output, "frozen-source", path);
+    await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+    await cp(join(root, path), destination, { force: false, errorOnExist: true });
+    if (await fileSha256(destination) !== sources[path] || await fileSha256(join(root, path)) !== sources[path]) {
+      throw new Error("Owned source changed during snapshot.");
+    }
+  }
   await writeFile(join(output, "image-inspect.json"), await required(["image", "inspect", image]), { mode: 0o600 });
   await required(["create", "--name", container, "--init", "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL",
     "--security-opt", `seccomp=${seccomp}`, "--pids-limit", "256", "--memory", "4g", "--shm-size", "256m",

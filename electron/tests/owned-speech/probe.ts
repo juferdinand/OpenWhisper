@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { app, utilityProcess } from "electron";
-import { createUtilitySpeechChannelFactory } from "../../src/main/speech-channel.js";
+import { createFixtureSpeechChannelFactory } from "../fixtures/speech-bootstrap-channel.js";
 import { SpeechClient, SpeechWorkerError } from "../../src/services/speech-client.js";
 import type { SpeechModel } from "../../src/workers/native-speech.js";
 
@@ -30,15 +30,15 @@ async function failure(pending: Promise<unknown>, code: string): Promise<void> {
 export async function runUtilityProbe(mode: "abi" | "cpu") {
   assert.equal(app.isReady(), true);
   assert.equal(process.getuid?.(), 1000);
-  const factory = createUtilitySpeechChannelFactory();
+  const factory = createFixtureSpeechChannelFactory();
   const checks: string[] = [];
   const client = new SpeechClient(factory, { startupMs: 5000, requestMs: 60_000 });
   try {
     if (mode === "abi") {
-      await failure(client.gpuDevice(), "WORKER_FAILED");
+      await failure(client.gpuDevice(), "START_FAILED");
       await client.close();
       await noOwners();
-      return { result: "ABI_LOAD_FAILED_CONTAINED", mainAlive: true, checks: ["incompatible host addon fails before ready; owner removed"], versions: process.versions };
+      return { result: "ABI_LOAD_FAILED_CONTAINED", mainAlive: true, checks: ["incompatible host addon fails on first ordinary discovery after control handshake; fixture owner removed"], versions: process.versions };
     }
     assert.equal(await client.gpuDevice(), null);
     const firstOwner = owner();
@@ -111,13 +111,13 @@ export async function runUtilityProbe(mode: "abi" | "cpu") {
     await early.terminate();
     await early.terminate();
     await noOwners();
-    checks.push("abort immediately after fork before readiness; idempotent cleanup handles late spawn");
+    checks.push("abort after fixture bootstrap handshake; idempotent generic-exit cleanup");
     const cancelled = new AbortController();
     cancelled.abort();
     await failure(factory(cancelled.signal), "CANCELLED");
     await noOwners();
 
-    const malformed = utilityProcess.fork("/owned-app/dist/workers/speech-entry.js", ["/owned-app/dist/native/openwhisper_speech.node"], {
+    const malformed = utilityProcess.fork("/owned-app/dist/workers/speech-entry.js", ["/owned-app/dist/native/openwhisper_speech.node", randomUUID()], {
       serviceName: "OpenWhisper Malformed Probe", stdio: "ignore", execArgv: [],
     });
     const malformedExit = await new Promise<number>((accept, reject) => {
@@ -129,6 +129,6 @@ export async function runUtilityProbe(mode: "abi" | "cpu") {
     checks.push("actual worker rejects malformed raw frame and exits without diagnostic or native access in main");
     return { result: "PASS", mainAlive: true, checks, firstOwner, familyReplacement, replacement, afterCrash,
       transcriptSha, sampleCount: samples.length, versions: process.versions,
-      scope: "CPU Node-API/utility transport only; no GPU/Parakeet/capture/desktop parity" };
+      scope: "CPU Node-API/utility transport only; historical fixture generic-exit cleanup, no supervisor OS admission/retirement proof or GPU/Parakeet/capture/desktop parity" };
   } finally { await client.close(); }
 }

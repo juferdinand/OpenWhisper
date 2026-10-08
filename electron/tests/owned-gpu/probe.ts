@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { cp, lstat, readFile, readdir, rename } from "node:fs/promises";
 import { app } from "electron";
-import { createUtilitySpeechChannelFactory } from "../../src/main/speech-channel.js";
+import { createFixtureSpeechChannelFactory } from "../fixtures/speech-bootstrap-channel.js";
 import { SpeechClient, SpeechWorkerError } from "../../src/services/speech-client.js";
 import { PARAKEET_FIXTURE } from "../fixtures/parakeet-model.js";
 import { ownedGpuInputSchema, ownedGpuResultSchema } from "./contract.js";
@@ -57,9 +57,9 @@ export async function runOwnedGpuProbe() {
   const checks: string[] = [];
   const owners: zResult["owners"] = [];
   const inference: zResult["inference"] = [];
-  let startupFailure: "WORKER_FAILED" | null = null;
+  let startupFailure: "START_FAILED" | null = null;
   let explicitFixtureCpuReplacement = false;
-  let client = new SpeechClient(createUtilitySpeechChannelFactory(), { startupMs: 10_000, requestMs: 120_000 });
+  let client = new SpeechClient(createFixtureSpeechChannelFactory(), { startupMs: 10_000, requestMs: 120_000 });
   const infer = async (family: "whisper" | "parakeet", gpu: boolean): Promise<string> => {
     const began = performance.now();
     const text = await client.transcribeWindow({ path: family === "whisper" ? "/fixtures/ggml-tiny.bin" : `/fixtures/${PARAKEET_FIXTURE.filename}`,
@@ -74,16 +74,16 @@ export async function runOwnedGpuProbe() {
       for (const directory of ["/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu", "/owned-app/node_modules/electron/dist"]) {
         assert.equal((await readdir(directory)).some((name) => /^libvulkan\.so(?:\.|$)/u.test(name)), false);
       }
-      await assert.rejects(client.gpuDevice(), (error: unknown) => error instanceof SpeechWorkerError && error.code === "WORKER_FAILED");
-      startupFailure = "WORKER_FAILED";
+      await assert.rejects(client.gpuDevice(), (error: unknown) => error instanceof SpeechWorkerError && error.code === "START_FAILED");
+      startupFailure = "START_FAILED";
       await client.close(); await noOwners();
-      checks.push("actual Vulkan-linked utility startup fails safely with all system/Electron loader copies absent; confirmed reap");
+      checks.push("actual Vulkan-linked utility binding load fails after bootstrap control safely with all system/Electron loader copies absent; confirmed reap");
       // Explicit test-owned fallback, not an automatic production worker/factory feature.
       await cp("/fixtures/cpu.node", `${nativePath}.fixture-cpu`);
       assert.equal(await fileSha(`${nativePath}.fixture-cpu`), input.cpuSha256);
       await rename(`${nativePath}.fixture-cpu`, nativePath);
       explicitFixtureCpuReplacement = true;
-      client = new SpeechClient(createUtilitySpeechChannelFactory(), { startupMs: 10_000, requestMs: 120_000 });
+      client = new SpeechClient(createFixtureSpeechChannelFactory(), { startupMs: 10_000, requestMs: 120_000 });
       assert.equal(await client.gpuDevice(), null);
       const replacement = await owner(input.cpuSha256); assert.equal(replacement.loaderPaths.length, 0); owners.push(replacement);
       await infer("whisper", false);
@@ -107,7 +107,7 @@ export async function runOwnedGpuProbe() {
     return ownedGpuResultSchema.parse({ result: "PASS", mode: input.mode, checks, mainAlive: true,
       cpuSha256: input.cpuSha256, vulkanSha256: input.vulkanSha256, owners, inference, nativeDevice: null,
       startupFailure, explicitFixtureCpuReplacement, versions: process.versions,
-      scope: "Owned Ubuntu22 x64 Electron utility: compiled Vulkan backend, missing-device/software-only fallback and explicit fixture-only CPU replacement. No automatic factory selection, physical GPU, Metal/macOS, microphone or general speech-quality claim." });
+      scope: "Owned Ubuntu22 x64 Electron utility: compiled Vulkan backend, missing-device/software-only fallback and explicit fixture-only CPU replacement. Historical fixture generic-exit cleanup only; no supervisor OS admission/retirement proof, automatic factory selection, physical GPU, Metal/macOS, microphone or general speech-quality claim." });
   } finally { await client.close(); }
 }
 

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { cp, lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { PARAKEET_FIXTURE } from "../../scripts/fetch-parakeet-fixture.js";
@@ -106,10 +106,16 @@ try {
   const sources: Record<string, string> = {};
   for (const path of ["tests/owned-parakeet/run.ts", "tests/owned-parakeet/build-probe.ts", "tests/owned-parakeet/processor.ts",
     "tests/fixtures/parakeet-speech.ts", "tests/parakeet-speech.test.ts", "scripts/fetch-parakeet-fixture.ts", "tests/fixtures/parakeet-model.ts",
-    "src/main/speech-channel.ts", "src/services/speech-client.ts", "src/services/adaptive-speech.ts",
+    "tests/fixtures/speech-bootstrap-channel.ts", "src/services/speech-client.ts", "src/services/adaptive-speech.ts",
     "src/core/transcript-cleaner.ts", "src/core/vocabulary-corrector.ts", "src/core/snippet-expander.ts",
-    "src/workers/speech-entry.ts", "src/workers/speech-protocol.ts", "native/whisper-source.json", "native/node-headers.json"]) {
+    "src/workers/speech-entry.ts", "src/workers/speech-bootstrap.ts", "src/workers/speech-control.ts", "src/workers/speech-protocol.ts", "native/whisper-source.json", "native/node-headers.json"]) {
     sources[path] = await sha(join(packageRoot, path));
+    const destination = join(output, "frozen-source", path);
+    await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+    await cp(join(packageRoot, path), destination, { force: false, errorOnExist: true });
+    if (await sha(destination) !== sources[path] || await sha(join(packageRoot, path)) !== sources[path]) {
+      throw new Error("Owned source changed during snapshot.");
+    }
   }
   const inspectedImage = await required(["image", "inspect", image]);
   await writeFile(join(output, "image-inspect.json"), inspectedImage, { mode: 0o600 });

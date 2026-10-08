@@ -99,6 +99,18 @@ try {
     throw new Error("Application dist changed during frozen source copy.");
   }
   await writeFile(join(output, "frozen-dist.json"), JSON.stringify(distBefore, null, 2), { mode: 0o600 });
+  const bootstrapSources: Record<string, string> = {};
+  for (const path of ["tests/fixtures/speech-bootstrap-channel.ts", "tests/owned-speech/probe.ts", "tests/owned-speech/build-probe.ts",
+    "src/workers/speech-bootstrap.ts", "src/workers/speech-control.ts", "src/workers/speech-entry.ts", "src/workers/speech-protocol.ts",
+    "src/services/speech-client.ts", "src/workers/native-speech.ts"]) {
+    bootstrapSources[path] = await sha(join(packageRoot, path));
+    const destination = join(output, "frozen-source", path);
+    await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+    await cp(join(packageRoot, path), destination, { force: false, errorOnExist: true });
+    if (await sha(destination) !== bootstrapSources[path] || await sha(join(packageRoot, path)) !== bootstrapSources[path]) {
+      throw new Error("Bootstrap source changed during owned snapshot.");
+    }
+  }
   const policyBytes = await pinnedDownload(policy.upstream.url, policy.upstream.sha256, join(output, "moby-default-seccomp.json"));
   await pinnedDownload(policy.upstream.licenseUrl, policy.upstream.licenseSha256, join(output, "LICENSE-moby"));
   const upstream = z.object({
@@ -192,7 +204,7 @@ try {
   if (JSON.stringify(await fileManifest(join(output, "frozen-dist"))) !== JSON.stringify(distBefore)) {
     throw new Error("Frozen application build changed during owned acceptance.");
   }
-  await writeFile(join(output, "input-provenance.json"), JSON.stringify({ image, dist: distBefore, nativeSource, speechPin, headerPin, fixtureHashes,
+  await writeFile(join(output, "input-provenance.json"), JSON.stringify({ image, dist: distBefore, bootstrapSources, nativeSource, speechPin, headerPin, fixtureHashes,
     baselineAddon: await sha(join(output, "ubuntu22-openwhisper_speech.node")),
     electron: await sha(join(packageRoot, "node_modules/electron/dist/electron")),
     test: await sha(join(packageRoot, "tests/utility-speech.test.ts")), probe: await sha(join(fixtureRoot, "probe.ts")),

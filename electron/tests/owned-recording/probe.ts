@@ -5,7 +5,7 @@ import { lstat, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { MainRecordingEffects, DeliveryReceiptCache } from "../../src/main/recording-effects.js";
-import { createUtilitySpeechChannelFactory } from "../../src/main/speech-channel.js";
+import { createFixtureSpeechChannelFactory } from "../fixtures/speech-bootstrap-channel.js";
 import { SpeechClient } from "../../src/services/speech-client.js";
 import { recordingEffectRequestSchema } from "../../src/workers/recording-effects-protocol.js";
 import { MODEL, SAMPLE_COUNT, modeSchema, phaseSchema, probeResultSchema, readySchema, resultSchema } from "./contracts.js";
@@ -72,7 +72,7 @@ export async function runRecordingProbe(recoveryPath: string): Promise<ProbeResu
       approveModel: (model) => model.path === MODEL && model.family === "whisper" && model.gpu === false,
       createSpeech: () => {
         speechCreates++;
-        return new SpeechClient(createUtilitySpeechChannelFactory(), { startupMs: 10000, requestMs: 60000 });
+        return new SpeechClient(createFixtureSpeechChannelFactory(), { startupMs: 10000, requestMs: 60000 });
       },
     });
     for (const samples of [new Float32Array(new ArrayBuffer(16 * 1024 * 1024), 128, 16),

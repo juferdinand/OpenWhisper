@@ -8,8 +8,8 @@ export async function buildParakeetProbe(directory: string): Promise<void> {
   await build({ entryPoints: [join(source, "../fixtures/parakeet-speech.ts")], outfile: join(directory, "probe.mjs"),
     bundle: true, platform: "node", format: "esm", target: "node24", external: ["electron"],
     plugins: [{ name: "actual-packaged-speech", setup(builder) {
-      builder.onResolve({ filter: /src\/(main\/speech-channel|services\/speech-client)\.js$/ }, (args) => ({
-        path: `file:///owned-app/dist/${args.path.includes("speech-channel") ? "main/speech-channel" : "services/speech-client"}.js`, external: true,
+      builder.onResolve({ filter: /src\/(services\/speech-client|workers\/speech-(control|protocol))\.js$/ }, (args) => ({
+        path: `file:///owned-app/dist/${args.path.split("/src/")[1]}`, external: true,
       }));
     } }],
   });

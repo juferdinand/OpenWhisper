@@ -192,3 +192,23 @@ test("shutdown waits for a late startup owner and its confirmed cleanup", async 
   cleanup.accept(); await closing;
   assert.deepEqual(first.requests, []);
 });
+
+for (const category of ["START_FAILED", "NATIVE_FAILED"] as const) {
+  test(`validated ${category} reply preserves its category and disposes its owner`, async () => {
+    const channel = new OwnedChannel(); channel.reply = false;
+    const client = new SpeechClient(async () => channel);
+    const pending = client.gpuDevice(); const rejected = assert.rejects(pending, code(category));
+    await nextTurn(); const input = channel.requests[0]; assert.ok(input);
+    channel.message?.({ version: 1, id: input.id, ok: false, code: category });
+    await rejected; assert.equal(channel.terminated, 1); await client.close();
+  });
+}
+
+test("an unrecognized helper failure category is INVALID_REPLY rather than eligible startup failure", async () => {
+  const channel = new OwnedChannel(); channel.reply = false;
+  const client = new SpeechClient(async () => channel);
+  const pending = client.gpuDevice(); const rejected = assert.rejects(pending, code("INVALID_REPLY"));
+  await nextTurn(); const input = channel.requests[0]; assert.ok(input);
+  channel.message?.({ version: 1, id: input.id, ok: false, code: "private loader details" });
+  await rejected; assert.equal(channel.terminated, 1); await client.close();
+});

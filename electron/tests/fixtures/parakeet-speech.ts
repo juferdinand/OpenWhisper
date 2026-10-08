@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { app, utilityProcess } from "electron";
 import { z } from "zod";
-import { createUtilitySpeechChannelFactory } from "../../src/main/speech-channel.js";
+import { createFixtureSpeechChannelFactory } from "./speech-bootstrap-channel.js";
 import { SpeechClient, SpeechWorkerError, type SpeechChannelFactory } from "../../src/services/speech-client.js";
 import type { SpeechModel } from "../../src/workers/native-speech.js";
 import { PARAKEET_FIXTURE } from "./parakeet-model.js";
@@ -81,7 +81,7 @@ export async function runParakeetProbe() {
   for (let i = 0; i < samples.length; i += 1) samples[i] = pcm.readFloatLE(i * 4);
 
   let parakeetRequests = 0;
-  const actualFactory = createUtilitySpeechChannelFactory();
+  const actualFactory = createFixtureSpeechChannelFactory();
   const observedFactory: SpeechChannelFactory = async (signal) => {
     const channel = await actualFactory(signal);
     return { ...channel, send(request) {
@@ -139,6 +139,6 @@ export async function runParakeetProbe() {
     checks.push("acknowledged native shutdown and utility reap; application remains alive");
     return { result: "PASS", mainAlive: true, checks, original, replacement, processed,
       transcriptSha256: digest(first), transcriptCharacters: first.length, sampleCount: samples.length, timings, versions: process.versions,
-      scope: "Owned Ubuntu22 x64 Electron utility; genuine Parakeet Q4_0 CPU/public English fixture only. No microphone, language override, macOS, GPU or general accuracy proof." };
+      scope: "Owned Ubuntu22 x64 Electron utility; genuine Parakeet Q4_0 CPU/public English fixture only. Historical fixture generic-exit cleanup only; no supervisor OS admission/retirement proof, microphone, language override, macOS, GPU or general accuracy proof." };
   } finally { await client.close(); }
 }

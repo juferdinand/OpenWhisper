@@ -18,7 +18,7 @@ export const speechReplySchema = z.discriminatedUnion("ok", [
     z.strictObject({ command: z.literal("shutdown") }),
     z.strictObject({ command: z.literal("transcribe"), text: speechTextSchema }),
   ]) }),
-  z.strictObject({ ...envelope, ok: z.literal(false), code: z.literal("NATIVE_FAILED") }),
+  z.strictObject({ ...envelope, ok: z.literal(false), code: z.enum(["START_FAILED", "NATIVE_FAILED"]) }),
 ]);
 export type SpeechRequest = z.infer<typeof speechRequestSchema>;
 export type SpeechReply = z.infer<typeof speechReplySchema>;

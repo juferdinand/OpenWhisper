@@ -513,3 +513,32 @@ now allow scheduling; explicit expiry/late-settlement cases retain their short
 budgets. The whole-download test allows zero or one early HEAD and proves the request
 count cannot increase after expiry/gate release. Production deadlines and failure
 categories are unchanged. Fresh Intel native evidence remains required.
+
+### Bootstrap controls before native speech loading
+
+The helper now accepts exactly the fixed absolute binding and a main-created UUID
+epoch. It sends bootstrap availability without loading native code and answers a
+closed, finite challenge protocol with its own PID. Two distinct valid challenges
+are required before ordinary discovery or transcription; shutdown before loading
+also stays entirely in the bootstrap. Native loading has one lazy attempt, with
+separate closed start versus native-operation failure categories. Twenty bootstrap
+tests, ten fixture-channel tests and the expanded client tests pass; together with
+the unchanged protocol checks, the focused set has 44 passing inert tests. Four
+fixture builders generate six modules without executing them.
+
+These controls are a child-side prerequisite, not OS admission. The continuing
+main supervisor must still bracket the original channel with genuine process
+identity checks. Historical owned fixtures use a separately labeled two-challenge
+helper with generic-exit cleanup; it is ineligible for production retirement.
+The old production factory remains unchanged and its old arguments fail closed
+against this entry. Main transport/identity integration and actual execution at
+these new hashes remain separate steps before ordinary app wiring.
+
+The complete Apple Silicon retirement artifact from
+[CI 37729612021](https://github.com/juferdinand/OpenWhisper/actions/runs/37729612021)
+was independently checked against `4cb0bae`: all seven owned child cases reached
+full reap and disposal, and the synthetic Worker completed exactly once during
+Node's work drain before the addon cleanup hook. All recorded source and native
+binary hashes match. This is actual macOS 15.5 arm64 runtime evidence; it does not
+establish Intel execution, macOS 14 runtime, production Metal admission, kernel
+cancellation or signed package loading. Zombie visibility was not observed.

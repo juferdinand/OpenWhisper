@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { cp, lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { buildRecordingProbe } from "./build-probe.js";
@@ -136,11 +136,17 @@ try {
   for (const path of ["tests/owned-recording/run.ts", "tests/owned-recording/build-probe.ts", "tests/owned-recording/entry.ts",
     "tests/owned-recording/probe.ts", "tests/owned-recording/contracts.ts", "tests/owned-recording.test.ts",
     "src/main/recording-effects.ts", "src/workers/recording-effects.ts", "src/workers/recording-effects-protocol.ts",
-    "src/main/speech-channel.ts", "src/services/speech-client.ts", "src/services/adaptive-speech.ts", "src/services/capture.ts",
+    "tests/fixtures/speech-bootstrap-channel.ts", "src/services/speech-client.ts", "src/services/adaptive-speech.ts", "src/services/capture.ts",
     "src/core/recording.ts", "src/core/speech-windows.ts", "src/core/transcript-cleaner.ts", "src/core/vocabulary-corrector.ts", "src/core/snippet-expander.ts",
-    "src/workers/native-capture.ts", "src/workers/recovery.ts", "src/workers/speech-gate.ts", "src/workers/speech-entry.ts",
+    "src/workers/native-capture.ts", "src/workers/recovery.ts", "src/workers/speech-gate.ts", "src/workers/speech-entry.ts", "src/workers/speech-bootstrap.ts", "src/workers/speech-control.ts",
     "src/workers/speech-protocol.ts", "src/workers/native-speech.ts", "native/whisper-source.json", "native/node-headers.json"]) {
     sources[path] = await sha(join(packageRoot, path));
+    const destination = join(output, "frozen-source", path);
+    await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+    await cp(join(packageRoot, path), destination, { force: false, errorOnExist: true });
+    if (await sha(destination) !== sources[path] || await sha(join(packageRoot, path)) !== sources[path]) {
+      throw new Error("Owned source changed during snapshot.");
+    }
   }
   const inspectedImage = await required(["image", "inspect", image]);
   await writeFile(join(output, "image-inspect.json"), inspectedImage, { mode: 0o600 });
@@ -169,7 +175,7 @@ try {
     captureManifestSha256: await sha(join(capturePacket, "source-manifest.json")), baseline, capturePacket, electronSha256: await sha(join(packageRoot, "node_modules/electron/dist/electron")),
     packageLockSha256: await sha(join(packageRoot, "package-lock.json")), seccompSha256: await sha(seccomp),
     probeSha256: await sha(join(output, "probe.mjs")), entrySha256: await sha(join(output, "entry.mjs")),
-    scope: "Actual Electron synthetic capture/recovery/adaptive/bounded CPU speech broker, private-Xvfb clipboard and running-main receipt cache. Fresh CPU backend-profile speech build graph and final capture graph retained separately. No host audio, services, mounts, stable data, auto-paste or history.",
+    scope: "Actual Electron synthetic capture/recovery/adaptive/bounded CPU speech broker, private-Xvfb clipboard and running-main receipt cache. Fresh CPU backend-profile speech build graph and final capture graph retained separately. Speech transport cleanup is the historical fixture generic-exit signal, not supervisor OS admission/retirement proof. No host audio, services, mounts, stable data, auto-paste or history.",
   }, null, 2), { mode: 0o600 });
   await required(["start", container]);
   await required(["cp", `${container}:/etc/openwhisper-test-packages.txt`, join(output, "distro-packages.txt")]);

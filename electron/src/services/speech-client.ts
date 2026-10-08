@@ -79,7 +79,7 @@ export class SpeechClient {
     }
     this.pending = undefined;
     if (reply.data.ok) pending.accept(reply.data);
-    else { pending.reject(new SpeechWorkerError("NATIVE_FAILED")); this.dispose(); }
+    else { pending.reject(new SpeechWorkerError(reply.data.code)); this.dispose(); }
   }
 
   private fail(code: SpeechFailureCode): void {

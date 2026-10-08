@@ -1,10 +1,12 @@
 import type {} from "electron";
 import { loadNativeSpeech } from "./native-speech.js";
-import { executeSpeechRequest, speechReadySchema } from "./speech-protocol.js";
+import { createSpeechBootstrap } from "./speech-bootstrap.js";
+import { speechBootstrapArgumentsSchema } from "./speech-control.js";
 
-const binding = process.argv[2];
-if (!binding || (!process.parentPort && !process.send)) process.exit(1);
-const native = loadNativeSpeech(binding);
+const args = speechBootstrapArgumentsSchema.safeParse(process.argv.slice(2));
+if (!args.success || (!process.parentPort && !process.send)) process.exit(1);
+const [binding, epoch] = args.data;
+const bootstrap = createSpeechBootstrap({ binding, epoch, pid: process.pid, load: loadNativeSpeech });
 
 const send = (value: unknown): void => {
   if (process.parentPort) process.parentPort.postMessage(value);
@@ -12,10 +14,10 @@ const send = (value: unknown): void => {
   else process.exit(1);
 };
 const receive = (input: unknown): void => {
-  try { send(executeSpeechRequest(native, input)); }
+  try { send(bootstrap.receive(input)); }
   catch {
     // Malformed helper frames terminate this disposable worker without diagnostics.
-    native.shutdown();
+    bootstrap.close();
     process.exit(1);
   }
 };
@@ -24,6 +26,6 @@ if (process.parentPort) process.parentPort.on("message", (event) => {
   receive(input);
 });
 else process.on("message", receive);
-process.once("disconnect", () => { native.shutdown(); process.exit(0); });
-process.once("SIGTERM", () => { native.shutdown(); process.exit(0); });
-send(speechReadySchema.parse({ version: 1, type: "ready" }));
+process.once("disconnect", () => { bootstrap.close(); process.exit(0); });
+process.once("SIGTERM", () => { bootstrap.close(); process.exit(0); });
+send(bootstrap.ready);
