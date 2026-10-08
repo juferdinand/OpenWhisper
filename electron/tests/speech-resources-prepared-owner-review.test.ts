@@ -197,8 +197,10 @@ test("artifact close refusal retains a genuine unlinked root directory descripto
     assert.equal(directories.length, 1); assert.equal(directoryCloses, 0);
     const directory = directories[0]; assert.ok(directory);
     await rm(root, { recursive: true });
+    await assert.rejects(lstat(root), (error: unknown) =>
+      typeof error === "object" && error !== null && Reflect.get(error, "code") === "ENOENT");
     const retained = await directory.stat({ bigint: true });
-    assert.equal(retained.isDirectory(), true); assert.equal(retained.nlink, 0n);
+    assert.equal(retained.isDirectory(), true);
     assert.equal(retained.dev, original.dev); assert.equal(retained.ino, original.ino);
     await mkdir(replacement, { mode: 0o700 });
     const newer = await lstat(replacement, { bigint: true });

@@ -471,3 +471,11 @@ The Apple fixture now records bounded categorical Worker stages, validated nativ
 counters and termination state. Its four original cleanup assertions, native
 source, ownership guards and production deadlines are unchanged. Fresh CI is
 required to identify the failed assertion before changing cleanup behavior.
+
+The next CI exposed a fixture assumption before native execution: macOS reports
+`nlink=2` for the still-open removed directory, where the owned Linux run reported
+zero. The cross-platform test now requires actual pathname absence plus the live
+descriptor's original dev/inode and a different replacement identity. It does not
+infer pathname removal from a platform-specific link count. Catalog source and
+Apple native assertions remain unchanged; the earlier Linux observation is retained
+at its exact historical test source.
