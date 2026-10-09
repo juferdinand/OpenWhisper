@@ -14,180 +14,56 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | --- | --- | --- |
 | Plan and architecture | Reviewed plan, repository research answers and issue/PR review recorded | Keep decisions aligned with final implementation |
 | Shared interface and services | Existing design, strict TS bridge, isolated Dev profile, settings, models/history and localized shared-owner tray actions; sandboxed recording overlay connected | Native tray presentation, assembled Mac overlay and remaining platform behaviors |
-| Linux dictation | Normal UI, CPU recognition, clipboard, Retry/Discard and graceful Quit pass on private Ubuntu22 and stock Kubuntu/KDE 5.27 native Wayland with virtual audio; background Wayland publication and actual GTK target insertion also pass. The normal stable package passes migration, saved-WAV Retry, X11 dictation and restart in an owned profile | Startup-failure cleanup under resource pressure; remaining desktop control, overlays and accelerated inference |
-| macOS dictation | CPU recording, microphone permission, RAM Retry/Discard, shared tray/overlay and guarded Accessibility paste are connected. Actual Apple Silicon/Intel Dev apps pass startup, sandbox, signed production utilities, real CPU recognition of pinned public audio, keyboard setup/removal and original Quit in CI37842623817 | Physical microphone/TCC, actual target insertion and device changes; Metal selection remains open |
-| Linux desktop integration | Stock KDE 5.27 native Wayland F8, cancellation, binding Quit/crash recovery and paste into Wayland/XWayland editors pass. The guarded native overlay passes pointer Cancel/Stop and foreground editor keyboard delivery. Genuine X11 native F8 capture, held/repeated keys, CPU dictation, clipboard/history and Retry/Discard pass in private Xvfb, including the stable package | Stable command control; expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
+| Linux dictation | CPU recognition, clipboard/history, Retry/Discard and original cleanup pass in exact Dev/stable packages with private virtual audio. The installed stable package also passes migration, command control, autostart and permanent-target restart | Accelerated inference; an earlier final-Quit hang did not reproduce and remains unclassified |
+| macOS dictation | Actual Intel/Apple Silicon Dev packages pass sandbox, signed utilities, CPU recognition of public audio, shortcut setup/removal and original Quit. Normal stable packages pass migration, edited-state restart and clean exits at b892d86 | Physical microphone/TCC, actual target insertion and device changes; Metal selection remains open |
+| Linux desktop integration | Owned stock KDE 5.27 native Wayland F8, binding Quit/crash recovery and paste into separate Wayland/XWayland editors pass. Genuine X11 shortcuts and all five no-display CLI commands pass, including installed stable autostart enable/disable and generated-target restart | Expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
-| Packaging and updates | Ubuntu22-built Dev directory/.deb and a freshly compiled unsigned stable Linux package pass exact-package X11 dictation/recovery/cleanup. Stable profile migration, saved-WAV Retry and restart pass in 47.29s. Fresh local Dev installation through embedded Node passes Linux X11 and Mac package checks on both architectures. Mac stable selection, archival plist migration and read-only native admission are implemented | Actual Mac migration/runtime acceptance, archive download, existing-version replacement/upgrade, Electron AppImage/universal DMG+ZIP, autostart, release signing and old-client update checks |
+| Packaging and updates | Exact Ubuntu22 Dev/stable .deb construction and owned runtime pass. Debian retains io-github-whisperfree. Fresh local Dev installation passes Linux and both Mac architectures; normal Mac stable runtime passes. Pure source/version policy and real fixed-key Linux signature checks pass, including actual Electron execution | Mac publisher continuity, owned-file/download/installation adapters, authenticated Dev replacement, existing-version upgrade, AppImage/universal DMG+ZIP and release signing |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
-Stable data services now accept resolved stable profiles while retaining Dev
-restrictions. Existing safe models remain at their original locations and modes;
-new downloads remain private. Pure Linux/Mac converters preserve source settings,
-history and unsupported trigger details. The compiled Linux startup worker passes
-an owned filesystem fixture: complete initial migration, production preferences/
-model reads, actual saved-WAV recovery, repeat after settings edits, Discard without
-replay, original-data preservation and partial-state refusal. Publication cannot
-replace existing data, and audio copying uses bounded memory without a recording
-duration limit. The same fixture also passes through a fresh Dev package's own
-embedded Node. P27 now verifies a fresh stable Linux package's normal main/shared
-UI: migration precedes private path/service setup, the saved WAV is retried through
-the UI, CPU dictation confirms clipboard/history, and restart retains edits and
-Discard without replay. Legacy originals, in-place models and the separate Dev
-sentinel remain unchanged; no Dev control owner appears. Actual X11 WM_CLASS
-matches `io.github.whisperfree`. The owned case passes in 47.29s with original
-application/server closes and container removal confirmed.
-The exact stable package also passes the embedded Node startup fixture; a fresh
-default Dev package from the same frozen source passes the X11 regression in 43.22s.
+## Current package checkpoint
 
-The unsigned `.deb` remains `0.3.0~dev.58169b3a8cc1.modified`, preserving producer
-58169b3a8cc167e7538f434e02f95fe437f46d68+modified. It opens the real stable profile;
-the tested HOME/XDG roots were disposable. Current installations remain untouched.
-The retained first attempt failed because saved-WAV recovery was invisible until
-recording configuration; pre-UI worker configuration fixes that without opening a
-capture stream. Autostart/updater, installation
-transitions and release continuity remain open. P27 local source checks pass
-1023 tests with 14 explicit skips and 62 shared UI tests; independent reviews pass.
-Committed [CI37852647513](https://github.com/juferdinand/OpenWhisper/actions/runs/37852647513)
-passes all six jobs for P27 at `40805be`.
+[CI37862779046](https://github.com/juferdinand/OpenWhisper/actions/runs/37862779046)
+passes all six jobs at clean `b892d861921fd51c6a1de2e35c987a0bd620ac9b`, including
+the complete owned Mac jobs on Intel and Apple Silicon. Each Mac job passes the
+signed Dev capture-close check and normal stable first launch, read-only migration,
+shortcut setup/removal, edited-state restart and original clean exits. The Mac
+migration worker uses an empty OS preference domain and synthetic host facts; this
+does not establish persistent-signature or nonempty 0.2.5 preference transitions.
 
-The next Mac increment decodes binary/XML plist bytes with fixed CoreFoundation
-APIs, preserves exact raw backups and unsupported native values, and publishes
-private configuration exclusively. It checks that the old host is stopped and
-that the preference-service snapshot agrees with the archival bytes. Completed
-migration retains later edits without querying or replaying the old profile.
-Stable bundle metadata/signature admission and factual login/hardware context are
-connected before startup migration. Independent review passes; local typing,
-build, compiled Linux regression and 1050 tests pass with 25 explicit skips.
-Actual CF/AppKit/APFS behavior and the compiled Mac worker pass on
-[Apple Silicon](https://github.com/juferdinand/OpenWhisper/actions/runs/37855692180/job/113579185090)
-and [Intel](https://github.com/juferdinand/OpenWhisper/actions/runs/37855692180/job/113579185034)
-at `f31bea4`. Each Mac suite passes 1032 tests with 43 explicit skips and zero failures;
-the subsequent native empty-domain worker and existing Dev package gates also pass.
-The owned worker uses an empty OS preference domain and synthetic host facts;
-it cannot establish a nonempty 0.2.5 cache or persistent-signature/login transition.
-Ad-hoc thin stable packages are validation artifacts, not releases.
+Fresh Ubuntu22 stable build8 and Dev build9 retain that exact clean source. The
+Dev package passes its full owned X11 runtime in 43.96 seconds. Installed stable
+passes all eighteen checks in 58.92 seconds: ordinary Debian installation,
+migration, CPU dictation, clipboard/history, recovery, all CLI commands, autostart
+enable/disable, read-only refresh and restart through the fixed permanent target.
+The final restarted original PID exits 0, all owned servers close normally and the
+container is removed. The earlier attempt hung at final Quit; this did not
+reproduce with the same immutable package and bounded close observations. No
+production fix was made, and the original failure remains unclassified. These
+unsigned packages establish automated container acceptance, not a release, real
+login-session launch or physical-device coverage.
 
-The next reviewed source increment connects pre-ready Linux `--control` to one
-captured stable/Dev endpoint and preserves the legacy content-free JSON status.
-Action gating remains separate from observation. Stable launch-at-login adapters
-are connected: Debian uses only its verified permanent `/opt` layout; Mac uses
-typed `mainAppService` facts, including pending approval. Startup only reads facts;
-registration changes require an explicit settings action. Persisted requests survive
-unavailable capabilities, and late status reads cannot overwrite newer facts.
-The initial [CI at `9349566`](https://github.com/juferdinand/OpenWhisper/actions/runs/37858180435)
-finds a missing desktop validator and a Mac profile failure. Corrective
-[CI at `2003831`](https://github.com/juferdinand/OpenWhisper/actions/runs/37859812420)
-passes both TypeScript jobs and existing Dev gates; fixed diagnostics identify the
-same Mac failure on ARM/Intel: `LOGIN_STATE_UNKNOWN`, observed login `not-found`.
-Migration now preserves that known state with the old native requested=false
-mapping. Autostart control remains unavailable, unknown facts still refuse initial
-migration and completed profiles retain edits. No registration occurs.
-At `b3e1d4a`, the [Intel owned Mac job](https://github.com/juferdinand/OpenWhisper/actions/runs/37860813852/job/113595823107)
-passes the normal stable package's first launch, read-only migration, shortcut
-setup/removal, edited-state restart and original clean exits. The ARM Dev smoke
-fails while waiting for its capture-close reply, before stable acceptance. Both
-capture entries posted that reply and immediately exited, which could overtake
-IPC delivery. The reviewed correction leaves successful close termination to the
-existing parent, after the matching reply; signal and broken-parent retirement
-paths remain. The signed Mac smoke follows that same ownership and retains numeric
-exit observations. Actual corrected-package acceptance remains open.
-Independent reviews, strict typing and 1091 local tests pass with 25 explicit skips
-and zero failures in 17.78s.
+The fixed-key Linux signature helper verifies real cached 0.2.5 Debian/AppImage
+bytes and streams with independent Rust-oracle agreement. Electron 44.7.0 /
+embedded Node 24.21.0 lacks native BLAKE2b-512, so the helper uses exactly pinned
+TypeScript `@noble/hashes` for that digest and retains Node Ed25519 verification.
+All nine cases pass in that actual runtime in 20.25 seconds, including both real
+packages and payload/key/comment/version/mode/stream negatives. This uses the
+same immutable Dev9 executable and a separate compiled helper fixture; it does
+not establish packaged updater wiring. Original MIT notices are included by both
+packagers. Updates remain inactive pending owned-file, download and installation
+adapters. The separate Mac signature adapter now obtains the current running
+application's designated requirement and checks all architectures, nested code
+and strict sealed resources through Apple's APIs. Nine focused ownership/failure
+checks and independent reviews pass; actual Mac execution is pending the matching
+CI. Neither helper enables updater UI or installation.
 
-Fresh Ubuntu22 packages retain clean producer `2003831`. Native auth/expiry and
-ordinary inspector-prefixed GUI startup pass in the owned bus fixture. The exact
-Dev package's first run fails to discover its private virtual audio source before
-dictation. A fresh diagnostic package finds the source without resource-pressure
-events; it does not include the capture-close correction, so the earlier failure
-cannot yet be classified as fixed. Its actual no-display CLI status passes strict
-JSON, exit 0 and original process retirement. A Chromium warning refers solely
-to the fixture's explicitly absent private system-bus socket; the test now accepts
-only that exact original-PID warning. A bounded metadata probe identifies only
-native Fontconfig cache files; HOME, configuration and data remain absent. The
-owned check permits this exact cache tree while continuing to reject application
-profiles, unexpected entries and links. Final matching-package acceptance remains open.
-The matching stable Debian harness
-verifies archive contents before container-only installation, UI autostart and
-generated permanent-target restart. Its first attempt stops at a private archive
-permission boundary before application launch; a public-archive-only stage fixes
-that harness boundary without adding container capabilities. The next attempt
-installs the exact package and passes ordinary migration and read-only startup/focus
-autostart checks. Its CLI status also succeeds; the same owned-system-bus warning
-stops the original overly strict stderr assertion. Remaining dictation, all commands,
-UI autostart and generated-target restart acceptance is still required. The next
-stable package restores Debian `io-github-whisperfree`, matching the old updater;
-dotted app/desktop identity remains unchanged. Previous validation archives remain
-immutable and do not prove upgrade continuity. Actual login-session launch remains
-explicitly untested.
-Earlier separately attributed migration/dictation evidence remains valid.
-
-The strict TS update policy now validates exact UInt64 versions, Mac release
-sources and fixed Linux package/feed targets. Candidates remain explicitly
-unauthenticated. It does not enable checks, downloads, installation or update UI;
-real signature and installation adapters remain required.
-
-The current checkpoint includes actual stock KDE keyboard dictation, recovery
-after a held-key/GUI cancellation sequence and same-profile crash recovery. Explicit
-keyboard permission and F8 CPU dictation now insert into a separate owned native
-Wayland or inner XWayland target with exact cross-client clipboard/history agreement. A TypeScript
-adapter uses installed clipboard tools; no new C/C++ source is required.
-Explicit setup releases a dead KDE action before window key capture; normal Quit
-also releases an active binding. Native terminal failures retain their
-original failure; only verified stale owners permit safe reference cleanup.
-Prior startup/pressure failures remain retained. It does not change the installed application or publish
-a release. [Dev instructions](ELECTRON-DEVELOPMENT.md) explain the currently runnable
-build; [automated evidence](ELECTRON-DEV-EVIDENCE.md) records its exact tested scope.
-
-The new native Wayland overlay probe failed focus retention, matching Electron's
-documented inactive-show limitation. Its BrowserWindow path is guarded while
-ordinary native Wayland dictation remains checked. The app is not globally forced
-to XWayland. The full native layer-shell gate is still required; the explicit
-XWayland overlay pass does not complete it.
-
-A strict TypeScript GTK/layer-shell prototype now paints the same trusted Electron
-overlay offscreen. A separate native GTK editor confirms that the previous normal
-surface role really lost keyboard delivery after a click. Selecting KWin's dock
-role fixes that case: all four keyboard markers before/after Cancel and Stop pass
-without refocusing; actual native pixels, F8/private capture, CPU recognition,
-independent clipboard/history and original cleanup pass in 28.50 seconds.
-KWin stacks this role below active fullscreen and keep-above windows. That behavior
-and other compositors remain unresolved, so the explicit
-`--experimental-wayland-overlay` switch and main-control fallback remain.
-The full L-OVERLAY gate stays open. CI at committed `de495e6` passes all six jobs;
-that result does not validate subsequent uncommitted inputs or relabel older artifacts.
-
-The genuine-X11 adapter uses the existing platform utility and strict TypeScript
-Koffi calls, preserving the legacy keycode/keysym/modifiers/group profile separately
-from KDE preferences. Native capture requires actual X11 focus ancestry. In private
-Xvfb the server confirms the owned main window as its keyboard target while
-Electron reports it unfocused. Initial keyboard mapping notices can now precede
-the first captured candidate; later mapping changes still retire a captured or
-active binding. The owned case passes real F8 setup, Escape preservation,
-held/repeated keys, safe cancellation, CPU dictation, clipboard/history,
-trigger removal, Retry/Discard and original cleanup in 40.99 seconds.
-See the [exact evidence](ELECTRON-DEV-EVIDENCE.md). A separate private Ubuntu22
-native build removes the first host preview's GLIBC2.43 dependency. Its actual
-packaged executable passes the same X11 dictation/recovery checks in 41.78 seconds,
-with its own resources/app, captured descriptor and native inputs unchanged.
-Its frozen metadata remains de495e6+modified. This is owned package execution on
-the pinned Kubuntu24.04 image; host installation, other distributions and signed
-release acceptance remain separate.
+The complete signature increment passes strict typing, the ordinary application/
+shared-UI build and 1110 unit tests with zero failures and 26 explicit native or
+opt-in skips in 17.30 seconds. Focused real-artifact checks and actual Electron
+execution are separate from those skipped default-suite cases.
 
 ## Delivery order and execution limits
-
-The Mac regular-key adapter uses Electron globalShortcut and the same immutable
-recording control leases. Explicit press/release setup, Escape/blur restoration,
-conflicts, removal and shutdown have nine inert checks. The saved Mac accelerator
-is host-owned and independent of Linux profiles; Dev startup does not bind it.
-The shared UI explains toggle-only mode and disables hold selection.
-Fn, modifier-only and mouse input are not implemented by this adapter. Strict
-typing/build and 31 focused integration cases pass; the full unit suite has 929
-passes and 14 explicit skips, and all 60 shared UI cases pass. Actual assembled
-Mac shortcut/package execution now passes on [Apple Silicon](https://github.com/juferdinand/OpenWhisper/actions/runs/37830955196/job/113495848864)
-and [Intel](https://github.com/juferdinand/OpenWhisper/actions/runs/37830955196/job/113495849495).
-The owned VM input targets only the app's Chromium window; this does not establish
-physical global-shortcut activation, microphone access, or insertion into another app.
 
 Owner scope adjustment, 2026-10-08: finish the current genuine-X11 increment,
 then defer expanded Linux desktop/special-input matrices to existing bug reports.

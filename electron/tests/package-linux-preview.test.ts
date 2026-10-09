@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -10,6 +10,7 @@ import { developmentRecordingDescriptorSchema } from "../src/main/development-re
 import { SPEECH_ENTRY_FILES } from "../src/services/speech-entry-graph.js";
 
 const supportedHost = process.platform === "linux" && process.arch === "x64";
+const nobleSource = new URL("../node_modules/@noble/hashes/", import.meta.url);
 
 async function fixture() {
   const base = await mkdtemp(join(tmpdir(), "openwhisper-package-preview-")), root = join(base, "source/electron");
@@ -17,11 +18,14 @@ async function fixture() {
     await mkdir(join(root, path, ".."), { recursive: true }); await writeFile(join(root, path), text);
   };
   const metadata = JSON.stringify({ name: "openwhisper-electron", version: "0.3.0", private: true, type: "module",
-    main: "dist/main/index.js", dependencies: { fixture: "1.0.0" }, devDependencies: { electron: "44.7.0" } });
+    main: "dist/main/index.js", dependencies: { fixture: "1.0.0", "@noble/hashes": "2.4.0" }, devDependencies: { electron: "44.7.0" } });
   await write("package.json", metadata);
   await write("package-lock.json", JSON.stringify({ lockfileVersion: 3, packages: {
     "node_modules/fixture": { version: "1.0.0" }, "node_modules/@fixture/linux-x64": { version: "1.0.0" },
+    "node_modules/@noble/hashes": { version: "2.4.0" },
   } }));
+  await mkdir(join(root, "node_modules/@noble"), { recursive: true });
+  await cp(nobleSource, join(root, "node_modules/@noble/hashes"), { recursive: true });
   await write("node_modules/fixture/package.json", JSON.stringify({ name: "fixture", version: "1.0.0",
     optionalDependencies: { "@fixture/linux-x64": "1.0.0", "@fixture/darwin-arm64": "1.0.0" } }));
   await write("node_modules/fixture/LICENSE", "Fixture dependency license");
@@ -53,11 +57,11 @@ async function stableRecording(input: Awaited<ReturnType<typeof fixture>>) {
   await input.write("dist/main/application-build.js", 'export const APPLICATION_BUILD = {"version":1,"kind":"stable","appId":"io.github.whisperfree","productName":"OpenWhisper"};\n');
   const metadata: unknown = JSON.parse(input.metadata);
   assert.ok(metadata && typeof metadata === "object");
-  await input.write("package.json", JSON.stringify({ ...metadata, dependencies: { fixture: "1.0.0", zod: "4.6.5" } }));
+  await input.write("package.json", JSON.stringify({ ...metadata, dependencies: { fixture: "1.0.0", zod: "4.6.5", "@noble/hashes": "2.4.0" } }));
   const lock: unknown = JSON.parse(await readFile(join(input.root, "package-lock.json"), "utf8"));
   assert.ok(lock && typeof lock === "object");
   await input.write("package-lock.json", JSON.stringify({ ...lock, packages: { "node_modules/fixture": { version: "1.0.0" },
-    "node_modules/@fixture/linux-x64": { version: "1.0.0" }, "node_modules/zod": { version: "4.6.5" } } }));
+    "node_modules/@fixture/linux-x64": { version: "1.0.0" }, "node_modules/zod": { version: "4.6.5" }, "node_modules/@noble/hashes": { version: "2.4.0" } } }));
   await input.write("node_modules/zod/package.json", JSON.stringify({ name: "zod", version: "4.6.5" }));
   await input.write("node_modules/zod/index.js", "inert locked dependency fixture");
   for (const path of SPEECH_ENTRY_FILES.filter((path) => path !== "package.json")) await input.write(path, "inert speech graph fixture");
@@ -102,9 +106,23 @@ test("preview stages the runtime, exact app metadata, installed optional depende
     assert.match(control, /^Version: 0\.3\.0~dev\./mu);
     assert.equal(await readFile(join(result.directory, "LICENSES.chromium.html"), "utf8"), "Fixture Chromium notices");
     assert.equal(await readFile(join(result.directory, "notices/tauri-api-LICENSE-MIT"), "utf8"), "Fixture renderer dependency LICENSE-MIT");
+    const license = await readFile(new URL("LICENSE", nobleSource));
+    assert.equal(createHash("sha256").update(license).digest("hex"), "4f221aee6e072336700c408c68ab3b96a3fc09f6aebe6f48f1bd99e5ef13faec");
+    assert.deepEqual(await readFile(join(result.directory, "notices/noble-hashes-LICENSE")), license);
+    assert.deepEqual(await readFile(join(app, "node_modules/@noble/hashes/LICENSE")), license);
+    assert.deepEqual(await readFile(join(app, "node_modules/@noble/hashes/blake2.js")), await readFile(new URL("blake2.js", nobleSource)));
     await assert.rejects(lstat(join(app, "node_modules/electron")), { code: "ENOENT" });
     await assert.rejects(lstat(join(result.debianRoot, "usr/share/applications/io.github.whisperfree.desktop")), { code: "ENOENT" });
     await assert.rejects(packageLinuxPreview({ root: input.root, output: input.output, directoryOnly: true }), /fresh directory/);
+  } finally { await rm(input.base, { recursive: true, force: true }); }
+});
+
+test("preview refuses a missing noble license before creating package output", { skip: !supportedHost }, async () => {
+  const input = await fixture();
+  try {
+    await rm(join(input.root, "node_modules/@noble/hashes/LICENSE"));
+    await assert.rejects(packageLinuxPreview({ root: input.root, output: input.output, directoryOnly: true }), { code: "ENOENT" });
+    await assert.rejects(lstat(input.output), { code: "ENOENT" });
   } finally { await rm(input.base, { recursive: true, force: true }); }
 });
 

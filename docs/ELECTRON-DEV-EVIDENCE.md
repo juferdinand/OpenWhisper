@@ -1,5 +1,70 @@
 # Electron development evidence
 
+## Exact b892d86 installed Linux and Mac package checkpoint
+
+Clean producer: `b892d861921fd51c6a1de2e35c987a0bd620ac9b`.
+[CI37862779046](https://github.com/juferdinand/OpenWhisper/actions/runs/37862779046)
+passes all six jobs. Both owned Mac jobs pass signed Dev capture-close and normal
+stable first launch, read-only migration, shortcut setup/removal, edited-state
+restart and original clean exits. The empty-domain worker uses synthetic host
+facts; persistent 0.2.5 signature/login transitions are separate.
+
+The Ubuntu22-built stable archive
+`OpenWhisper-Linux-amd64_0.3.0~dev.b892d861921f.deb` retains Debian identity
+`io-github-whisperfree`, 141,253,222 bytes, SHA-256
+`5f178f0867481f7f060ddf8e3ce1e222a088ef6e3065e40b996eb78155f5d13c`.
+Dev archive SHA-256 is
+`7a5d5a1b08320838b9f9fddd14b3400057b5c84a5548f0e233c4aaed7ae5a7ab`.
+The exact Dev package passes the owned X11 runtime in 43.96 seconds. The exact
+installed stable package passes eighteen checks in 58.92 seconds: ordinary Debian
+installation, migration, public-audio CPU recognition, clipboard/history,
+Retry/Discard, native X11 shortcuts, all five CLI commands, absent-owner refusal,
+autostart enable/disable, read-only refresh and permanent-target restart.
+
+The latest restarted original app exits 0; its close event and PID absence are
+observed, all owned servers close, and the private container is removed without
+forced app termination. Package contents/modes, returned archive hash, legacy
+originals, in-place models and the separate Dev sentinel remain unchanged. The
+earlier attempt hung at final Quit. The same immutable package passes with bounded
+close observations; no production fix was made and that failure is unclassified.
+
+This is automated non-root container acceptance with private Xvfb, audio and buses.
+It does not establish real login-session launch, physical microphone/GPU coverage,
+automatic paste, signed public upgrade or universal release packaging. Installed
+user applications remain unchanged. [Current status](ELECTRON-STATUS.md) lists
+remaining replacement work; earlier receipts below retain their original scope.
+
+## Fixed-key Linux signatures in the actual Electron runtime
+
+The real cached 0.2.5 Debian/AppImage and their original signature/feed files are
+checksum-pinned before and after use. Standalone Node checks agree with the
+existing Rust verifier. Actual Electron 44.7.0 / embedded Node 24.21.0 first
+refuses native BLAKE2b-512; that failed receipt remains retained. The narrow TS
+helper replaces only this digest with pinned `@noble/hashes` 2.4.0, retaining the
+publisher key, Node Ed25519, both signatures and exact signed-version rule.
+
+The corrected separately compiled fixture passes all nine cases in 20.25 seconds
+using the same immutable Dev9 executable, UID1000, no network, devices or host
+desktop/audio sockets. Both real packages pass raw-byte and bounded-stream checks;
+changed payload/key/comment/version/mode, malformed envelopes and stream errors
+are refused. No private signing key, generated publisher, GUI, package rebuild
+or installation is used. Package/assets remain independently pinned. Both package
+fixtures preserve the actual dependency and MIT notice bytes. Supplied-byte
+authentication does not establish filesystem ownership, download, installation
+or release continuity; those adapters remain separate.
+
+## Mac update signature source
+
+The strict TS adapter preserves the old Swift current-self/static-self/designated-
+requirement chain and Security validation flags for all architectures, nested code
+and strict sealed resources. Existing pinned Koffi calls Apple's APIs; no C/C++
+source, replacement publisher input or installer is added. Nine focused inert
+ownership/error checks pass and independent review accepts the source. The
+existing owned Mac smoke now tests the running package against itself, valid
+different ad-hoc identity, unsigned code and a changed sealed resource. Actual
+execution awaits the matching Intel/Apple Silicon CI; thin ad-hoc fixtures cannot
+establish universal or persistent 0.2.5 release-signature continuity.
+
 ## Mac archival migration and native empty-domain worker PASS
 
 The reviewed source adds a bounded CoreFoundation XML/binary decoder, read-only

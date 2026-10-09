@@ -80,6 +80,7 @@ let identity: { executable: string; appPath: string; packaged: boolean; name: st
 let stage = "launch", passed = false;
 let failure: { name: string; message?: string } | undefined;
 let nativeUtilityLoading: unknown;
+let signatureAdmission: unknown;
 let installation: unknown;
 let stableMigration: unknown;
 let restartExit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
@@ -164,6 +165,51 @@ try {
     assert.equal(identity.userData, configRoot); assert.equal(identity.sessionData, join(cacheRoot, "session"));
   } else assert.ok(identity.userData.startsWith(`${profile}/`) && identity.sessionData.startsWith(`${profile}/`));
   checks.push(`Actual packaged executable and Resources/app; isolated ${variant} storage; sandboxed shared UI`);
+  stage = "owned-update-signature-admission";
+  const verifyCandidate = async (candidate: string) => z.strictObject({ accepted: z.boolean(), code: z.enum(["INVALID_PATH", "UNSUPPORTED_HOST", "NATIVE_UNAVAILABLE",
+    "NATIVE_RESULT_INVALID", "CURRENT_SIGNATURE_UNAVAILABLE", "INVALID_SIGNATURE", "RELEASE_FAILED"]).nullable(),
+    osStatus: z.number().int().nullable() }).parse(await application!.evaluate(({ app }, staged: string) => {
+    const modules = process.getBuiltinModule("module"), path = process.getBuiltinModule("path");
+    if (!modules || !path) throw new Error("Owned signature test dependencies are unavailable.");
+    const packagedRequire = modules.createRequire(path.join(app.getAppPath(), "package.json"));
+    const service = packagedRequire(path.join(app.getAppPath(), "dist/services/macos-update-signature.js")) as typeof import("../src/services/macos-update-signature.js");
+    try { service.verifyMacosUpdateSignature(staged); return { accepted: true, code: null, osStatus: null }; }
+    catch (error: unknown) {
+      if (!(error instanceof service.MacosUpdateSignatureError)) throw new Error("Unexpected owned signature failure.");
+      return { accepted: false, code: error.code, osStatus: error.osStatus ?? null };
+    }
+  }, candidate));
+  const signatureCases: { name: "self" | "different-identity" | "unsigned" | "tampered"; result: Awaited<ReturnType<typeof verifyCandidate>> }[] = [];
+  signatureAdmission = { cases: signatureCases, flags: 25, architecture: process.arch,
+    scope: "Actual running package requirement; ad-hoc owned fixtures only; no persistent 0.2.5 publisher, universal artifact or install authorization claim" };
+  stage = "update-signature-self";
+  const selfSignature = await verifyCandidate(bundle); signatureCases.push({ name: "self", result: selfSignature });
+  assert.deepEqual(selfSignature, { accepted: true, code: null, osStatus: null });
+  const signatureRoot = join(evidence, "signature-candidates"); await mkdir(signatureRoot, { mode: 0o700 });
+  const wrongRoot = join(signatureRoot, "different-identity"), tamperedRoot = join(signatureRoot, "tampered");
+  for (const path of [wrongRoot, tamperedRoot]) await mkdir(path, { mode: 0o700 });
+  const wrongBundle = join(wrongRoot, `${capturedBuild.productName}.app`), tamperedBundle = join(tamperedRoot, `${capturedBuild.productName}.app`);
+  for (const candidate of [wrongBundle, tamperedBundle]) execFileSync("/usr/bin/ditto", [bundle, candidate], { env: environment, timeout: 120_000, stdio: "ignore" });
+  execFileSync("/usr/bin/codesign", ["--force", "--sign", "-", "--identifier", "io.github.whisperfree.owned-wrong-publisher", "--timestamp=none", wrongBundle],
+    { env: environment, timeout: 15_000, stdio: "ignore" });
+  execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", wrongBundle], { env: environment, timeout: 15_000, stdio: "ignore" });
+  stage = "update-signature-different-identity";
+  const differentIdentity = await verifyCandidate(wrongBundle); signatureCases.push({ name: "different-identity", result: differentIdentity });
+  assert.equal(differentIdentity.accepted, false); assert.equal(differentIdentity.code, "INVALID_SIGNATURE");
+  execFileSync("/usr/bin/codesign", ["--remove-signature", wrongBundle], { env: environment, timeout: 15_000, stdio: "ignore" });
+  stage = "update-signature-unsigned";
+  const unsigned = await verifyCandidate(wrongBundle); signatureCases.push({ name: "unsigned", result: unsigned });
+  assert.equal(unsigned.accepted, false); assert.equal(unsigned.code, "INVALID_SIGNATURE");
+  const sealedResource = join(tamperedBundle, "Contents/Resources/app/dist/resources/VERSION");
+  assert.ok((await lstat(sealedResource)).isFile() && !(await lstat(sealedResource)).isSymbolicLink());
+  await writeFile(sealedResource, "owned-invalid-sealed-resource\n");
+  stage = "update-signature-tampered";
+  const tampered = await verifyCandidate(tamperedBundle); signatureCases.push({ name: "tampered", result: tampered });
+  assert.equal(tampered.accepted, false); assert.equal(tampered.code, "INVALID_SIGNATURE");
+  assert.deepEqual(await readFile(sourceDescriptorPath), sourceDescriptor);
+  assert.deepEqual(await readFile(join(appPath, "dist/main/development-recording-build.js")), sourceDescriptor);
+  execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], { env: environment, timeout: 15_000, stdio: "ignore" });
+  checks.push("Current running-app requirement accepts itself and rejects valid different ad-hoc identity, unsigned code and changed sealed resource");
   stage = "native-composition";
   const state = async () => appStateSchema.parse(await page!.evaluate(() => window.openwhisper!.invoke("get_state", {})));
   const initial = await state();
@@ -486,14 +532,14 @@ try {
     input: "CDP to owned window only; no OS global input injection", microphone: stable
       ? "No permission request, capture Start, recording stream or inference in this stable smoke"
       : "No permission request, capture Start or microphone operation; pinned public inference fixture only",
-    installation, nativeUtilityLoading, stableMigration, tccAttribution: "Permission and real microphone behavior remain pending", exit, restartExit,
+    installation, nativeUtilityLoading, signatureAdmission, stableMigration, tccAttribution: "Permission and real microphone behavior remain pending", exit, restartExit,
     scope: stable ? "Actual stable normal main/bundle/native empty-domain migration/UI/preferences/regular shortcut/restart/clean Quit; no stable recording or CPU claim"
       : "Actual Dev package plus signed capture configure and CPU fixture utilities" }, null, 2), { mode: 0o600 });
   passed = true;
 } catch (error: unknown) {
   failure = error instanceof Error ? { name: error.name, message: error.message.slice(0, 2000) } : { name: "UNKNOWN" };
   if (page && !page.isClosed()) await page.screenshot({ path: join(evidence, "failure.png"), fullPage: true }).catch(() => {});
-  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "FAIL", stage, applicationBuild: capturedBuild, identity, checks, installation, nativeUtilityLoading, stableMigration,
+  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "FAIL", stage, applicationBuild: capturedBuild, identity, checks, installation, nativeUtilityLoading, signatureAdmission, stableMigration,
     error: failure }, null, 2), { mode: 0o600 });
   process.exitCode = 1;
 } finally {

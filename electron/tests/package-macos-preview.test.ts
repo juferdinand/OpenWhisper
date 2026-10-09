@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { lstat, mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -8,6 +8,7 @@ import { developmentRecordingDescriptorSchema } from "../src/main/development-re
 import { SPEECH_ENTRY_FILES } from "../src/services/speech-entry-graph.js";
 import { captureSignedMacDescriptor, insideOutMacCodePaths, inspectMacBinary, inspectMacMinimumOS, macHelperBundleIdentifier, macPreviewPlistValues, stageMacPreview } from "../scripts/package-macos-preview.js";
 import { buildIdentitySchema } from "../src/contracts/build-identity.js";
+const nobleSource = new URL("../node_modules/@noble/hashes/", import.meta.url);
 
 async function fixture(kind: "development" | "stable" = "development", architecture: "arm64" | "x64" = "arm64") {
   const base = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-mac-package-"))), root = join(base, "source/electron");
@@ -15,13 +16,16 @@ async function fixture(kind: "development" | "stable" = "development", architect
     await mkdir(dirname(join(root, path)), { recursive: true }); await writeFile(join(root, path), value);
   };
   const metadata = JSON.stringify({ name: "openwhisper-electron", version: "0.3.0", main: "dist/main/index.js", type: "module",
-    dependencies: { koffi: "3.3.2", zod: "4.6.5" }, devDependencies: { electron: "44.7.0" } });
+    dependencies: { koffi: "3.3.2", zod: "4.6.5", "@noble/hashes": "2.4.0" }, devDependencies: { electron: "44.7.0" } });
   await write("package.json", metadata);
   const koffi = `@koromix/koffi-darwin-${architecture}`;
   await write("package-lock.json", JSON.stringify({ lockfileVersion: 3, packages: {
     "node_modules/koffi": { version: "3.3.2" }, "node_modules/zod": { version: "4.6.5" },
+    "node_modules/@noble/hashes": { version: "2.4.0" },
     [`node_modules/${koffi}`]: { version: "3.3.2" },
   } }));
+  await mkdir(join(root, "node_modules/@noble"), { recursive: true });
+  await cp(nobleSource, join(root, "node_modules/@noble/hashes"), { recursive: true });
   await write("node_modules/koffi/package.json", JSON.stringify({ name: "koffi", version: "3.3.2",
     optionalDependencies: { [koffi]: "3.3.2", "@koromix/koffi-linux-x64": "3.3.2" } }));
   await write(`node_modules/${koffi}/package.json`, JSON.stringify({ name: koffi, version: "3.3.2" }));
@@ -80,9 +84,23 @@ test("Mac preview copies exact captured inputs, architecture dependency, icon/no
     assert.equal(await readFile(join(result.application, "node_modules/@koromix/koffi-darwin-arm64/koffi.node"), "utf8"), "inert Koffi native fixture");
     assert.equal(await readFile(join(result.directory, "Contents/Resources/AppIcon.icns"), "utf8"), "fixture original notice/icon");
     assert.equal(await readFile(join(result.directory, "Contents/Resources/notices/LICENSES.chromium.html"), "utf8"), "fixture original notice/icon");
+    const license = await readFile(new URL("LICENSE", nobleSource));
+    assert.equal(createHash("sha256").update(license).digest("hex"), "4f221aee6e072336700c408c68ab3b96a3fc09f6aebe6f48f1bd99e5ef13faec");
+    assert.deepEqual(await readFile(join(result.directory, "Contents/Resources/notices/noble-hashes-LICENSE")), license);
+    assert.deepEqual(await readFile(join(result.application, "node_modules/@noble/hashes/LICENSE")), license);
+    assert.deepEqual(await readFile(join(result.application, "node_modules/@noble/hashes/blake2.js")), await readFile(new URL("blake2.js", nobleSource)));
     await assert.rejects(lstat(join(result.application, "dist/native/openwhisper_macos_retirement_probe.node")), { code: "ENOENT" });
     await assert.rejects(lstat(join(result.application, "node_modules/electron")), { code: "ENOENT" });
     await assert.rejects(stageMacPreview({ root: input.root, output: input.output, architecture: "arm64" }), /fresh absolute output/);
+  } finally { await rm(input.base, { recursive: true, force: true }); }
+});
+
+test("Mac preview refuses a missing noble license before creating package output", async () => {
+  const input = await fixture();
+  try {
+    await rm(join(input.root, "node_modules/@noble/hashes/LICENSE"));
+    await assert.rejects(stageMacPreview({ root: input.root, output: input.output, architecture: "arm64" }), { code: "ENOENT" });
+    await assert.rejects(lstat(input.output), { code: "ENOENT" });
   } finally { await rm(input.base, { recursive: true, force: true }); }
 });
 

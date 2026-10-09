@@ -43,7 +43,8 @@ const checks: string[] = [];
 let stage = "guard", status = "FAIL", application: ElectronApplication | undefined, page: Page | undefined;
 let failure: { name: string; location: string | null } | undefined;
 let appCloseObserved = false, appOriginalClose: Promise<void> | undefined;
-const appOwners: { original: ChildProcess; closed: Promise<void>; closeObserved: boolean; termination: "quit" | "crash" | null }[] = [];
+const appOwners: { original: ChildProcess; closed: Promise<void>; closeObserved: boolean; termination: "quit" | "crash" | null;
+  quitEvents: ("before-quit" | "will-quit")[] }[] = [];
 let lastState: Readonly<{ status: string; recordingAvailable: boolean; recoveryAvailable: boolean; elapsed: number; progress: number;
   messageCategory: "NONE" | "RECORDING_ERROR" | "ACTION_REFUSED" | "OTHER"; recordingError: string | null }> | undefined;
 const owners: { child: ChildProcess; closed: Promise<void>; closeObserved: boolean }[] = [];
@@ -408,7 +409,8 @@ async function main(): Promise<void> {
       env: applicationEnvironment, chromiumSandbox: true, timeout: 30_000 });
   } finally { clearTimeout(startupWatch); }
   const original = application.process();
-  const owner = { original, closed: Promise.resolve(), closeObserved: false, termination: null as "quit" | "crash" | null };
+  const owner = { original, closed: Promise.resolve(), closeObserved: false, termination: null as "quit" | "crash" | null,
+    quitEvents: [] as ("before-quit" | "will-quit")[] };
   original.stdout?.on("data", (bytes: Buffer) => { diagnostics.stdoutBytes += bytes.length; });
   owner.closed = new Promise<void>((accept) => original.once("close", () => { owner.closeObserved = true; appCloseObserved = true; accept(); }));
   appOwners.push(owner); appOriginalClose = owner.closed;
@@ -417,6 +419,8 @@ async function main(): Promise<void> {
     diagnostics.stderrBytes += bytes.length;
     for (const character of bytes.toString("utf8")) {
       if (character === "\n") {
+        const quitEvent = !diagnosticOverflow ? /^OpenWhisper owned quit event: (before-quit|will-quit)\r?$/u.exec(diagnosticLine)?.[1] : undefined;
+        if ((quitEvent === "before-quit" || quitEvent === "will-quit") && owner.quitEvents.length < 4) owner.quitEvents.push(quitEvent);
         if (!diagnosticOverflow && diagnostics.sourceDiscoveryFailures.length < 16) {
           const match = /^OpenWhisper capture source discovery failed: stage=([a-z-]+) code=([A-Z_]+)\r?$/u.exec(diagnosticLine);
           const category = sourceDiscoveryFailureSchema.safeParse(match ? { stage: match[1], code: match[2] } : undefined);
@@ -438,6 +442,10 @@ async function main(): Promise<void> {
         else diagnosticLine += character;
       }
     }
+  });
+  await application.evaluate(({ app }) => {
+    app.on("before-quit", () => console.error("OpenWhisper owned quit event: before-quit"));
+    app.on("will-quit", () => console.error("OpenWhisper owned quit event: will-quit"));
   });
   page = await application.firstWindow();
   await expect(page.locator(".sidebar-brand strong")).toHaveText(stablePackage ? "OpenWhisper" : "OpenWhisper Dev");
@@ -1527,7 +1535,35 @@ async function main(): Promise<void> {
     assert.equal(resources["pids.max"]?.trim(), "256");
   }
   await checkpoint("graceful-normal-quit");
-  await application.close(); await appOriginalClose; application = undefined;
+  const quitOwner = appOwners.at(-1)!; assert.equal(quitOwner.original, application.process());
+  const quitPid = quitOwner.original.pid; assert.ok(quitPid); quitOwner.termination = "quit";
+  let quitPhase: "playwright-close" | "original-close" | "complete" = "playwright-close";
+  let quitOutcome: "closed" | "failed" = "failed", quitExpired = false, quitTimer: NodeJS.Timeout | undefined;
+  await checkpoint("graceful-playwright-close");
+  const closing = (async () => {
+    await application!.close(); quitPhase = "original-close"; if (!quitExpired) await checkpoint("graceful-playwright-close-complete");
+    await quitOwner.closed; quitPhase = "complete"; if (!quitExpired) await checkpoint("graceful-original-close-complete");
+  })(); void closing.catch(() => {});
+  try {
+    await Promise.race([closing, new Promise<never>((_, reject) => { quitTimer = setTimeout(() => {
+      quitExpired = true; reject(new Error("OWNED_APP_CLOSE_TIMEOUT"));
+    }, 10_000); })]); quitOutcome = "closed";
+  } finally {
+    if (quitTimer) clearTimeout(quitTimer);
+    let pidExists: boolean | "unknown" = "unknown";
+    try { await lstat(`/proc/${quitPid}`); pidExists = true; } catch (error: unknown) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") pidExists = false;
+    }
+    await writeFile(join(evidence, "quit-observation.json"), JSON.stringify({ outcome: quitExpired ? "expired" : quitOutcome, phase: quitPhase, pid: quitPid,
+      exitCode: quitOwner.original.exitCode, signalCode: quitOwner.original.signalCode, closeObserved: quitOwner.closeObserved,
+      pidExists, quitEvents: quitOwner.quitEvents, ownerIndex: appOwners.length - 1 }), { mode: 0o600 });
+    if (quitExpired) {
+      await recordResources("quit-timeout-resources.json");
+      const processes = await execute("/bin/ps", ["-eo", "pid,ppid,comm,stat"], { env, timeout: 5000, maxBuffer: 65_536 }).catch(() => undefined);
+      await writeFile(join(evidence, "quit-timeout-processes.json"), JSON.stringify({ processes: processes?.stdout ?? null }), { mode: 0o600 });
+    }
+  }
+  application = undefined;
   if (packaged) { await packageCommand("status", true); checks.push("absent package owner refuses no-display CLI without activation, profile creation or residual process"); }
   await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", checks, architecture: process.arch, uid: process.getuid?.(),
     transcriptCharacters: result.transcript.length, transcriptSha256: sha(Buffer.from(result.transcript)), countryRecognized: true,

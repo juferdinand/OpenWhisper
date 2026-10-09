@@ -145,6 +145,7 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
   const libcFloor = await nativeLibcFloor(root, recording);
   const noticeInputs = [[resolve(root, "../LICENSE"), "OpenWhisper-LICENSE"],
     [join(root, "dist/ui/fonts/LICENSE.txt"), "Inter-LICENSE.txt"],
+    [join(root, "node_modules/@noble/hashes/LICENSE"), "noble-hashes-LICENSE"],
     [resolve(root, "../shared/ui/node_modules/@tauri-apps/api/LICENSE-MIT"), "tauri-api-LICENSE-MIT"],
     [resolve(root, "../shared/ui/node_modules/@tauri-apps/api/LICENSE-APACHE-2.0"), "tauri-api-LICENSE-APACHE-2.0"],
     [resolve(root, "../shared/ui/node_modules/@tauri-apps/api/LICENSE.spdx"), "tauri-api-LICENSE.spdx"],
