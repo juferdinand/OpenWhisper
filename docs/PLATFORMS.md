@@ -1,14 +1,13 @@
 # Platform architecture
 
-The published 0.2.5 release uses the original native hosts. This replacement branch's
-application source is the Electron app in `app/`. See [current status and evidence](ELECTRON-STATUS.md)
-for package and acceptance scope; the [immutable 0.2.5 source](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4)
-is the historical reference for those native hosts.
+The current 0.3.0 release uses the Electron app in `app/`. See [release status and evidence](ELECTRON-STATUS.md)
+for exact package and test scope. The [immutable 0.2.5 source](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4)
+preserves the former native hosts and their historical evidence.
 
-| Platform | Published 0.2.5 release | Replacement branch |
+| Platform | Current release | Status |
 | --- | --- | --- |
-| macOS 14+ | 0.2.5 native app | Electron app; see current status for evidence and limits |
-| Linux x86_64 | 0.2.5 AppImage and Debian package | Electron app; see current status for evidence and limits |
+| macOS 14+ | 0.3.0 Universal DMG and ZIP | Self-signed, not notarized; see status for tested scope |
+| Linux x86_64 | 0.3.0 AppImage and Debian package | See status and [Linux evidence](LINUX.md) |
 | Windows | None | Not implemented; tracked by [issue #35](https://github.com/juferdinand/OpenWhisper/issues/35) |
 
 ## Electron source layout
@@ -29,8 +28,8 @@ is the historical reference for those native hosts.
 
 The renderer communicates only through the schema-validated Electron preload contract. Keep
 settings and recording UI shared inside this renderer, and keep platform permissions and native
-capabilities in host services. Validate every IPC boundary at runtime. Dev storage and identity
-are separate from stable storage; no Dev data is imported automatically.
+capabilities in host services. Validate every IPC boundary at runtime. Development storage and
+identity are separate from stable storage; no development data is imported automatically.
 
 The `shared` Linux platform area contains common Linux integration code; it does not hold a second
 renderer or duplicate shared UI. GNOME and wlroots use these services according to detected

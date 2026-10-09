@@ -1,6 +1,7 @@
 # Electron migration plan
 
-Status: implementation in progress on isolated draft PR #34; target release **0.3.0**.
+Historical migration design for release **0.3.0**. The work shipped in merged PR #34; see
+[current release status](ELECTRON-STATUS.md) for implementation and acceptance results.
 See [implementation status](ELECTRON-STATUS.md) for delivered behavior and remaining work.
 Prepared 2026-10-08 against signed public `v0.2.5`
 (`d69b43bf6e7017c61089e117e79af34f57f297c4`). This is the authoritative record of
@@ -330,10 +331,12 @@ have limitations. Interactive Stop/Cancel need their own proven focus/input beha
 
 ## Automatic update and existing data
 
-Updating signed 0.2.5 to an Electron implementation is technically feasible: current verifiers
-check identities, versions, archive structure and signatures, not the UI framework. It is
-**not yet demonstrated**. Do not ask everyone to reinstall by default or promise automatic
-compatibility without the following exact-old-client tests.
+The original 0.2.5 app's GUI updater has **not been demonstrated to update to Electron 0.3.0**.
+The Linux Debian package transition component was exercised on one pinned Kubuntu 24 baseline,
+but that is not an original-app GUI update or a universal distribution claim. Use manual
+installation when moving from 0.2.5; see [Linux status](LINUX.md). The table below records the
+broader requirements considered during migration. Scoped passing tests do not satisfy every row;
+see [current status](ELECTRON-STATUS.md) and its linked follow-up issues for remaining work.
 
 | Platform | Preserve and prove |
 | --- | --- |
