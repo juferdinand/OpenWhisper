@@ -177,7 +177,8 @@ copied, stopped-container and returned package hashes remain checked. This
 owned fresh-copy case does not replace a host installation or prove downloads,
 updates, data migration or release signatures.
 
-Append `--stock-kde` to reuse `linux/scripts/run-owned-desktop.py` and the pinned
+Append `--stock-kde` to reuse the frozen legacy helper in
+`tests/fixtures/legacy-linux/run-owned-desktop.py` and the pinned
 cached Kubuntu 24.04 portal image. This mode opens the normal app with native
 Wayland and installed KDE portal services, never the synthetic frontend. It uses
 no synthetic portal source or compiler execution. Only the verified Node runtime

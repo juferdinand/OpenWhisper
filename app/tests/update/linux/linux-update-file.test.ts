@@ -7,6 +7,7 @@ import { chmod, link, lstat, mkdir, mkdtemp, open, readFile, rename, rm, symlink
 import type { FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { LinuxUpdateFileError, verifyOwnedLinuxUpdateFile } from "../../../src/services/update/linux/linux-update-file.js";
 import type { OwnedLinuxUpdateFile } from "../../../src/services/update/linux/linux-update-file.js";
@@ -14,6 +15,8 @@ import { LinuxUpdateSignatureError, MAX_LINUX_UPDATE_BYTES } from "../../../src/
 
 const linuxTest = process.platform === "linux" ? test : test.skip;
 const artifactName = "OpenWhisper-Linux-amd64.deb";
+const legacyConfigPath = fileURLToPath(new URL("../../fixtures/legacy-linux/tauri.conf.json", import.meta.url));
+const legacyConfigSha256 = "2d901a9a06e9844697fab1ef3da0f2d44315254d3ab5bf9045066b9bdc743731";
 // The original public envelope is not a signature for the small fault-test files.
 const signature = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSUsxODJ0WHltd1NSQ1VqNWY4dzlHNi9PTHZsWFNIbEFtdS9FZDZqWnFhRVZqQ29WMVoycmJEWlljNS9qMi9sUERLWCtqL25UclZYbEhQQWVNWEZseFF0NmowYktweEFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNDEwNTQwCWZpbGU6T3BlbldoaXNwZXItTGludXgtYW1kNjQuZGViCXZlcnNpb246MC4yLjUKQysxdTllc3FxSnBZWVY1YXRGWTlVTXlJZ0hEUHZSRk94TkVvQTRzYm56YTF3MWFLaGdhVU5sQkhrQ2hraUVNcXNZRTQ3Mlhhd0xMeTRpMzd1OTd3QkE9PQo=";
 const fileFailure = (code: string) => (error: unknown): boolean => error instanceof LinuxUpdateFileError && error.code === code && error.message === code;
@@ -158,6 +161,7 @@ linuxTest("explicit owned original 0.2.5 private files authenticate with live ha
   assert.ok(assets && oracle && isAbsolute(assets) && isAbsolute(oracle));
   const oracleHash = "6908d45153af03dc37c6e4b67b21d9699d2d4c9722c00cd2f711328f5388ba3d";
   assert.equal(await sha256(oracle), oracleHash);
+  assert.equal(await sha256(legacyConfigPath), legacyConfigSha256);
   for (const [name, hash] of Object.entries(pins)) assert.equal(await sha256(join(assets, name)), hash);
   for (const name of [artifactName, "OpenWhisper-Linux-x86_64.AppImage"] as const) {
     const original = join(assets, name), bytes = await readFile(original), f = await fixture(bytes, name);
@@ -169,8 +173,7 @@ linuxTest("explicit owned original 0.2.5 private files authenticate with live ha
       assert.deepEqual(receipt, { bytes: bytes.length, version: "0.2.5" }); assert.ok(Object.isFrozen(receipt));
       const next = Buffer.alloc(3); await f.file.read(next, 0, 3, null); assert.deepEqual(next, bytes.subarray(3, 6));
       assert.equal((await f.file.stat()).size, bytes.length); assert.equal((await lstat(f.path)).nlink, 1);
-      const config = join(assets, "../../../../linux/src-tauri/tauri.conf.json");
-      const native: SpawnSyncReturns<string> = spawnSync(oracle, [config, f.path, `${original}.sig`, "0.2.5"], { encoding: "utf8", timeout: 60_000, maxBuffer: 4096 });
+      const native: SpawnSyncReturns<string> = spawnSync(oracle, [legacyConfigPath, f.path, `${original}.sig`, "0.2.5"], { encoding: "utf8", timeout: 60_000, maxBuffer: 4096 });
       assert.equal(native.status, 0); assert.equal(native.signal, null); assert.equal(native.stderr, "");
       assert.equal(native.stdout.trim(), "Update signature and version verified.");
       if (name === artifactName) {

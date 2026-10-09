@@ -29,7 +29,7 @@ deterministic preflight and the application/UI build pass. The renderer passed a
 62 focused UI checks. Nine focused release-source/publication checks also pass using
 the unchanged public signed 0.2.5 Linux assets. The source now uses feature folders
 under `app/`, `app/ui/` and `app/data/`; old hosts remain until replacement gates pass.
-This preparation has not yet been pushed or accepted as the final replacement.
+This layout is pushed in the draft PR; it has not been accepted as the final replacement.
 
 `npm run preflight --prefix app` checks all workflows with pinned actionlint
 and ShellCheck, strict TypeScript, shared UI formatting and whitespace. A focused
@@ -48,7 +48,7 @@ Positive metadata tests use pinned public 0.2.5 Linux signatures; their inert Ma
 artifacts do not establish Mac package acceptance. Actual release-mode construction,
 signing and publication through these new workflows remain open.
 
-The latest pushed application checkpoint is `cfd8218`. In
+At application checkpoint `cfd8218`,
 [CI 37930208209](https://github.com/juferdinand/OpenWhisper/actions/runs/37930208209),
 both thin Mac native jobs and Universal construction pass. The persistent Universal
 candidate and genuine private 0.3.1 successor satisfy the unchanged 0.2.5 publisher
@@ -57,9 +57,19 @@ Credential cleanup passes. The final handoff test fails before requesting an upd
 its new HOME has no legacy preferences plist, while the actual macOS CurrentUser/AnyHost
 snapshot differs. The production coherence guard rejects that mismatch. A fresh HOME
 does not establish a separate macOS preferences domain. The handoff currently runs
-after a same-bundle-ID smoke on the same runner; separating it onto a fresh runner is
-being prepared. Actual installation and relaunch remain unproved. The signature and
-source checks are retained.
+after a same-bundle-ID smoke on the same runner; the handoff now has a separate fresh-runner job consuming only the same-run signed
+packages with hash and embedded-source checks. It can be rerun alone without rebuilding
+the packages. Actual installation and relaunch remain unproved; signature and source
+checks are retained.
+
+The `app/` layout CI at `47560a2` passes the full static preflight, common tests and
+native capture/retirement checks, then stops during recording-build graph capture:
+one fixed input still named the old `dist/contracts/speech.js`. That input now matches
+`dist/contracts/speech/speech.js`. The focused graph tests pass, and the existing graph
+builder also passes against actual compiled workers/contracts and copied production Zod
+in a private temporary directory, without executing native or application code. Frozen
+legacy Linux helper/config fixtures preserve optional desktop and original signed-0.2.5
+oracle checks independently of the old application source directories.
 
 AppImage source/relink bundle `64fd7e2` passes an actual modified-libfuse build and inert image
 extraction/FUSE-free launch. It did not build a production AppImage or establish byte-identical

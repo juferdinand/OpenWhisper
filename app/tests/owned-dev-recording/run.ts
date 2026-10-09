@@ -247,14 +247,18 @@ const sources: Record<string, { bytes: number; sha256: string }> = {};
 for (const name of Object.keys(bundled.metafile.inputs)) sources[name] = await describe(resolve(root, name));
 sources["tests/owned-dev-recording/run.ts"] = await describe(fileURLToPath(import.meta.url));
 if (stockKde) {
-  const launcher = resolve(root, "../linux/scripts/run-owned-desktop.py");
+  const launcher = resolve(root, "tests/fixtures/legacy-linux/run-owned-desktop.py");
   await cp(launcher, join(payload, "run-owned-desktop.py"));
-  sources["linux/scripts/run-owned-desktop.py"] = await describe(launcher);
+  const launcherRecord = await describe(launcher);
+  assert.equal(launcherRecord.sha256, "ec4893b2190753e83f7ab85eae76bc90fb51c6e9589de24e78a5a4fefbcd0a13");
+  sources["tests/fixtures/legacy-linux/run-owned-desktop.py"] = launcherRecord;
 }
 if (kdePaste || kdeWaylandOverlay) {
-  const helper = resolve(root, "../linux/scripts/test-owned-portals.py");
+  const helper = resolve(root, "tests/fixtures/legacy-linux/test-owned-portals.py");
   await cp(helper, join(payload, "test-owned-portals.py"));
-  sources["linux/scripts/test-owned-portals.py"] = await describe(helper);
+  const helperRecord = await describe(helper);
+  assert.equal(helperRecord.sha256, "af17a2dedbaece0ccf6ee2b06fdb0ba3701b8f9ddc03a37c5a96843ae69efdb6");
+  sources["tests/fixtures/legacy-linux/test-owned-portals.py"] = helperRecord;
   const focus = join(root, "tests/owned-dev-recording/focus-target.ts");
   await build({ entryPoints: [focus], outfile: join(payload, "focus-target.js"),
     platform: "neutral", format: "iife", target: "es2015", bundle: true, sourcemap: false });

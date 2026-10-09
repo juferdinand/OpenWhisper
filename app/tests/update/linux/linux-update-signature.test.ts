@@ -3,6 +3,7 @@ import { createHash, createPublicKey, verify } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import type { SpawnSyncReturns } from "node:child_process";
 import { test } from "node:test";
@@ -14,8 +15,16 @@ import { UPDATE_POLICY_LIMITS } from "../../../src/services/update/common/update
 
 // Original public 0.2.5 envelope, without payload or private signing material.
 const releaseSignature = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSUsxODJ0WHltd1NSQ1VqNWY4dzlHNi9PTHZsWFNIbEFtdS9FZDZqWnFhRVZqQ29WMVoycmJEWlljNS9qMi9sUERLWCtqL25UclZYbEhQQWVNWEZseFF0NmowYktweEFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNDEwNTQwCWZpbGU6T3BlbldoaXNwZXItTGludXgtYW1kNjQuZGViCXZlcnNpb246MC4yLjUKQysxdTllc3FxSnBZWVY1YXRGWTlVTXlJZ0hEUHZSRk94TkVvQTRzYm56YTF3MWFLaGdhVU5sQkhrQ2hraUVNcXNZRTQ3Mlhhd0xMeTRpMzd1OTd3QkE9PQo=";
+const legacyConfigPath = fileURLToPath(new URL("../../fixtures/legacy-linux/tauri.conf.json", import.meta.url));
+const legacyConfigSha256 = "2d901a9a06e9844697fab1ef3da0f2d44315254d3ab5bf9045066b9bdc743731";
 const encode = (text: string) => Buffer.from(text, "utf8").toString("base64");
 const failure = (code: string) => (error: unknown): boolean => error instanceof LinuxUpdateSignatureError && error.code === code && error.message === code;
+test("retained public 0.2.5 updater config keeps its pinned key and version policy", async () => {
+  assert.equal(await createHash("sha256").update(await readFile(legacyConfigPath)).digest("hex"), legacyConfigSha256);
+  const config = z.object({ plugins: z.object({ updater: z.object({ pubkey: z.string(), requireSignedVersion: z.literal(true) }) }) })
+    .parse(JSON.parse(await readFile(legacyConfigPath, "utf8")) as unknown);
+  assert.equal(config.plugins.updater.pubkey, LINUX_UPDATE_PUBLIC_KEY);
+});
 function rewrite(signature: string, change: (lines: string[]) => void): string {
   const lines = Buffer.from(signature, "base64").toString("utf8").trimEnd().split("\n");
   change(lines); return encode(lines.join("\n") + "\n");
@@ -132,8 +141,8 @@ test("explicit owned 0.2.5 Debian and AppImage authenticate under the fixed key 
   const oracleHash = "6908d45153af03dc37c6e4b67b21d9699d2d4c9722c00cd2f711328f5388ba3d";
   assert.equal(await sha256(oracle), oracleHash);
   for (const [name, hash] of Object.entries(pins)) assert.equal(await sha256(join(assets, name)), hash, name);
-  const configPath = join(assets, "../../../../linux/src-tauri/tauri.conf.json");
-  const config = z.object({ plugins: z.object({ updater: z.object({ pubkey: z.string(), requireSignedVersion: z.literal(true) }) }) }).parse(JSON.parse(await readFile(configPath, "utf8")) as unknown);
+  assert.equal(await sha256(legacyConfigPath), legacyConfigSha256);
+  const config = z.object({ plugins: z.object({ updater: z.object({ pubkey: z.string(), requireSignedVersion: z.literal(true) }) }) }).parse(JSON.parse(await readFile(legacyConfigPath, "utf8")) as unknown);
   assert.equal(config.plugins.updater.pubkey, LINUX_UPDATE_PUBLIC_KEY);
   const feed = z.object({ version: z.literal("0.2.5"), platforms: z.record(z.string(), z.object({ signature: z.string() })) }).parse(JSON.parse(await readFile(join(assets, "latest.json"), "utf8")) as unknown);
   for (const [name, target] of [["OpenWhisper-Linux-amd64.deb", "linux-x86_64-deb"], ["OpenWhisper-Linux-x86_64.AppImage", "linux-x86_64-appimage"]]) {
@@ -145,7 +154,7 @@ test("explicit owned 0.2.5 Debian and AppImage authenticate under the fixed key 
     const padded = Buffer.concat([Buffer.from([0]), bytes, Buffer.from([0])]);
     assert.equal(verifyLinuxUpdateBytes(padded.subarray(1, -1), signature, feed.version), undefined);
     for (const highWaterMark of [64 * 1024, 777_777]) await verifyLinuxUpdateStream(createReadStream(path, { highWaterMark }), signature, feed.version);
-    const native: SpawnSyncReturns<string> = spawnSync(oracle, [configPath, path, `${path}.sig`, feed.version], { encoding: "utf8", timeout: 60_000, maxBuffer: 4096 });
+    const native: SpawnSyncReturns<string> = spawnSync(oracle, [legacyConfigPath, path, `${path}.sig`, feed.version], { encoding: "utf8", timeout: 60_000, maxBuffer: 4096 });
     assert.equal(native.status, 0); assert.equal(native.signal, null); assert.equal(native.stderr, "");
     assert.equal(native.stdout.trim(), "Update signature and version verified.");
     assert.throws(() => verifyLinuxUpdateBytes(bytes, signature, "0.3.1"), failure("SIGNED_VERSION_MISMATCH"));

@@ -23,7 +23,7 @@ async function owned(run: (root: string) => Promise<void>, retainRoot = false): 
       const path = join(root, name); await mkdir(dirname(path), { recursive: true, mode: 0o700 });
       const value = name === "package.json" ? JSON.stringify(application) : name === "node_modules/zod/package.json" ? JSON.stringify(dependency) :
         name.endsWith("package.json") ? '{"type":"module"}' : name === "dist/workers/speech-entry.js" ?
-          'import { value } from "../contracts/speech.js"; import { z } from "zod"; export const fixture = [value,z];' :
+          'import { value } from "../contracts/speech/speech.js"; import { z } from "zod"; export const fixture = [value,z];' :
           name === "node_modules/zod/index.js" ? 'export { z } from "./v4/core.js";' : name === "node_modules/zod/v4/core.js" ? 'export const z = "inert";' : 'export const value = "inert";';
       await writeFile(path, value, { mode: 0o600, flag: "wx" });
     }
@@ -51,7 +51,7 @@ test("invalid or incomplete manifests refuse before filesystem effects", async (
   }
   assert.equal(speechEntryGraphSchema.safeParse(expected).success, true);
 }));
-for (const changed of ["dist/contracts/speech.js", "package.json", "node_modules/zod/package.json", "node_modules/zod/v4/package.json", "node_modules/zod/v4/core.js"] as const) {
+for (const changed of ["dist/contracts/speech/speech.js", "package.json", "node_modules/zod/package.json", "node_modules/zod/v4/package.json", "node_modules/zod/v4/core.js"] as const) {
   test(`substituted ${changed} is rejected`, async () => owned(async (root) => {
     const expected = await captureSpeechEntryGraph(root), token = await prepareSpeechEntryGraph(root, expected);
     await writeFile(join(root, changed), "changed-inert-bytes");
@@ -74,14 +74,14 @@ test("nearer application package scope cannot alter module interpretation", asyn
 test("symlinked root, ancestor or entry and hardlinked/writable entries refuse", async () => {
   for (const kind of ["root", "ancestor", "entry", "hardlink", "writable"] as const) await owned(async (root) => {
     const expected = await captureSpeechEntryGraph(root), token = await prepareSpeechEntryGraph(root, expected);
-    const path = join(root, "dist/contracts/speech.js");
+    const path = join(root, "dist/contracts/speech/speech.js");
     if (kind === "root") {
       const alias = `${root}-alias`; await symlink(root, alias);
       try { await assert.rejects(prepareSpeechEntryGraph(alias, expected), { code: "INTEGRITY_FAILED" }); } finally { await rm(alias); }
       return;
     }
     if (kind === "ancestor" || kind === "entry") {
-      const selected = kind === "ancestor" ? join(root, "dist/contracts") : path;
+      const selected = kind === "ancestor" ? join(root, "dist/contracts/speech") : path;
       await rename(selected, `${selected}-original`); await symlink(`${selected}-original`, selected);
     } else if (kind === "hardlink") await link(path, `${path}-alias`); else await chmod(path, 0o620);
     await assert.rejects(verifySpeechEntryGraph(token), { code: "INTEGRITY_FAILED" });
@@ -93,7 +93,7 @@ test("mutation of an earlier file while later file is hashed is detected", async
     const file = await actual.open(path, flags);
     if (path.endsWith("node_modules/zod/index.js")) return { stat: file.stat.bind(file), close: file.close.bind(file), async read(...args: Parameters<typeof file.read>) {
       const result = await file.read(...args);
-      if (!changed) { changed = true; await writeFile(join(root, "dist/contracts/speech.js"), 'export const value = "other";'); }
+      if (!changed) { changed = true; await writeFile(join(root, "dist/contracts/speech/speech.js"), 'export const value = "other";'); }
       return result;
     } };
     return file;
@@ -105,11 +105,11 @@ test("mutation while descriptor close is held cannot pass verification", async (
   const expected = await captureSpeechEntryGraph(root), gate = deferred<void>(), reached = deferred<void>();
   const files: SpeechEntryFiles = { ...actual, async open(path, flags) {
     const file = await actual.open(path, flags);
-    if (!path.endsWith("dist/contracts/speech.js")) return file;
+    if (!path.endsWith("dist/contracts/speech/speech.js")) return file;
     return { stat: file.stat.bind(file), read: file.read.bind(file), async close() { reached.accept(); await gate.promise; await file.close(); } };
   } };
   const token = await prepareSpeechEntryGraph(root, expected, files), operation = verifySpeechEntryGraph(token);
-  await reached.promise; await writeFile(join(root, "dist/contracts/speech.js"), 'export const value = "other";'); gate.accept();
+  await reached.promise; await writeFile(join(root, "dist/contracts/speech/speech.js"), 'export const value = "other";'); gate.accept();
   await assert.rejects(operation, { code: "INTEGRITY_FAILED" });
 }));
 test("held root descriptor closure serializes every token", async () => owned(async (root) => {
@@ -129,7 +129,7 @@ for (const failure of ["file", "root"] as const) {
     const files: SpeechEntryFiles = { ...actual, async open(path, flags) {
       const file = await actual.open(path, flags);
       if (path === root) rootHandles.push(file);
-      if ((failure === "root" && path === root) || (failure === "file" && path.endsWith("dist/contracts/speech.js"))) {
+      if ((failure === "root" && path === root) || (failure === "file" && path.endsWith("dist/contracts/speech/speech.js"))) {
         handles.push(file); return { stat: file.stat.bind(file), read: file.read.bind(file), close() { closes++; return Promise.reject(new Error("inert close refusal")); } };
       }
       return file;
@@ -146,7 +146,7 @@ for (const failure of ["file", "root"] as const) {
 }
 test("source-only build records actual resolution inputs without executing bundled code", async () => owned(async (root) => {
   const captured = await buildSpeechEntryGraph(root);
-  assert.ok(captured.importedFiles.includes("dist/contracts/speech.js"));
+  assert.ok(captured.importedFiles.includes("dist/contracts/speech/speech.js"));
   assert.ok(captured.importedFiles.includes("node_modules/zod/v4/core.js"));
   assert.ok(captured.graph.entries.some((entry) => entry.path === "node_modules/zod/package.json"));
 }));
