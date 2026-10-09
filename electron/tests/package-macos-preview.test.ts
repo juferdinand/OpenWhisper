@@ -6,7 +6,8 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
 import { SPEECH_ENTRY_FILES } from "../src/services/speech-entry-graph.js";
-import { captureSignedMacDescriptor, insideOutMacCodePaths, inspectMacBinary, inspectMacMinimumOS, macHelperBundleIdentifier, macPreviewCodesignArguments, macPreviewPlistValues, macPreviewSigningPolicy, macPreviewUpdatePolicy, stageMacPreview } from "../scripts/package-macos-preview.js";
+import { captureSignedMacDescriptor, insideOutMacCodePaths, inspectMacBinary, inspectMacMinimumOS, macHelperBundleIdentifier, macPackageConstructionMode,
+  macPreviewCodesignArguments, macPreviewPlistValues, macPreviewSigningPolicy, macPreviewUpdatePolicy, stageMacPreview } from "../scripts/package-macos-preview.js";
 import { buildIdentitySchema } from "../src/contracts/build-identity.js";
 const nobleSource = new URL("../node_modules/@noble/hashes/", import.meta.url);
 
@@ -170,6 +171,19 @@ test("persistent policy rejects Dev, source or modified provenance, noncanonical
   assert.deepEqual(macPreviewCodesignArguments(defaultPolicy, "/private/fixture/app.node"), ["--force", "--sign", "-", "--timestamp=none", "/private/fixture/app.node"]);
   assert.throws(() => macPreviewCodesignArguments({ ...defaultPolicy, identity: fingerprint }, "/private/fixture/app.node"));
   assert.throws(() => macPreviewCodesignArguments({ ...defaultPolicy, mode: "persistent-validation" }, "/private/fixture/app.node"));
+});
+
+test("release construction is explicit and requires stable persistent signing plus compiled update policy", () => {
+  const stable = buildIdentitySchema.parse({ version: 1, kind: "stable", appId: "io.github.whisperfree", productName: "OpenWhisper" });
+  const dev = buildIdentitySchema.parse({ version: 1, kind: "development", appId: "io.github.whisperfree.dev", productName: "OpenWhisper Dev" });
+  const signing = { mode: "persistent-validation" as const, identity: "0123456789abcdef0123456789abcdef01234567", description: "fixture" };
+  const update = { version: 1 as const, repository: "juferdinand/OpenWhisper" as const,
+    certificateFingerprint: signing.identity };
+  assert.equal(macPackageConstructionMode(undefined, stable, signing, null), "validation");
+  assert.equal(macPackageConstructionMode("release", stable, signing, update), "release");
+  assert.throws(() => macPackageConstructionMode("release", stable, signing, null), /updater policy enabled/u);
+  assert.throws(() => macPackageConstructionMode("release", dev, signing, update), /updater policy enabled/u);
+  assert.throws(() => macPackageConstructionMode("release", stable, { ...signing, mode: "ad-hoc" }, update), /updater policy enabled/u);
 });
 
 test("only an explicit persistent stable packaging choice emits a fixed updater policy without mutating source", async () => {

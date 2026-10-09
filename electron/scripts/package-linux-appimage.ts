@@ -72,7 +72,7 @@ function command(executable: string, args: readonly string[], cwd: string, recei
   return reply.stdout;
 }
 export interface LinuxAppImageOptions { readonly directory: string; readonly output: string; readonly tools: string;
-  readonly canonicalStableValidation?: boolean }
+  readonly canonicalStableValidation?: boolean; readonly canonicalStableReleaseConstruction?: boolean }
 
 /** A release filename requires an explicit clean Stable construction, never a renamed preview. */
 export function appImageArtifactName(kind: "stable" | "development", version: string,
@@ -90,6 +90,8 @@ export function appImageArtifactName(kind: "stable" | "development", version: st
 export async function packageLinuxAppImage(options: LinuxAppImageOptions): Promise<{ image: string; launcher: string; receipt: string }> {
   if (process.platform !== "linux" || process.arch !== "x64") throw new Error("UNSUPPORTED_APPIMAGE_HOST");
   const { directory, output, tools } = options;
+  if (options.canonicalStableValidation && options.canonicalStableReleaseConstruction) throw new Error("SELECT_ONE_CANONICAL_MODE");
+  const canonicalConstruction = options.canonicalStableValidation === true || options.canonicalStableReleaseConstruction === true;
   await canonical(directory); await canonical(tools); await canonical(dirname(output));
   if (!isAbsolute(output) || resolve(output) !== output || /[\p{Cc}]/u.test(output) || !await absent(output) ||
       [directory, tools, root].some((input) => inside(input, output) || inside(output, input))) throw new Error("UNSAFE_PACKAGE_OUTPUT");
@@ -115,8 +117,8 @@ export async function packageLinuxAppImage(options: LinuxAppImageOptions): Promi
   if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u.test(version) ||
       z.object({ version: z.string() }).parse(JSON.parse(await readFile(join(application, "package.json"), "utf8"))).version !== version) throw new Error("PACKAGE_VERSION_MISMATCH");
   const producer = producerSchema.parse(JSON.parse(await readFile(join(dist, "resources/development-build.json"), "utf8")) as unknown);
-  const imageName = appImageArtifactName(identity.kind, version, producer, options.canonicalStableValidation);
-  if (options.canonicalStableValidation) {
+  const imageName = appImageArtifactName(identity.kind, version, producer, canonicalConstruction);
+  if (canonicalConstruction) {
     const git = (args: string[]): string => execFileSync("git", args, { cwd: root, encoding: "utf8", timeout: 5_000 }).trim();
     if (version !== (await readFile(join(root, "../VERSION"), "utf8")).trim() ||
         version !== z.object({ version: z.string() }).parse(JSON.parse(await readFile(join(root, "package.json"), "utf8"))).version ||
@@ -169,8 +171,9 @@ export async function packageLinuxAppImage(options: LinuxAppImageOptions): Promi
   for (const [path, expected] of Object.entries(before)) assert.deepEqual(extractedPayload[path], expected);
   assert.deepEqual(await inventory(directory), before);
   const receipt = join(output, "receipt.json");
-  await writeFile(receipt, `${JSON.stringify({ classification: "UNSIGNED_CONSTRUCTION_ONLY", applicationProducer: producer, buildIdentity: identity, version,
+  await writeFile(receipt, `${JSON.stringify({ classification: options.canonicalStableReleaseConstruction ? "CANONICAL_STABLE_RELEASE_CONSTRUCTION_UNSIGNED" : "UNSIGNED_CONSTRUCTION_ONLY", applicationProducer: producer, buildIdentity: identity, version,
     canonicalStableValidation: options.canonicalStableValidation === true,
+    canonicalStableReleaseConstruction: options.canonicalStableReleaseConstruction === true,
     sourceDirectory: directory, sourceInventory: before, image: { path: image, bytes: imageBytes.length, sha256: hash(imageBytes) },
     launcher: { path: launcher, sha256: hash(Buffer.from(appImageLauncher())) }, tools: pins, runtimeDigestMd5Only: true,
     passiveExtractionMatches: true, originalInputUnchanged: true, runtimeAcceptance: false, updateAuthority: false,
@@ -180,9 +183,10 @@ export async function packageLinuxAppImage(options: LinuxAppImageOptions): Promi
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   if (![6, 7].includes(args.length) || args[0] !== "--directory" || args[2] !== "--output" || args[4] !== "--tools" || !args[1] || !args[3] || !args[5] ||
-      (args.length === 7 && args[6] !== "--canonical-stable-validation")) {
-    throw new Error("Usage: tsx scripts/package-linux-appimage.ts --directory /existing/preview --output /fresh/output --tools /verified/tools [--canonical-stable-validation]");
+      (args.length === 7 && args[6] !== "--canonical-stable-validation" && args[6] !== "--canonical-stable-release-construction")) {
+    throw new Error("Usage: tsx scripts/package-linux-appimage.ts --directory /existing/preview --output /fresh/output --tools /verified/tools [--canonical-stable-validation|--canonical-stable-release-construction]");
   }
   console.log(JSON.stringify(await packageLinuxAppImage({ directory: args[1], output: args[3], tools: args[5],
-    ...(args.length === 7 ? { canonicalStableValidation: true } : {}) })));
+    ...(args.length === 7 && args[6] === "--canonical-stable-validation" ? { canonicalStableValidation: true } : {}),
+    ...(args.length === 7 && args[6] === "--canonical-stable-release-construction" ? { canonicalStableReleaseConstruction: true } : {}) })));
 }

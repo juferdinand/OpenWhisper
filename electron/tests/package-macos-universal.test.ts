@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { inspectUniversalMacBinary, macUniversalFailureDiagnostic, macUniversalToolFailure, readMacUniversalLoadCommands, stageMacUniversalInputs } from "../scripts/package-macos-universal.js";
+import { inspectUniversalMacBinary, macUniversalFailureDiagnostic, macUniversalToolFailure, readMacUniversalLoadCommands,
+  stageMacUniversalInputs, verifyMacUniversalCopy } from "../scripts/package-macos-universal.js";
 import { darwinUniversalRecordingDescriptorSchema, developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
 import { SPEECH_ENTRY_FILES } from "../src/services/speech-entry-graph.js";
 
@@ -116,6 +117,45 @@ test("owned thin fixtures normalize exact V2, both Koffi variants and indexed re
     }
     assert.equal(staged.merger.force, false); assert.equal(staged.merger.mergeASARs, false);
     assert.equal(staged.merger.x64ArchFiles, `{${app}/node_modules/@koromix/koffi-darwin-arm64/darwin_arm64/koffi.node,${app}/node_modules/@koromix/koffi-darwin-x64/darwin_x64/koffi.node}`);
+  } finally { await f.cleanup(); }
+});
+
+test("release universal construction admits only two explicitly configured persistent release inputs", async () => {
+  const f = await fixture(), previous = process.env["SIGN_IDENTITY"], fingerprint = "0123456789abcdef0123456789abcdef01234567";
+  process.env["SIGN_IDENTITY"] = fingerprint;
+  try {
+    for (const architecture of ["arm64", "x64"] as const) {
+      const source = join(f.paths[architecture], "Contents/Resources/notices/mac-stable-validation-package.json");
+      const receipt = JSON.parse(await readFile(source, "utf8")) as Record<string, unknown>;
+      receipt.classification = "STABLE_RELEASE_INPUT"; receipt.signingMode = "persistent-validation"; receipt.updateConfigured = true;
+      await writeFile(join(f.paths[architecture], "Contents/Resources/notices/mac-stable-release-input.json"), JSON.stringify(receipt));
+      await rm(source);
+    }
+    const originalReceipts = await Promise.all((['arm64', 'x64'] as const).map((architecture) =>
+      readFile(join(f.paths[architecture], "Contents/Resources/notices/mac-stable-release-input.json"))));
+    const staged = await stageMacUniversalInputs({ arm64AppPath: f.paths.arm64, x64AppPath: f.paths.x64, output: f.output,
+      signingMode: "persistent-validation", enableUpdates: true, constructionMode: "release" });
+    for (const [index, architecture] of (["arm64", "x64"] as const).entries()) {
+      assert.deepEqual(await readFile(join(f.paths[architecture], "Contents/Resources/notices/mac-stable-release-input.json")), originalReceipts[index]);
+      assert.equal(JSON.parse(await readFile(join(staged.staged[architecture],
+        `Contents/Resources/notices/architectures/${architecture}/Contents/Resources/notices/mac-stable-release-input.json`), "utf8")).classification, "STABLE_RELEASE_INPUT");
+    }
+  } finally { if (previous === undefined) delete process.env["SIGN_IDENTITY"]; else process.env["SIGN_IDENTITY"] = previous; await f.cleanup(); }
+});
+
+test("Mac copy verification compares complete signed files, modes and framework link targets", async () => {
+  const f = await fixture(), original = f.paths.arm64, copy = join(f.root, "copy/OpenWhisper.app");
+  try {
+    await mkdir(dirname(copy), { recursive: true }); await cp(original, copy, { recursive: true, verbatimSymlinks: true, force: false, errorOnExist: true });
+    await verifyMacUniversalCopy(original, copy);
+    const plist = join(copy, "Contents/Info.plist"), originalPlist = await readFile(plist), originalMode = (await lstat(plist)).mode & 0o7777;
+    await writeFile(plist, "changed bytes"); await assert.rejects(verifyMacUniversalCopy(original, copy), /changed signed files/u);
+    await writeFile(plist, originalPlist); await chmod(plist, originalMode);
+    await chmod(plist, 0o600); await assert.rejects(verifyMacUniversalCopy(original, copy), /changed signed files/u);
+    await chmod(plist, originalMode);
+    const frameworkLink = join(copy, "Contents/Frameworks/Electron Framework.framework/Versions/Current");
+    await rm(frameworkLink); await symlink("./A", frameworkLink);
+    await assert.rejects(verifyMacUniversalCopy(original, copy), /changed signed files/u);
   } finally { await f.cleanup(); }
 });
 

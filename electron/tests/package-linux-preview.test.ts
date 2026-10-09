@@ -297,6 +297,54 @@ test("canonical mode refuses Dev, dirty or uncaptured producer, version disagree
   } finally { await rm(input.base, { recursive: true, force: true }); }
 });
 
+test("release construction requires its captured commit to be the exact clean Git source before creating output", { skip: !supportedHost }, async () => {
+  const input = await fixture();
+  try {
+    await stableRecording(input); await input.write("../VERSION", "0.3.0\n");
+    await input.write("dist/resources/development-build.json", JSON.stringify({ commit: "0123456789abcdef0123456789abcdef01234567", modified: false }));
+    await assert.rejects(packageLinuxPreview({ root: input.root, output: input.output, directoryOnly: true,
+      mode: "canonical-stable-release-construction" }), /Git source verification/u);
+    await assert.rejects(lstat(input.output), { code: "ENOENT" });
+  } finally { await rm(input.base, { recursive: true, force: true }); }
+});
+
+test("canonical Stable release construction accepts a clean captured source and keeps release identity and notices", { skip: !supportedHost }, async () => {
+  const input = await fixture(), source = join(input.base, "source");
+  try {
+    await stableRecording(input); await input.write("../VERSION", "0.3.0\n");
+    await writeFile(join(source, ".gitignore"), "/electron/dist/\n/electron/node_modules/\n/electron/vendor/\n/electron/native/\n/shared/ui/node_modules/\n");
+    const git = (args: string[]) => {
+      const result = spawnSync("git", args, { cwd: source, encoding: "utf8", shell: false });
+      assert.equal(result.status, 0, result.stderr); return result.stdout.trim();
+    };
+    git(["init", "-q"]);
+    git(["add", "-A"]);
+    git(["-c", "user.name=OpenWhisper Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "clean Stable fixture"]);
+    const commit = git(["rev-parse", "HEAD"]);
+    await input.write("dist/resources/development-build.json", JSON.stringify({ commit, modified: false }));
+    const packageBefore = await readFile(join(input.root, "package.json"));
+    const descriptorBefore = await readFile(join(input.root, "dist/main/development-recording-build.js"));
+    const result = await packageLinuxPreview({ root: input.root, output: input.output, directoryOnly: true,
+      mode: "canonical-stable-release-construction" });
+    const control = await readFile(join(result.debianRoot, "DEBIAN/control"), "utf8");
+    const notices = await readFile(join(result.directory, "notices/README.txt"), "utf8");
+    assert.equal(result.version, "0.3.0"); assert.equal(result.debianPackage, null);
+    assert.match(control, /^Package: io-github-whisperfree$/mu);
+    assert.match(control, /^Version: 0\.3\.0$/mu);
+    assert.match(control, /^Architecture: amd64$/mu);
+    assert.match(control, /^Description: OpenWhisper stable Linux package$/mu);
+    assert.match(control, /Stable package construction; release signatures and feed publication are separate steps\./u);
+    assert.match(notices, /^OpenWhisper Linux stable package construction\./u);
+    assert.match(notices, /release signer adds update signatures separately/u);
+    assert.doesNotMatch(notices, /validation package|Unsigned; no stable update channel/u);
+    assert.equal(await readFile(join(result.debianRoot, "usr/bin/openwhisper-desktop"), "utf8"),
+      '#!/bin/sh\nexec /opt/openwhisper/openwhisper-launch "$@"\n');
+    assert.deepEqual(await readFile(join(result.directory, "resources/app/package.json")), packageBefore);
+    assert.deepEqual(await readFile(join(result.directory, "resources/app/dist/main/development-recording-build.js")), descriptorBefore);
+    assert.equal(git(["status", "--porcelain"]), "");
+  } finally { await rm(input.base, { recursive: true, force: true }); }
+});
+
 test("canonical Stable produces the fixed unsigned Debian archive with exact source version and unchanged payload", {
   skip: !hasDpkg ? "Requires the actual dpkg-deb tool; no host installation or unsigned signing fallback." : false,
 }, async () => {

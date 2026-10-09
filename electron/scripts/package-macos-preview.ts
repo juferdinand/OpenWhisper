@@ -22,7 +22,19 @@ const lockSchema = z.object({ lockfileVersion: z.literal(3), packages: z.record(
 const buildSchema = z.strictObject({ commit: z.union([z.string().regex(/^[a-f0-9]{40}$/u), z.literal("source")]), modified: z.boolean() });
 type Architecture = "arm64" | "x64";
 export type MacPreviewSigningMode = "ad-hoc" | "persistent-validation";
+export type MacPackageConstructionMode = "validation" | "release";
 export interface MacPreviewSigningPolicy { readonly mode: MacPreviewSigningMode; readonly identity: string; readonly description: string }
+
+/** A release build is an explicitly configured stable input, never an authority to publish. */
+export function macPackageConstructionMode(mode: MacPackageConstructionMode | undefined, identity: BuildIdentity,
+  signing: MacPreviewSigningPolicy, updates: ReturnType<typeof macPreviewUpdatePolicy>): MacPackageConstructionMode {
+  const selected = mode ?? "validation";
+  if (selected !== "validation" && selected !== "release") throw new Error("Unknown Mac package construction mode.");
+  if (selected === "release" && (buildIdentitySchema.parse(identity).kind !== "stable" || signing.mode !== "persistent-validation" || updates === null)) {
+    throw new Error("Mac release construction requires a stable persistent-signing build with updater policy enabled.");
+  }
+  return selected;
+}
 
 /** Explicit validation policy only; no keychain selection, fallback, release authorization or updater enablement. */
 export function macPreviewSigningPolicy(mode: MacPreviewSigningMode, identity: BuildIdentity, version: string,
@@ -145,7 +157,7 @@ export async function captureSignedMacDescriptor(root: string, original: Develop
 }
 
 export interface MacPreviewStageOptions { readonly root: string; readonly output: string; readonly architecture: Architecture;
-  readonly signingMode?: MacPreviewSigningMode; readonly enableUpdates?: boolean }
+  readonly signingMode?: MacPreviewSigningMode; readonly enableUpdates?: boolean; readonly constructionMode?: MacPackageConstructionMode }
 export interface MacPreviewStage { readonly directory: string; readonly application: string; readonly version: string;
   readonly identity: BuildIdentity; readonly source: z.infer<typeof buildSchema>; readonly recording: DevelopmentRecordingDescriptor;
   readonly signing: Readonly<MacPreviewSigningPolicy>; readonly updatePolicy: ReturnType<typeof macPreviewUpdatePolicy> }
@@ -172,6 +184,7 @@ export async function stageMacPreview(options: MacPreviewStageOptions): Promise<
   const identity = parseApplicationBuildModule(await readFile(join(root, "dist/main/application-build.js"), "utf8"));
   const signing = macPreviewSigningPolicy(options.signingMode ?? "ad-hoc", identity, metadata.version, source, process.env["SIGN_IDENTITY"]);
   const updatePolicy = macPreviewUpdatePolicy(options.enableUpdates, identity, signing);
+  macPackageConstructionMode(options.constructionMode, identity, signing, updatePolicy);
   macPreviewPlistValues(identity, metadata.version);
   if ((await readFile(join(root, "dist/resources/VERSION"), "utf8")).trim() !== metadata.version) throw new Error("Source and build versions differ.");
   const recording = await descriptor(root);
@@ -308,14 +321,15 @@ function verifyBundleMetadata(directory: string, identity: BuildIdentity, versio
   }
 }
 
-export async function packageMacPreview(output: string, root = defaultRoot, options: Readonly<{ signingMode?: MacPreviewSigningMode; enableUpdates?: boolean }> = {}): Promise<{ directory: string; archive: string; sha256: string }> {
+export async function packageMacPreview(output: string, root = defaultRoot, options: Readonly<{ signingMode?: MacPreviewSigningMode; enableUpdates?: boolean; constructionMode?: MacPackageConstructionMode }> = {}): Promise<{ directory: string; archive: string; sha256: string }> {
   if (process.platform !== "darwin" || (process.arch !== "arm64" && process.arch !== "x64") || process.getuid?.() === 0) throw new Error("Mac preview packaging requires a non-root Darwin architecture host.");
   const architecture = process.arch;
   await installedElectronExecutable(root);
   const inputRuntime = join(root, "node_modules/electron/dist/Electron.app");
   const inventory = await machFiles(inputRuntime, architecture, true);
   const staged = await stageMacPreview({ root, output, architecture, signingMode: options.signingMode ?? "ad-hoc",
-    ...(options.enableUpdates !== undefined ? { enableUpdates: options.enableUpdates } : {}) });
+    ...(options.enableUpdates !== undefined ? { enableUpdates: options.enableUpdates } : {}),
+    ...(options.constructionMode !== undefined ? { constructionMode: options.constructionMode } : {}) });
   const plist = join(staged.directory, "Contents/Info.plist");
   updatePlist(plist, macPreviewPlistValues(staged.identity, staged.version));
   const helpers = (await readdir(join(staged.directory, "Contents/Frameworks"))).filter((name) => name.endsWith(".app"));
@@ -331,8 +345,10 @@ export async function packageMacPreview(output: string, root = defaultRoot, opti
   // The source build keeps a second capture copy. Keep both signed copies identical.
   await cp(join(staged.application, "dist/native/capture/openwhisper_macos_capture.node"), join(staged.application, "dist/native/openwhisper_macos_capture.node"));
   const signed = await captureSignedMacDescriptor(staged.application, staged.recording);
-  await writeFile(join(staged.directory, "Contents/Resources/notices", staged.identity.kind === "stable" ? "mac-stable-validation-package.json" : "mac-dev-package.json"), JSON.stringify({
-    version: 1, architecture, sourceVersion: staged.version, source: staged.source, runtimeVersion: "44.7.0",
+  const packageNotice = staged.identity.kind !== "stable" ? "mac-dev-package.json" : options.constructionMode === "release"
+    ? "mac-stable-release-input.json" : "mac-stable-validation-package.json";
+  await writeFile(join(staged.directory, "Contents/Resources/notices", packageNotice), JSON.stringify({
+    version: 1, ...(options.constructionMode === "release" ? { classification: "STABLE_RELEASE_INPUT" } : {}), architecture, sourceVersion: staged.version, source: staged.source, runtimeVersion: "44.7.0",
     applicationBuild: staged.identity, signing: staged.signing.description,
     signingMode: staged.signing.mode, ...(staged.signing.mode === "persistent-validation" ? { certificateFingerprint: staged.signing.identity } : {}),
     updateConfigured: staged.updatePolicy !== null, publicationAuthority: false,
@@ -351,7 +367,7 @@ export async function packageMacPreview(output: string, root = defaultRoot, opti
   await machFiles(staged.directory, architecture, true);
   await verifyDescriptor(staged.application, await descriptor(staged.application));
   verifyBundleMetadata(staged.directory, staged.identity, staged.version, helpers);
-  const archive = join(output, `OpenWhisper-${staged.identity.kind === "stable" ? "validation" : "Dev"}-macOS-${architecture}_${staged.version}_${staged.source.commit.slice(0, 12)}${staged.source.modified ? ".modified" : ""}.zip`);
+  const archive = join(output, `OpenWhisper-${options.constructionMode === "release" ? "release-input" : staged.identity.kind === "stable" ? "validation" : "Dev"}-macOS-${architecture}_${staged.version}_${staged.source.commit.slice(0, 12)}${staged.source.modified ? ".modified" : ""}.zip`);
   run("/usr/bin/ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", staged.directory, archive]);
   const extracted = join(output, "archive-check");
   run("/usr/bin/ditto", ["-x", "-k", archive, extracted]);
@@ -368,11 +384,12 @@ export async function packageMacPreview(output: string, root = defaultRoot, opti
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
-  if (![2, 4, 5].includes(args.length) || args[0] !== "--output" || !args[1] ||
+  if (![2, 4, 5, 7].includes(args.length) || args[0] !== "--output" || !args[1] ||
       (args.length >= 4 && (args[2] !== "--signing-mode" || args[3] !== "persistent-validation")) ||
-      (args.length === 5 && args[4] !== "--enable-updates")) {
-    throw new Error("Usage: package-macos-preview.ts --output /absolute/fresh/output [--signing-mode persistent-validation [--enable-updates]]");
+      (args.length >= 5 && args[4] !== "--enable-updates") || (args.length === 6) ||
+      (args.length === 7 && (args[5] !== "--construction-mode" || args[6] !== "release"))) {
+    throw new Error("Usage: package-macos-preview.ts --output /absolute/fresh/output [--signing-mode persistent-validation --enable-updates [--construction-mode release]]");
   }
   console.log(JSON.stringify(await packageMacPreview(args[1], defaultRoot, args.length >= 4 ? { signingMode: "persistent-validation",
-    ...(args.length === 5 ? { enableUpdates: true } : {}) } : {})));
+    ...(args.length >= 5 ? { enableUpdates: true } : {}), ...(args.length === 7 ? { constructionMode: "release" } : {}) } : {})));
 }

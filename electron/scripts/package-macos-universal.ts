@@ -13,7 +13,8 @@ import { parseUpdateVersion } from "../src/services/update-policy.js";
 import { captureSignedMacDescriptor, digestMacPreviewFile as digest, inspectMacBinary, inspectMacMinimumOS,
   inspectMacPreviewFiles, insideOutMacCodePaths, macPreviewCodesignArguments, macPreviewSigningPolicy,
   readMacPreviewRecordingDescriptor, verifyMacPreviewBundleMetadata, verifyMacPreviewRecordingDescriptor,
-  macPreviewUpdatePolicy, writeMacPreviewUpdateBuild, type MacPreviewSigningMode } from "./package-macos-preview.js";
+  macPreviewUpdatePolicy, macPackageConstructionMode, writeMacPreviewUpdateBuild,
+  type MacPackageConstructionMode, type MacPreviewSigningMode } from "./package-macos-preview.js";
 
 type Architecture = "arm64" | "x64";
 const architectures = ["arm64", "x64"] as const;
@@ -22,6 +23,7 @@ const nativeRelative = ["dist/native/capture/openwhisper_macos_capture.node", "d
   "dist/native/openwhisper_macos_retirement.node", "dist/native/speech/cpu/openwhisper_speech.node", "dist/native/openwhisper_speech.node"];
 const koffiRelative = (architecture: Architecture) => `${appRelative}/node_modules/@koromix/koffi-darwin-${architecture}`;
 const snapshotRelative = (architecture: Architecture) => `Contents/Frameworks/Electron Framework.framework/Versions/A/Resources/v8_context_snapshot.${architecture === "x64" ? "x86_64" : "arm64"}.bin`;
+const thinPackageNotice = (mode: MacPackageConstructionMode) => `Contents/Resources/notices/${mode === "release" ? "mac-stable-release-input.json" : "mac-stable-validation-package.json"}`;
 const namespaced = ["Contents/Resources/notices/mac-stable-validation-package.json", "Contents/Resources/notices/speech-cpu-unsigned-build.json",
   `${appRelative}/dist/native/macos-capture-notices/build-manifest.json`, `${appRelative}/dist/native/macos-retirement-notices/build-manifest.json`];
 const sourceSchema = z.strictObject({ commit: z.string().length(40).regex(/^[a-f0-9]{40}$/u), modified: z.literal(false) });
@@ -29,6 +31,7 @@ const mergerRoot = dirname(dirname(fileURLToPath(import.meta.resolve("@electron/
 const mergerPin = { version: "3.0.6", integrity: "sha512-MonS1kfkZdSEkLZI0pdR/TCx8ecxwRSFm7sORfwIkDI9UaIbHnk4Mgeqq+Ob9qDQRV8LZ9+hHCmimpA9BRcNxw==",
   licenseSha256: "edab8abb78d9c5b36944c3e00aebf6a90eb32378993f49ac8a3904007029c629" } as const;
 const receiptSchema = z.object({ version: z.literal(1), architecture: z.enum(architectures), sourceVersion: z.string(), source: sourceSchema,
+  classification: z.string().optional(), signingMode: z.string().optional(), updateConfigured: z.boolean().optional(),
   runtimeVersion: z.literal("44.7.0"), applicationBuild: buildIdentitySchema, unsignedRecording: developmentRecordingDescriptorSchema, signedRecording: developmentRecordingDescriptorSchema,
   runtimeMachFiles: z.array(z.string().min(1).max(1024)).min(1).max(64),
   native: z.array(z.strictObject({ path: z.string(), unsigned: developmentArtifactSchema, signed: developmentArtifactSchema })).min(5).max(16) });
@@ -120,7 +123,7 @@ export function inspectUniversalMacBinary(bytes: Buffer): void {
   }
 }
 
-async function admit(directory: string, architecture: Architecture) {
+async function admit(directory: string, architecture: Architecture, constructionMode: MacPackageConstructionMode) {
   if (!isAbsolute(directory) || resolve(directory) !== directory || /[\u0000-\u001f\u007f]/u.test(directory) || await realpath(directory) !== directory || !directory.endsWith("/OpenWhisper.app")) throw new Error("Expected a canonical stable thin Mac bundle.");
   const original = await inventory(directory), root = join(directory, appRelative);
   await inspectMacPreviewFiles(root);
@@ -135,10 +138,12 @@ async function admit(directory: string, architecture: Architecture) {
   const recording = await readMacPreviewRecordingDescriptor(root);
   if (recording.platform !== "darwin" || recording.architecture !== architecture) throw new Error("Thin Mac recording architecture differs.");
   await verifyMacPreviewRecordingDescriptor(root, recording);
-  const receipt = receiptSchema.parse(JSON.parse(await readFile(join(directory, namespaced[0]!), "utf8")));
+  const receipt = receiptSchema.parse(JSON.parse(await readFile(join(directory, thinPackageNotice(constructionMode)), "utf8")));
   if (receipt.architecture !== architecture || receipt.sourceVersion !== metadata.version || !same(receipt.source, source) ||
     !same(receipt.applicationBuild, identity) || receipt.unsignedRecording.platform !== "darwin" || receipt.unsignedRecording.architecture !== architecture ||
-    !same(receipt.signedRecording, recording)) throw new Error("Thin package receipt differs.");
+    !same(receipt.signedRecording, recording) || (constructionMode === "release" && (receipt.classification !== "STABLE_RELEASE_INPUT" ||
+      receipt.signingMode !== "persistent-validation" || receipt.updateConfigured !== true)) ||
+    (constructionMode === "validation" && receipt.classification !== undefined)) throw new Error("Thin package receipt differs.");
   const lock = z.object({ packages: z.record(z.string(), z.object({ version: z.string().optional() })) }).parse(JSON.parse(await readFile(join(root, "package-lock.json"), "utf8")));
   const wrapper = z.object({ name: z.literal("koffi"), version: z.literal("3.3.2"), optionalDependencies: z.record(z.string(), z.string()) })
     .parse(JSON.parse(await readFile(join(root, "node_modules/koffi/package.json"), "utf8")));
@@ -170,16 +175,18 @@ async function admit(directory: string, architecture: Architecture) {
 }
 
 export interface MacUniversalOptions { readonly arm64AppPath: string; readonly x64AppPath: string; readonly output: string;
-  readonly signingMode?: MacPreviewSigningMode; readonly enableUpdates?: boolean }
+  readonly signingMode?: MacPreviewSigningMode; readonly enableUpdates?: boolean; readonly constructionMode?: MacPackageConstructionMode }
 /** Normalize only captured architecture differences in fresh copies; never mutate the original thin packages. */
 export async function stageMacUniversalInputs(options: MacUniversalOptions) {
   z.object({ name: z.literal("@electron/universal"), version: z.literal(mergerPin.version), license: z.literal("MIT") })
     .parse(JSON.parse(await readFile(join(mergerRoot, "package.json"), "utf8")));
   if ((await digest(join(mergerRoot, "LICENSE"))).sha256 !== mergerPin.licenseSha256) throw new Error("Universal merger license differs from its pin.");
-  const input = { arm64: await admit(options.arm64AppPath, "arm64"), x64: await admit(options.x64AppPath, "x64") };
+  const constructionMode = options.constructionMode ?? "validation";
+  const input = { arm64: await admit(options.arm64AppPath, "arm64", constructionMode), x64: await admit(options.x64AppPath, "x64", constructionMode) };
   if (!same(input.arm64.identity, input.x64.identity) || input.arm64.version !== input.x64.version || !same(input.arm64.source, input.x64.source)) throw new Error("Thin Mac provenance differs.");
   const signing = macPreviewSigningPolicy(options.signingMode ?? "ad-hoc", input.arm64.identity, input.arm64.version, input.arm64.source, process.env["SIGN_IDENTITY"]);
-  macPreviewUpdatePolicy(options.enableUpdates, input.arm64.identity, signing);
+  const updatePolicy = macPreviewUpdatePolicy(options.enableUpdates, input.arm64.identity, signing);
+  macPackageConstructionMode(constructionMode, input.arm64.identity, signing, updatePolicy);
   if (!isAbsolute(options.output) || resolve(options.output) !== options.output || /[\u0000-\u001f\u007f]/u.test(options.output) || !await absent(options.output) || await realpath(dirname(options.output)) !== dirname(options.output) ||
     architectures.some((architecture) => beneath(input[architecture].directory, options.output) || beneath(options.output, input[architecture].directory))) throw new Error("Expected a fresh isolated canonical output.");
   await mkdir(options.output, { mode: 0o700 });
@@ -191,12 +198,12 @@ export async function stageMacUniversalInputs(options: MacUniversalOptions) {
   for (const architecture of architectures) {
     const destination = staged[architecture];
     if (!inventoryEqual(await inventory(destination), input[architecture].original)) throw new Error("Copied thin Mac inputs changed.");
-    for (const path of namespaced) {
+    for (const path of [thinPackageNotice(constructionMode), ...namespaced.slice(1)]) {
       const source = join(destination, path);
       if (!await absent(source)) {
         const receipt = join(destination, "Contents/Resources/notices/architectures", architecture, path);
         await mkdir(dirname(receipt), { recursive: true }); await cp(source, receipt, { force: false, errorOnExist: true }); await rm(source);
-      } else if (path === namespaced[0] || path === namespaced[1]) throw new Error("Missing original architecture receipt.");
+      } else if (path === thinPackageNotice(constructionMode) || path === namespaced[1]) throw new Error("Missing original architecture receipt.");
     }
     for (const [path, item] of input[architecture].original) if (path.endsWith("/_CodeSignature/CodeResources")) {
       if (item.kind !== "file") throw new Error("Invalid original code seal.");
@@ -225,7 +232,15 @@ export async function stageMacUniversalInputs(options: MacUniversalOptions) {
   const koffiFiles = [...input.arm64.koffiMach, ...input.x64.koffiMach].sort();
   const merger: MakeUniversalOpts = { arm64AppPath: staged.arm64, x64AppPath: staged.x64, outAppPath: join(options.output, "OpenWhisper.app"),
     force: false, mergeASARs: false, x64ArchFiles: `{${koffiFiles.join(",")}}` };
-  return { input, staged, captured, signing, merger, copies, nativeFiles: [...allowedMach].sort(), output: options.output };
+  return { input, staged, captured, signing, merger, copies, nativeFiles: [...allowedMach].sort(), constructionMode, output: options.output };
+}
+
+/** Compare the complete signed application tree, including modes and relative framework-link targets. */
+export async function verifyMacUniversalCopy(original: string, copy: string): Promise<void> {
+  if (!isAbsolute(original) || !isAbsolute(copy) || resolve(original) !== original || resolve(copy) !== copy || original === copy) {
+    throw new Error("Expected two distinct absolute Mac application paths.");
+  }
+  if (!inventoryEqual(await inventory(original), await inventory(copy))) throw new Error("Universal Mac copy changed signed files or framework links.");
 }
 
 async function verifyMerged(stage: Awaited<ReturnType<typeof stageMacUniversalInputs>>, signed = false,
@@ -239,7 +254,8 @@ async function verifyMerged(stage: Awaited<ReturnType<typeof stageMacUniversalIn
       if (!updateBuild || !same(actual.get(key), { kind: "file", mode: 0o644, ...updateBuild })) throw new Error("Universal updater configuration changed.");
       continue;
     }
-    if (signed && (key === descriptorRelative || key === "Contents/Resources/notices/mac-universal-validation-package.json" ||
+    const packageNotice = `Contents/Resources/notices/${stage.constructionMode === "release" ? "mac-universal-release-package.json" : "mac-universal-validation-package.json"}`;
+    if (signed && (key === descriptorRelative || key === packageNotice ||
       key.endsWith("/_CodeSignature") || key.endsWith("/_CodeSignature/CodeResources"))) continue;
     if (key.endsWith("/Info.plist")) {
       if (reference.get(key)?.kind !== "file" || actual.get(key)?.kind !== "file" || reference.get(key)?.mode !== actual.get(key)?.mode) throw new Error("Universal plist inventory changed.");
@@ -278,11 +294,14 @@ export async function packageMacUniversal(options: MacUniversalOptions): Promise
   await build({ stdin: { contents: `export const DEVELOPMENT_RECORDING_BUILD: unknown = ${JSON.stringify(final)};`, loader: "ts" },
     outfile: join(root, "dist/main/development-recording-build.js"), platform: "node", format: "esm", target: "node24", sourcemap: false });
   const updateBuild = await writeMacPreviewUpdateBuild(root, updatePolicy);
-  await writeFile(join(directory, "Contents/Resources/notices/mac-universal-validation-package.json"), JSON.stringify({ version: 1,
-    classification: "UNIVERSAL_VALIDATION_ONLY", source: stage.input.arm64.source, sourceVersion: stage.input.arm64.version,
+  const constructionMode = options.constructionMode ?? "validation";
+  const packageNotice = constructionMode === "release" ? "mac-universal-release-package.json" : "mac-universal-validation-package.json";
+  await writeFile(join(directory, "Contents/Resources/notices", packageNotice), JSON.stringify({ version: 1,
+    classification: constructionMode === "release" ? "UNIVERSAL_RELEASE_PACKAGE" : "UNIVERSAL_VALIDATION_ONLY", source: stage.input.arm64.source, sourceVersion: stage.input.arm64.version,
     runtimeVersion: "44.7.0", applicationBuild: stage.input.arm64.identity, merger: mergerPin, signingMode: stage.signing.mode, originalThinRecording: stage.captured,
     signedRecording: final, updateAuthority: false, updateConfigured: updatePolicy !== null, publicationAuthority: false, runtimeAcceptance: false,
-    limitations: ["No notarization", ...(updatePolicy ? ["No update installation or public release acceptance"] : ["No stable update channel or public release acceptance"]), "No microphone/TCC or desktop runtime acceptance"] }, null, 2), { mode: 0o644 });
+    limitations: ["No notarization", ...(updatePolicy ? [constructionMode === "release" ? "No public release publication or end-user update acceptance" : "No update installation or public release acceptance"]
+      : ["No stable update channel or public release acceptance"]), "No microphone/TCC or desktop runtime acceptance"] }, null, 2), { mode: 0o644 });
   for (const path of insideOutMacCodePaths(stage.nativeFiles.filter((path) => !beneath(appRelative, path)))) tool("/usr/bin/codesign", macPreviewCodesignArguments(stage.signing, join(directory, path)));
   const containers = (await readdir(join(directory, "Contents/Frameworks"))).filter((name) => name.endsWith(".framework") || name.endsWith(".app"));
   for (const name of containers) tool("/usr/bin/codesign", macPreviewCodesignArguments(stage.signing, join(directory, "Contents/Frameworks", name)));
@@ -292,22 +311,24 @@ export async function packageMacUniversal(options: MacUniversalOptions): Promise
   for (const architecture of architectures) await verifyMacPreviewRecordingDescriptor(root, final.architectures[architecture]);
   const helpers = containers.filter((name) => name.endsWith(".app"));
   verifyMacPreviewBundleMetadata(directory, stage.input.arm64.identity, stage.input.arm64.version, helpers);
-  const archive = join(options.output, `OpenWhisper-validation-macOS-universal_${stage.input.arm64.version}_${stage.input.arm64.source.commit.slice(0, 12)}.zip`);
+  const archive = join(options.output, constructionMode === "release" ? "OpenWhisper-macOS.zip" :
+    `OpenWhisper-validation-macOS-universal_${stage.input.arm64.version}_${stage.input.arm64.source.commit.slice(0, 12)}.zip`);
   tool("/usr/bin/ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", directory, archive]);
   const extracted = join(options.output, "archive-check"); tool("/usr/bin/ditto", ["-x", "-k", archive, extracted]);
   const bundle = join(extracted, "OpenWhisper.app"); tool("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--all-architectures", bundle]);
-  if (!inventoryEqual(await inventory(directory), await inventory(bundle))) throw new Error("Universal ZIP roundtrip changed bundle bytes.");
+  await verifyMacUniversalCopy(directory, bundle);
   return { directory, archive, sha256: (await digest(archive)).sha256 };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
-  if (![6, 8, 9].includes(args.length) || args[0] !== "--arm64-app" || args[2] !== "--x64-app" || args[4] !== "--output" ||
+  if (![6, 8, 9, 11].includes(args.length) || args[0] !== "--arm64-app" || args[2] !== "--x64-app" || args[4] !== "--output" ||
     !args[1] || !args[3] || !args[5] || (args.length >= 8 && (args[6] !== "--signing-mode" || args[7] !== "persistent-validation")) ||
-    (args.length === 9 && args[8] !== "--enable-updates")) throw new Error("Usage: package-macos-universal.ts --arm64-app /owned/OpenWhisper.app --x64-app /owned/OpenWhisper.app --output /fresh/output [--signing-mode persistent-validation [--enable-updates]]");
+    (args.length >= 9 && args[8] !== "--enable-updates") || (args.length === 11 && (args[9] !== "--construction-mode" || args[10] !== "release")))
+    throw new Error("Usage: package-macos-universal.ts --arm64-app /owned/OpenWhisper.app --x64-app /owned/OpenWhisper.app --output /fresh/output [--signing-mode persistent-validation --enable-updates [--construction-mode release]]");
   try {
     console.log(JSON.stringify(await packageMacUniversal({ arm64AppPath: args[1], x64AppPath: args[3], output: args[5], ...(args.length >= 8 ? {
-      signingMode: "persistent-validation", ...(args.length === 9 ? { enableUpdates: true } : {}) } : {}) })));
+      signingMode: "persistent-validation", ...(args.length >= 9 ? { enableUpdates: true } : {}), ...(args.length === 11 ? { constructionMode: "release" } : {}) } : {}) })));
   } catch (error: unknown) {
     const diagnostic = process.env["OPENWHISPER_UNIVERSAL_DIAGNOSTIC"];
     if (diagnostic && isAbsolute(diagnostic) && resolve(diagnostic) === diagnostic) {

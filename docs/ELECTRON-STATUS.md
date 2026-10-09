@@ -23,10 +23,30 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 
 ## Current package checkpoint
 
-The current source increment passes strict typing, the normal application/shared
-UI build and 1,293 tests: 1,339 total, zero failures and 46 explicit native/opt-in
-skips in 19.02 seconds. Independent source reviews pass. The genuine signed
-Debian upgrade and latest Mac results are recorded below.
+The current source increment passes 1,302 tests: 1,348 total, zero failures and
+46 explicit native/opt-in skips in 17.99 seconds. Independent source reviews pass.
+The genuine signed Debian and AppImage upgrade scopes are recorded below.
+
+`npm run preflight --prefix electron` checks all workflows with pinned actionlint
+and ShellCheck, strict TypeScript, shared UI formatting and whitespace. A focused
+YAML check also rejects shell continuations in folded/plain `run` scalars: the
+standard linters do not detect that specific argument-folding failure. CI runs this
+before native builds and packaging. Verified tool archives are cached for later
+offline checks; upstream license contents are preserved verbatim.
+
+Explicit Electron release-construction paths now prepare canonical Debian/AppImage
+and Universal Mac ZIP/DMG names. Mac disk-image verification uses strict publisher
+checks and full signed-tree comparison without the legacy Swift verifier. These
+paths are source-reviewed and covered by focused fixtures; actual release-mode
+construction, signing and publication through the Release workflow remain open.
+
+[CI 37919640284](https://github.com/juferdinand/OpenWhisper/actions/runs/37919640284)
+passes both thin Mac jobs, Universal construction and actual Universal runtime
+checks on ARM and Intel. Its publisher job stops before credentials or signing
+because YAML folded a shell continuation into a leading argument space. The
+literal-block correction at `643b463` passes parsed-YAML and exact shell-argument
+checks. The following CI run must still prove persistent publisher admission and
+the genuine private newer-version install/relaunch.
 
 Debian updates connect directly to the existing
 parent supervisor, V2 channel and shared Update controls. Only a canonical

@@ -1,0 +1,15 @@
+Install OpenWhisper
+===================
+
+1. Drag OpenWhisper.app onto the Applications folder in this window.
+2. Eject the OpenWhisper volume in Finder.
+3. Launch OpenWhisper from Applications.
+
+The app appears in the menu bar. Download a speech model and grant microphone
+access during setup. Automatic text insertion also requires Accessibility access.
+
+The app is self-signed and is not notarized by Apple. If macOS blocks the first
+launch, review its origin and use System Settings → Privacy & Security → Open Anyway
+if you choose to allow it.
+
+Guide: https://github.com/juferdinand/OpenWhisper#readme
