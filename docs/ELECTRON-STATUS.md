@@ -18,7 +18,7 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | macOS dictation | Actual Intel/Apple Silicon Dev packages pass sandbox, signed utilities, CPU recognition of public audio, shortcut setup/removal and original Quit. Normal stable packages pass migration, edited-state restart and clean exits at b892d86 | Physical microphone/TCC, actual target insertion and device changes; Metal selection remains open |
 | Linux desktop integration | Owned stock KDE 5.27 native Wayland F8, binding Quit/crash recovery and paste into separate Wayland/XWayland editors pass. Genuine X11 shortcuts and all five no-display CLI commands pass, including installed stable autostart enable/disable and generated-target restart | Expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
-| Packaging and updates | Ubuntu22 .deb and AppImage construction/runtime pass. Fresh Dev installation and normal Mac stable runtime pass. Fixed-key Linux verification includes real files and actual Electron execution; actual Mac signature checks pass on Intel/Apple Silicon. Reviewed original-file staging, bounded download and Mac ZIP consumer are implemented | Actual new Mac ZIP runtime, AppImage admission/autostart, installation/restart/rollback, persistent publisher continuity, authenticated Dev replacement, universal DMG+ZIP and release signing |
+| Packaging and updates | Ubuntu22 .deb and AppImage construction/runtime pass. Fresh Dev installation and normal Mac stable runtime pass. Fixed-key Linux verification includes real files and actual Electron execution; actual Mac signatures and ZIP roundtrips pass on Intel/Apple Silicon. Original-file staging, bounded download and AppImage admission/autostart are implemented | Actual new AppImage admission/autostart runtime, installation/restart/rollback, persistent publisher continuity, authenticated Dev replacement, universal DMG+ZIP and release signing |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 ## Current package checkpoint
@@ -88,7 +88,13 @@ reproduced in the unchanged Dev9 Electron runtime: normal `fs` treats the
 physical `default_app.asar` file as a virtual directory and leaves it behind.
 The built-in `original-fs` removes the owned tree successfully. The reviewed
 consumer now uses physical filesystem operations for bundle checks and removal,
-with no global ASAR switch or retry. Actual new Mac ZIP acceptance is pending.
+with no global ASAR switch or retry. Both original owned Mac jobs in
+[CI 37871798972](https://github.com/juferdinand/OpenWhisper/actions/runs/37871798972)
+pass Dev and stable ZIP roundtrips, all seven malformed-archive fixtures,
+same-version refusal and original clean exits. Its API head is `f28b2583`; the
+actual checkout/package producer is synthetic merge `7e30a4f7`. These thin
+ad-hoc packages establish archive acceptance, with persistent publisher and
+universal installation acceptance still outstanding.
 
 The committed cleanup/signing/harness increment `6994e42` passes strict typing,
 ordinary build and 1153 tests with 28 explicit skips in 17.83 seconds. Its thin
@@ -101,9 +107,21 @@ passes all 15 checks in 64.39 seconds: all five CLI command kinds and absent-own
 refusal, native X11 controls, real CPU recognition/clipboard/history, Retry/
 Discard, edited-state restart, secondary resource survival and normal cleanup.
 Both launcher/runtime/main chains exit normally, all observed PIDs are absent
-and the extraction base is empty; actual cache mode is safely0600. Current
-strict typing and 1153 default-suite tests pass in 17.88 seconds with 28 explicit
-skips. Actual Mac ZIP execution remains separate acceptance work.
+and the extraction base is empty; actual cache mode is safely 0600. That
+increment passes strict typing and 1153 default-suite tests in 17.88 seconds
+with 28 explicit skips. Matching Mac ZIP execution subsequently passes as above.
+
+The next source increment admits an AppImage launch only through the exact
+permanent image and launcher, matching extracted layout, same-user live process
+ancestry and original file identities. Startup/status reads preserve existing
+autostart entries; explicit enable can retarget a recognized entry to the two
+escaped permanent arguments. Focused admission tests use real owned files and
+a mocked kernel boundary; a fresh package runtime must verify the new wiring.
+The separate Mac V2 descriptor validates both architecture branches before
+selecting the current runtime's V1 services. Thin/Linux V1 remains unchanged;
+this is preparation for a universal package rather than proof of one. The
+combined source passes strict typing, ordinary build and 1167 tests in 17.99
+seconds, zero failures and 28 explicit skips.
 
 Unsigned AppImage construction reuses the exact clean `b892d861` stable package.
 The 119,441,912-byte image has SHA-256
@@ -112,7 +130,7 @@ passive extraction matches the payload/native descriptors, modes and notices.
 The installed-launcher design creates private temporary storage before each
 extract-and-run invocation, avoiding the upstream shared-directory cleanup race.
 Owned application/control/restart acceptance passes with that exact old producer;
-permanent-path admission and autostart/update wiring remain open. Raw overlapping
+new permanent-path admission/autostart runtime and update wiring remain open. Raw overlapping
 extract-and-run launches are outside this protected path.
 Static runtime component notices are included, with LGPL corresponding-source/
 relink obligations retained as a public distribution gate. Construction is not

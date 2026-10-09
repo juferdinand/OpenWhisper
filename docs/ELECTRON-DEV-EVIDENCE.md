@@ -1,5 +1,36 @@
 # Electron development evidence
 
+## Mac ZIP acceptance and next installed-launch source increment
+
+Both original owned Mac jobs in
+[CI 37871798972](https://github.com/juferdinand/OpenWhisper/actions/runs/37871798972)
+pass at API head `f28b2583`; both actual package producers are synthetic PR
+merge `7e30a4f7fc9374c7795810e058d1e386b6c7121e`. Intel and Apple Silicon each
+accept the real Dev and stable ZIP through retained original fd3, reject the
+same version before extraction and reject wrong-version, corrupt, missing-app,
+app-symlink, external-symlink, dotdot and symlink-write fixtures. Original files
+remain unchanged, private stages disappear and no outside marker is created.
+All original Dev/first-stable/restarted-stable exits are normal. Original logs
+and terminal job receipts are retained; no rerun or artifact download is used.
+Persistent release signing, universal packaging and installation remain separate.
+
+The next AppImage source admits only the exact legacy permanent image and fixed
+launcher, canonical extracted layout and a same-user live image ancestor proven
+through bounded kernel process records and original executable inode. Status
+is read-only. Explicit autostart enable can retarget a recognized native entry
+to the permanent launcher/image after revalidation; extracted executables are
+never published. The 23 focused checks pass with actual owned files and a mocked
+kernel boundary. This does not replace the earlier immutable package runtime
+or establish runtime acceptance of the new source.
+
+The separate Mac V2 descriptor validates both original V1 branches before
+selecting a matching runtime architecture; Linux/thin V1 semantics remain intact.
+Five focused checks and independent descriptor/Main review pass. A universal
+package has not yet been assembled. Combined strict typing, ordinary build and
+1167 default-suite tests pass in 17.99 seconds, with 28 explicit skips and no
+failures. Independent review of installed-launch admission, autostart, launcher,
+packager and Main integration also passes; new package execution remains open.
+
 ## Physical Mac archive filesystem and targeted AppImage diagnosis
 
 Original ARM job113626633516 in
@@ -21,7 +52,8 @@ separate: its sleeping container terminates137 after the probe closes normally,
 then the container is removed. This embedded Linux result is not a Mac browser
 acceptance claim. The reviewed consumer now uses the documented
 [physical filesystem API](https://www.electronjs.org/docs/latest/tutorial/asar-archives#treating-an-asar-archive-as-a-normal-file)
-for bundle inspection and cleanup; its actual Mac ZIP smoke remains pending.
+for bundle inspection and cleanup; the subsequent actual Mac ZIP result is
+recorded above.
 
 The first owned AppImage case fails before readiness in7.96s total. Its targeted
 startup-only diagnostic identifies a125-byte AF_UNIX SingletonSocket path below
@@ -56,10 +88,10 @@ private servers close and namespace removal passes. Nineteen bounded cache
 receipts now observe0600 regular same-user files withnlink1; the previous failed
 mode remains unknown. This is offline owned Xvfb/nativeX11/private Pulse evidence,
 without FUSE/host devices/physical microphone/GPU/automatic paste/login claims.
-AppImage admission/autostart/updater remains unavailable. One current default
+AppImage admission/autostart/updater is unavailable in that immutable package. Its default
 suite passes1153 tests in17.88 seconds, zero failures,28 explicit skips; strict
 typing passes. Mac physical-FS source and every harness increment have separate
-independent review; actual Mac ZIP execution still requires matching CI.
+independent review; subsequent matching Mac ZIP execution is recorded above.
 
 ## Reviewed original-file staging, update download and Mac archive consumer
 

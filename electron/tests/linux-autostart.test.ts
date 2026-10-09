@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { mock, test } from "node:test";
 import { LinuxAutostart, LinuxAutostartError, linuxAutostartArgument, selectLinuxAutostartExecutable } from "../src/services/linux-autostart.js";
+import { appImageLauncher } from "../src/services/linux-appimage-launcher.js";
 
 const supported = process.platform === "linux" && process.getuid?.() !== 0;
 const identity = { version: 1, kind: "stable", appId: "io.github.whisperfree", productName: "OpenWhisper" };
@@ -83,6 +84,50 @@ test("Native AppImage entries are recognized without executing them and retarget
   assert.deepEqual(await input.service.status(), { requested: true }); assert.equal(await filesystem.readFile(input.entry, "utf8"), raw);
   await input.service.set(true); assert.equal(await filesystem.readFile(input.entry, "utf8"), desktop(input.executable));
   await assert.rejects(filesystem.lstat(old), { code: "ENOENT" });
+}));
+
+test("Admitted permanent AppImage status preserves native bytes; explicit enable writes only quoted launcher and image", { skip: !supported }, async () => fixture(async (input) => {
+  const directory = join(input.root, 'Permanent % "quoted" $value`tail\\image'); await filesystem.mkdir(directory, { mode: 0o700 });
+  const image = join(directory, "OpenWhisper.AppImage"), launcher = join(directory, "openwhisper-launch");
+  await filesystem.writeFile(image, "owned image, never launched", { mode: 0o700 });
+  await filesystem.writeFile(launcher, appImageLauncher(), { mode: 0o700 });
+  let checks = 0;
+  const service = await LinuxAutostart.open({ appId: identity.appId, configHome: input.configHome, configDirs: input.configDirs,
+    executable: launcher, appImage: { image, assertUnchanged() { checks++; } } });
+  const native = desktop(image, "", true); await write(input.entry, native);
+  assert.deepEqual(await service.status(), { requested: true }); assert.equal(await filesystem.readFile(input.entry, "utf8"), native);
+  await service.set(true);
+  const expected = desktop(launcher).replace(`Exec=${linuxAutostartArgument(launcher)}`, `Exec=${linuxAutostartArgument(launcher)} ${linuxAutostartArgument(image)}`);
+  assert.equal(await filesystem.readFile(input.entry, "utf8"), expected);
+  const validate = spawnSync("desktop-file-validate", [input.entry], { encoding: "utf8" }); assert.ifError(validate.error); assert.equal(validate.status, 0, validate.stderr);
+  const before = await filesystem.lstat(input.entry, { bigint: true }); await service.set(true);
+  assert.equal((await filesystem.lstat(input.entry, { bigint: true })).ino, before.ino);
+  assert(checks >= 8); await service.set(false); assert.deepEqual(await service.status(), { requested: false });
+  assert.equal(await filesystem.readFile(image, "utf8"), "owned image, never launched");
+}));
+
+test("Permanent AppImage identity change during staging preserves the original desktop and removes only owned unused staging", { skip: !supported }, async () => fixture(async (input) => {
+  const image = join(input.root, "OpenWhisper.AppImage"), launcher = join(input.root, "openwhisper-launch");
+  await filesystem.writeFile(image, "owned image, never launched", { mode: 0o700 }); await filesystem.writeFile(launcher, appImageLauncher(), { mode: 0o700 });
+  let changed = false;
+  const service = await LinuxAutostart.open({ appId: identity.appId, configHome: input.configHome, configDirs: input.configDirs,
+    executable: launcher, appImage: { image, assertUnchanged() { if (changed) throw new Error("INSTALLED_LAUNCH_CHANGED"); } } });
+  const original = desktop(image, "", true); await write(input.entry, original);
+  await afterStageSync(async () => { changed = true; }, async () => { await assert.rejects(service.set(true), category("SOURCE_CHANGED")); });
+  assert.equal(await filesystem.readFile(input.entry, "utf8"), original);
+  assert.deepEqual(await filesystem.readdir(dirname(input.entry)), ["io.github.whisperfree.desktop"]);
+  await assert.rejects(service.status(), category("SOURCE_CHANGED"));
+}));
+
+test("AppImage entries with extra or non-fixed launcher arguments are retained as conflicts", { skip: !supported }, async () => fixture(async (input) => {
+  const launcher = join(input.root, "openwhisper-launch"), image = join(input.root, "OpenWhisper.AppImage");
+  for (const command of [`${linuxAutostartArgument(launcher)} ${linuxAutostartArgument(image)} ${linuxAutostartArgument("/extra")}`,
+    `${linuxAutostartArgument(input.executable)} ${linuxAutostartArgument(image)}`,
+    `env APPIMAGE_EXTRACT_AND_RUN=1 ${linuxAutostartArgument(launcher)} ${linuxAutostartArgument(image)}`]) {
+    const raw = desktop(input.executable).replace(`Exec=${linuxAutostartArgument(input.executable)}`, `Exec=${command}`);
+    await write(input.entry, raw); await assert.rejects(input.service.status(), category("CONFLICT"));
+    await assert.rejects(input.service.set(true), category("CONFLICT")); assert.equal(await filesystem.readFile(input.entry, "utf8"), raw);
+  }
 }));
 
 test("Foreign, restricted, ambiguous, invalid and oversized entries remain untouched", { skip: !supported }, async () => fixture(async (input) => {

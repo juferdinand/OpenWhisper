@@ -1,7 +1,7 @@
 import { constants, linkSync, lstatSync, mkdirSync, renameSync, unlinkSync, type BigIntStats } from "node:fs";
 import { open } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import { buildIdentitySchema } from "../contracts/build-identity.js";
 
@@ -10,9 +10,12 @@ const filename = `${appId}.desktop`;
 const maximumBytes = 32 * 1024;
 const pathSchema = z.string().min(1).max(4096).refine((value) => isAbsolute(value) && resolve(value) === value && !/[\p{Cc}]/u.test(value));
 const optionsSchema = z.strictObject({ appId: z.literal(appId), configHome: pathSchema,
-  configDirs: z.array(pathSchema).max(32), executable: pathSchema });
+  configDirs: z.array(pathSchema).max(32), executable: pathSchema,
+  appImage: z.strictObject({ image: pathSchema, assertUnchanged: z.custom<() => void>((value) => typeof value === "function") }).optional() });
 export interface LinuxAutostartOptions { readonly appId: string; readonly configHome: string;
-  readonly configDirs: readonly string[]; readonly executable: string }
+  readonly configDirs: readonly string[]; readonly executable: string;
+  /** The main process supplies an admitted permanent image and synchronous original-identity guard. */
+  readonly appImage?: Readonly<{ image: string; assertUnchanged(): void }> }
 export interface LinuxAutostartStatus { readonly requested: boolean }
 export class LinuxAutostartError extends Error {
   constructor(readonly code: "UNAVAILABLE" | "UNSAFE_PATH" | "CONFLICT" | "SOURCE_CHANGED" | "CHANGE_FAILED") {
@@ -47,28 +50,36 @@ export function linuxAutostartArgument(value: string): string {
   if (!pathSchema.safeParse(value).success || value.includes("=")) return fail("UNSAFE_PATH");
   return `"${value.replaceAll("%", "%%").replace(/["`$\\]/gu, (item) => `\\${item}`).replaceAll("\\", "\\\\")}"`;
 }
-function legacyExecutable(value: string): string {
+function interpretedLaunch(value: string): { executable: string; image?: string } {
   const prefix = "env APPIMAGE_EXTRACT_AND_RUN=1 ";
   const command = value.startsWith(prefix) ? value.slice(prefix.length) : value;
   // Recognize the native generator's two exact escape layers; never execute an entry.
   const quoted = command.replaceAll("\\\\", "\\");
-  if (!quoted.startsWith('"') || !quoted.endsWith('"')) return fail("CONFLICT");
-  let path = "";
-  for (let index = 1; index < quoted.length - 1; index++) {
-    const char = quoted[index]!;
-    if (char === "\\") {
-      const next = quoted[++index]; if (next === undefined || !['"', "`", "$", "\\"].includes(next)) return fail("CONFLICT");
-      path += next;
-    } else if (char === "%") {
-      if (quoted[++index] !== "%") return fail("CONFLICT"); path += "%";
-    } else { if (['"', "`", "$"].includes(char)) return fail("CONFLICT"); path += char; }
+  const paths: string[] = []; let index = 0;
+  while (index < quoted.length) {
+    if (paths.length === 2 || quoted[index++] !== '"') return fail("CONFLICT");
+    let path = "", closed = false;
+    while (index < quoted.length) {
+      const char = quoted[index++]!;
+      if (char === '"') { closed = true; break; }
+      if (char === "\\") {
+        const next = quoted[index++]; if (next === undefined || !['"', "`", "$", "\\"].includes(next)) return fail("CONFLICT"); path += next;
+      } else if (char === "%") { if (quoted[index++] !== "%") return fail("CONFLICT"); path += "%"; }
+      else { if (["`", "$"].includes(char)) return fail("CONFLICT"); path += char; }
+    }
+    if (!closed || !pathSchema.safeParse(path).success || path.includes("=")) return fail("CONFLICT");
+    paths.push(path); if (index < quoted.length && quoted[index++] !== " ") return fail("CONFLICT");
   }
-  if (!pathSchema.safeParse(path).success || path.includes("=") || linuxAutostartArgument(path) !== command) return fail("CONFLICT");
-  return path;
+  if (!paths.length || paths.map(linuxAutostartArgument).join(" ") !== command || (value.startsWith(prefix) && paths.length !== 1)) return fail("CONFLICT");
+  const executable = paths[0]!;
+  if (paths.length === 1) return { executable };
+  const image = paths[1]!;
+  if (basename(executable) !== "openwhisper-launch" || basename(image) !== "OpenWhisper.AppImage" || dirname(executable) !== dirname(image)) return fail("CONFLICT");
+  return { executable, image };
 }
 interface Entry { readonly path: string; readonly stats: BigIntStats; readonly bytes: Buffer;
-  readonly requested: boolean; readonly executable?: string }
-function interpret(bytes: Buffer): { requested: boolean; executable?: string } {
+  readonly requested: boolean; readonly executable?: string; readonly image?: string }
+function interpret(bytes: Buffer): { requested: boolean; executable?: string; image?: string } {
   let text: string;
   try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { return fail("CONFLICT"); }
   const lines = text.trimEnd().split("\n").map((line) => line.endsWith("\r") ? line.slice(0, -1) : line);
@@ -85,7 +96,7 @@ function interpret(bytes: Buffer): { requested: boolean; executable?: string } {
       [...fields.keys()].some((key) => !["Type", "Name", "Exec", ...Object.keys(fixed), "Hidden", "X-GNOME-Autostart-enabled"].includes(key))) return fail("CONFLICT");
   for (const key of ["Hidden", "X-GNOME-Autostart-enabled"]) if (fields.has(key) && !["true", "false"].includes(fields.get(key)!)) return fail("CONFLICT");
   return { requested: fields.get("Hidden") !== "true" && fields.get("X-GNOME-Autostart-enabled") !== "false",
-    executable: legacyExecutable(fields.get("Exec")!) };
+    ...interpretedLaunch(fields.get("Exec")!) };
 }
 
 /** Per-user fixed-name autostart. Opening and status reads have no registration effects. */
@@ -97,6 +108,11 @@ export class LinuxAutostart {
     if (process.platform !== "linux" || process.getuid?.() === undefined || process.getuid() === 0 || input.appId !== appId) return fail("UNAVAILABLE");
     const parsed = optionsSchema.safeParse(input); if (!parsed.success) return fail("UNSAFE_PATH");
     linuxAutostartArgument(parsed.data.executable);
+    if (parsed.data.appImage) {
+      linuxAutostartArgument(parsed.data.appImage.image);
+      if (basename(parsed.data.executable) !== "openwhisper-launch" || basename(parsed.data.appImage.image) !== "OpenWhisper.AppImage" ||
+          dirname(parsed.data.executable) !== dirname(parsed.data.appImage.image)) return fail("UNSAFE_PATH");
+    }
     const service = new LinuxAutostart(parsed.data, BigInt(process.getuid()));
     service.checkDirectories(dirname(parsed.data.executable));
     service.checkDirectories(join(parsed.data.configHome, "autostart"), parsed.data.configHome);
@@ -119,6 +135,7 @@ export class LinuxAutostart {
     const stats = optional(this.options.executable);
     if (!stats?.isFile() || stats.nlink !== 1n || (stats.uid !== this.uid && stats.uid !== 0n) ||
         (stats.mode & 0o022n) !== 0n || (stats.mode & 0o111n) === 0n) return fail("UNSAFE_PATH");
+    try { this.options.appImage?.assertUnchanged(); } catch { return fail("SOURCE_CHANGED"); }
   }
   private paths(): string[] { return [...new Set([this.options.configHome, ...this.options.configDirs])].map((base) => join(base, "autostart", filename)); }
   private async read(path: string): Promise<Entry | undefined> {
@@ -145,12 +162,16 @@ export class LinuxAutostart {
     for (const path of this.paths()) { const entry = await this.read(path); checked.push({ path, entry }); if (entry) return { checked, effective: entry }; }
     return { checked, effective: undefined };
   }
-  async status(): Promise<LinuxAutostartStatus> { return { requested: (await this.snapshot()).effective?.requested ?? false }; }
+  async status(): Promise<LinuxAutostartStatus> {
+    this.checkExecutable(); const value = (await this.snapshot()).effective?.requested ?? false;
+    this.checkExecutable(); return { requested: value };
+  }
   set(requested: boolean): Promise<LinuxAutostartStatus> {
     if (typeof requested !== "boolean") return Promise.reject(new LinuxAutostartError("UNAVAILABLE"));
     const task = this.queue.then(async () => {
-      const original = await this.snapshot();
-      if ((!requested && !original.effective?.requested) || (requested && original.effective?.requested && original.effective.executable === this.options.executable)) return { requested };
+      this.checkExecutable(); const original = await this.snapshot(); this.checkExecutable();
+      if ((!requested && !original.effective?.requested) || (requested && original.effective?.requested &&
+          original.effective.executable === this.options.executable && original.effective.image === this.options.appImage?.image)) return { requested };
       this.checkExecutable();
       const path = this.paths()[0]!, parent = dirname(path);
       for (const directory of ancestry(parent)) {
@@ -158,7 +179,8 @@ export class LinuxAutostart {
         if (!optional(directory)) { mkdirSync(directory, { mode: 0o700 }); this.checkDirectories(parent, this.options.configHome); }
       }
       const content = requested ? ["[Desktop Entry]", "Type=Application", "Name=OpenWhisper", "Comment=Free, local dictation",
-        `Exec=${linuxAutostartArgument(this.options.executable)}`, `Icon=${appId}`, `StartupWMClass=${appId}`, "Terminal=false", ""].join("\n")
+        `Exec=${linuxAutostartArgument(this.options.executable)}${this.options.appImage ? ` ${linuxAutostartArgument(this.options.appImage.image)}` : ""}`,
+        `Icon=${appId}`, `StartupWMClass=${appId}`, "Terminal=false", ""].join("\n")
         : "[Desktop Entry]\nType=Application\nName=OpenWhisper\nHidden=true\n";
       const temporary = join(parent, `.${filename}.${randomUUID()}.tmp`); let owned: BigIntStats | undefined;
       try {

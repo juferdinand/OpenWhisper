@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { parseApplicationBuildModule } from "../src/contracts/build-identity.js";
 import { developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
+import { appImageLauncher } from "../src/services/linux-appimage-launcher.js";
+export { appImageLauncher };
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const producerSchema = z.strictObject({ commit: z.string().regex(/^[a-f0-9]{40}$/u), modified: z.boolean() });
@@ -51,17 +53,6 @@ async function inventory(path: string, prefix = "", iconLink?: string): Promise<
   return result;
 }
 
-/** A fixed installed launcher gives each invocation its own extraction lifetime before the runtime starts. */
-export function appImageLauncher(): string {
-  return ["#!/bin/sh", "set -eu", 'image=${1:?A permanent AppImage path is required}', "shift",
-    'case "$image" in /*) ;; *) exit 64 ;; esac', 'test -f "$image" && test -x "$image" && test ! -L "$image" || exit 64',
-    "umask 077", 'launch_tmp=$(mktemp -d "${TMPDIR:-/tmp}/openwhisper-appimage.XXXXXXXX")', "child=",
-    'cleanup() { status=$?; trap - EXIT HUP INT TERM; rm -rf -- "$launch_tmp"; exit "$status"; }',
-    'terminate() { trap "" HUP INT TERM; if test -n "$child"; then /bin/kill -TERM -- "-$child" 2>/dev/null || :; attempts=0; while /bin/kill -0 "$child" 2>/dev/null && test "$attempts" -lt 100; do sleep 0.1; attempts=$((attempts + 1)); done; /bin/kill -KILL -- "-$child" 2>/dev/null || :; wait "$child" 2>/dev/null || :; child=; fi; exit 143; }',
-    "trap cleanup EXIT", "trap terminate HUP INT TERM", "unset TARGET_APPIMAGE APPIMAGE APPDIR ARGV0 NO_CLEANUP",
-    'TMPDIR="$launch_tmp" APPIMAGE_EXTRACT_AND_RUN=1 setsid --wait "$image" "$@" &', "child=$!", "status=0",
-    'wait "$child" || status=$?', "child=", 'exit "$status"', ""].join("\n");
-}
 function appRun(executable: string): string {
   return ["#!/bin/sh", "set -eu", 'bundle=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)',
     `exec "$bundle/usr/lib/${executable}/${executable}" "$@"`, ""].join("\n");

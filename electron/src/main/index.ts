@@ -35,7 +35,7 @@ import { recordingRequestSchema } from "../core/recording.js";
 import type { RecordingSource } from "../workers/recording-host-protocol.js";
 import { recordingSnapshotSchema } from "../workers/recording-host-protocol.js";
 import { DEVELOPMENT_RECORDING_BUILD } from "./development-recording-build.js";
-import { developmentRecordingDescriptorSchema, type DevelopmentRecordingDescriptor } from "./development-recording-descriptor.js";
+import { developmentRecordingDescriptorSchema, selectDevelopmentRecordingDescriptor, type DevelopmentRecordingDescriptor } from "./development-recording-descriptor.js";
 import { DevelopmentRecordingHost, developmentPulseServer, formatSourceDiscoveryFailure } from "./development-recording-host.js";
 import { saveTranscript } from "../services/development-transcripts.js";
 import { DevelopmentPlatformHost } from "./development-platform-host.js";
@@ -49,7 +49,8 @@ import { WaylandRecordingOverlay } from "./wayland-recording-overlay.js";
 import { MacosShortcut } from "./macos-shortcut.js";
 import { MacosPaste } from "./macos-paste.js";
 import { MacosAutostart } from "./macos-autostart.js";
-import { LinuxAutostart, selectLinuxAutostartExecutable } from "../services/linux-autostart.js";
+import { LinuxAutostart } from "../services/linux-autostart.js";
+import { admitLinuxInstalledLaunch } from "./linux-installed-launch.js";
 import { createRequire } from "node:module";
 import { routeControlStartup } from "./control-startup.js";
 import { createControlAdapter } from "../platforms/linux/shared/control-adapter.js";
@@ -101,10 +102,7 @@ async function prepareApplication(): Promise<ApplicationBootstrap> {
     platform: process.platform, architecture: process.arch, packaged: app.isPackaged,
     executable: await realpath(process.execPath), appPath, resourcesPath: await realpath(process.resourcesPath),
     distribution: await realpath(distribution), projectVersion: version, packageVersion });
-  const descriptor = DEVELOPMENT_RECORDING_BUILD === null ? null : developmentRecordingDescriptorSchema.parse(DEVELOPMENT_RECORDING_BUILD);
-  if (descriptor && (descriptor.platform !== process.platform || descriptor.architecture !== process.arch)) {
-    throw new Error("The recording build does not match this runtime.");
-  }
+  const descriptor = DEVELOPMENT_RECORDING_BUILD === null ? null : selectDevelopmentRecordingDescriptor(DEVELOPMENT_RECORDING_BUILD);
   if (identity.kind === "stable" && (!descriptor || descriptor.platform === "linux" && !descriptor.platformServices)) {
     throw new Error("The stable build requires its matching recording services.");
   }
@@ -214,11 +212,13 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     try {
       if (process.platform === "darwin") autostart = MacosAutostart.open({ appId: profile.appId, app });
       else if (process.platform === "linux") {
-        const executable = selectLinuxAutostartExecutable({ build: identity, packaged: app.isPackaged,
-          executable: await realpath(process.execPath), appPath: await realpath(app.getAppPath()) });
-        if (executable) autostart = await LinuxAutostart.open({ appId: profile.appId,
+        const launch = await admitLinuxInstalledLaunch({ build: identity, packaged: app.isPackaged, home: homedir(), pid: process.pid,
+          executable: await realpath(process.execPath), appPath: await realpath(app.getAppPath()),
+          resourcesPath: await realpath(process.resourcesPath), environment: process.env });
+        if (launch) autostart = await LinuxAutostart.open({ appId: profile.appId,
           configHome: dirname(profile.roots.config),
-          configDirs: (process.env["XDG_CONFIG_DIRS"] || "/etc/xdg").split(":").filter(Boolean), executable });
+          configDirs: (process.env["XDG_CONFIG_DIRS"] || "/etc/xdg").split(":").filter(Boolean), executable: launch.executable,
+          ...(launch.kind === "appimage" ? { appImage: { image: launch.arguments[0], assertUnchanged: launch.assertUnchanged } } : {}) });
       }
     } catch { /* Keep persisted requests intact when installation or OS facts are unavailable. */ }
     await refreshLogin();
