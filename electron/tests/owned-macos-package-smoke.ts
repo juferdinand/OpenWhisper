@@ -11,6 +11,7 @@ import { validateMacBundleMetadata } from "../src/main/build-selection.js";
 import { legacyMacosMigrationContextSchema } from "../src/services/legacy-macos-data.js";
 import { decodedLegacyMacosPlistSchema } from "../src/workers/macos-legacy-plist.js";
 import { pinnedRuntimeEnvironment } from "../scripts/runtime.js";
+import { macUpdateZip } from "./fixtures/mac-update-zip.js";
 
 // Stable selection changes only this launcher; the captured package must independently match.
 if (process.platform !== "darwin" || process.getuid?.() === 0 || process.env["GITHUB_ACTIONS"] !== "true" ||
@@ -81,6 +82,7 @@ let stage = "launch", passed = false;
 let failure: { name: string; message?: string } | undefined;
 let nativeUtilityLoading: unknown;
 let signatureAdmission: unknown;
+let archiveAdmission: unknown;
 let installation: unknown;
 let stableMigration: unknown;
 let restartExit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
@@ -210,6 +212,96 @@ try {
   assert.deepEqual(await readFile(join(appPath, "dist/main/development-recording-build.js")), sourceDescriptor);
   execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], { env: environment, timeout: 15_000, stdio: "ignore" });
   checks.push("Current running-app requirement accepts itself and rejects valid different ad-hoc identity, unsigned code and changed sealed resource");
+  stage = "owned-update-archive-admission";
+  const archiveRoot = join(evidence, "archive-candidates"), outside = join(archiveRoot, "outside");
+  await mkdir(archiveRoot, { mode: 0o700 }); await mkdir(outside, { mode: 0o700 });
+  const archiveFixtures = ["real-package", "wrong-version", "corrupt", "missing-app", "app-symlink", "external-symlink", "dotdot", "symlink-write"] as const;
+  const realZIP = join(archiveRoot, "real-package.zip");
+  execFileSync("/usr/bin/ditto", ["-c", "-k", "--keepParent", bundle, realZIP], { env: environment, timeout: 120_000, stdio: "ignore" });
+  await chmod(realZIP, 0o600);
+  await copyFile(realZIP, join(archiveRoot, "wrong-version.zip")); await chmod(join(archiveRoot, "wrong-version.zip"), 0o600);
+  const product = `${capturedBuild.productName}.app`;
+  const hostileZIPs = {
+    corrupt: Buffer.from("not a zip"),
+    "missing-app": macUpdateZip([{ name: "Other.app/Contents/Info.plist", content: "bad" }]),
+    "app-symlink": macUpdateZip([{ name: product, content: outside, mode: 0o120777 }]),
+    "external-symlink": macUpdateZip([{ name: `${product}/Contents/Resources/escape`, content: outside, mode: 0o120777 }]),
+    dotdot: macUpdateZip([{ name: "../../outside/marker", content: "bad" }]),
+    "symlink-write": macUpdateZip([{ name: "escape", content: outside, mode: 0o120777 }, { name: "escape/marker", content: "bad" }]),
+  };
+  for (const [name, bytes] of Object.entries(hostileZIPs)) await writeFile(join(archiveRoot, `${name}.zip`), bytes, { flag: "wx", mode: 0o600 });
+  const archiveOriginals = await Promise.all(archiveFixtures.map((name) => frozenFile(join(archiveRoot, `${name}.zip`))));
+  const archiveResults = await application.evaluate(async ({ app }, input) => {
+    const modules = process.getBuiltinModule("module"), path = process.getBuiltinModule("path"), fs = process.getBuiltinModule("fs/promises"),
+      nativeFS = process.getBuiltinModule("fs");
+    const assert: { ok(value: unknown): void; equal(actual: unknown, expected: unknown): void;
+      deepEqual(actual: unknown, expected: unknown): void;
+      rejects: typeof import("node:assert/strict")["rejects"] } | undefined = process.getBuiltinModule("assert/strict");
+    if (!modules || !path || !fs || !nativeFS || !assert) throw new Error("Owned archive dependencies are unavailable.");
+    const packagedRequire = modules.createRequire(path.join(app.getAppPath(), "package.json"));
+    const staging = packagedRequire(path.join(app.getAppPath(), "dist/services/update-staging.js")) as typeof import("../src/services/update-staging.js");
+    const archive = packagedRequire(path.join(app.getAppPath(), "dist/services/macos-update-archive.js")) as typeof import("../src/services/macos-update-archive.js");
+    const results: { name: string; accepted: boolean; code: string | null; bytes: number; sameVersionRefused: boolean }[] = [];
+    for (const name of input.names) {
+      const stageDirectory = await fs.mkdtemp(path.join(input.root, "download-"));
+      const file = await fs.open(path.join(stageDirectory, "OpenWhisper-macOS.zip"),
+        nativeFS.constants.O_RDWR | nativeFS.constants.O_CREAT | nativeFS.constants.O_EXCL | nativeFS.constants.O_NOFOLLOW, 0o600);
+      let download: Awaited<ReturnType<typeof staging.retainOwnedUpdateDownload>> | undefined;
+      let extracted: Awaited<ReturnType<typeof archive.extractVerifiedMacUpdateArchive>> | undefined;
+      try {
+        const source = await fs.open(path.join(input.root, `${name}.zip`), nativeFS.constants.O_RDONLY | nativeFS.constants.O_NOFOLLOW);
+        try {
+          const block = Buffer.alloc(64 * 1024); let position = 0;
+          for (;;) {
+            const { bytesRead } = await source.read(block, 0, block.length, position); if (!bytesRead) break;
+            let written = 0;
+            while (written < bytesRead) {
+              const result = await file.write(block, written, bytesRead - written, position + written);
+              assert.ok(result.bytesWritten > 0); written += result.bytesWritten;
+            }
+            position += bytesRead;
+          }
+          await file.sync();
+        } finally { await source.close(); }
+        download = await staging.retainOwnedUpdateDownload({ file, stageDirectory, artifactName: "OpenWhisper-macOS.zip" });
+        let sameVersionRefused = false;
+        if (name === "real-package") {
+          await assert.rejects(archive.extractVerifiedMacUpdateArchive({ download, build: input.build,
+            expectedVersion: input.version, currentVersion: input.version }), (error: unknown) =>
+            error instanceof archive.MacosUpdateArchiveError && error.code === "INVALID_INPUT");
+          assert.deepEqual(await fs.readdir(stageDirectory), ["OpenWhisper-macOS.zip"]); sameVersionRefused = true;
+        }
+        try {
+          extracted = await archive.extractVerifiedMacUpdateArchive({ download, build: input.build,
+            expectedVersion: name === "wrong-version" ? "1.0.0" : input.version, currentVersion: "0.0.0" });
+          assert.equal(extracted.version, input.version); assert.equal(path.basename(extracted.bundlePath), `${input.build.productName}.app`);
+          assert.equal((await file.stat()).size, download.bytes);
+          results.push({ name, accepted: true, code: null, bytes: download.bytes, sameVersionRefused });
+        } catch (error: unknown) {
+          if (!(error instanceof archive.MacosUpdateArchiveError)) throw error;
+          assert.deepEqual(await fs.readdir(stageDirectory), ["OpenWhisper-macOS.zip"]);
+          assert.equal((await file.stat()).size, download.bytes);
+          results.push({ name, accepted: false, code: error.code, bytes: download.bytes, sameVersionRefused });
+        }
+      } finally {
+        await extracted?.cleanup();
+        if (download) await download.cleanup();
+        else { await file.close(); await fs.rm(stageDirectory, { recursive: true }); }
+      }
+      await assert.rejects(fs.lstat(stageDirectory), { code: "ENOENT" });
+      await assert.rejects(fs.lstat(path.join(input.outside, "marker")), { code: "ENOENT" });
+    }
+    return results;
+  }, { root: archiveRoot, outside, names: [...archiveFixtures], build: capturedBuild, version: packageMetadata.sourceVersion });
+  assert.equal(archiveResults.length, archiveFixtures.length);
+  assert.equal(archiveResults[0]?.accepted, true); assert.equal(archiveResults[0]?.sameVersionRefused, true);
+  assert.ok(archiveResults.slice(1).every((result) => result.accepted === false));
+  assert.equal(archiveResults[1]?.code, "INVALID_BUNDLE");
+  assert.deepEqual(await Promise.all(archiveFixtures.map((name) => frozenFile(join(archiveRoot, `${name}.zip`)))), archiveOriginals);
+  assert.ok((await readdir(archiveRoot)).every((name) => !name.startsWith("download-")));
+  archiveAdmission = { cases: archiveResults, descriptor: "Original exclusively created descriptor inherited as fd3, positioned producer writes",
+    scope: "Actual packaged main and ditto ZIP; synthetic prior version0.0.0; ad-hoc running requirement; no persistent release publisher or installation claim" };
+  checks.push("Original fd3 Mac ZIP extraction accepts actual packaged app and refuses version, traversal, symlink and corrupt archives with complete owned cleanup");
   stage = "native-composition";
   const state = async () => appStateSchema.parse(await page!.evaluate(() => window.openwhisper!.invoke("get_state", {})));
   const initial = await state();
@@ -532,14 +624,14 @@ try {
     input: "CDP to owned window only; no OS global input injection", microphone: stable
       ? "No permission request, capture Start, recording stream or inference in this stable smoke"
       : "No permission request, capture Start or microphone operation; pinned public inference fixture only",
-    installation, nativeUtilityLoading, signatureAdmission, stableMigration, tccAttribution: "Permission and real microphone behavior remain pending", exit, restartExit,
+    installation, nativeUtilityLoading, signatureAdmission, archiveAdmission, stableMigration, tccAttribution: "Permission and real microphone behavior remain pending", exit, restartExit,
     scope: stable ? "Actual stable normal main/bundle/native empty-domain migration/UI/preferences/regular shortcut/restart/clean Quit; no stable recording or CPU claim"
       : "Actual Dev package plus signed capture configure and CPU fixture utilities" }, null, 2), { mode: 0o600 });
   passed = true;
 } catch (error: unknown) {
   failure = error instanceof Error ? { name: error.name, message: error.message.slice(0, 2000) } : { name: "UNKNOWN" };
   if (page && !page.isClosed()) await page.screenshot({ path: join(evidence, "failure.png"), fullPage: true }).catch(() => {});
-  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "FAIL", stage, applicationBuild: capturedBuild, identity, checks, installation, nativeUtilityLoading, signatureAdmission, stableMigration,
+  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "FAIL", stage, applicationBuild: capturedBuild, identity, checks, installation, nativeUtilityLoading, signatureAdmission, archiveAdmission, stableMigration,
     error: failure }, null, 2), { mode: 0o600 });
   process.exitCode = 1;
 } finally {

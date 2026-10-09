@@ -18,7 +18,7 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | macOS dictation | Actual Intel/Apple Silicon Dev packages pass sandbox, signed utilities, CPU recognition of public audio, shortcut setup/removal and original Quit. Normal stable packages pass migration, edited-state restart and clean exits at b892d86 | Physical microphone/TCC, actual target insertion and device changes; Metal selection remains open |
 | Linux desktop integration | Owned stock KDE 5.27 native Wayland F8, binding Quit/crash recovery and paste into separate Wayland/XWayland editors pass. Genuine X11 shortcuts and all five no-display CLI commands pass, including installed stable autostart enable/disable and generated-target restart | Expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
-| Packaging and updates | Exact Ubuntu22 Dev/stable .deb construction and owned runtime pass. Debian retains io-github-whisperfree. Fresh local Dev installation passes Linux and both Mac architectures; normal Mac stable runtime passes. Pure source/version policy and real fixed-key Linux signature checks pass, including actual Electron execution | Mac publisher continuity, owned-file/download/installation adapters, authenticated Dev replacement, existing-version upgrade, AppImage/universal DMG+ZIP and release signing |
+| Packaging and updates | Ubuntu22 .deb construction/runtime and AppImage construction pass. Fresh Dev installation and normal Mac stable runtime pass. Fixed-key Linux verification includes real files and actual Electron execution; actual Mac signature checks pass on Intel/Apple Silicon. Reviewed original-file staging, bounded download and Mac ZIP consumer are implemented | Actual new Mac ZIP runtime, AppImage launch/admission/autostart, installation/restart/rollback, persistent publisher continuity, authenticated Dev replacement, universal DMG+ZIP and release signing |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 ## Current package checkpoint
@@ -51,17 +51,51 @@ All nine cases pass in that actual runtime in 20.25 seconds, including both real
 packages and payload/key/comment/version/mode/stream negatives. This uses the
 same immutable Dev9 executable and a separate compiled helper fixture; it does
 not establish packaged updater wiring. Original MIT notices are included by both
-packagers. Updates remain inactive pending owned-file, download and installation
-adapters. The separate Mac signature adapter now obtains the current running
+packagers. Updates remain inactive pending installation acceptance and application
+wiring. The separate Mac signature adapter obtains the current running
 application's designated requirement and checks all architectures, nested code
 and strict sealed resources through Apple's APIs. Nine focused ownership/failure
-checks and independent reviews pass; actual Mac execution is pending the matching
-CI. Neither helper enables updater UI or installation.
+checks and independent reviews pass. Both original owned Mac jobs in
+[CI37865793116](https://github.com/juferdinand/OpenWhisper/actions/runs/37865793116)
+pass actual self, different-identity, unsigned and tampered-resource cases for
+both Dev and stable, including normal restart/clean exits. The PR run identifies
+head `9af2ed04`; its normal checkout/package producer is merge `ad3262de` into
+`68294863`. These thin ad-hoc cases do not establish persistent release signing.
 
 The complete signature increment passes strict typing, the ordinary application/
 shared-UI build and 1110 unit tests with zero failures and 26 explicit native or
 opt-in skips in 17.30 seconds. Focused real-artifact checks and actual Electron
 execution are separate from those skipped default-suite cases.
+
+The next reviewed increment shares private original-file staging and HTTPS
+resource ownership between update consumers. Positioned writes preserve the
+Mac inherited descriptor's initial offset; cancellation waits for actual reads,
+writes and original connections to settle. Linux verifies both copied original
+packages, and an inert HTTPS transfer of real cached Debian bytes authenticates
+through the retained file. One actual public HTTPS transfer through the default
+production factory also passes on Node26: exact 21,152,538-byte 0.2.5 Debian,
+fixed signature/version/SHA, original descriptor closure and complete private
+stage removal in 1.52 seconds. This uses synthetic current version 0.2.4 and
+establishes download compatibility rather than an upgrade or Electron-embedded
+network execution. The Mac consumer uses fixed system bsdtar/plutil,
+internal framework links, exact metadata/version and the existing running-app
+signature requirement. Its new real ZIP/hostile archive smoke awaits matching
+CI; filesystem checks already pass. Complete typing, ordinary build and
+1149 default-suite cases pass in 17.87 seconds, with zero failures and 28 explicit
+native or opt-in skips.
+
+Unsigned AppImage construction reuses the exact clean `b892d861` stable package.
+The 119,441,912-byte image has SHA-256
+`5307c99c5d8f603fbf8ed937d8688dc24181509163cdfc365552dd9bd5eb5069`;
+passive extraction matches the payload/native descriptors, modes and notices.
+The installed-launcher design creates private temporary storage before each
+extract-and-run invocation, avoiding the upstream shared-directory cleanup race.
+Actual application/control/restart acceptance and permanent-path admission remain
+open; raw overlapping extract-and-run launches are outside this protected path.
+Static runtime component notices are included, with LGPL corresponding-source/
+relink obligations retained as a public distribution gate. Construction is not
+signed-update or release acceptance. [Evidence](ELECTRON-DEV-EVIDENCE.md) keeps
+the original failures and successful scopes separate.
 
 ## Delivery order and execution limits
 

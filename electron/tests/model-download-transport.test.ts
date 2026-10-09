@@ -6,7 +6,7 @@ import { globalAgent } from "node:https";
 import type { Socket } from "node:net";
 import { Readable } from "node:stream";
 import test from "node:test";
-import { createModelDownloadTransport, ModelDownloadTransportError, type ModelDownloadHTTPSIO } from "../src/services/model-download-transport.js";
+import { createModelDownloadTransport, createUpdateDownloadTransport, MODEL_DOWNLOAD_CHUNK_BYTES, ModelDownloadTransportError, type ModelDownloadHTTPSIO } from "../src/services/model-download-transport.js";
 
 class InertSocket extends EventEmitter {
   destroyed = false; closed = false; hold = false;
@@ -20,9 +20,9 @@ class InertResponse extends Readable {
 }
 class InertRequest extends EventEmitter {
   destroyed = false; closed = false; endCalls = 0; destroyCalls = 0;
-  readonly socket = new InertSocket(); readonly response = new InertResponse();
+  readonly socket = new InertSocket(); readonly response: InertResponse;
   holdHeaders = false;
-  constructor(private readonly reply: (message: IncomingMessage) => void) { super(); }
+  constructor(private readonly reply: (message: IncomingMessage) => void, data: Uint8Array) { super(); this.response = new InertResponse(data); }
   end(): void {
     this.endCalls++; queueMicrotask(() => {
       this.emit("socket", this.socket); if (!this.holdHeaders && !this.destroyed) this.sendHeaders();
@@ -34,12 +34,12 @@ class InertRequest extends EventEmitter {
     queueMicrotask(() => { this.closed = true; this.emit("close"); }); return this;
   }
 }
-function effects(prepare: (request: InertRequest) => void = () => {}) {
+function effects(prepare: (request: InertRequest) => void = () => {}, data: Uint8Array = Buffer.from("test")) {
   const requests: InertRequest[] = [], requestOptions: RequestOptions[] = [], agentOptions: AgentOptions[] = [];
   const agent = { destroy() {} } as unknown as Agent;
   const io: ModelDownloadHTTPSIO = { createAgent(options) { agentOptions.push(options); return agent; },
     request(_url, options, reply) {
-      requestOptions.push(options); const owned = new InertRequest(reply); prepare(owned); requests.push(owned);
+      requestOptions.push(options); const owned = new InertRequest(reply, data); prepare(owned); requests.push(owned);
       return owned as unknown as ClientRequest;
     } };
   return { io, agent, requests, requestOptions, agentOptions };
@@ -97,4 +97,39 @@ test("forbidden destinations or already aborted signals call no request effect",
   }
   controller.abort(); assert.throws(() => transport.request(new URL("https://hf.co/inert"), "GET", controller.signal), ModelDownloadTransportError);
   assert.equal(fake.requests.length, 0); await transport.close();
+});
+test("the updater factory shares original closure but admits only its two fixed hosts", async () => {
+  const fake = effects((req) => { req.socket.hold = true; }), transport = createUpdateDownloadTransport(fake.io);
+  const signal = new AbortController().signal;
+  for (const address of ["https://hf.co/file", "https://huggingface.co/file", "https://github.com.evil.invalid/file",
+    "https://objects.githubusercontent.com/file", "https://sub.release-assets.githubusercontent.com/file", "http://github.com/file",
+    "https://user@github.com/file", "https://github.com:444/file", "https://github.com/file#secret"]) {
+    assert.throws(() => transport.request(new URL(address), "GET", signal), ModelDownloadTransportError);
+  }
+  assert.equal(fake.requests.length, 0);
+  const exchange = transport.request(new URL("https://release-assets.githubusercontent.com/inert"), "GET", signal);
+  await exchange.headers; const closing = exchange.close(); let settled = false;
+  void closing.then(() => { settled = true; }); await new Promise<void>((accept) => { setImmediate(accept); });
+  assert.equal(settled, false); assert.equal(exchange.close(), closing); assert.equal(fake.requests[0]?.closed, true);
+  fake.requests[0]?.socket.finish(); await closing; await transport.close();
+  assert.deepEqual(fake.agentOptions, [{ keepAlive: false, rejectUnauthorized: true, proxyEnv: {} }]);
+  assert.deepEqual(fake.requestOptions[0]?.headers, { "Accept-Encoding": "identity" });
+  const hf = createModelDownloadTransport(fake.io);
+  assert.throws(() => hf.request(new URL("https://github.com/file"), "GET", signal), ModelDownloadTransportError);
+  await hf.close();
+});
+test("an oversized real Readable response is split into exact bounded bytes before original closure", async () => {
+  const length = 2 * MODEL_DOWNLOAD_CHUNK_BYTES + 17, backing = Buffer.alloc(length + 53);
+  const bytes = backing.subarray(31, 31 + length);
+  for (let index = 0; index < bytes.length; index++) bytes[index] = index % 251;
+  const fake = effects(() => {}, bytes), transport = createUpdateDownloadTransport(fake.io);
+  const exchange = transport.request(new URL("https://github.com/inert"), "GET", new AbortController().signal);
+  await exchange.headers;
+  const chunks: Uint8Array[] = []; for await (const chunk of exchange.body) chunks.push(chunk);
+  assert.deepEqual(chunks.map((chunk) => chunk.length), [MODEL_DOWNLOAD_CHUNK_BYTES, MODEL_DOWNLOAD_CHUNK_BYTES, 17]);
+  assert.deepEqual(Buffer.concat(chunks), bytes);
+  const closing = exchange.close(); assert.equal(exchange.close(), closing); await closing; await transport.close();
+  assert.deepEqual(exchange.completion(), { complete: true, failed: false });
+  assert.equal(fake.requests[0]?.closed, true); assert.equal(fake.requests[0]?.socket.closed, true);
+  assert.equal(fake.requests[0]?.response.closed, true); assert.equal(fake.requests[0]?.destroyCalls, 1);
 });

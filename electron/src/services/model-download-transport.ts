@@ -30,13 +30,25 @@ export class ModelDownloadTransportError extends Error {
 export function createModelDownloadTransport(io: ModelDownloadHTTPSIO = {
   createAgent: (options) => new Agent(options), request,
 }): ModelDownloadTransport {
+  return createPublicHTTPSTransport((hostname) => ["hf.co", "huggingface.co"]
+    .some((host) => hostname === host || hostname.endsWith(`.${host}`)), io);
+}
+
+/** Fixed updater hosts only; exact asset and redirect admission remain the download owner's responsibility. */
+export function createUpdateDownloadTransport(io: ModelDownloadHTTPSIO = {
+  createAgent: (options) => new Agent(options), request,
+}): ModelDownloadTransport {
+  return createPublicHTTPSTransport((hostname) => ["github.com", "release-assets.githubusercontent.com"].includes(hostname), io);
+}
+
+function createPublicHTTPSTransport(allowedHost: (hostname: string) => boolean, io: ModelDownloadHTTPSIO): ModelDownloadTransport {
   const agent = io.createAgent({ keepAlive: false, rejectUnauthorized: true, proxyEnv: {} });
   const exchanges = new Set<ModelDownloadExchange>(); let closing: Promise<void> | undefined;
   return {
     request(url, method, signal) {
       if (closing || signal.aborted || url.protocol !== "https:" || (url.port && url.port !== "443") ||
           url.username || url.password || url.hash || url.hostname.endsWith(".") ||
-          !["hf.co", "huggingface.co"].some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`))) {
+          !allowedHost(url.hostname)) {
         throw new ModelDownloadTransportError();
       }
       let response: IncomingMessage | undefined, socket: Socket | undefined, owned: ClientRequest | undefined;
@@ -71,7 +83,11 @@ export function createModelDownloadTransport(io: ModelDownloadHTTPSIO = {
           const message = await incoming;
           try {
             for await (const chunk of message) {
-              if (!(chunk instanceof Uint8Array)) throw new ModelDownloadTransportError(); yield chunk;
+              if (!(chunk instanceof Uint8Array)) throw new ModelDownloadTransportError();
+              // IncomingMessage does not guarantee an application-level chunk ceiling.
+              for (let offset = 0; offset < chunk.length; offset += MODEL_DOWNLOAD_CHUNK_BYTES) {
+                yield chunk.subarray(offset, offset + MODEL_DOWNLOAD_CHUNK_BYTES);
+              }
             }
           } catch { failed = true; throw new ModelDownloadTransportError(); }
         } },

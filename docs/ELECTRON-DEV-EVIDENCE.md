@@ -1,5 +1,72 @@
 # Electron development evidence
 
+## Reviewed original-file staging, update download and Mac archive consumer
+
+The shared stage borrows or retains the exclusively created original descriptor,
+with exact private ownership/modes, literal asset names and before/after inode,
+size and ancestry checks. Position-based writes/reads preserve the initial Mac
+fd3 cursor. Consumers settle before original close and replacement-safe cleanup.
+Linux file checks pass on both pinned original 0.2.5 Debian/AppImage copies with
+independent Rust agreement. The separate bounded downloader revalidates source
+policy before effects, shares the existing HTTPS lifecycle, admits only the
+fixed GitHub/CDN hosts and measures actual bytes/EOF. Its cached Debian positive
+uses inert HTTPS effects and real private files/signatures; it is not network
+or installation evidence. Cancellation, partial writes, late closure, overflow
+and changed-path cleanup cases pass. Incoming stream blocks are split into
+64-KiB views while preserving exact bytes and existing model host policy.
+
+One separate actual public HTTPS transfer passes with the production default
+factory on Node26.10.0 in 1.522 seconds. It downloads exactly 21,152,538 bytes
+from the admitted 0.2.5 Debian URL, verifies the original fixed publisher/global
+signature and signed version, and matches SHA-256
+`412d06d5475b430fd290c560ea9cd03818b6c471075f064833ebca021313b6cb`.
+The original descriptor remains at offset zero until the explicit cursor check;
+the process exits naturally, its PID is absent, the original descriptor closes
+and the private stage/cache are empty. Cached feed/signature/package and all
+111 compiled fixture/production/dependency inputs retain their pins. The prior
+version is synthetic 0.2.4; this is neither an installation nor embedded
+Electron network-execution claim. No redirected signed URLs or raw headers are
+logged, and no retry, app launch or build is used.
+
+The Mac ZIP consumer passes original fd3 to fixed bsdtar without `-P`, retains
+internal framework links, refuses escaping/special files and requires exact
+captured metadata/newer version and the running application's designated
+requirement. Four local filesystem cases pass. The new ordinary Mac smoke adds
+a real ditto ZIP plus version/corrupt/missing-app/traversal/symlink cases and
+owned cleanup; its actual execution awaits the matching CI. The prior version
+is explicitly synthetic 0.0.0, and the fixture remains ad-hoc. No persistent
+publisher transition, installation or updater UI is established.
+
+Independent source reviews pass. One completed increment passes strict typing,
+ordinary app/shared-UI build and 1149 default-suite tests in 17.87 seconds,
+zero failures, 28 explicitly skipped native/opt-in cases. Real cached positives
+are separate focused checks; skips are not silently treated as acceptance.
+
+## Unsigned AppImage construction from the existing exact Ubuntu22 package
+
+Application producer remains clean `b892d861921fd51c6a1de2e35c987a0bd620ac9b`;
+the wrapper construction does not relabel it as newer source. The image is
+119,441,912 bytes, SHA-256
+`5307c99c5d8f603fbf8ed937d8688dc24181509163cdfc365552dd9bd5eb5069`.
+All 1340 original file/directory entries retain bytes/modes and captured native
+descriptors. Pinned appimagetool/runtime execute only after digest/size checks.
+Passive extraction matches the staged tree; the only permitted output link is
+root `.DirIcon` to the exact captured app icon, recorded without traversal.
+The runtime prefix changes only its documented reserved MD5 slot. Original
+construction/extraction processes exit 0 and are absent afterward.
+
+Attempt one failed without retained nested diagnostics and remains unclassified.
+Attempt two retains the original unsupported-gzip failure; the pinned tool
+provides zstd only. Attempt three succeeds using zstd and the observed root
+icon link. No application/native rebuild or app execution occurred. Seven
+original runtime/component notice texts and scoped provenance accompany the
+payload; patched LGPL source/relink proof remains a public distribution gate.
+
+Inert launcher checks establish separate temporary storage, literal argument
+forwarding and normal cleanup. Real AppImage command control, PGID/lifetime,
+autostart, restart, permanent-path admission and public signing are pending.
+Neither construction nor the inert launcher establishes runtime/release support.
+
 ## Exact b892d86 installed Linux and Mac package checkpoint
 
 Clean producer: `b892d861921fd51c6a1de2e35c987a0bd620ac9b`.
@@ -53,16 +120,23 @@ fixtures preserve the actual dependency and MIT notice bytes. Supplied-byte
 authentication does not establish filesystem ownership, download, installation
 or release continuity; those adapters remain separate.
 
-## Mac update signature source
+## Actual Mac update signature checks on both architectures
 
 The strict TS adapter preserves the old Swift current-self/static-self/designated-
 requirement chain and Security validation flags for all architectures, nested code
 and strict sealed resources. Existing pinned Koffi calls Apple's APIs; no C/C++
 source, replacement publisher input or installer is added. Nine focused inert
 ownership/error checks pass and independent review accepts the source. The
-existing owned Mac smoke now tests the running package against itself, valid
-different ad-hoc identity, unsigned code and a changed sealed resource. Actual
-execution awaits the matching Intel/Apple Silicon CI; thin ad-hoc fixtures cannot
+existing owned Mac smoke tests the running package against itself, valid
+different ad-hoc identity, unsigned code and a changed sealed resource. Both
+original Intel/Apple Silicon jobs in
+[CI37865793116](https://github.com/juferdinand/OpenWhisper/actions/runs/37865793116)
+pass all four cases for Dev and stable, normal restart and original clean exits.
+The run's associated head is `9af2ed04`; actual PR checkout/package producer is
+merge `ad3262ded6b05b0f53ecb9f7b57687e7db4bddb3` into `68294863`.
+Wrong-identity code is independently signature-valid before requirement refusal;
+the three negatives report `INVALID_SIGNATURE`. Original logs are retained;
+numeric OSStatus values are not printed or claimed. Thin ad-hoc fixtures cannot
 establish universal or persistent 0.2.5 release-signature continuity.
 
 ## Mac archival migration and native empty-domain worker PASS

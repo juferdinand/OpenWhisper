@@ -1,0 +1,58 @@
+{
+  "runtimeCommit": "dd6cebedcbddde9c82f89b011e8e1d40b6e43868",
+  "upstreamBuild": "https://github.com/AppImage/type2-runtime/blob/dd6cebedcbddde9c82f89b011e8e1d40b6e43868/scripts/common/install-dependencies.sh",
+  "upstreamMakefile": "https://github.com/AppImage/type2-runtime/blob/dd6cebedcbddde9c82f89b011e8e1d40b6e43868/src/runtime/Makefile",
+  "classification": "LICENSE_TEXTS_AND_UPSTREAM_BUILD_PROVENANCE_ONLY",
+  "publicDistributionGate": "Confirm complete corresponding patched LGPL source and a usable relinking method for this static runtime before public distribution; these text snapshots do not claim that proof.",
+  "entries": [
+    {
+      "path": "libfuse-LICENSE",
+      "source": "https://raw.githubusercontent.com/libfuse/libfuse/fuse-3.15.0/LICENSE",
+      "bytes": 435,
+      "sha256": "b8832d9caaa075bbbd2aef24efa09f8b7ab66a832812d88c602da0c7b4397fad",
+      "scope": "Upstream explicitly pins libfuse3.15.0 source archive and a local mount.c patch."
+    },
+    {
+      "path": "libfuse-LGPL2.txt",
+      "source": "https://raw.githubusercontent.com/libfuse/libfuse/fuse-3.15.0/LGPL2.txt",
+      "bytes": 26530,
+      "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+      "scope": "Full upstream library license, including linked-work requirements."
+    },
+    {
+      "path": "squashfuse-LICENSE",
+      "source": "https://raw.githubusercontent.com/vasi/squashfuse/0.5.2/LICENSE",
+      "bytes": 1592,
+      "sha256": "9e909cc8a8ba27b1a649c964cf9eda37de911f3138c2b64e6d2f01703904ac13",
+      "scope": "Upstream explicitly pins squashfuse0.5.2 source archive."
+    },
+    {
+      "path": "musl-COPYRIGHT",
+      "source": "https://git.musl-libc.org/cgit/musl/plain/COPYRIGHT?h=v1.2.5",
+      "bytes": 6204,
+      "sha256": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+      "scope": "License snapshot only; Alpine3.21 package revision of the supplied binary is not attested."
+    },
+    {
+      "path": "zstd-LICENSE",
+      "source": "https://raw.githubusercontent.com/facebook/zstd/v1.5.6/LICENSE",
+      "bytes": 1549,
+      "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
+      "scope": "BSD license snapshot only; supplied binary package version is not attested."
+    },
+    {
+      "path": "zlib-LICENSE",
+      "source": "https://raw.githubusercontent.com/madler/zlib/v1.3.1/LICENSE",
+      "bytes": 1002,
+      "sha256": "845efc77857d485d91fb3e0b884aaa929368c717ae8186b66fe1ed2495753243",
+      "scope": "License snapshot only; supplied binary package version is not attested."
+    },
+    {
+      "path": "mimalloc-LICENSE",
+      "source": "https://raw.githubusercontent.com/microsoft/mimalloc/v2.1.7/LICENSE",
+      "bytes": 1096,
+      "sha256": "19c99805e7a44a34b297a75d1edea9985e300066dfc024d5c99d4236d4573b5d",
+      "scope": "Makefile statically links mimalloc; license snapshot only, binary package version not attested."
+    }
+  ]
+}
