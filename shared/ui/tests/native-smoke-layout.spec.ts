@@ -132,7 +132,9 @@ test("native layout rejects unmatched rounding conditions and larger metric diff
   await page.evaluate(() => {
     document.querySelector<HTMLElement>("main")!.style.width = "200px";
   });
-  expect(await result(page)).toContain("Settings layout overflows horizontally");
+  expect(await result(page)).toContain(
+    "Settings layout overflows horizontally",
+  );
 });
 
 test("native layout always requires selected and connected navigation", async ({

@@ -4,7 +4,13 @@ import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   base: "./",
-  resolve: { alias: { zod: fileURLToPath(new URL("./node_modules/zod/index.js", import.meta.url)) } },
+  resolve: {
+    alias: {
+      zod: fileURLToPath(
+        new URL("./node_modules/zod/index.js", import.meta.url),
+      ),
+    },
+  },
   build: {
     target: ["chrome107", "edge107", "firefox104", "safari16"],
     rolldownOptions: { output: { format: "iife" } },
@@ -13,10 +19,15 @@ export default defineConfig({
     {
       name: "local-webview-assets",
       generateBundle() {
-        for (const locale of ["en", "de"]) this.emitFile({
-          type: "asset", fileName: `locales/${locale}.json`,
-          source: readFileSync(new URL(`../locales/${locale}.json`, import.meta.url), "utf8"),
-        });
+        for (const locale of ["en", "de"])
+          this.emitFile({
+            type: "asset",
+            fileName: `locales/${locale}.json`,
+            source: readFileSync(
+              new URL(`../locales/${locale}.json`, import.meta.url),
+              "utf8",
+            ),
+          });
       },
       apply: "build",
       // A classic bundle can be loaded by WKWebView from the signed app's local resources.

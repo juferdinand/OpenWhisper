@@ -10,18 +10,29 @@ export function setLocale(value: UILanguage) {
 }
 
 /** Translate UI messages only. Dictated text, vocabulary, snippets, paths, and names stay untouched. */
-export function t(message: string, values: Record<string, string | number> = {}): string {
-  let template = locale === "de" ? translations[message] ?? message : message;
+export function t(
+  message: string,
+  values: Record<string, string | number> = {},
+): string {
+  let template = locale === "de" ? (translations[message] ?? message) : message;
   // Native services emit English diagnostics; translate known templates while retaining error details.
   if (locale === "de" && !translations[message]) {
     for (const [source, translated] of Object.entries(translations)) {
       if (!source.includes("{error}") && !source.includes("{app}")) continue;
-      const names = Array.from(source.matchAll(/\{([a-z_]+)\}/g), (match) => match[1]);
-      const pattern = source.split(/\{[a-z_]+\}/g).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("(.*?)");
+      const names = Array.from(
+        source.matchAll(/\{([a-z_]+)\}/g),
+        (match) => match[1],
+      );
+      const pattern = source
+        .split(/\{[a-z_]+\}/g)
+        .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join("(.*?)");
       const match = new RegExp(`^${pattern}$`, "s").exec(message);
       if (match) {
         template = translated;
-        values = Object.fromEntries(names.map((name, i) => [name, match[i + 1]]));
+        values = Object.fromEntries(
+          names.map((name, i) => [name, match[i + 1]]),
+        );
         break;
       }
     }

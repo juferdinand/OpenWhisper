@@ -1,14 +1,25 @@
 import { invoke } from "./bridge";
 import { t } from "./i18n";
 import {
-  defaultLocalProcessingProfile, localProcessingProfilePatchSchema,
+  defaultLocalProcessingProfile,
+  localProcessingProfilePatchSchema,
   previewLocalProcessingInputSchema,
-  type LocalProcessingProfile as ProcessingProfile, type LocalProcessingProfilePatch,
+  type LocalProcessingProfile as ProcessingProfile,
+  type LocalProcessingProfilePatch,
 } from "../../../electron/src/contracts/local-processing";
 const defaults = defaultLocalProcessingProfile();
-const profileKeys = ["enabled", "provider", "endpoint", "model", "instruction", "max_tokens", "timeout_seconds"] as const;
+const profileKeys = [
+  "enabled",
+  "provider",
+  "endpoint",
+  "model",
+  "instruction",
+  "max_tokens",
+  "timeout_seconds",
+] as const;
 const failureMessages = {
-  INVALID_REQUEST: "Preview text must contain between 1 byte and 64 KB; your dictation is unchanged",
+  INVALID_REQUEST:
+    "Preview text must contain between 1 byte and 64 KB; your dictation is unchanged",
   INVALID_PROFILE: "Invalid text processing profile",
   DISABLED: "Text processing preview is disabled",
   MODEL_REQUIRED: "Enter a text model identifier",
@@ -16,8 +27,10 @@ const failureMessages = {
   CANCELLED: "Text processing cancelled; your dictation is unchanged",
   CLOSED: "Text processing preview is unavailable",
   TIMEOUT: "Text processing timed out; your dictation is unchanged",
-  CONNECTION_FAILED: "Could not connect to the selected local server; your dictation is unchanged",
-  HTTP_REJECTED: "The local server rejected the request; check its model and authentication settings",
+  CONNECTION_FAILED:
+    "Could not connect to the selected local server; your dictation is unchanged",
+  HTTP_REJECTED:
+    "The local server rejected the request; check its model and authentication settings",
   RESPONSE_TOO_LARGE: "The model response exceeded the preview limit",
   RESPONSE_READ_FAILED: "Could not read the model response",
   INVALID_RESPONSE: "The model returned an invalid or incomplete text response",
@@ -71,8 +84,10 @@ export function mountProcessingPreview(
   current = { root, profile, latest, save, invalidProfile };
   const base = profile ?? defaults;
   const p: ProcessingProfile = {
-    enabled: pendingFields.enabled ?? base.enabled, provider: pendingFields.provider ?? base.provider,
-    endpoint: pendingFields.endpoint ?? base.endpoint, model: pendingFields.model ?? base.model,
+    enabled: pendingFields.enabled ?? base.enabled,
+    provider: pendingFields.provider ?? base.provider,
+    endpoint: pendingFields.endpoint ?? base.endpoint,
+    model: pendingFields.model ?? base.model,
     instruction: pendingFields.instruction ?? base.instruction,
     max_tokens: pendingFields.max_tokens ?? base.max_tokens,
     timeout_seconds: pendingFields.timeout_seconds ?? base.timeout_seconds,
@@ -118,12 +133,21 @@ export function mountProcessingPreview(
             : ["max_tokens", "timeout_seconds"].includes(name)
               ? Number(control.value)
               : control.value;
-        const parsed = localProcessingProfilePatchSchema.safeParse(name === "provider"
-          ? { provider: value, endpoint: value === "ollama" ? "http://127.0.0.1:11434" : "http://127.0.0.1:1234/v1" }
-          : { [name]: value });
+        const parsed = localProcessingProfilePatchSchema.safeParse(
+          name === "provider"
+            ? {
+                provider: value,
+                endpoint:
+                  value === "ollama"
+                    ? "http://127.0.0.1:11434"
+                    : "http://127.0.0.1:1234/v1",
+              }
+            : { [name]: value },
+        );
         if (!parsed.success) {
           feedback = "Invalid text processing profile";
-          if (control instanceof HTMLInputElement && name === "enabled") control.checked = draft!.enabled;
+          if (control instanceof HTMLInputElement && name === "enabled")
+            control.checked = draft!.enabled;
           else control.value = String(draft![name]);
           refresh();
           return;
@@ -131,8 +155,7 @@ export function mountProcessingPreview(
         const patch = parsed.data;
         const keys = profileKeys.filter((key) => Object.hasOwn(patch, key));
         const version = ++patchSequence;
-        for (const key of keys)
-          fieldVersions.set(key, version);
+        for (const key of keys) fieldVersions.set(key, version);
         Object.assign(pendingFields, patch);
         saves++;
         refresh();
@@ -186,7 +209,12 @@ export function mountProcessingPreview(
       .addEventListener("click", async () => {
         if (requestID || saves) return;
         const id = crypto.randomUUID();
-        if (!previewLocalProcessingInputSchema.safeParse({ requestId: id, text: input }).success) {
+        if (
+          !previewLocalProcessingInputSchema.safeParse({
+            requestId: id,
+            text: input,
+          }).success
+        ) {
           feedback = failureMessages.INVALID_REQUEST;
           refresh();
           return;
@@ -209,9 +237,14 @@ export function mountProcessingPreview(
             feedback = failureMessages[output.code];
           }
         } catch {
-          if (requestID === id) feedback = "Could not complete the preview; your dictation is unchanged";
+          if (requestID === id)
+            feedback =
+              "Could not complete the preview; your dictation is unchanged";
         } finally {
-          if (requestID === id) { requestID = undefined; refresh(); }
+          if (requestID === id) {
+            requestID = undefined;
+            refresh();
+          }
         }
       });
     root
@@ -225,7 +258,11 @@ export function mountProcessingPreview(
         try {
           await invoke("cancel_local_processing", { requestId: id });
         } catch {
-          if (latestRequestID === id && !requestID) { feedback = "Could not cancel the preview; its result will be ignored"; refresh(); }
+          if (latestRequestID === id && !requestID) {
+            feedback =
+              "Could not cancel the preview; its result will be ignored";
+            refresh();
+          }
         }
       });
   }
@@ -234,7 +271,8 @@ export function mountProcessingPreview(
       HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
     >(`#processing-${name}`)!;
     control.disabled = !!requestID;
-    if (name === "enabled" && control instanceof HTMLInputElement) control.checked = p.enabled;
+    if (name === "enabled" && control instanceof HTMLInputElement)
+      control.checked = p.enabled;
     else if (document.activeElement !== control)
       control.value = String(p[name]);
   }
@@ -242,7 +280,8 @@ export function mountProcessingPreview(
   text.readOnly = !!requestID;
   if (document.activeElement !== text) text.value = input;
   root.querySelector<HTMLTextAreaElement>("#processing-result")!.value = result;
-  root.querySelector<HTMLElement>("#processing-profile-warning")!.hidden = !invalidProfile;
+  root.querySelector<HTMLElement>("#processing-profile-warning")!.hidden =
+    !invalidProfile;
   root.querySelector<HTMLElement>("#processing-feedback")!.textContent = t(
     requestID ? "Processing preview …" : feedback,
   );
