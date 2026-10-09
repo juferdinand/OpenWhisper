@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { developmentRecordingDescriptorSchema } from "../../../src/main/development-recording-descriptor.js";
 import { SPEECH_ENTRY_FILES } from "../../../src/services/speech/speech-entry-graph.js";
 import { classifyMacPublisherFixtureResult, parseMacPackageSmokeArguments, validateMacPackageUpdateConfiguration, validateUniversalMacPackageMetadata } from "../../fixtures/mac-package-metadata.js";
-import { MacPublisherIdentityError, parseMacPublisherIdentity, parseMacPublisherKeychains, parseMacPublisherZipListing, parseOwnedMacPublisherArguments,
+import { MacPublisherIdentityError, macPublisherArchitectureAllowed, parseMacPublisherIdentity, parseMacPublisherKeychains, parseMacPublisherZipListing, parseOwnedMacPublisherArguments,
   validateMacPublisherCompletion } from "../../owned-macos-publisher.js";
 const artifact = { bytes: 123, sha256: "a".repeat(64) };
 function descriptor(architecture: "arm64" | "x64") {
@@ -128,6 +128,16 @@ test("owned publisher commands and keychain output reject ambiguous or unbounded
     ["/Users/runner/Library/Keychains/login.keychain-db", "/owned/path with spaces.keychain-db"]);
   for (const value of ['', '/unquoted\n', '"relative"\n', '"/owned/../elsewhere"\n', '"/owned"\n"/owned"\n', '"/owned\u0000key"\n']) {
     assert.throws(() => parseMacPublisherKeychains(value));
+  }
+});
+test("only pure keychain parsers may run on either Mac architecture", () => {
+  for (const mode of ["keychain-list", "keychain-identity"] as const) {
+    assert.equal(macPublisherArchitectureAllowed(mode, "arm64"), true);
+    assert.equal(macPublisherArchitectureAllowed(mode, "x64"), true);
+  }
+  for (const mode of ["admit", "oracle", "runtime-input", "result"] as const) {
+    assert.equal(macPublisherArchitectureAllowed(mode, "arm64"), true);
+    assert.equal(macPublisherArchitectureAllowed(mode, "x64"), false);
   }
 });
 test("owned publisher selects one matching self-signed identity without granting publisher authority", () => {

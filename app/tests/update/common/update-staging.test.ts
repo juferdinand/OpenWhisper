@@ -54,6 +54,7 @@ unixTest("shared staging accepts an original Mac ZIP descriptor without authenti
 unixTest("borrowed observations retain the original caller and detect same-size modification", async () => {
   const f = await fixture();
   try {
+    await f.file.utimes(new Date(1), new Date(1));
     const observed = await inspectOwnedUpdateFile(f.input); assert.ok(Object.isFrozen(observed));
     assert.equal(observed.bytes, 11); await observed.assertUnchanged();
     await f.file.write(Buffer.from("Owned bytes"), 0, 11, 0);
