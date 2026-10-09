@@ -238,7 +238,7 @@ export async function packageMacUniversal(options: MacUniversalOptions): Promise
     outfile: join(root, "dist/main/development-recording-build.js"), platform: "node", format: "esm", target: "node24", sourcemap: false });
   await writeFile(join(directory, "Contents/Resources/notices/mac-universal-validation-package.json"), JSON.stringify({ version: 1,
     classification: "UNIVERSAL_VALIDATION_ONLY", source: stage.input.arm64.source, sourceVersion: stage.input.arm64.version,
-    runtimeVersion: "44.7.0", merger: mergerPin, signingMode: stage.signing.mode, originalThinRecording: stage.captured,
+    runtimeVersion: "44.7.0", applicationBuild: stage.input.arm64.identity, merger: mergerPin, signingMode: stage.signing.mode, originalThinRecording: stage.captured,
     signedRecording: final, updateAuthority: false, runtimeAcceptance: false,
     limitations: ["No notarization", "No stable update channel or public release acceptance", "No microphone/TCC or desktop runtime acceptance"] }, null, 2), { mode: 0o644 });
   for (const path of insideOutMacCodePaths(stage.nativeFiles.filter((path) => !beneath(appRelative, path)))) tool("/usr/bin/codesign", macPreviewCodesignArguments(stage.signing, join(directory, path)));

@@ -113,6 +113,7 @@ test("preview stages the runtime, exact app metadata, installed optional depende
     assert.deepEqual(await readFile(join(app, "node_modules/@noble/hashes/blake2.js")), await readFile(new URL("blake2.js", nobleSource)));
     await assert.rejects(lstat(join(app, "node_modules/electron")), { code: "ENOENT" });
     await assert.rejects(lstat(join(result.debianRoot, "usr/share/applications/io.github.whisperfree.desktop")), { code: "ENOENT" });
+    await assert.rejects(lstat(join(result.debianRoot, "usr/bin/openwhisper-desktop")), { code: "ENOENT" });
     await assert.rejects(packageLinuxPreview({ root: input.root, output: input.output, directoryOnly: true }), /fresh directory/);
   } finally { await rm(input.base, { recursive: true, force: true }); }
 });
@@ -155,6 +156,7 @@ test("preview builds and inspects an owned inert Debian archive without installa
     assert.equal(await readFile(join(extracted, "opt/openwhisper-dev/resources/app/package.json"), "utf8"), input.metadata);
     assert.equal(await readFile(join(extracted, "opt/openwhisper-dev/resources/app/dist/resources/development-build.json"), "utf8"), input.build);
     await assert.rejects(lstat(join(extracted, "opt/openwhisper")), { code: "ENOENT" });
+    await assert.rejects(lstat(join(extracted, "usr/bin/openwhisper-desktop")), { code: "ENOENT" });
   } finally { await rm(input.base, { recursive: true, force: true }); }
 });
 
@@ -175,6 +177,19 @@ test("stable validation package preserves inputs and uses persistent Linux ident
     assert.match(desktop, /^Name=OpenWhisper$/mu); assert.match(desktop, /^Exec=\/opt\/openwhisper\/openwhisper$/mu);
     assert.match(desktop, /^Icon=io\.github\.whisperfree$/mu); assert.match(desktop, /^StartupWMClass=io\.github\.whisperfree$/mu);
     assert.match(await readFile(join(result.debianRoot, "DEBIAN/control"), "utf8"), /^Package: io-github-whisperfree$/mu);
+    const legacyEntry = join(result.debianRoot, "usr/bin/openwhisper-desktop"), entryInfo = await lstat(legacyEntry);
+    assert.ok(entryInfo.isFile()); assert.equal(entryInfo.isSymbolicLink(), false);
+    assert.equal(entryInfo.mode & 0o7777, 0o755);
+    assert.equal(await readFile(legacyEntry, "utf8"), '#!/bin/sh\nexec /opt/openwhisper/openwhisper "$@"\n');
+    const unexpectedExecution = join(input.base, "unexpected-command"), forwarded = ["--control", "status", "", "two words", "*", "a\\b",
+      "line\nbreak", `$(touch ${unexpectedExecution})`, `\`touch ${unexpectedExecution}\``];
+    // Override only the fixed shell exec boundary: capture actual argument expansion without launching the app.
+    const intercepted = spawnSync("/bin/sh", ["-c", 'capture() { printf "%s\\000" "$@"; return 23; }; alias exec=capture; entry=$1; shift; . "$entry"',
+      "owned-legacy-entry", legacyEntry, ...forwarded], { encoding: "utf8", shell: false, timeout: 1_000, maxBuffer: 16 * 1024 });
+    assert.ifError(intercepted.error); assert.equal(intercepted.signal, null); assert.equal(intercepted.status, 23);
+    assert.equal(intercepted.stderr, "");
+    assert.deepEqual(intercepted.stdout.split("\0"), ["/opt/openwhisper/openwhisper", ...forwarded, ""]);
+    await assert.rejects(lstat(unexpectedExecution), { code: "ENOENT" });
     assert.match(await readFile(join(result.directory, "notices/README.txt"), "utf8"), /Unsigned; no stable update channel/u);
     assert.deepEqual(await readFile(join(input.root, "dist/main/development-recording-build.js")), descriptor);
     await assert.rejects(lstat(join(result.debianRoot, "opt/openwhisper-dev")), { code: "ENOENT" });

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, copyFile, lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { _electron, expect, type ElectronApplication, type Page } from "@playwright/test";
 import { z } from "zod";
 import { appStateSchema, preferencesSchema, snippetSchema } from "../src/contracts/ui.js";
@@ -12,22 +12,17 @@ import { legacyMacosMigrationContextSchema } from "../src/services/legacy-macos-
 import { decodedLegacyMacosPlistSchema } from "../src/workers/macos-legacy-plist.js";
 import { pinnedRuntimeEnvironment } from "../scripts/runtime.js";
 import { macUpdateZip } from "./fixtures/mac-update-zip.js";
+import { parseMacPackageSmokeArguments, validateUniversalMacPackageMetadata } from "./fixtures/mac-package-metadata.js";
 
 // Stable selection changes only this launcher; the captured package must independently match.
 if (process.platform !== "darwin" || process.getuid?.() === 0 || process.env["GITHUB_ACTIONS"] !== "true" ||
   process.env["OPENWHISPER_OWNED_MAC_PACKAGE_SMOKE"] !== "1") {
   throw new Error("Mac package smoke requires explicit owned non-root Mac CI execution.");
 }
-const args = process.argv.slice(2);
-if (![6, 8].includes(args.length) || args[0] !== "--package" || args[2] !== "--evidence" || args[4] !== "--fixtures" ||
-  (args.length === 8 && args[6] !== "--variant") || !args[1] || !args[3] || !args[5] ||
-  ![args[1], args[3], args[5]].every((path) => isAbsolute(path) && !path.includes("\0"))) {
-  throw new Error("Usage: owned-macos-package-smoke.ts --package /absolute/App.app --evidence /absolute/fresh/evidence --fixtures /absolute/pinned/fixtures [--variant development|stable]");
-}
-const variant = z.enum(["development", "stable"]).parse(args.length === 8 ? args[7] : "development");
+const { variant, packageFormat, packagePath, evidencePath, fixturePath } = parseMacPackageSmokeArguments(process.argv.slice(2));
 const stable = variant === "stable";
 if (stable && process.env["RUNNER_ENVIRONMENT"] !== "github-hosted") throw new Error("Stable smoke requires the disposable hosted Mac account.");
-const sourceBundle = resolve(args[1]), evidence = resolve(args[3]), fixtures = resolve(args[5]);
+const sourceBundle = resolve(packagePath), evidence = resolve(evidencePath), fixtures = resolve(fixturePath);
 const sourceRoot = join(sourceBundle, "Contents/Resources/app");
 const capturedBuild = parseApplicationBuildModule(await readFile(join(sourceRoot, "dist/main/application-build.js"), "utf8"));
 assert.equal(capturedBuild.kind, variant, "The explicit launcher variant must match the original package build.");
@@ -44,9 +39,17 @@ const executable = join(bundle, `Contents/MacOS/${capturedBuild.productName}`), 
 assert.equal((await lstat(sourceExecutable)).isSymbolicLink(), false);
 const sourceDescriptorPath = join(sourceBundle, "Contents/Resources/app/dist/main/development-recording-build.js");
 const sourceDescriptor = await readFile(sourceDescriptorPath);
-const packageMetadata = z.object({ architecture: z.literal(process.arch), sourceVersion: z.string().regex(/^\d+\.\d+\.\d+$/u),
-  runtimeVersion: z.literal("44.7.0"), applicationBuild: buildIdentitySchema }).parse(JSON.parse(await readFile(join(sourceBundle,
-    `Contents/Resources/notices/${stable ? "mac-stable-validation-package" : "mac-dev-package"}.json`), "utf8")) as unknown);
+const packageMetadata = packageFormat === "universal"
+  ? validateUniversalMacPackageMetadata({
+    receipt: JSON.parse(await readFile(join(sourceBundle, "Contents/Resources/notices/mac-universal-validation-package.json"), "utf8")) as unknown,
+    thinReceipts: { arm64: JSON.parse(await readFile(join(sourceBundle, "Contents/Resources/notices/architectures/arm64/Contents/Resources/notices/mac-stable-validation-package.json"), "utf8")) as unknown,
+      x64: JSON.parse(await readFile(join(sourceBundle, "Contents/Resources/notices/architectures/x64/Contents/Resources/notices/mac-stable-validation-package.json"), "utf8")) as unknown },
+    applicationBuild: capturedBuild, source: JSON.parse(await readFile(join(sourceRoot, "dist/resources/development-build.json"), "utf8")) as unknown,
+    recordingModule: sourceDescriptor.toString("utf8"), host: { platform: "darwin", architecture: process.arch },
+  })
+  : z.object({ architecture: z.literal(process.arch), sourceVersion: z.string().regex(/^\d+\.\d+\.\d+$/u),
+    runtimeVersion: z.literal("44.7.0"), applicationBuild: buildIdentitySchema }).parse(JSON.parse(await readFile(join(sourceBundle,
+      `Contents/Resources/notices/${stable ? "mac-stable-validation-package" : "mac-dev-package"}.json`), "utf8")) as unknown);
 assert.deepEqual(packageMetadata.applicationBuild, capturedBuild);
 
 const ownedHome = join(evidence, "home"), legacyRoot = join(ownedHome, "Library/Application Support/WhisperFree");
@@ -183,7 +186,9 @@ try {
   }, candidate));
   const signatureCases: { name: "self" | "different-identity" | "unsigned" | "tampered"; result: Awaited<ReturnType<typeof verifyCandidate>> }[] = [];
   signatureAdmission = { cases: signatureCases, flags: 25, architecture: process.arch,
-    scope: "Actual running package requirement; ad-hoc owned fixtures only; no persistent 0.2.5 publisher, universal artifact or install authorization claim" };
+    scope: packageFormat === "universal"
+      ? "Actual running universal package requirement; ad-hoc owned fixtures only; no persistent 0.2.5 publisher or install authorization claim"
+      : "Actual running package requirement; ad-hoc owned fixtures only; no persistent 0.2.5 publisher, universal artifact or install authorization claim" };
   stage = "update-signature-self";
   const selfSignature = await verifyCandidate(bundle); signatureCases.push({ name: "self", result: selfSignature });
   assert.deepEqual(selfSignature, { accepted: true, code: null, osStatus: null });
@@ -398,6 +403,8 @@ try {
     assert.deepEqual(await readFile(sourceDescriptorPath), sourceDescriptor);
     assert.deepEqual(await readFile(join(appPath, "dist/main/development-recording-build.js")), sourceDescriptor);
     checks.push("A second installation refuses the existing root while the original relocated app remains alive and idle");
+  }
+  if (!stable || packageFormat === "universal") {
     stage = "signed-native-utility-loading";
     nativeUtilityLoading = await application.evaluate(async ({ app, utilityProcess, session }, fixtureRoot: string) => {
       const path = process.getBuiltinModule("path"), modules = process.getBuiltinModule("module"), crypto = process.getBuiltinModule("crypto");
@@ -454,7 +461,7 @@ try {
         const control = packagedRequire(path.join(root, "dist/workers/speech-control.js")) as typeof import("../src/workers/speech-control.js");
         const protocol = packagedRequire(path.join(root, "dist/workers/speech-protocol.js")) as typeof import("../src/workers/speech-protocol.js");
         const mac = packagedRequire(path.join(root, "dist/main/macos-speech-host.js")) as typeof import("../src/main/macos-speech-host.js");
-        const descriptor = schema.developmentRecordingDescriptorSchema.parse(build.DEVELOPMENT_RECORDING_BUILD);
+        const descriptor = schema.selectDevelopmentRecordingDescriptor(build.DEVELOPMENT_RECORDING_BUILD, { platform: "darwin", architecture: process.arch });
         requireCondition(descriptor.platform === "darwin" && descriptor.architecture === process.arch, "descriptor platform/architecture");
         const spawn = { call(entry: string, arguments_: string[], serviceName: string): Owner {
           const child = utilityProcess.fork(entry, arguments_, { serviceName, stdio: "ignore", execArgv: [], session: session.defaultSession,
@@ -633,21 +640,23 @@ try {
     assert.equal(restartExit.code, 0); assert.equal(restartExit.signal, null); await preserved();
     checks.push("Owned vocabulary edit survives normal stable restart; raw originals and completion stay unchanged; second original Quit exits 0");
   }
-  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", architecture: process.arch, applicationBuild: capturedBuild, identity, checks,
-    input: "CDP to owned window only; no OS global input injection", microphone: stable
+  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", architecture: process.arch, packageFormat, applicationBuild: capturedBuild, identity, checks,
+    input: "CDP to owned window only; no OS global input injection", microphone: stable && packageFormat === "thin"
       ? "No permission request, capture Start, recording stream or inference in this stable smoke"
       : "No permission request, capture Start or microphone operation; pinned public inference fixture only",
     installation, nativeUtilityLoading, signatureAdmission, archiveAdmission, stableMigration, tccAttribution: "Permission and real microphone behavior remain pending", exit, restartExit,
-    scope: stable ? "Actual stable normal main/bundle/native empty-domain migration/UI/preferences/regular shortcut/restart/clean Quit; no stable recording or CPU claim"
+    scope: stable ? (packageFormat === "universal"
+      ? "Actual universal stable normal main, native empty-domain migration/UI/preferences/shortcut/restart/clean Quit and host capture Configure/Close plus CPU Tiny/JFK utilities; no capture Start or microphone"
+      : "Actual stable normal main/bundle/native empty-domain migration/UI/preferences/regular shortcut/restart/clean Quit; no stable recording or CPU claim")
       : "Actual Dev package plus signed capture configure and CPU fixture utilities" }, null, 2), { mode: 0o600 });
   passed = true;
 } catch (error: unknown) {
   failure = error instanceof Error ? { name: error.name, message: error.message.slice(0, 2000) } : { name: "UNKNOWN" };
   if (page && !page.isClosed()) await page.screenshot({ path: join(evidence, "failure.png"), fullPage: true }).catch(() => {});
-  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "FAIL", stage, applicationBuild: capturedBuild, identity, checks, installation, nativeUtilityLoading, signatureAdmission, archiveAdmission, stableMigration,
+  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "FAIL", stage, packageFormat, applicationBuild: capturedBuild, identity, checks, installation, nativeUtilityLoading, signatureAdmission, archiveAdmission, stableMigration,
     error: failure }, null, 2), { mode: 0o600 });
   process.exitCode = 1;
 } finally {
   if (application) await application.close().catch(() => {});
 }
-console.log(JSON.stringify({ status: passed ? "PASS" : "FAIL", stage, evidence, architecture: process.arch, error: failure }));
+console.log(JSON.stringify({ status: passed ? "PASS" : "FAIL", stage, evidence, architecture: process.arch, packageFormat, error: failure }));

@@ -56,9 +56,29 @@ synthetic. No privileged install or restart took place. Application wiring,
 post-native-cleanup restart and rollback remain open.
 
 This combined source increment passes strict typing, the normal app/shared-UI
-build and 1174 unit tests in 17.55 seconds, with zero failures and 34 explicit
+build and 1177 unit tests in 17.62 seconds, with zero failures and 34 explicit
 native/opt-in skips. The separate eight-case embedded Debian check above has no
 skips. Independent source reviews pass for both new consumers and the harness.
+
+The next CI increment consumes both successful thin packages from the same run,
+constructs one universal ZIP, then checks that identical ZIP on Intel and ARM.
+It reuses the normal stable smoke for migration, settings, signatures, archives,
+shortcuts, restart and original Quit, plus capture Configure/Close and CPU public
+fixture inference without opening a microphone. This workflow and its explicit
+V2/original-receipt admission are reviewed; actual universal results remain open.
+
+Stable Debian packaging also retains `/usr/bin/openwhisper-desktop`, the restart
+path captured by native 0.2.5. The fixed entry forwards to the permanent Electron
+installation; Dev does not own it. Owned inert packaging checks pass, with the
+actual native-to-Electron upgrade still outstanding.
+
+The original Intel job in
+[CI 37875160757](https://github.com/juferdinand/OpenWhisper/actions/runs/37875160757)
+fails before packaging in an existing abort test's initial mock bind. Hosted
+scheduling exceeds its unrelated 30-ms monotonic setup budget. That one logical
+ordering test now uses the existing injected clock; fourteen focused cases pass.
+Production deadlines and separate expiry tests are unchanged. The original ARM
+job passes; the next original CI run must confirm the corrected Intel case.
 
 Earlier package checkpoints follow with their original producers and scopes.
 

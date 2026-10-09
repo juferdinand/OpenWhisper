@@ -58,10 +58,43 @@ the test closes normally. Application wiring, privileged installation,
 post-native-cleanup restart and rollback are separate gates.
 
 Combined source checks pass strict typing, normal app/shared-UI build and
-1174 unit tests in 17.55 seconds, with 34 explicit native/opt-in skips and zero
+1177 unit tests in 17.62 seconds, with 34 explicit native/opt-in skips and zero
 failures. The skipped optional Debian asset cases are covered separately by the
 eight-case actual embedded-Node run above. New source and harness each received
 independent review.
+
+## Same-run universal CI and native Debian restart entry
+
+The reviewed workflow requires both successful original thin Mac jobs, extracts
+their exact same-run ZIPs and checks the captured source against the checkout.
+One official constructor creates the universal validation ZIP. Both native
+runner architectures then verify its same SHA and reuse ordinary stable main
+checks plus existing capture Configure/Close and pinned CPU/JFK utilities. The
+explicit universal smoke validates the actual final V2 export and both indexed
+original thin receipts before host selection. Thin selection stays the default.
+Thirteen focused metadata/constructor checks pass; actual universal assembly,
+signing and runtime are pending the normal CI run, without a manual dispatch.
+
+The original public 0.2.5 Debian archive's fixed SHA matches the retained release
+asset; read-only ar/tar listing proves `/usr/bin/openwhisper-desktop`. New stable
+packaging provides that regular0755 path with fixed
+`exec /opt/openwhisper/openwhisper "$@"`; Dev excludes it. Existing owned inert
+package tests confirm entry bytes/type/mode, preserved empty/special arguments
+and no command evaluation. Five focused cases pass; the archive-tool case skips
+on the host without `dpkg-deb`. This is source/inert packaging evidence, without
+an actual installed upgrade or supervised Electron restart claim.
+
+Original Intel job113641952691 in
+[CI 37875160757](https://github.com/juferdinand/OpenWhisper/actions/runs/37875160757)
+fails in `npm test` before capture/package execution. Its abort/late-reply case
+fails the initial successful fake bind with `TEARDOWN_FAILED` in34.306ms against
+a30ms monotonic budget; the hosted suite takes97.67seconds. The closed error
+does not identify which bounded bind operation expires. One reviewed test-only
+correction injects the already supported fixed clock for logical ordering,
+retaining the30ms timer, production code and separate real-expiry cases. Explicit
+dispatch-before-abort, one close and inactive-owner assertions remain. Fourteen
+focused cases pass in239ms; the original failure is retained, and no CI retry or
+production timing fix is claimed. The original ARM job passes separately.
 
 ## Historical Mac ZIP acceptance and installed-launch source increment
 

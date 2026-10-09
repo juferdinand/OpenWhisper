@@ -207,6 +207,117 @@ jobs:
             ${{ runner.temp }}/openwhisper-mac-stable-smoke/failure.png
           if-no-files-found: warn
           retention-days: 14
+  mac_universal_construct:
+    name: Electron universal Mac construction
+    needs: mac_capture
+    runs-on: macos-15
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+      - name: Install locked construction tools without rebuilding thin apps
+        run: npm ci --prefix electron
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: OpenWhisper-validation-macOS-macos-15-${{ github.sha }}
+          path: ${{ runner.temp }}/thin-arm64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: OpenWhisper-validation-macOS-macos-15-intel-${{ github.sha }}
+          path: ${{ runner.temp }}/thin-x64
+      - name: Construct and verify one same-source universal validation ZIP
+        working-directory: electron
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for architecture in arm64 x64; do
+            input="$RUNNER_TEMP/thin-$architecture"
+            archives=("$input"/openwhisper-mac-stable/*.zip "$input"/*.zip)
+            test "${#archives[@]}" -eq 1
+            test "$(/usr/bin/plutil -extract status raw -o - "$input/openwhisper-mac-stable-smoke/result.json")" = PASS
+            test "$(/usr/bin/plutil -extract architecture raw -o - "$input/openwhisper-mac-stable-smoke/result.json")" = "$architecture"
+            /usr/bin/shasum -a 256 "${archives[0]}" > "$input/original-archive.sha256"
+            /usr/bin/ditto -x -k "${archives[0]}" "$RUNNER_TEMP/extracted-$architecture"
+            test "$(/usr/bin/plutil -extract commit raw -o - "$RUNNER_TEMP/extracted-$architecture/OpenWhisper.app/Contents/Resources/app/dist/resources/development-build.json")" = "$GITHUB_SHA"
+          done
+          node --import tsx scripts/package-macos-universal.ts \
+            --arm64-app "$RUNNER_TEMP/extracted-arm64/OpenWhisper.app" \
+            --x64-app "$RUNNER_TEMP/extracted-x64/OpenWhisper.app" \
+            --output "$RUNNER_TEMP/openwhisper-mac-universal" \
+            > "$RUNNER_TEMP/openwhisper-mac-universal-result.json"
+      - name: Upload the verified universal ZIP and original producer receipts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OpenWhisper-validation-macOS-universal-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/openwhisper-mac-universal/*.zip
+            ${{ runner.temp }}/openwhisper-mac-universal-result.json
+            ${{ runner.temp }}/thin-arm64/original-archive.sha256
+            ${{ runner.temp }}/thin-arm64/openwhisper-mac-stable-result.json
+            ${{ runner.temp }}/thin-arm64/openwhisper-mac-stable-smoke/result.json
+            ${{ runner.temp }}/thin-x64/original-archive.sha256
+            ${{ runner.temp }}/thin-x64/openwhisper-mac-stable-result.json
+            ${{ runner.temp }}/thin-x64/openwhisper-mac-stable-smoke/result.json
+          if-no-files-found: error
+          retention-days: 14
+  mac_universal_runtime:
+    name: Electron owned universal Mac (${{ matrix.os }})
+    needs: mac_universal_construct
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+      - name: Install locked test tools without rebuilding the app
+        run: npm ci --prefix electron
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: OpenWhisper-validation-macOS-universal-${{ github.sha }}
+          path: ${{ runner.temp }}/universal-input
+      - name: Check the identical universal ZIP through the normal stable main
+        working-directory: electron
+        shell: bash
+        env:
+          OPENWHISPER_OWNED_MAC_PACKAGE_SMOKE: '1'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          input="$RUNNER_TEMP/universal-input"
+          archives=("$input"/openwhisper-mac-universal/*.zip "$input"/*.zip)
+          test "${#archives[@]}" -eq 1
+          expected="$(/usr/bin/plutil -extract sha256 raw -o - "$input/openwhisper-mac-universal-result.json")"
+          actual="$(/usr/bin/shasum -a 256 "${archives[0]}" | cut -d ' ' -f 1)"
+          test "$actual" = "$expected"
+          /usr/bin/ditto -x -k "${archives[0]}" "$RUNNER_TEMP/universal-extracted"
+          test "$(/usr/bin/plutil -extract commit raw -o - "$RUNNER_TEMP/universal-extracted/OpenWhisper.app/Contents/Resources/app/dist/resources/development-build.json")" = "$GITHUB_SHA"
+          node --import tsx scripts/fetch-speech-fixtures.ts
+          node --import tsx tests/owned-macos-package-smoke.ts \
+            --package "$RUNNER_TEMP/universal-extracted/OpenWhisper.app" \
+            --evidence "$RUNNER_TEMP/openwhisper-mac-universal-smoke" \
+            --fixtures "$PWD/.local/speech-fixtures" --variant stable --package-format universal
+      - name: Upload original universal runtime results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Electron-universal-macOS-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/openwhisper-mac-universal-smoke/result.json
+            ${{ runner.temp }}/openwhisper-mac-universal-smoke/failure.png
+          if-no-files-found: warn
+          retention-days: 14
   linux:
     uses: ./.github/workflows/linux-build.yml
     with:

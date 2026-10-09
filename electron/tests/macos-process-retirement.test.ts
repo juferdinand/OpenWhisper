@@ -107,12 +107,19 @@ test("Mac a held native bind deadline retains its owner and permits neither a se
   assert.deepEqual(native.calls, ["create", "bind", "close"]);
 });
 test("Mac abort during an observation cannot let a late reaped result affect admission", async () => {
-  const { native, probe } = fixture(); await probe.bind();
+  // This checks abort/late-reply ordering, independently of hosted scheduling.
+  // The separate timer and monotonic-expiry cases retain their real deadlines.
+  const native = new FakeNative();
+  const probe = new OwnedMacRetirementProbe(native, { pid: 123, challenge: async (nonce, epoch) => ({ kind: "nonce", nonce, epoch }) },
+    randomUUID(), { uid: 501, parentPid: 100, now: () => 0 }, { deadlineMs: 30, pollMs: 1 });
+  assert.equal((await probe.bind()).canAdmit, true);
   const held = deferred<unknown>(); native.hold = held.promise;
   const controller = new AbortController(), observing = probe.observe(controller.signal);
-  await Promise.resolve(); controller.abort(); await rejects(observing);
+  await Promise.resolve(); assert.equal(native.calls.filter((value) => value === "observe").length, 2);
+  controller.abort(); await rejects(observing);
   held.accept({ second: { kind: "absent" }, ...flags }); await Promise.resolve();
   await rejects(probe.observe()); await probe.close(); assert.equal(native.calls.filter((value) => value === "observe").length, 2);
+  assert.equal(native.closes, 1); assert.equal(native.active, false);
 });
 test("Mac pre-dispatch abort queues no native operation", async () => {
   const { native, probe } = fixture(); const controller = new AbortController();

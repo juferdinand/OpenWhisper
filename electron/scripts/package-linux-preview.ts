@@ -187,6 +187,13 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
   const debianRoot = join(output, "debian-root"), payload = join(debianRoot, "opt", executableName);
   await mkdir(dirname(payload), { recursive: true });
   await cp(directory, payload, { recursive: true });
+  if (stable) {
+    const legacyEntry = join(debianRoot, "usr/bin/openwhisper-desktop");
+    await mkdir(dirname(legacyEntry), { recursive: true, mode: 0o755 });
+    // The native updater captured this permanent path before replacing its package.
+    await writeFile(legacyEntry, '#!/bin/sh\nexec /opt/openwhisper/openwhisper "$@"\n', { flag: "wx", mode: 0o755 });
+    await chmod(legacyEntry, 0o755);
+  }
   const desktopDirectory = join(debianRoot, "usr/share/applications");
   const iconDirectory = join(debianRoot, "usr/share/icons/hicolor/256x256/apps");
   const docDirectory = join(debianRoot, "usr/share/doc", packageName);
@@ -216,7 +223,8 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
     if (runDpkg(["--field", debianPackage, "Package", "Version", "Architecture"]).trim() !==
       `Package: ${packageName}\nVersion: ${version}\nArchitecture: amd64`) throw new Error("Unexpected preview Debian metadata.");
     const contents = runDpkg(["--contents", debianPackage]);
-    if (!contents.includes(`./usr/share/applications/${appId}.desktop`) || !contents.includes(`./opt/${executableName}/resources/app/dist/main/index.js`)) {
+    if (!contents.includes(`./usr/share/applications/${appId}.desktop`) || !contents.includes(`./opt/${executableName}/resources/app/dist/main/index.js`) ||
+        (stable && !contents.includes("./usr/bin/openwhisper-desktop"))) {
       throw new Error("Preview Debian package is missing its launcher or application.");
     }
   }
