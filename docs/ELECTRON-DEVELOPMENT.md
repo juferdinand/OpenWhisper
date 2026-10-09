@@ -25,6 +25,19 @@ npm run setup
 npm run dev
 ```
 
+Before a CI push, run the deterministic static preflight from a Linux x64 or macOS x64/arm64
+development machine after both `npm ci` commands:
+
+```bash
+npm run preflight --prefix electron
+```
+
+It downloads and checksum-verifies pinned actionlint and ShellCheck archives once, caches them
+under the ignored `.local/preflight-tools/` directory, and can reuse them offline. It then checks
+workflow YAML and embedded shell, rejects shell continuations in folded or plain `run` scalars,
+runs focused regression fixtures, checks Electron TypeScript and shared UI formatting, and checks
+PR/commit and local working-tree whitespace. CI gates native and package jobs on this preflight.
+
 The development launcher resolves the already installed pinned binary; launching does
 not automatically download a missing runtime. `setup` uses the pinned package's official
 download and checksum verification. Runtime/download override variables are removed.

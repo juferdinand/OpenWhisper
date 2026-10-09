@@ -37,6 +37,8 @@ or subscription. The project is open source under the MIT License.
   Recording and native platform replacement are incomplete. Follow `docs/ELECTRON-DEVELOPMENT.md`
   and `docs/ELECTRON-MIGRATION.md`; preserve the stable hosts until replacement gates pass.
   Run `npm run typecheck`, `npm test`, and `npm run build` in `electron/` for its changes.
+  Run `npm run preflight` before every push. It checks workflow syntax and shell commands,
+  ambiguous YAML continuations, strict TypeScript, shared UI formatting, and whitespace errors.
   Use `npm run test:platform` for focused platform feedback during implementation;
   run the complete required checks once for a completed increment.
 - `macos/`: native Swift app, SwiftPM, Swift 5.10 language mode, macOS 14+.

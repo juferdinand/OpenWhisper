@@ -104,15 +104,18 @@ jobs:
           if test -n "$(git status --porcelain)"; then git status --short; exit 1; fi
           packet="$RUNNER_TEMP/openwhisper-update-tools"
           test ! -e "$packet"
-          mkdir -m 700 -p "$packet/node_modules/@tauri-apps"
+          mkdir -m 700 "$packet"
+          mkdir -m 700 "$packet/node_modules"
+          mkdir -m 700 "$packet/node_modules/@tauri-apps"
           cp -a target/debug/examples/verify-update "$packet/verify-update"
           cp src-tauri/tauri.conf.json package.json package-lock.json "$packet/"
           cp -a node_modules/@tauri-apps/cli node_modules/@tauri-apps/cli-linux-x64-gnu "$packet/node_modules/@tauri-apps/"
           git rev-parse HEAD > "$packet/source-commit.txt"
           (
             cd "$packet"
-            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            find . -type f -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/openwhisper-update-tools.SHA256SUMS"
           )
+          mv "$RUNNER_TEMP/openwhisper-update-tools.SHA256SUMS" "$packet/SHA256SUMS"
           tar -C "$packet" -cf "$RUNNER_TEMP/openwhisper-update-tools.tar" .
       - name: Upload the same-run locked update tools
         if: inputs.version == ''

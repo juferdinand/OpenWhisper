@@ -9,6 +9,7 @@
   },
   "scripts": {
     "setup": "tsx scripts/setup.ts",
+    "preflight": "tsx scripts/preflight.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts tests/owned-retirement/*.test.ts tests/owned-bus-async/*.test.ts tests/owned-supervisor-fallback/*.test.ts",
     "test:platform": "tsx --test tests/*platform*.test.ts tests/portal-*.test.ts tests/clipboard-output.test.ts tests/wayland-clipboard.test.ts tests/delivery-receipts.test.ts tests/preferences.test.ts",
@@ -29,7 +30,8 @@
     "electron": "44.7.0",
     "esbuild": "0.28.2",
     "tsx": "4.23.15",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "yaml": "2.9.1"
   },
   "allowScripts": {
     "esbuild@0.28.2": true
