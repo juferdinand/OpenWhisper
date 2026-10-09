@@ -156,7 +156,7 @@ test("stable validation package preserves inputs and uses persistent Linux ident
     const desktop = await readFile(join(result.debianRoot, "usr/share/applications/io.github.whisperfree.desktop"), "utf8");
     assert.match(desktop, /^Name=OpenWhisper$/mu); assert.match(desktop, /^Exec=\/opt\/openwhisper\/openwhisper$/mu);
     assert.match(desktop, /^Icon=io\.github\.whisperfree$/mu); assert.match(desktop, /^StartupWMClass=io\.github\.whisperfree$/mu);
-    assert.match(await readFile(join(result.debianRoot, "DEBIAN/control"), "utf8"), /^Package: io\.github\.whisperfree$/mu);
+    assert.match(await readFile(join(result.debianRoot, "DEBIAN/control"), "utf8"), /^Package: io-github-whisperfree$/mu);
     assert.match(await readFile(join(result.directory, "notices/README.txt"), "utf8"), /Unsigned; no stable update channel/u);
     assert.deepEqual(await readFile(join(input.root, "dist/main/development-recording-build.js")), descriptor);
     await assert.rejects(lstat(join(result.debianRoot, "opt/openwhisper-dev")), { code: "ENOENT" });

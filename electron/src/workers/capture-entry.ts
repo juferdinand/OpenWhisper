@@ -109,9 +109,9 @@ subscribe("message", (event: unknown) => {
   if (typeof event !== "object" || event === null) { retire(); return; }
   const input: unknown = Reflect.get(event, "data");
   if (typeof input === "object" && input !== null && Reflect.get(input, "channel") === "recording-host") {
-    void runtime.receive(input).then(() => {
-      if (Reflect.get(input, "command") === "close") retire();
-    }, () => { retire(); });
+    // Main receives the cleanup reply before terminating this original owner.
+    // Immediate exit here could drop the posted close acknowledgement.
+    void runtime.receive(input).catch(() => { retire(); });
   } else for (const receive of replies) receive(input);
 });
 subscribe("close", () => { for (const listener of exits) listener(); retire(); });

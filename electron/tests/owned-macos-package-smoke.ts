@@ -269,9 +269,23 @@ try {
         requireCondition(Array.isArray(objects) && objects.every((item: unknown) => typeof item === "string"), "main native inventory unavailable");
         return (objects as string[]).some((item) => /openwhisper_(?:macos_capture|speech)\.node$/u.test(item));
       } }.call;
+      const goneReasons = ["clean-exit", "abnormal-exit", "killed", "crashed", "oom", "launch-failed", "integrity-failure", "memory-eviction"] as const;
       type Owner = { child: ReturnType<typeof utilityProcess.fork>; spawned: Promise<number>; exit: Promise<number>;
-        exited: boolean; failed: boolean; frames: unknown[]; wake: (() => void) | undefined; pid: number | undefined };
+        exited: boolean; failed: boolean; frames: unknown[]; wake: (() => void) | undefined; pid: number | undefined;
+        serviceName: string; exitCode: number | undefined;
+        gone: { reason: typeof goneReasons[number]; exitCode: number | null } | undefined };
       const owners: Owner[] = [];
+      const observeGone = { call(_event: unknown, details: unknown): void {
+        try {
+          if (typeof details !== "object" || details === null || Reflect.get(details, "type") !== "Utility") return;
+          const owner = owners.find((item) => item.serviceName === Reflect.get(details, "serviceName"));
+          const reason = goneReasons.find((item) => item === Reflect.get(details, "reason"));
+          if (!owner || !reason) return;
+          const code: unknown = Reflect.get(details, "exitCode");
+          owner.gone = { reason, exitCode: typeof code === "number" && Number.isSafeInteger(code) ? code : null };
+        } catch { /* Observation failures cannot change utility ownership. */ }
+      } }.call;
+      app.on("child-process-gone", observeGone);
       let capture: { pid: number; generation: number; exitCode: number } | undefined;
       let speech: { pid: number; gpu: null; exitCode: number } | undefined;
       let inference: { recognized: boolean; modelSha256: string; audioSha256: string; sampleCount: number } | undefined;
@@ -296,14 +310,16 @@ try {
             allowLoadingUnsignedLibraries: false, respondToAuthRequestsFromMainProcess: false, env: mac.macSpeechEnvironment(process.env) });
           let acceptSpawn!: (pid: number) => void, rejectSpawn!: (error: Error) => void, acceptExit!: (code: number) => void;
           const owner: Owner = { child, spawned: new Promise((accept, reject) => { acceptSpawn = accept; rejectSpawn = reject; }),
-            exit: new Promise((accept) => { acceptExit = accept; }), exited: false, failed: false, frames: [], wake: undefined, pid: undefined };
+            exit: new Promise((accept) => { acceptExit = accept; }), exited: false, failed: false, frames: [], wake: undefined, pid: undefined,
+            serviceName, exitCode: undefined, gone: undefined };
           owners.push(owner); void owner.spawned.catch(() => {});
           child.once("spawn", () => { const pid = child.pid;
             if (!pid) { owner.failed = true; rejectSpawn(new Error("Original utility PID missing")); }
             else { owner.pid = pid; acceptSpawn(pid); } owner.wake?.(); });
           child.on("message", (input: unknown) => { if (owner.frames.length >= 64) owner.failed = true; else owner.frames.push(input); owner.wake?.(); });
           child.on("error", () => { owner.failed = true; rejectSpawn(new Error("Original utility error")); owner.wake?.(); });
-          child.once("exit", (code) => { owner.exited = true; acceptExit(code); rejectSpawn(new Error("Original utility exited")); owner.wake?.(); });
+          child.once("exit", (code) => { owner.exited = true; owner.exitCode = Number.isSafeInteger(code) ? code : undefined;
+            acceptExit(code); rejectSpawn(new Error("Original utility exited")); owner.wake?.(); });
           return owner;
         } }.call;
         const next = { async call(owner: Owner, maximum = 8000): Promise<unknown> {
@@ -336,6 +352,7 @@ try {
         } }.call;
         phase = "capture-configure-native-load"; await captureControl("configure");
         phase = "capture-close"; await captureControl("close");
+        requireCondition(captureOwner.child.kill(), "original capture termination request");
         const captureExit = await bounded(captureOwner.exit); requireCondition(captureExit === 0, "capture original exit");
         capture = { pid: capturePid, generation: 0, exitCode: captureExit };
         phase = "speech-entry";
@@ -391,13 +408,16 @@ try {
         await bounded(owner.exit, cleanupDeadline);
         if (owner.failed) throw new Error("Original utility error/channel failure retained through exit");
       }));
+      app.removeListener("child-process-gone", observeGone);
       const cleanupPassed = cleanup.every((item) => item.status === "fulfilled");
       let mainCaptureSpeechFree = false;
       try { mainCaptureSpeechFree = !mainInventory(); }
       catch (failure: unknown) { error ??= failure instanceof Error ? failure.message.slice(0, 1000) : "Main inventory unavailable after cleanup"; }
       return { status: error || !cleanupPassed || !mainCaptureSpeechFree ? "FAIL" : "PASS", phase, error, capture, speech, inference, cleanupPassed, mainCaptureSpeechFree,
         cleanupErrors: cleanup.filter((item) => item.status === "rejected").map((item) => item.reason instanceof Error ? item.reason.message : "Original exit not observed"),
-        originalExitsObserved: owners.map((owner) => ({ pid: owner.pid, exited: owner.exited })),
+        // Electron UtilityProcess exposes no separate signal value; do not infer one from its code.
+        originalExitsObserved: owners.map((owner) => ({ pid: owner.pid, exited: owner.exited, exitCode: owner.exitCode ?? null,
+          signal: "not-exposed-by-utility-api", gone: owner.gone ?? null })),
         scope: "Signed production capture configure + CPU Tiny/JFK inference; no Start, TCC, microphone audio or full retirement claim" };
     }, fixtures);
     assert.ok(typeof nativeUtilityLoading === "object" && nativeUtilityLoading !== null);

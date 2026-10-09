@@ -257,10 +257,10 @@ try {
   if (debianPackage) {
     assert.ok(packageBefore && debianVersion && debianBefore);
     const user = ["exec", "--user", "1000:1000", container];
-    const absent = await docker([...user, "/usr/bin/dpkg-query", "-W", "-f=${db:Status-Abbrev}", "io.github.whisperfree"]);
+    const absent = await docker([...user, "/usr/bin/dpkg-query", "-W", "-f=${db:Status-Abbrev}", "io-github-whisperfree"]);
     assert.equal(absent.code, 1); assert.equal(absent.closureObserved, true); assert.equal(absent.stdout, "");
     for (const path of ["/opt/openwhisper", "/usr/share/applications/io.github.whisperfree.desktop",
-      "/usr/share/icons/hicolor/256x256/apps/io.github.whisperfree.png", "/usr/share/doc/io.github.whisperfree"]) {
+      "/usr/share/icons/hicolor/256x256/apps/io.github.whisperfree.png", "/usr/share/doc/io-github-whisperfree"]) {
       await required([...user, "/usr/bin/test", "!", "-e", path]); await required([...user, "/usr/bin/test", "!", "-L", path]);
     }
     const extracted = "/tmp/openwhisper-owned-debian-input";
@@ -269,13 +269,13 @@ try {
     const archiveRoot = join(output, "debian-input"); await required(["cp", "-a", `${container}:${extracted}`, archiveRoot], 60_000);
     assert.deepEqual((await readdir(join(archiveRoot, "DEBIAN"))).sort(), ["control"]);
     const metadata = await required([...user, "/usr/bin/dpkg-deb", "--field", "/payload/package.deb", "Package", "Version", "Architecture"]);
-    assert.equal(metadata, `Package: io.github.whisperfree\nVersion: ${debianVersion}\nArchitecture: amd64`);
+    assert.equal(metadata, `Package: io-github-whisperfree\nVersion: ${debianVersion}\nArchitecture: amd64`);
     const dependencies = await required([...user, "/usr/bin/dpkg-deb", "--field", "/payload/package.deb", "Depends"]);
     const match = /^libc6 \(>= (\d+\.\d+)\), (libstdc\+\+6, libgcc-s1, libgtk-3-0, libnss3, libnspr4, libasound2, libgbm1, libdrm2, libx11-6, libx11-xcb1, libxcb1, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxrandr2, libxkbcommon0, libdbus-1-3, libatomic1, libpulse0, libsystemd0)$/u.exec(dependencies);
     assert.ok(match);
     const control = await readFile(join(archiveRoot, "DEBIAN/control"), "utf8");
     const installedSize = /^Installed-Size: ([1-9][0-9]{0,9})$/mu.exec(control)?.[1]; assert.ok(installedSize);
-    assert.equal(control, ["Package: io.github.whisperfree", `Version: ${debianVersion}`, "Architecture: amd64", "Section: utils", "Priority: optional",
+    assert.equal(control, ["Package: io-github-whisperfree", `Version: ${debianVersion}`, "Architecture: amd64", "Section: utils", "Priority: optional",
       "Maintainer: OpenWhisper Contributors <noreply@openwhisper.invalid>", `Installed-Size: ${installedSize}`, `Depends: ${dependencies}`,
       "Description: OpenWhisper stable-profile validation package", " Unsigned validation package; no public release or stable update channel.", ""].join("\n"));
     const archiveModes: Record<string, number> = {};
@@ -287,7 +287,7 @@ try {
     assert.equal(await readFile(join(archiveRoot, desktopPath), "utf8"), desktop);
     expected[desktopPath] = { bytes: Buffer.byteLength(desktop), sha256: createHash("sha256").update(desktop).digest("hex") };
     expected["usr/share/icons/hicolor/256x256/apps/io.github.whisperfree.png"] = await describe(join(app, "dist/ui/app-icon.png"));
-    expected["usr/share/doc/io.github.whisperfree/copyright"] = packageBefore["notices/OpenWhisper-LICENSE"]!;
+    expected["usr/share/doc/io-github-whisperfree/copyright"] = packageBefore["notices/OpenWhisper-LICENSE"]!;
     expected["DEBIAN/control"] = await describe(join(archiveRoot, "DEBIAN/control"));
     const allModes: Record<string, number> = {};
     assert.deepEqual(await inventory(archiveRoot, "", allModes), expected);
@@ -304,8 +304,8 @@ try {
     assert.equal(await required([...user, "/usr/bin/sha256sum", installationArchive]), `${debianBefore.sha256}  ${installationArchive}`);
     // Unforced dpkg resolves versioned dependencies and legitimate Provides aliases.
     await required(["exec", "--user", "0:0", container, "/usr/bin/dpkg", "--install", installationArchive], 60_000);
-    assert.equal(await required([...user, "/usr/bin/dpkg-query", "-W", "-f=${db:Status-Abbrev} ${Package} ${Version} ${Architecture}", "io.github.whisperfree"]),
-      `ii  io.github.whisperfree ${debianVersion} amd64`);
+    assert.equal(await required([...user, "/usr/bin/dpkg-query", "-W", "-f=${db:Status-Abbrev} ${Package} ${Version} ${Architecture}", "io-github-whisperfree"]),
+      `ii  io-github-whisperfree ${debianVersion} amd64`);
     await writeFile(join(output, "debian-installation.json"), JSON.stringify({ package: debianBefore, version: debianVersion,
       archiveMatchesDirectory: true, controlScriptsAbsent: true, dependenciesPresent: true,
       applicationUid: 1000, packageManagerUid: 0, packageManagerArchive: installationArchive, payloadModePreserved: true,

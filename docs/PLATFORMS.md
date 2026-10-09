@@ -4,7 +4,7 @@
 |---|---|---|
 | macOS 14+ | Native Swift services + shared UI in WKWebView | Public DMG and ZIP releases |
 | Linux x86_64 | Shared UI in Tauri 2 + Rust and C++ speech services | Source / AppImage / `.deb` releases; see [validation status](LINUX.md#validation-status) |
-| Windows | Not implemented | Future work |
+| Windows | Not implemented | Follow-up [#35](https://github.com/juferdinand/OpenWhisper/issues/35), after the Mac/Linux 0.3.0 migration |
 
 Both implementations use `shared/models.json`, the same pinned whisper.cpp release, and
 `shared/test-vectors.json`. The Rust core passes the same cleanup, vocabulary, and snippet cases

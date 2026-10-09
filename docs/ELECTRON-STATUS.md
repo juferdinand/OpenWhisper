@@ -83,18 +83,43 @@ same Mac failure on ARM/Intel: `LOGIN_STATE_UNKNOWN`, observed login `not-found`
 Migration now preserves that known state with the old native requested=false
 mapping. Autostart control remains unavailable, unknown facts still refuse initial
 migration and completed profiles retain edits. No registration occurs.
+At `b3e1d4a`, the [Intel owned Mac job](https://github.com/juferdinand/OpenWhisper/actions/runs/37860813852/job/113595823107)
+passes the normal stable package's first launch, read-only migration, shortcut
+setup/removal, edited-state restart and original clean exits. The ARM Dev smoke
+fails while waiting for its capture-close reply, before stable acceptance. Both
+capture entries posted that reply and immediately exited, which could overtake
+IPC delivery. The reviewed correction leaves successful close termination to the
+existing parent, after the matching reply; signal and broken-parent retirement
+paths remain. The signed Mac smoke follows that same ownership and retains numeric
+exit observations. Actual corrected-package acceptance remains open.
 Independent reviews, strict typing and 1091 local tests pass with 25 explicit skips
-and zero failures in 17.81s; actual corrected Mac package acceptance remains open.
+and zero failures in 17.78s.
 
 Fresh Ubuntu22 packages retain clean producer `2003831`. Native auth/expiry and
 ordinary inspector-prefixed GUI startup pass in the owned bus fixture. The exact
-Dev package starts but fails to discover its private virtual audio source before
-dictation; that concrete failure remains open. The matching stable Debian harness
+Dev package's first run fails to discover its private virtual audio source before
+dictation. A fresh diagnostic package finds the source without resource-pressure
+events; it does not include the capture-close correction, so the earlier failure
+cannot yet be classified as fixed. Its actual no-display CLI status passes strict
+JSON, exit 0 and original process retirement. A Chromium warning refers solely
+to the fixture's explicitly absent private system-bus socket; the test now accepts
+only that exact original-PID warning. A bounded metadata probe identifies only
+native Fontconfig cache files; HOME, configuration and data remain absent. The
+owned check permits this exact cache tree while continuing to reject application
+profiles, unexpected entries and links. Final matching-package acceptance remains open.
+The matching stable Debian harness
 verifies archive contents before container-only installation, UI autostart and
 generated permanent-target restart. Its first attempt stops at a private archive
 permission boundary before application launch; a public-archive-only stage fixes
-that harness boundary without adding container capabilities. Runtime acceptance
-is still required, and actual login-session launch remains explicitly untested.
+that harness boundary without adding container capabilities. The next attempt
+installs the exact package and passes ordinary migration and read-only startup/focus
+autostart checks. Its CLI status also succeeds; the same owned-system-bus warning
+stops the original overly strict stderr assertion. Remaining dictation, all commands,
+UI autostart and generated-target restart acceptance is still required. The next
+stable package restores Debian `io-github-whisperfree`, matching the old updater;
+dotted app/desktop identity remains unchanged. Previous validation archives remain
+immutable and do not prove upgrade continuity. Actual login-session launch remains
+explicitly untested.
 Earlier separately attributed migration/dictation evidence remains valid.
 
 The strict TS update policy now validates exact UInt64 versions, Mac release

@@ -36,7 +36,7 @@ import type { RecordingSource } from "../workers/recording-host-protocol.js";
 import { recordingSnapshotSchema } from "../workers/recording-host-protocol.js";
 import { DEVELOPMENT_RECORDING_BUILD } from "./development-recording-build.js";
 import { developmentRecordingDescriptorSchema, type DevelopmentRecordingDescriptor } from "./development-recording-descriptor.js";
-import { DevelopmentRecordingHost, developmentPulseServer } from "./development-recording-host.js";
+import { DevelopmentRecordingHost, developmentPulseServer, formatSourceDiscoveryFailure } from "./development-recording-host.js";
 import { saveTranscript } from "../services/development-transcripts.js";
 import { DevelopmentPlatformHost } from "./development-platform-host.js";
 import { createRecordingControlPort } from "./recording-control.js";
@@ -181,6 +181,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let installed: readonly InstalledModel[] = await inventory.installed();
   let sources: readonly RecordingSource[] = [];
   let audioServer: string | undefined;
+  const checkedAudioServer = async (): Promise<string> => {
+    try { return await developmentPulseServer(); }
+    catch (error: unknown) { console.error(formatSourceDiscoveryFailure({ stage: "checked-pulse", code: "FAILED" })); throw error; }
+  };
   let host: DevelopmentRecordingHost | undefined;
   let configured = false;
   let recordingControl = false, cancelRequested = false;
@@ -242,6 +246,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   if (descriptor) {
     host = await DevelopmentRecordingHost.open(resolve(distribution, ".."), descriptor, inventory, {
       recoveryPath: profile.paths.recovery,
+      sourceDiscoveryFailure: (failure) => { console.error(formatSourceDiscoveryFailure(failure)); },
       snapshot: (value) => { recording = value; if (value.phase !== "error") message = "";
         if (value.phase === "starting" || value.phase === "recording") deliveryNotice = ""; notify(); },
       progress: (value) => { inferenceProgress = recording.elapsedMs > 0
@@ -278,7 +283,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       } },
     });
     if (descriptor.platform === "linux") {
-      try { audioServer = await developmentPulseServer(); sources = await host.enumerate(audioServer); }
+      try { audioServer = await checkedAudioServer(); sources = await host.enumerate(audioServer); }
       catch { message = "A local audio server is not available."; }
     }
   }
@@ -679,7 +684,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       discard_recovery: () => recordingAction(async () => { await configureRecording(); if (!cancelRequested) await host?.command("discard"); }),
       refresh_microphones: () => recordingAction(async () => { if (!host) throw new Error("Recording unavailable.");
         if (macRecording) { microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted"; return; }
-        audioServer = await developmentPulseServer(); sources = await host.enumerate(audioServer); }),
+        audioServer = await checkedAudioServer(); sources = await host.enumerate(audioServer); }),
       allow_microphone: () => action(async () => {
         if (!macRecording) throw new Error("Microphone permission is unavailable.");
         const permission = systemPreferences.getMediaAccessStatus("microphone");

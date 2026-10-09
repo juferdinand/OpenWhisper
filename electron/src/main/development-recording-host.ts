@@ -12,7 +12,7 @@ import { prepareSpeechResources } from "../services/speech-resources.js";
 import { prepareSpeechEntryGraph } from "../services/speech-entry-graph.js";
 import { verifyDevelopmentCaptureArtifact, verifyDevelopmentCaptureEntry,
   verifyDevelopmentMacCaptureArtifact, verifyDevelopmentMacCaptureEntry } from "../services/development-artifact.js";
-import { recordingHostReplySchema, recordingHostRequestSchema,
+import { recordingHostErrorSchema, recordingHostReplySchema, recordingHostRequestSchema,
   type RecordingHostReply, type RecordingHostRequest, type RecordingSource } from "../workers/recording-host-protocol.js";
 import { recordingEffectRequestSchema } from "../workers/recording-effects-protocol.js";
 import { createLinuxSpeechBindings, speechEnvironment } from "./linux-speech-host.js";
@@ -39,6 +39,17 @@ interface Owner {
   closing?: Promise<void>; failed?: Error; exited: boolean;
 }
 const fail = (code = "Recording could not complete.") => new Error(code);
+const sourceDiscoveryStages = ["checked-pulse", "artifact", "allocation-fork", "spawn-ready", "native-query", "retirement"] as const;
+const sourceDiscoveryCodeSchema = z.union([recordingHostErrorSchema, z.literal("INTEGRITY_FAILED"), z.literal("FAILED")]);
+const sourceDiscoveryFailureSchema = z.strictObject({ stage: z.enum(sourceDiscoveryStages), code: sourceDiscoveryCodeSchema });
+type SourceDiscoveryFailure = z.infer<typeof sourceDiscoveryFailureSchema>;
+/** Diagnostics are closed categories; arbitrary exceptions, paths and device metadata stay private. */
+export function formatSourceDiscoveryFailure(input: unknown): string {
+  let selected: SourceDiscoveryFailure | undefined;
+  try { const parsed = sourceDiscoveryFailureSchema.safeParse(input); if (parsed.success) selected = parsed.data; }
+  catch { /* Unreadable diagnostic fields stay generic. */ }
+  return `OpenWhisper capture source discovery failed: stage=${selected?.stage ?? "discovery"} code=${selected?.code ?? "FAILED"}`;
+}
 async function bounded<T>(operation: Promise<T>, milliseconds: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   try { return await Promise.race([operation, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(fail()), milliseconds); })]); }
@@ -67,10 +78,12 @@ export class DevelopmentRecordingHost {
   private fatal: Error | undefined;
   private readonly receipts = new DeliveryReceiptCache();
   private closed = false;
+  private lastSourceDiscoveryFailure: SourceDiscoveryFailure | undefined;
   private constructor(private readonly root: string, private readonly descriptor: DevelopmentRecordingDescriptor,
     private readonly inventory: ModelInventory, private readonly supervisor: BackendSupervisor,
     private readonly prepareRetirement: (pid: number, epoch: string) => RetirementAllocation,
     private readonly options: { readonly recoveryPath: string; readonly delivery: DeliveryBoundary;
+      readonly sourceDiscoveryFailure?: (failure: SourceDiscoveryFailure) => void;
       readonly snapshot: (snapshot: SnapshotReply["snapshot"]) => void; readonly progress: (progress: ProgressReply) => void }) {}
 
   static async open(root: string, descriptor: DevelopmentRecordingDescriptor, inventory: ModelInventory,
@@ -87,12 +100,30 @@ export class DevelopmentRecordingHost {
     return new DevelopmentRecordingHost(root, descriptor, inventory, supervisor,
       mac ? (pid, epoch) => mac.prepare(pid, epoch) : prepareLinuxSpeechRetirement, options);
   }
+  private sourceFailure(stage: SourceDiscoveryFailure["stage"], error: unknown): void {
+    let code: unknown;
+    try { code = typeof error === "object" && error !== null ? Reflect.get(error, "code") : error; }
+    catch { /* Exception fields are never diagnostic text. */ }
+    const parsed = sourceDiscoveryCodeSchema.safeParse(code);
+    const failure: SourceDiscoveryFailure = { stage, code: parsed.success ? parsed.data : "FAILED" };
+    this.lastSourceDiscoveryFailure = failure;
+    try { this.options.sourceDiscoveryFailure?.(failure); }
+    catch { /* Diagnostic sinks cannot change capture ownership or cleanup. */ }
+  }
   private async allocate(selection?: { readonly id: string; readonly request: RecordingRequest }): Promise<Owner> {
-    if (this.closed || this.fatal || this.owner) throw this.fatal ?? fail();
+    if (this.closed || this.fatal || this.owner) {
+      // A later explicit refresh can observe a categorical refusal emitted before UI attachment.
+      if (!selection) this.sourceFailure(this.lastSourceDiscoveryFailure?.stage ?? "allocation-fork",
+        this.lastSourceDiscoveryFailure?.code ?? this.fatal);
+      throw this.fatal ?? fail();
+    }
     const mac = this.descriptor.platform === "darwin";
-    const [entry] = await Promise.all([
-      (mac ? verifyDevelopmentMacCaptureEntry : verifyDevelopmentCaptureEntry)(this.root, this.descriptor.captureEntry),
-      (mac ? verifyDevelopmentMacCaptureArtifact : verifyDevelopmentCaptureArtifact)(this.root, this.descriptor.capture)]);
+    let entry: string;
+    try {
+      [entry] = await Promise.all([
+        (mac ? verifyDevelopmentMacCaptureEntry : verifyDevelopmentCaptureEntry)(this.root, this.descriptor.captureEntry),
+        (mac ? verifyDevelopmentMacCaptureArtifact : verifyDevelopmentCaptureArtifact)(this.root, this.descriptor.capture)]);
+    } catch (error: unknown) { if (!selection) this.sourceFailure("artifact", error); throw error; }
     if (this.closed || this.fatal || this.owner) throw this.fatal ?? fail();
     const epoch = randomUUID();
     const effects = selection ? new MainRecordingEffects({ epoch, platform: mac ? "macos" : "linux", receipts: this.receipts,
@@ -103,9 +134,12 @@ export class DevelopmentRecordingHost {
     let acceptReady!: (pid: number) => void, rejectReady!: (error: Error) => void;
     const ready = new Promise<number>((accept, reject) => { acceptReady = accept; rejectReady = reject; });
     void spawned.catch(() => {}); void ready.catch(() => {});
-    const child = utilityProcess.fork(entry, [epoch], { serviceName: "OpenWhisper Dev Capture", execArgv: [], stdio: "ignore",
-      allowLoadingUnsignedLibraries: false, respondToAuthRequestsFromMainProcess: false, session: session.defaultSession,
-      env: (mac ? macSpeechEnvironment : speechEnvironment)(process.env) });
+    const child = (() => {
+      try { return utilityProcess.fork(entry, [epoch], { serviceName: "OpenWhisper Dev Capture", execArgv: [], stdio: "ignore",
+        allowLoadingUnsignedLibraries: false, respondToAuthRequestsFromMainProcess: false, session: session.defaultSession,
+        env: (mac ? macSpeechEnvironment : speechEnvironment)(process.env) }); }
+      catch (error: unknown) { if (!selection) this.sourceFailure("allocation-fork", error); throw error; }
+    })();
     // Retain immediately, before constructing transport/listeners or awaiting startup.
     const owner: Owner = { child, epoch, effects, requests: new Map(), acknowledgements: new Set(), spawned, ready, exited: false, generation: 0 };
     this.owner = owner;
@@ -163,7 +197,11 @@ export class DevelopmentRecordingHost {
         identity: z.object({ pid: z.literal(pid), parentPid: z.literal(process.pid), uid: z.literal(process.getuid?.() ?? -1), epoch: z.literal(epoch) }) }).parse(owner.boundary.initial);
       if (admission.identity.pid !== child.pid || owner.failed) throw fail();
       return owner;
-    } catch (error: unknown) { await this.retire(owner).catch(() => {}); throw error; }
+    } catch (error: unknown) {
+      if (!selection) this.sourceFailure("spawn-ready", error);
+      await this.retire(owner).catch((cleanup: unknown) => { if (!selection) this.sourceFailure("retirement", cleanup); });
+      throw error;
+    }
   }
   private request(owner: Owner, input: unknown, milliseconds = 20_000): Promise<Reply> {
     if (owner.exited || owner.failed) return Promise.reject(owner.failed ?? fail());
@@ -193,16 +231,22 @@ export class DevelopmentRecordingHost {
   }
   async enumerate(server: string): Promise<readonly RecordingSource[]> {
     if (this.descriptor.platform !== "linux") return [];
+    const read = async (owner: Owner): Promise<readonly RecordingSource[]> => {
+      let reply: Reply;
+      try { reply = await this.request(owner, { command: "enumerate-sources", capture: this.descriptor.capture, server }); }
+      catch (error: unknown) { this.sourceFailure("native-query", error); throw error; }
+      if (reply.kind !== "devices") {
+        this.sourceFailure("native-query", reply.kind === "failed" ? reply.code : "FAILED"); throw fail();
+      }
+      return reply.devices;
+    };
     if (this.owner && !this.owner.failed && !this.owner.exited) {
-      const reply = await this.request(this.owner, { command: "enumerate-sources", capture: this.descriptor.capture, server });
-      if (reply.kind !== "devices") throw fail(); return reply.devices;
+      return read(this.owner);
     }
-    if (this.owner) await this.retire(this.owner);
+    if (this.owner) await this.retire(this.owner).catch((error: unknown) => { this.sourceFailure("retirement", error); throw error; });
     const owner = await this.allocate();
-    try {
-      const reply = await this.request(owner, { command: "enumerate-sources", capture: this.descriptor.capture, server });
-      if (reply.kind !== "devices") throw fail(); return reply.devices;
-    } finally { await this.retire(owner); }
+    try { return await read(owner); }
+    finally { await this.retire(owner).catch((error: unknown) => { this.sourceFailure("retirement", error); throw error; }); }
   }
   isConfigured(): boolean { return !!this.owner?.effects && !this.owner.exited && !this.owner.failed && !this.owner.closing; }
   currentIdentity(): RecordingIdentity | undefined {

@@ -35,7 +35,7 @@ OpenWhisper is in early development. Download the packaged macOS or Linux app fr
 | --- | --- |
 | macOS 14+ | Native Swift services; universal package for Apple Silicon and Intel |
 | Linux x86_64 | AppImage / `.deb` releases; CachyOS with KDE Plasma / Wayland is the primary test system |
-| Windows | Planned, not implemented yet — see the [platform plan](docs/PLATFORMS.md) |
+| Windows | Planned, not implemented yet — follow-up [#35](https://github.com/juferdinand/OpenWhisper/issues/35); see the [platform plan](docs/PLATFORMS.md) |
 
 ### Linux compatibility
 

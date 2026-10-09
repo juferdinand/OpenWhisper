@@ -49,9 +49,14 @@ let lastState: Readonly<{ status: string; recordingAvailable: boolean; recoveryA
 const owners: { child: ChildProcess; closed: Promise<void>; closeObserved: boolean }[] = [];
 const surfaceFailureSchema = z.enum(["startup-timeout", "image-size", "png-size", "invalid-reply", "frame-mismatch", "frame-timeout",
   "renderer-regions", "helper-exit", "helper-error", "native-message", "native-frame", "native-visibility", "native-pump", "native-close"]);
+const sourceDiscoveryFailureSchema = z.strictObject({
+  stage: z.enum(["checked-pulse", "artifact", "allocation-fork", "spawn-ready", "native-query", "retirement", "discovery"]),
+  code: z.union([recordingHostErrorSchema, z.literal("INTEGRITY_FAILED"), z.literal("FAILED")]),
+});
 const diagnostics: { stdoutBytes: number; stderrBytes: number; surfaceFailures: z.infer<typeof surfaceFailureSchema>[];
+  sourceDiscoveryFailures: z.infer<typeof sourceDiscoveryFailureSchema>[];
   surfaceDimensions: { width: number; height: number }[] } =
-  { stdoutBytes: 0, stderrBytes: 0, surfaceFailures: [], surfaceDimensions: [] };
+  { stdoutBytes: 0, stderrBytes: 0, surfaceFailures: [], sourceDiscoveryFailures: [], surfaceDimensions: [] };
 async function checkpoint(value: string): Promise<void> {
   stage = value; await writeFile(join(evidence, "checkpoint.json"), JSON.stringify({ stage, checks }), { mode: 0o600 });
 }
@@ -412,6 +417,11 @@ async function main(): Promise<void> {
     diagnostics.stderrBytes += bytes.length;
     for (const character of bytes.toString("utf8")) {
       if (character === "\n") {
+        if (!diagnosticOverflow && diagnostics.sourceDiscoveryFailures.length < 16) {
+          const match = /^OpenWhisper capture source discovery failed: stage=([a-z-]+) code=([A-Z_]+)\r?$/u.exec(diagnosticLine);
+          const category = sourceDiscoveryFailureSchema.safeParse(match ? { stage: match[1], code: match[2] } : undefined);
+          if (category.success) diagnostics.sourceDiscoveryFailures.push(category.data);
+        }
         if (!diagnosticOverflow && diagnostics.surfaceFailures.length < 16) {
           const category = surfaceFailureSchema.safeParse(/^OpenWhisper Wayland overlay failed: ([a-z-]+)\r?$/u.exec(diagnosticLine)?.[1]);
           if (category.success) diagnostics.surfaceFailures.push(category.data);
@@ -487,27 +497,76 @@ async function main(): Promise<void> {
     "ELECTRON_RUN_AS_NODE", "ELECTRON_OVERRIDE_DIST_PATH", "ELECTRON_NO_ASAR"]) delete controlEnvironment[key];
   const commandRecords: { command: ControlCommand; pid: number; seconds: number; exitCode: 0 | 1; closed: true;
     status: string | null; elapsed: string | null; recoveryAvailable: boolean | null }[] = [];
+  const assertControlStorage = async () => {
+    for (const path of controlRoots.slice(0, 3)) await assert.rejects(lstat(path), { code: "ENOENT" });
+    const cachePath = controlRoots[3]!;
+    let cache: Awaited<ReturnType<typeof lstat>>;
+    try { cache = await lstat(cachePath); } catch (error: unknown) {
+      assert.ok(error instanceof Error && "code" in error && error.code === "ENOENT");
+      return { protectedProfileAbsent: true, nativeFontCache: "ABSENT", fileCount: 0 } as const;
+    }
+    assert.ok(cache.isDirectory() && !cache.isSymbolicLink()); assert.equal(cache.uid, 1000); assert.equal(cache.mode & 0o7777, 0o755);
+    assert.deepEqual(await readdir(cachePath), ["fontconfig"]);
+    const fontsPath = join(cachePath, "fontconfig"), fonts = await lstat(fontsPath);
+    assert.ok(fonts.isDirectory() && !fonts.isSymbolicLink()); assert.equal(fonts.uid, 1000); assert.equal(fonts.mode & 0o7777, 0o755);
+    const names = await readdir(fontsPath); assert.ok(names.length <= 16);
+    for (const name of names) {
+      assert.match(name, /^(?:CACHEDIR\.TAG|[a-f0-9]{32}-le64\.cache-11)$/u);
+      const file = await lstat(join(fontsPath, name));
+      assert.ok(file.isFile() && !file.isSymbolicLink()); assert.equal(file.uid, 1000); assert.equal(file.mode & 0o7777, 0o644);
+    }
+    return { protectedProfileAbsent: true, nativeFontCache: "OWNED_FONTCONFIG", fileCount: names.length } as const;
+  };
   const packageCommand = async (command: ControlCommand, absent = false): Promise<ControlWireStatus | undefined> => {
     assert.ok(packaged && capturedControl);
     assert.equal(basename(executable), capturedControl.kind === "stable" ? "openwhisper" : "openwhisper-dev");
     const before = application ? await application.evaluate(({ BrowserWindow }) => ({ pid: process.pid, windows: BrowserWindow.getAllWindows().length })) : undefined;
-    for (const path of controlRoots) await assert.rejects(lstat(path), { code: "ENOENT" });
+    await assertControlStorage();
     const started = performance.now();
-    const request = execute(executable, ["--control", command], { env: controlEnvironment, timeout: 8000, maxBuffer: 4096 });
+    const request = execute(executable, ["--control", command], { env: controlEnvironment, timeout: 8000, maxBuffer: 32 * 1024 });
     const original = request.child, pid = original.pid; assert.ok(pid);
     const owner = { child: original, closed: Promise.resolve(), closeObserved: false };
     owner.closed = new Promise<void>((accept) => original.once("close", () => { owner.closeObserved = true; accept(); })); owners.push(owner);
     const force = setTimeout(() => { original.kill("SIGKILL"); }, 9000);
     let result: ControlWireStatus | undefined;
     try {
-      if (absent) {
-        await assert.rejects(request, (error: unknown) => z.object({ code: z.literal(1), killed: z.literal(false), signal: z.null(), stdout: z.literal(""),
-          stderr: z.literal(`${capturedControl.productName} is not running in this session. Open the app first.\n`) }).safeParse(error).success);
-      } else {
-        const reply = await request; assert.equal(reply.stderr, ""); assert.ok(reply.stdout.endsWith("\n")); result = parseControlStatus(reply.stdout);
+      let reply: Awaited<typeof request> | undefined, requestFailure: unknown;
+      try { reply = await request; } catch (error: unknown) { requestFailure = error; }
+      await owner.closed;
+      let pidAbsent = false;
+      try { await lstat(`/proc/${pid}`); } catch (error: unknown) {
+        pidAbsent = error instanceof Error && "code" in error && error.code === "ENOENT";
       }
-      await owner.closed; assert.equal(owner.closeObserved, true); await assert.rejects(lstat(`/proc/${pid}`), { code: "ENOENT" });
-      for (const path of controlRoots) await assert.rejects(lstat(path), { code: "ENOENT" });
+      const failedReply = z.object({ stdout: z.string(), stderr: z.string() }).safeParse(requestFailure);
+      const stdout = reply?.stdout ?? (failedReply.success ? failedReply.data.stdout : "");
+      const stderrText = reply?.stderr ?? (failedReply.success ? failedReply.data.stderr : "");
+      let parsed: ControlWireStatus | undefined;
+      try { parsed = parseControlStatus(stdout); } catch { /* Record categorical parse outcome, never raw stdout. */ }
+      const warnings = [...stderrText.matchAll(/^\[([1-9][0-9]{0,9}):[0-9]{4}\/[0-9]{6}\.[0-9]{6}:ERROR:dbus\/bus\.cc:406\] Failed to connect to the bus: Failed to connect to socket ([^\r\n]{1,4096}): No such file or directory\n/gmu)]
+        .filter((warning) => warning[1] === String(pid) && warning[2] === join(runtime, "disabled-system-bus"));
+      // Chromium may report our deliberately absent SYSTEM socket before Node;
+      // only this original PID, exact owned path and complete fixed line qualify.
+      const remainingStderr = warnings.length === 1 ? stderrText.replace(warnings[0]![0], "") : stderrText;
+      const stderr = Buffer.from(stderrText), boundedStderr = stderr.subarray(0, 32 * 1024);
+      const diagnostic = `cli-diagnostic-${commandRecords.length}-${command}`;
+      const storage = await assertControlStorage();
+      await writeFile(join(evidence, `${diagnostic}.stderr`), boundedStderr, { mode: 0o600, flag: "wx" });
+      await writeFile(join(evidence, `${diagnostic}.json`), JSON.stringify({ command, pid, exitCode: original.exitCode, signal: original.signalCode,
+        stderr: { bytes: stderr.length, sha256: sha(stderr), storedBytes: boundedStderr.length, storedSha256: sha(boundedStderr),
+          truncated: boundedStderr.length !== stderr.length, file: `${diagnostic}.stderr` },
+        allowedSystemBusWarning: { category: warnings.length === 1 ? "OWNED_DISABLED_SYSTEM_BUS" : "NONE",
+          count: warnings.length === 1 ? 1 : 0, matchingLines: warnings.length },
+        storage,
+        strictStdoutParse: parsed !== undefined && stdout.endsWith("\n"), originalCloseObserved: owner.closeObserved, pidAbsent,
+        scope: "Private owned container command only; no raw stdout or host inputs." }), { mode: 0o600, flag: "wx" });
+      assert.equal(owner.closeObserved, true); assert.equal(pidAbsent, true); assert.ok(warnings.length <= 1);
+      if (absent) {
+        assert.equal(reply, undefined);
+        z.object({ code: z.literal(1), killed: z.literal(false), signal: z.null(), stdout: z.literal(""), stderr: z.string() }).parse(requestFailure);
+        assert.equal(remainingStderr, `${capturedControl.productName} is not running in this session. Open the app first.\n`);
+      } else {
+        assert.ok(reply); assert.equal(remainingStderr, ""); assert.ok(stdout.endsWith("\n")); assert.ok(parsed); result = parsed;
+      }
       if (before) {
         assert.ok(application); assert.deepEqual(await application.evaluate(({ BrowserWindow }) => ({ pid: process.pid, windows: BrowserWindow.getAllWindows().length })), before);
         assert.equal(appCloseObserved, false);
@@ -515,7 +574,7 @@ async function main(): Promise<void> {
       commandRecords.push({ command, pid, seconds: (performance.now() - started) / 1000, exitCode: absent ? 1 : 0, closed: true,
         status: result?.status ?? null, elapsed: result?.elapsed.toString() ?? null, recoveryAvailable: result?.recovery_available ?? null });
       await writeFile(join(evidence, "package-control.json"), JSON.stringify({ identity: capturedControl, executable, endpoint: target, commandRecords,
-        noDisplay: true, noNodeModeOrRuntimeOverrides: true, controlRootsAbsent: true,
+        noDisplay: true, noNodeModeOrRuntimeOverrides: true, protectedProfileAbsent: true, nativeFontCachePermitted: true,
         scope: "Actual frozen package executable before graphical readiness; private session and virtual audio only." }, null, 2), { mode: 0o600 });
       return result;
     } finally { clearTimeout(force); }
@@ -1496,7 +1555,7 @@ try { await main(); } catch (error: unknown) {
     location: error instanceof Error ? error.stack?.split("\n").find((line) => line.includes("file:///payload/driver.mjs:"))?.trim() ?? null : null };
   process.exitCode = 1;
   await writeFile(join(evidence, "failure.json"), JSON.stringify({ stage, lastState, failure }), { mode: 0o600 });
-  if (stockKde) await recordResources("failure-resources.json");
+  await recordResources("failure-resources.json");
   if (page && stockKde) {
     try {
       const controls = await page.locator("button").evaluateAll((buttons) => buttons.slice(0, 40).map((button) => ({

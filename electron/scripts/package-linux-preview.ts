@@ -128,7 +128,7 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
   const metadata = packageSchema.parse(await json(join(root, "package.json")));
   const identity = parseApplicationBuildModule(await readFile(join(root, "dist/main/application-build.js"), "utf8"));
   const stable = identity.kind === "stable", appId = identity.appId;
-  const packageName = stable ? "io.github.whisperfree" : "io-github-whisperfree-dev";
+  const packageName = stable ? "io-github-whisperfree" : "io-github-whisperfree-dev";
   const executableName = stable ? "openwhisper" : "openwhisper-dev";
   const directoryName = stable ? "OpenWhisper-Linux-x64" : "OpenWhisper-Dev-Linux-x64";
   const build = buildSchema.parse(await json(join(root, "dist/resources/development-build.json")));
