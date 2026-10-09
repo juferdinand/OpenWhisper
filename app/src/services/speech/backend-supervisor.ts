@@ -398,7 +398,7 @@ class MainBackendSupervisor implements BackendSupervisor {
     void context.retirement.catch(() => {}); return context.retirement;
   }
   private async closeContext(context: Context): Promise<void> {
-    const closed = context.client?.close(); if (closed) this.allocation.retain(closed);
+    const closed = context.client?.close(); if (closed) void this.allocation.retain(closed);
     await this.retireContext(context);
     // The older client's generic exit/shutdown result cannot release this
     // allocation. Its wrapped terminate is the full OS/read gate above. Late

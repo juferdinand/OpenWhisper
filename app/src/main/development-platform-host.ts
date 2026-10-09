@@ -10,11 +10,11 @@ import { linuxApplicationIdSchema, type LinuxApplicationId, type PortalShortcutS
 import type { PortalPasteState } from "../platforms/linux/shared/portal-paste.js";
 import { serializeControlStatus } from "../platforms/linux/shared/control-status.js";
 
-export const developmentPlatformHostDescriptorSchema = z.strictObject({
+const developmentPlatformHostDescriptorSchema = z.strictObject({
   root: z.string().min(1).refine((path) => isAbsolute(path) && resolve(path) === path && !path.includes("\0")),
   entry: developmentArtifactSchema, bus: developmentArtifactSchema,
 }).readonly();
-export type DevelopmentPlatformDescriptor = z.infer<typeof developmentPlatformHostDescriptorSchema>;
+type DevelopmentPlatformDescriptor = z.infer<typeof developmentPlatformHostDescriptorSchema>;
 type StartOwner = { readonly id: string; readonly controller: AbortController; readonly completion: Promise<PlatformCaptureReply> };
 
 /** Main owns original capture leases. An opaque worker token can never select a later GUI owner. */

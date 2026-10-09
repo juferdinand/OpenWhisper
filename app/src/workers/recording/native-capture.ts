@@ -17,7 +17,7 @@ export const preparedMetadataSchema = captureMetadataSchema.extend({
   chunkCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
 });
 export type CaptureMetadata = z.infer<typeof captureMetadataSchema>;
-export type PreparedMetadata = z.infer<typeof preparedMetadataSchema>;
+type PreparedMetadata = z.infer<typeof preparedMetadataSchema>;
 export type CaptureSelection =
   | { readonly mode: "pulse"; readonly source: string; readonly server: string }
   | { readonly mode: "synthetic"; readonly sampleRate: number; readonly channels: number };

@@ -3,7 +3,6 @@ import { app, BrowserWindow, clipboard, utilityProcess } from "electron";
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { z } from "zod";
 import { MainRecordingEffects, DeliveryReceiptCache } from "../../src/main/recording-effects.js";
 import { createFixtureSpeechChannelFactory } from "../fixtures/speech-bootstrap-channel.js";
 import { SpeechClient } from "../../src/services/speech/speech-client.js";

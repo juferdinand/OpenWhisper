@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { z } from "zod";

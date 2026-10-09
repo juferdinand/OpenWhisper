@@ -8,7 +8,7 @@ import { z } from "zod";
 import { boundedJson, describe, inventory } from "../owned-supervisor/files.js";
 import { validateConfiguration as validateCpuConfiguration, waitForOriginalCommandClose } from "../owned-supervisor/run.js";
 import { verifyBuiltSources } from "./build-probe.js";
-import { buildManifestSchema, fileInventorySchema, inputSchema, validateResult, IMAGE, SECCOMP_SHA256, NODE_SHA256,
+import { buildManifestSchema, fileInventorySchema, inputSchema, validateResult, IMAGE, SECCOMP_SHA256,
   ELECTRON_SHA256, HOME, RECORDING_ENVIRONMENT_KEY, APPLICATION_MS, bounded } from "./contracts.js";
 
 const absolute = z.string().min(1).max(4096).refine((value) => isAbsolute(value) && resolve(value) === value && !value.includes("\0"));
@@ -44,7 +44,7 @@ export async function verifyReviewedBuild(build: string, expectedInput: string) 
 export async function executeReviewedRecordingPool(args: readonly string[]): Promise<void> {
   const { output, build, inputSha256, seccomp } = parseExecutionArguments(args);
   if (process.platform !== "linux" || process.arch !== "x64" || process.getuid?.() === 0) throw new Error("INVALID_EXECUTION");
-  const { manifest, runtime } = await verifyReviewedBuild(build, inputSha256);
+  const { runtime } = await verifyReviewedBuild(build, inputSha256);
   assert.equal((await describe(seccomp, 1024 * 1024)).sha256, SECCOMP_SHA256);
   await mkdir(output, { mode: 0o700, recursive: false }); await privateDirectory(output);
   const staged = join(output, "payload"); await cp(join(build, "payload"), staged, { recursive: true, errorOnExist: true, force: false });

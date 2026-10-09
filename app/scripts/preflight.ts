@@ -77,6 +77,24 @@ async function main(): Promise<void> {
     electronDirectory,
   );
   command(
+    "Check renderer TypeScript",
+    "npm",
+    ["run", "typecheck", "--prefix", "ui"],
+    electronDirectory,
+  );
+  command(
+    "Check runtime async handling and JavaScript correctness",
+    "npm",
+    ["run", "lint"],
+    electronDirectory,
+  );
+  command(
+    "Check unused files, exports and dependencies",
+    "npm",
+    ["run", "check:unused"],
+    electronDirectory,
+  );
+  command(
     "Check shared UI formatting",
     "npm",
     ["run", "format:check", "--prefix", "ui"],

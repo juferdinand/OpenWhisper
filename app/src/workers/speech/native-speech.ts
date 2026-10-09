@@ -4,9 +4,8 @@ import { z } from "zod";
 import { speechLanguageSchema } from "../../contracts/speech/speech.js";
 export { speechLanguageSchema } from "../../contracts/speech/speech.js";
 
-export const SAMPLE_RATE = 16_000;
+const SAMPLE_RATE = 16_000;
 export const MAX_WINDOW_SAMPLES = 30 * SAMPLE_RATE;
-export const MIN_WINDOW_SAMPLES = SAMPLE_RATE;
 export const speechModelSchema = z.strictObject({
   path: z.string().min(1).max(4096).refine((value) => isAbsolute(value) && !value.includes("\0")),
   family: z.enum(["whisper", "parakeet"]), gpu: z.boolean(),

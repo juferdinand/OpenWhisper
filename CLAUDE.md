@@ -84,6 +84,8 @@ npm run setup --prefix app
 npm run dev --prefix app
 npm run preflight --prefix app
 npm run typecheck --prefix app
+npm run lint --prefix app
+npm run check:unused --prefix app
 npm test --prefix app
 npm run build --prefix app
 npm run build --prefix app/ui && npm run test:ui --prefix app/ui
@@ -93,7 +95,9 @@ make mac                           # Build candidate only; does not install
 
 For a renderer change, run `npm run build && npm run test:ui` in `app/ui/`. For an application
 change, run the focused tests, `npm run typecheck`, and the appropriate build. `npm run preflight`
-checks workflow syntax and shell, strict typing, formatting, and whitespace before a push.
+checks workflow syntax and shell, both TypeScript projects, typed Oxlint rules, unused code and
+dependencies with Knip, formatting, and whitespace before a push. Keep worker entries explicit
+and document individual runtime/system-tool exceptions in `app/knip.jsonc`.
 
 ## Behavior and safety constraints
 

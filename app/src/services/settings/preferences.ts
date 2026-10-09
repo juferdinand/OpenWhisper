@@ -8,7 +8,7 @@ import { prepareHostProfile, type HostProfile } from "./host-profile.js";
 import { validateStableProfile } from "./stable-profile.js";
 import { PrivateStateStore } from "./private-state.js";
 
-export function developmentPreferences(): Preferences {
+function developmentPreferences(): Preferences {
   return preferencesSchema.parse({
     ui_language: "en", setup_completed: false, model: "tiny", language: "auto",
     microphone: "", vocabulary: "", snippets: [], output: "clipboard",

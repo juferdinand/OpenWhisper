@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants, type BigIntStats, type Dirent } from "node:fs";
 import { lstat, open, readdir, realpath, type FileHandle } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import { SpeechWorkerError } from "./speech-client.js";
 

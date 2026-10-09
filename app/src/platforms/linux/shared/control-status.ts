@@ -1,7 +1,7 @@
 import type { ControlWireStatus, RecordingStatus } from "../../../core/recording/control.js";
 export type { ControlWireStatus, RecordingStatus } from "../../../core/recording/control.js";
 
-export const MAX_CONTROL_STATUS_BYTES = 4096;
+const MAX_CONTROL_STATUS_BYTES = 4096;
 export const MAX_CONTROL_ELAPSED = (1n << 64n) - 1n;
 export class InvalidControlStatus extends Error {
   constructor() { super("Invalid control status response."); this.name = "InvalidControlStatus"; }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cp, lstat, mkdir, readFile, readdir, realpath, symlink, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";

@@ -88,7 +88,7 @@ const policy = z.strictObject({
 
 let result = "FAIL";
 try {
-  for (const path of ["dist/main/index.js", "dist/preload/index.cjs", "dist/main/speech-channel.js", "dist/workers/speech-entry.js",
+  for (const path of ["dist/main/index.js", "dist/preload/index.cjs", "dist/workers/speech-entry.js",
     "dist/services/speech/speech-client.js", "dist/native/openwhisper_speech.node", "node_modules/electron/dist/electron"]) {
     await access(join(packageRoot, path));
   }

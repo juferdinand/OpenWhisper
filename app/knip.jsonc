@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+  "ignoreDependencies": [
+    // The existing signing CLI is invoked from GitHub workflows outside this npm workspace.
+    "@tauri-apps/cli",
+    // Electron supplies this built-in module; it is not an npm dependency.
+    "original-fs"
+  ],
+  // These are system tools installed by the documented Linux build environment.
+  "ignoreBinaries": ["dpkg-deb", "readelf", "mkfifo", "desktop-file-validate", "jq"],
+  // Symbol aliases give shared schemas and compatibility CLI names distinct meanings.
+  // This category detects export aliases, not duplicated implementations.
+  "rules": { "duplicates": "off" },
+  "workspaces": {
+    ".": {
+      "entry": [
+        "src/main/index.ts!",
+        "src/preload/index.ts!",
+        "src/workers/*-entry.ts!",
+        "scripts/**/*.ts",
+        "tests/**/*.ts"
+      ],
+      "project": ["src/**/*.ts!", "scripts/**/*.ts", "tests/**/*.ts"]
+    },
+    "ui": {
+      "entry": ["index.html!", "tests/**/*.ts"],
+      "project": ["src/**/*.ts!", "*.config.ts", "tests/**/*.ts"]
+    }
+  }
+}

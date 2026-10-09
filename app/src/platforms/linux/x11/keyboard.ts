@@ -193,7 +193,7 @@ function field(value: unknown, name: string): unknown {
 }
 
 /** Fixed system libraries and one private Xlib connection, confined to the platform utility. */
-export function createNativeX11Keyboard(displayName: string): X11KeyboardNative {
+function createNativeX11Keyboard(displayName: string): X11KeyboardNative {
   if (!isGenuineX11(displayName)) throw new X11KeyboardError("UNAVAILABLE");
   const imported: unknown = createRequire(import.meta.url)("koffi");
   if (typeof imported !== "object" || imported === null || typeof Reflect.get(imported, "load") !== "function") throw new X11KeyboardError("UNAVAILABLE");

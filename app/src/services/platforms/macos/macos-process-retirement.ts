@@ -8,7 +8,7 @@ import { z } from "zod";
 
 const pid = z.number().int().min(1).max(0x7fff_ffff);
 const uid = z.number().int().min(1).max(0x7fff_ffff);
-export const macProcessRecordSchema = z.strictObject({ kind: z.literal("record"), pid, parentPid: pid,
+const macProcessRecordSchema = z.strictObject({ kind: z.literal("record"), pid, parentPid: pid,
   uid, realUid: uid, savedUid: uid, state: z.enum(["idle", "running", "sleeping", "stopped", "zombie"]),
   seconds: z.bigint().min(1n).max((1n << 64n) - 1n), micros: z.bigint().min(0n).max(999999n) }).readonly();
 export const macProcessSnapshotSchema = z.discriminatedUnion("kind", [macProcessRecordSchema,
@@ -23,9 +23,8 @@ const optionsSchema = z.strictObject({ deadlineMs: z.number().int().min(1).max(8
 const nonceSchema = z.strictObject({ kind: z.literal("nonce"), epoch: z.string().uuid(), nonce: z.string().uuid() });
 
 export type MacProcessRecord = z.infer<typeof macProcessRecordSchema>;
-type Snapshot = z.infer<typeof macProcessSnapshotSchema>;
 type Launch = z.infer<typeof launchSchema>;
-export type MacRetirementLevel = "running" | "non-running" | "reaped";
+type MacRetirementLevel = "running" | "non-running" | "reaped";
 export interface MacRetirementObservation { readonly level: MacRetirementLevel }
 export interface MacInitialObservation extends MacRetirementObservation {
   readonly canAdmit: boolean;

@@ -20,7 +20,7 @@ export interface CaptureRuntimeEffects {
   /** Original recording RPC cleanup; cancellation never forgets a late confirmed delivery. */
   close(): Promise<void>;
 }
-export class CaptureRuntimeError extends Error {
+class CaptureRuntimeError extends Error {
   constructor(readonly code: "INVALID_FRAME" | "TEARDOWN_FAILED" | "CLOSED") { super(`Recording host: ${code}.`); }
 }
 type Action = Exclude<RecordingHostRequest, RecordingConfiguration | RecordingEnumeration>;

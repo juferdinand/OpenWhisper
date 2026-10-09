@@ -16,7 +16,7 @@ import type { DeliveryBoundary } from "../../src/core/recording/recording.js";
 import { prepareEnvironment } from "./bootstrap.js";
 import { observeBindings } from "./observe.js";
 import { boundedJson, describe, type RawFiles } from "../owned-supervisor/files.js";
-import { inputSchema, MODEL, RECOVERY, HOME, RECORDING_ENVIRONMENT_KEY, MAIN_MS, EPOCH_MS, CLEANUP_MS,
+import { inputSchema, RECOVERY, HOME, RECORDING_ENVIRONMENT_KEY, MAIN_MS, EPOCH_MS, CLEANUP_MS,
   ELECTRON_SHA256, NODE_SHA256, MODEL_SHA256, cpuCatalog, SAMPLE_COUNT, modeSchema, phaseSchema, workerResultSchema,
   readySchema, runSchema, selectionSchema, mainIdentitySchema, validateProcessReceipt, validateResult, bounded,
   parseElectronFixtureArguments } from "./contracts.js";

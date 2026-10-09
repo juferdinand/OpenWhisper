@@ -4,7 +4,7 @@ export const WIDTH = 360;
 export const HEIGHT = 64;
 export const MAX_PNG_BYTES = 131_072;
 
-export const surfaceRegionSchema = z.strictObject({
+const surfaceRegionSchema = z.strictObject({
   x: z.number().int().min(0).max(WIDTH - 1),
   y: z.number().int().min(0).max(HEIGHT - 1),
   width: z.number().int().positive().max(WIDTH),
@@ -29,7 +29,6 @@ export const surfaceHostMessageSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("visibility"), visible: z.boolean() }),
   z.strictObject({ type: z.literal("close") }),
 ]);
-export type SurfaceHostMessage = z.infer<typeof surfaceHostMessageSchema>;
 
 export const surfaceReplySchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("ready"), supported: z.boolean() }),

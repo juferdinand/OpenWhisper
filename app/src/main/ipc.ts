@@ -9,7 +9,7 @@ import {
 import type { CommandInput, CommandName } from "../contracts/ui/state.js";
 
 export { MAX_UI_REQUEST_BYTES } from "../contracts/ui/state.js";
-export const MAX_UI_RESPONSE_BYTES = MAX_UI_STATE_BYTES + 64 * 1024;
+const MAX_UI_RESPONSE_BYTES = MAX_UI_STATE_BYTES + 64 * 1024;
 
 export type UiWindowRole = "main" | "overlay";
 export const TRUSTED_UI_URLS: Readonly<Record<UiWindowRole, string>> = Object.freeze({
@@ -49,7 +49,7 @@ export interface UiDispatchFailure {
   readonly ok: false;
   readonly error: { readonly code: UiErrorCode; readonly message: string };
 }
-export interface UiDispatchSuccess {
+interface UiDispatchSuccess {
   readonly ok: true;
   // The receiving preload validates this value again against its invoked command.
   readonly value: unknown;
@@ -61,7 +61,7 @@ export function uiFailure(code: UiErrorCode): UiDispatchFailure {
   return { ok: false, error: { code, message: errorMessages[code] } };
 }
 
-export interface UiDispatchRequest {
+interface UiDispatchRequest {
   readonly sender: unknown;
   readonly serializedRequest: unknown;
 }

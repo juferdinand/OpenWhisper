@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript"],
+  "categories": { "correctness": "off" },
+  "rules": {
+    "eslint/no-async-promise-executor": "error",
+    "eslint/no-debugger": "error",
+    "eslint/no-duplicate-case": "error",
+    "eslint/no-loss-of-precision": "error"
+  },
+  "overrides": [
+    {
+      "files": ["src/**/*.ts", "ui/src/**/*.ts"],
+      "rules": {
+        "typescript/no-floating-promises": "error",
+        "typescript/no-misused-promises": "error"
+      }
+    }
+  ]
+}

@@ -22,7 +22,6 @@ export const stableProfileSchema = z.strictObject({
     autostart: z.literal(true), stableUpdater: z.literal(true) }).readonly(),
 }).readonly();
 export type StableProfile = z.infer<typeof stableProfileSchema>;
-export type StableProfileOptions = z.input<typeof stableProfileInputSchema>;
 
 interface Context { readonly home: string; readonly uid: number; readonly directories: readonly string[];
   readonly privateRoots: readonly string[]; readonly ownedRoots: readonly string[]; readonly inspected: readonly string[] }

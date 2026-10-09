@@ -8,7 +8,7 @@ const common = {
   capture: developmentArtifactSchema, captureEntry: developmentArtifactSchema,
   speech: speechResourceCatalogSchema, speechEntryGraph: speechEntryGraphSchema,
 };
-export const developmentPlatformDescriptorSchema = z.strictObject({
+const developmentPlatformDescriptorSchema = z.strictObject({
   entry: developmentArtifactSchema, bus: developmentArtifactSchema,
 }).readonly();
 export const developmentRecordingDescriptorSchema = z.discriminatedUnion("platform", [
@@ -31,7 +31,6 @@ export const darwinUniversalRecordingDescriptorSchema = z.strictObject({
     x64: developmentRecordingDescriptorSchema.pipe(z.strictObject({ ...darwin, architecture: z.literal("x64") }).readonly()),
   }).readonly(),
 }).readonly();
-export type DarwinUniversalRecordingDescriptor = z.infer<typeof darwinUniversalRecordingDescriptorSchema>;
 
 const recordingBuildSchema = z.union([developmentRecordingDescriptorSchema, darwinUniversalRecordingDescriptorSchema]);
 const runtimeHostSchema = z.strictObject({ platform: z.enum(["linux", "darwin"]), architecture: z.enum(["arm64", "x64"]) });

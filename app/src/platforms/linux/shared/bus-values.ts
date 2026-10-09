@@ -1,9 +1,8 @@
 import { z } from "zod";
 
-export const MAX_BUS_BYTES = 65_536;
-export const MAX_BUS_NODES = 4096;
-export const MAX_BUS_DEPTH = 16;
-export const MAX_BUS_FDS = 16;
+const MAX_BUS_BYTES = 65_536;
+const MAX_BUS_NODES = 4096;
+const MAX_BUS_DEPTH = 16;
 
 /** Internal transport values; handles refer only to FDs owned by this helper. */
 export type BusValue =
@@ -38,7 +37,7 @@ const signed64 = z.string().regex(/^(?:0|-?[1-9][0-9]{0,18})$/).refine((value) =
 });
 const unsigned64 = z.string().regex(/^(?:0|[1-9][0-9]{0,19})$/).refine((value) => BigInt(value) < (1n << 64n));
 
-export const busValueSchema: z.ZodType<BusValue> = z.lazy(() => z.discriminatedUnion("type", [
+const busValueSchema: z.ZodType<BusValue> = z.lazy(() => z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("b"), value: z.boolean() }),
   z.strictObject({ type: z.literal("y"), value: z.int().min(0).max(255) }),
   z.strictObject({ type: z.literal("n"), value: z.int().min(-32768).max(32767) }),

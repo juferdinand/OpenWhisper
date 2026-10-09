@@ -15,7 +15,7 @@ export const deliveryReceiptSchema = z.discriminatedUnion("outcome", [
   z.strictObject({ ...ownership, outcome: z.literal("editor"), clipboardConfirmed: z.literal(false) }),
   z.strictObject({ ...ownership, outcome: z.literal("failed"), clipboardConfirmed: z.literal(false) }),
 ]);
-export const recordingEffectFailureSchema = z.enum(["INVALID_FRAME", "OWNERSHIP_FAILED", "DELIVERY_FAILED",
+const recordingEffectFailureSchema = z.enum(["INVALID_FRAME", "OWNERSHIP_FAILED", "DELIVERY_FAILED",
   "CANCELLED", "BUSY", "START_FAILED", "TEARDOWN_FAILED", "WORKER_FAILED", "TIMEOUT", "INVALID_REPLY", "NATIVE_FAILED", "CLOSED"]);
 export type RecordingEffectFailureCode = z.infer<typeof recordingEffectFailureSchema>;
 export class RecordingEffectError extends Error {

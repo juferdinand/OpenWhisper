@@ -96,7 +96,7 @@ export interface RecoveryBoundary {
   remove(token: RecoveryToken, context: WorkContext): Promise<Ownership>;
 }
 /** A finite monotonic millisecond clock; adapters normally use performance.now(). */
-export interface RecordingClock { now(): number }
+interface RecordingClock { now(): number }
 export type RecordingPhase = "idle" | "starting" | "recording" | "stopping"
   | "transcribing" | "restoring" | "discarding" | "done" | "error";
 export type RecordingError = "BUSY" | "INVALID_REQUEST" | "CALLER_INACTIVE" | "START_FAILED"

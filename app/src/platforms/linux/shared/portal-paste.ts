@@ -104,7 +104,7 @@ export class PortalPaste {
         this.publish({ ready: false, result: error instanceof BusFailure && error.code === "CANCELLED" ? "CANCELLED"
           : error instanceof BusFailure && error.code === "DENIED" ? "DENIED" : "FAILED" });
       } finally { if (this.setup === setup) this.setup = undefined; this.publish({ configuring: false }); }
-    })().catch((error: unknown) => {
+    })().catch(() => {
       this.failCleanup(); throw new BusFailure("TEARDOWN_FAILED");
     }).finally(() => { if (this.operation === operation) this.operation = undefined; });
     this.operation = operation; void operation.catch(() => {});
@@ -185,7 +185,7 @@ export class PortalPaste {
     if (this.clearTask) return this.clearTask;
     this.setup?.abort(); this.publish({ ready: false });
     const task = Promise.resolve().then(async () => { await this.operation; await this.pasteOperation; await this.releaseSession();
-      this.publish({ configuring: false, result }); }).catch((error: unknown) => {
+      this.publish({ configuring: false, result }); }).catch(() => {
       this.failCleanup(); throw new BusFailure("TEARDOWN_FAILED");
     }).finally(() => { if (this.clearTask === task) this.clearTask = undefined; });
     this.clearTask = task; void task.catch(() => {});

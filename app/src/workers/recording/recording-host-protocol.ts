@@ -25,7 +25,7 @@ export const recordingHostRequestSchema = z.discriminatedUnion("command", [
   ...(["start", "stop", "cancel", "retry", "discard", "status", "close"] as const)
     .map((command) => z.strictObject({ ...request, command: z.literal(command) })),
 ]);
-export const recordingSourceSchema = z.strictObject({ id: z.string().regex(/^[A-Za-z0-9_.:-]{1,255}$/u),
+const recordingSourceSchema = z.strictObject({ id: z.string().regex(/^[A-Za-z0-9_.:-]{1,255}$/u),
   name: z.string().max(1024).refine((value) => !value.includes("\0")), isDefault: z.boolean() }).readonly();
 export const recordingSnapshotSchema = z.strictObject({
   phase: z.enum(["idle", "starting", "recording", "stopping", "transcribing", "restoring", "discarding", "done", "error"]),

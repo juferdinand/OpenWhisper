@@ -77,6 +77,13 @@ test("Feed boundaries refuse oversized, incomplete, compressed or invalid metada
   }
 });
 
+test("legacy raw header element failures retain the feed transport error classification", async () => {
+  const malformed = ["Content-Length", 1] as unknown as readonly string[];
+  const transport = new FakeTransport([{ headers: { status: 200, raw: malformed }, chunks: [Buffer.from("{}") ] }]);
+  await assert.rejects(readUpdateFeed(input, { transport: () => transport }), failure("TRANSPORT_FAILED"));
+  assert.equal(transport.closes, 1);
+});
+
 test("Cancellation and expiry retain original header and body work until it settles", async (t) => {
   for (const phase of ["headers", "body"] as const) for (const timeout of [false, true]) {
     const entered = deferred<void>(), release = deferred<void>(), controller = new AbortController();

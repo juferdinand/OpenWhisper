@@ -1,4 +1,5 @@
 import { createUpdateFeedTransport, MODEL_DOWNLOAD_CHUNK_BYTES, type DownloadHeaders, type ModelDownloadTransport } from "../../models/model-download-transport.js";
+import { parseRawHTTPHeaders, RawHTTPHeadersError } from "../../http/raw-http-headers.js";
 import { LINUX_UPDATE_FEED_URL, LINUX_UPDATE_REPOSITORY, macosUpdateEndpoint, parseUpdateVersion,
   projectLinuxUpdateFeed, projectMacosUpdateRelease, UPDATE_POLICY_LIMITS, UpdatePolicyError, type LinuxUpdateCandidate, type MacosUpdateCandidate } from "./update-policy.js";
 
@@ -13,19 +14,15 @@ export type UpdateFeedInput = Readonly<{ package: "deb" | "appimage"; currentVer
 /** Host-only test seam; requests always receive endpoints projected by the reader. */
 export interface UpdateFeedEffects { transport(): ModelDownloadTransport }
 function metadataHeaders(value: DownloadHeaders): Map<string, string> {
-  if (!Number.isInteger(value.status) || value.status < 100 || value.status > 599 || value.raw.length % 2) fail("INVALID_METADATA");
-  const result = new Map<string, string>(); let bytes = 0;
-  for (let index = 0; index < value.raw.length; index += 2) {
-    const name = value.raw[index], field = value.raw[index + 1];
-    if (!name || field === undefined || !/^[a-z0-9-]+$/iu.test(name) || /[\u0000-\u001f\u007f]/u.test(field)) return fail("INVALID_METADATA");
-    bytes += Buffer.byteLength(name) + Buffer.byteLength(field); if (bytes > 16 * 1024) fail("INVALID_METADATA");
-    const key = name.toLowerCase();
-    if (result.has(key) && ["location", "content-length", "content-encoding", "transfer-encoding"].includes(key)) fail("INVALID_METADATA");
-    result.set(key, field);
+  if (!Number.isInteger(value.status) || value.status < 100 || value.status > 599) fail("INVALID_METADATA");
+  try {
+    return parseRawHTTPHeaders(value.raw, { maximumBytes: 16 * 1024,
+      rejectDuplicates: ["location", "content-length", "content-encoding", "transfer-encoding"],
+      requireIdentityEncoding: true, strictStrings: false });
+  } catch (error: unknown) {
+    if (error instanceof RawHTTPHeadersError) fail("INVALID_METADATA");
+    throw error;
   }
-  const encoding = result.get("content-encoding");
-  if (encoding !== undefined && encoding.toLowerCase() !== "identity") fail("INVALID_METADATA");
-  return result;
 }
 function redirectURL(location: string | undefined, previous: URL): URL {
   if (!location || location.length > 8192 || /[\\\s\u0000-\u001f\u007f]/u.test(location)) return fail("INVALID_REDIRECT");

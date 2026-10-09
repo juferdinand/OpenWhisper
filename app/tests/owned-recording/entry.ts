@@ -5,7 +5,7 @@ import { lstat, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { RecordingCoordinator } from "../../src/core/recording/recording.js";
-import type { PreparedAudio, RecoveryBoundary, RecoveryToken, WorkContext } from "../../src/core/recording/recording.js";
+import type { PreparedAudio, RecoveryBoundary, RecoveryToken } from "../../src/core/recording/recording.js";
 import { AdaptiveSpeechBoundary, createUtilitySpeechEffects } from "../../src/services/speech/adaptive-speech.js";
 import { NativeCaptureBoundary } from "../../src/services/recording/capture.js";
 import type { NativeCapturedHandle } from "../../src/services/recording/capture.js";

@@ -38,7 +38,7 @@ export interface SpeechResourceFiles {
   open(path: string, flags: number): Promise<Pick<FileHandle, "stat" | "read" | "close">>;
   openDirectory?(path: string, flags: number): Promise<SpeechResourceDirectory>;
 }
-export interface SpeechResourceDirectory {
+interface SpeechResourceDirectory {
   stat(options: { bigint: true }): Promise<BigIntStats>;
   close(): Promise<void>;
 }

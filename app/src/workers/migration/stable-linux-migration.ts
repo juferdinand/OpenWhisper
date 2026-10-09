@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { constants, lstatSync, readdirSync, type BigIntStats } from "node:fs";
 import { lstat, mkdir, open, readdir, type FileHandle } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { basename, dirname, join, relative, sep } from "node:path";
+import { basename, join, relative, sep } from "node:path";
 import { z } from "zod";
 import { MAX_UI_REQUEST_BYTES, MAX_USER_TEXT_BYTES, preferencesSchema } from "../../contracts/ui/state.js";
 import { convertLegacyLinuxData, convertLegacyLinuxRecoveryNames } from "../../services/migration/legacy-linux-data.js";

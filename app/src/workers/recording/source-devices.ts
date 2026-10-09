@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 
-export const captureSourceSchema = z.strictObject({
+const captureSourceSchema = z.strictObject({
   id: z.string().regex(/^[A-Za-z0-9_.:-]{1,255}$/u),
   name: z.string().max(255).refine((value) => Buffer.byteLength(value, "utf8") <= 255 && Buffer.from(value, "utf8").toString("utf8") === value && !/[\u0000-\u001f\u007f-\u009f]/u.test(value)),
   isDefault: z.boolean(),

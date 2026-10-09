@@ -15,7 +15,7 @@ const common = {
   maximum: z.number().int().min(MIN_WINDOW_SAMPLES).max(MAX_WINDOW_SAMPLES),
   range: sampleRangeSchema,
 };
-export const speechWindowPlanSchema = z.discriminatedUnion("kind", [
+const speechWindowPlanSchema = z.discriminatedUnion("kind", [
   z.strictObject({ ...common, kind: z.literal("tail") }),
   z.strictObject({ ...common, kind: z.literal("search"), probe: sampleRangeSchema,
     firstBoundary: indexSchema }),

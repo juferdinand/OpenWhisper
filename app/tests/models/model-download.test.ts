@@ -14,6 +14,7 @@ async function until(condition: () => boolean): Promise<void> {
 test("linked metadata accepts bare or ordinary quoted SHA and ignores HEAD redirect representation size", () => {
   assert.deepEqual(parseModelDownloadMetadata(metadata()), { bytes: bytes.length, sha256: digest(bytes) });
   assert.equal(parseModelDownloadMetadata({ status: 200, raw: ["x-linked-etag", digest(bytes), "x-linked-size", String(bytes.length)] }).sha256, digest(bytes));
+  assert.doesNotThrow(() => parseModelDownloadMetadata({ ...metadata(), raw: [...metadata().raw, "X-Trace", "first", "x-trace", "last"] }));
   for (const raw of [
     ["x-linked-etag", `W/\"${digest(bytes)}\"`, "x-linked-size", String(bytes.length)],
     ["x-linked-etag", `\\\"${digest(bytes)}\\\"`, "x-linked-size", String(bytes.length)],

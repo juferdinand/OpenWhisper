@@ -42,5 +42,3 @@ export function expandSnippets(text: string, snippets: readonly ExpansionSnippet
 export function processTranscript(text: string, vocabulary: string, snippets: readonly ExpansionSnippet[]): string {
   return expandSnippets(correctVocabulary(cleanTranscript(text), parseVocabulary(vocabulary)), snippets);
 }
-
-export const SnippetExpander = Object.freeze({ apply: expandSnippets });

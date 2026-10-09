@@ -7,7 +7,7 @@ import { parseBusValues, signatureOf, type BusValue } from "../../../src/platfor
 import type { ShortcutBus } from "../../../src/platforms/linux/shared/portal-shortcuts.js";
 import { PortalPaste } from "../../../src/platforms/linux/shared/portal-paste.js";
 
-const desktop = "/org/freedesktop/portal/desktop", remote = "org.freedesktop.portal.RemoteDesktop";
+const desktop = "/org/freedesktop/portal/desktop";
 const text = (value: string): BusValue => ({ type: "s", value });
 const dict = (values: Record<string, BusValue> = {}): BusValue => ({ type: "dict", key: "s", member: "v",
   value: Object.entries(values).map(([key, value]) => ({ key: text(key), value: { type: "v", signature: signatureOf(value), value } })) });

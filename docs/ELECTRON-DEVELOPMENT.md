@@ -35,7 +35,8 @@ npm run preflight --prefix app
 It downloads and checksum-verifies pinned actionlint and ShellCheck archives once, caches them
 under the ignored `.local/preflight-tools/` directory, and can reuse them offline. It then checks
 workflow YAML and embedded shell, rejects shell continuations in folded or plain `run` scalars,
-runs focused regression fixtures, checks Electron TypeScript and shared UI formatting, and checks
+runs focused regression fixtures, checks both TypeScript projects, typed Oxlint rules, unused
+files/exports/dependencies with Knip, shared UI formatting, and checks
 PR/commit and local working-tree whitespace. CI gates native and package jobs on this preflight.
 
 The development launcher resolves the already installed pinned binary; launching does

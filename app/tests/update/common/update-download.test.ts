@@ -122,6 +122,13 @@ unixTest("bounded headers, lengths, terminal completion and chunks refuse before
     assert.equal(transport.closes, 1); assert.deepEqual(await readdir(input.cacheDirectory), []);
   });
 });
+
+unixTest("strict raw header element validation keeps the download metadata error code", async () => fixture(async (input) => {
+  const malformed = ["Content-Length", 11] as unknown as readonly string[];
+  const transport = new FakeTransport([{ headers: { status: 200, raw: malformed }, chunks: [bytes] }]);
+  await assert.rejects(downloadUpdateCandidate(input, { transport: () => transport }), failure("METADATA_FAILED"));
+  assert.equal(transport.closes, 1);
+}));
 unixTest("overflow and actual write failure settle cleanup without deleting outside the private stage", async () => fixture(async (input) => {
   for (const maximumBytes of [0, 0.5, 1024 ** 3 + 1]) {
     await assert.rejects(downloadUpdateCandidate({ ...input, maximumBytes }, { transport: () => new FakeTransport([]) }), failure("INVALID_INPUT"));

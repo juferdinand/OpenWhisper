@@ -80,5 +80,3 @@ export function correctVocabulary(text: string, terms: readonly string[]): strin
   }
   return result;
 }
-
-export const VocabularyCorrector = Object.freeze({ parse: parseVocabulary, apply: correctVocabulary });

@@ -12,5 +12,3 @@ export const captureReplySchema = z.discriminatedUnion("ok", [
   z.strictObject({ ...envelope, ok: z.literal(true), value: captureMetadataSchema }),
   z.strictObject({ ...envelope, ok: z.literal(false), code: z.enum(["CAPTURE_FAILED", "OWNERSHIP_FAILED"]) }),
 ]);
-export type CaptureRequest = z.infer<typeof captureRequestSchema>;
-export type CaptureReply = z.infer<typeof captureReplySchema>;

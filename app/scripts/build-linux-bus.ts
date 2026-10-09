@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { cp, mkdir, readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { pinnedNativeSource } from "./native-dependencies.js";

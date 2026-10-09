@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
-import { parseModelCatalog, type Catalog } from "../../src/core/models/catalog.js";
+import { parseModelCatalog } from "../../src/core/models/catalog.js";
 import { developmentProfileSchema, prepareDevelopmentProfile, resolveDevelopmentProfile, type DevelopmentProfile } from "../../src/services/settings/profiles.js";
 import { MAX_INVENTORY_MODELS, MAX_MODEL_BYTES, MODEL_COPY_BYTES, ModelInventory, ModelInventoryError, type ModelInventoryFailure, type ModelInventoryIO } from "../../src/services/models/model-inventory.js";
 

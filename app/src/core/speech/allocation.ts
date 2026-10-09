@@ -50,7 +50,7 @@ export class SpeechAllocation {
     return operation;
   }
   poison(code: "INTEGRITY_FAILED" | "TEARDOWN_FAILED", obligation?: Promise<unknown>): SpeechWorkerError {
-    if (obligation) { this.failedObligations.add(obligation); this.retain(obligation); }
+    if (obligation) { this.failedObligations.add(obligation); void this.retain(obligation); }
     this.refusal ??= new SpeechWorkerError(code);
     this.phaseValue = "failed";
     return this.refusal;

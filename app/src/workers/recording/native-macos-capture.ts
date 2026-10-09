@@ -4,12 +4,12 @@ import { z } from "zod";
 import { captureMetadataSchema, preparedMetadataSchema } from "./native-capture.js";
 import type { NativeCaptureSession } from "./native-capture.js";
 
-export const macCaptureSelectionSchema = z.discriminatedUnion("mode", [
+const macCaptureSelectionSchema = z.discriminatedUnion("mode", [
   z.strictObject({ mode: z.literal("synthetic"), sampleRate: z.number().int().min(8000).max(192000), channels: z.number().int().min(1).max(8) }),
   z.strictObject({ mode: z.literal("avfoundation") }),
 ]);
-export type MacCaptureSelection = z.infer<typeof macCaptureSelectionSchema>;
-export const macCaptureDiagnosticsSchema = z.strictObject({ engineAllocations: z.number().int().nonnegative(),
+type MacCaptureSelection = z.infer<typeof macCaptureSelectionSchema>;
+const macCaptureDiagnosticsSchema = z.strictObject({ engineAllocations: z.number().int().nonnegative(),
   inputNodeOperations: z.number().int().nonnegative(), permissionQueries: z.number().int().nonnegative(),
   permissionRequests: z.literal(0), diskOperations: z.literal(0), activeCallbacks: z.number().int().nonnegative(), released: z.boolean() });
 const formatSchema = z.strictObject({ sampleRate: z.number().int().min(8000).max(192000), channels: z.number().int().min(1).max(8), interleaved: z.boolean() });

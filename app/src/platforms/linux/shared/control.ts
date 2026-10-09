@@ -1,18 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { controlStatusSchema } from "../../../core/recording/control.js";
-import type { ControlCaptureLease, ControlCapturePort, ControlStatus } from "../../../core/recording/control.js";
+import type { ControlCaptureLease, ControlCapturePort } from "../../../core/recording/control.js";
 import { BusFailure, type BusEvent, type BusFilter, type BusMethod, type BusReply } from "./bus.js";
 import { controlTarget, type ControlKind } from "./control-identity.js";
 import { serializeControlStatus } from "./control-status.js";
 
-export { controlStatusSchema, ControlCaptureLeaseError } from "../../../core/recording/control.js";
 export type { ControlCaptureLease, ControlCapturePort, ControlStatus } from "../../../core/recording/control.js";
 
 export const DEV_CONTROL_NAME = controlTarget("development").name;
 export const DEV_CONTROL_PATH = controlTarget("development").path;
 const daemon = "org.freedesktop.DBus";
-export const controlActionSchema = z.enum(["start", "stop", "toggle", "cancel"]);
+const controlActionSchema = z.enum(["start", "stop", "toggle", "cancel"]);
 type Refusal = "Denied" | "Busy" | "Expired" | "InvalidRequest" | "Unavailable";
 export interface ControlBus {
   readonly generation: string;

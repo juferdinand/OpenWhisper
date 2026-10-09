@@ -94,7 +94,7 @@ test("late original control reply cannot erase deadline refusal", async () => {
   assert.equal(port.sent.length, 1); assert.equal(port.terminateCalls, 0); port.exit();
 });
 test("blocked event loop late success is refused before timer dispatch", async () => {
-  const { port, transport, challenge } = fixture(30); port.autoChallenge = false;
+  const { port, challenge } = fixture(30); port.autoChallenge = false;
   const pending = challenge(); await turn();
   const until = performance.now() + 60; while (performance.now() < until) { /* Inert scheduling regression only. */ }
   port.reply(port.sent[0]); await assert.rejects(pending, { code: "TEARDOWN_FAILED" }); port.exit();
