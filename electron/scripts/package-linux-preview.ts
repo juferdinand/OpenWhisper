@@ -7,6 +7,7 @@ import { z } from "zod";
 import { developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
 import { parseApplicationBuildModule, type BuildIdentity } from "../src/contracts/build-identity.js";
 import { installedElectronExecutable } from "./runtime.js";
+import { linuxSupervisorLauncher } from "../src/cli/linux-supervisor-bootstrap.js";
 
 const defaultRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageSchema = z.object({ name: z.string(), version: z.string(), main: z.literal("dist/main/index.js"),
@@ -142,6 +143,8 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
   await checkTree(join(runtime, "LICENSE"));
   await checkTree(join(runtime, "LICENSES.chromium.html"));
   const recording = await recordingDescriptor(root, identity);
+  if (stable && (!await exists(join(root, "dist/cli/linux-supervisor-bootstrap.js")) ||
+      !(await lstat(join(root, "dist/cli/linux-supervisor-bootstrap.js"))).isFile())) throw new Error("Stable packaging requires its compiled Linux supervisor entry.");
   const libcFloor = await nativeLibcFloor(root, recording);
   const noticeInputs = [[resolve(root, "../LICENSE"), "OpenWhisper-LICENSE"],
     [join(root, "dist/ui/fonts/LICENSE.txt"), "Inter-LICENSE.txt"],
@@ -170,6 +173,10 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
     await mkdir(dirname(destination), { recursive: true });
     await cp(join(root, "node_modules", name), destination, { recursive: true });
   }
+  if (stable) {
+    await writeFile(join(directory, "openwhisper-launch"), linuxSupervisorLauncher("debian"), { flag: "wx", mode: 0o755 });
+    await chmod(join(directory, "openwhisper-launch"), 0o755);
+  }
   const notices = join(directory, "notices");
   await mkdir(notices);
   for (const [source, name] of noticeInputs) {
@@ -191,7 +198,7 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
     const legacyEntry = join(debianRoot, "usr/bin/openwhisper-desktop");
     await mkdir(dirname(legacyEntry), { recursive: true, mode: 0o755 });
     // The native updater captured this permanent path before replacing its package.
-    await writeFile(legacyEntry, '#!/bin/sh\nexec /opt/openwhisper/openwhisper "$@"\n', { flag: "wx", mode: 0o755 });
+    await writeFile(legacyEntry, '#!/bin/sh\nexec /opt/openwhisper/openwhisper-launch "$@"\n', { flag: "wx", mode: 0o755 });
     await chmod(legacyEntry, 0o755);
   }
   const desktopDirectory = join(debianRoot, "usr/share/applications");
@@ -202,7 +209,7 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
   await mkdir(docDirectory, { recursive: true });
   await writeFile(join(desktopDirectory, `${appId}.desktop`), [
     "[Desktop Entry]", "Type=Application", `Name=${identity.productName}`, `Comment=${stable ? "Local dictation validation package" : "Isolated local development preview"}`,
-    `Exec=/opt/${executableName}/${executableName}${stable ? "" : " --dev"}`, `Icon=${appId}`, "Terminal=false",
+    `Exec=/opt/${executableName}/${stable ? "openwhisper-launch" : `${executableName} --dev`}`, `Icon=${appId}`, "Terminal=false",
     "Categories=AudioVideo;Audio;", `StartupWMClass=${stable ? appId : executableName}`, "",
   ].join("\n"));
   await cp(join(root, "dist/ui/app-icon.png"), join(iconDirectory, `${appId}.png`));
@@ -224,7 +231,7 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
       `Package: ${packageName}\nVersion: ${version}\nArchitecture: amd64`) throw new Error("Unexpected preview Debian metadata.");
     const contents = runDpkg(["--contents", debianPackage]);
     if (!contents.includes(`./usr/share/applications/${appId}.desktop`) || !contents.includes(`./opt/${executableName}/resources/app/dist/main/index.js`) ||
-        (stable && !contents.includes("./usr/bin/openwhisper-desktop"))) {
+        (stable && (!contents.includes("./usr/bin/openwhisper-desktop") || !contents.includes("./opt/openwhisper/openwhisper-launch")))) {
       throw new Error("Preview Debian package is missing its launcher or application.");
     }
   }

@@ -217,7 +217,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           resourcesPath: await realpath(process.resourcesPath), environment: process.env });
         if (launch) autostart = await LinuxAutostart.open({ appId: profile.appId,
           configHome: dirname(profile.roots.config),
-          configDirs: (process.env["XDG_CONFIG_DIRS"] || "/etc/xdg").split(":").filter(Boolean), executable: launch.executable,
+          configDirs: (process.env["XDG_CONFIG_DIRS"] || "/etc/xdg").split(":").filter(Boolean),
+          executable: launch.kind === "debian" ? "/opt/openwhisper/openwhisper-launch" : launch.executable,
           ...(launch.kind === "appimage" ? { appImage: { image: launch.arguments[0], assertUnchanged: launch.assertUnchanged } } : {}) });
       }
     } catch { /* Keep persisted requests intact when installation or OS facts are unavailable. */ }

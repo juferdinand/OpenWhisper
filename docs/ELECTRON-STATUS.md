@@ -18,10 +18,40 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | macOS dictation | Actual Intel/Apple Silicon Dev packages pass sandbox, signed utilities, CPU recognition of public audio, shortcut setup/removal and original Quit. Normal stable packages pass migration, edited-state restart and clean exits at b892d86 | Physical microphone/TCC, actual target insertion and device changes; Metal selection remains open |
 | Linux desktop integration | Owned stock KDE 5.27 native Wayland F8, binding Quit/crash recovery and paste into separate Wayland/XWayland editors pass. Genuine X11 shortcuts and all five no-display CLI commands pass, including installed stable autostart enable/disable and generated-target restart | Expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
-| Packaging and updates | Fresh Ubuntu22 AppImage passes permanent-launch admission, autostart and the complete owned runtime. Debian metadata consumer passes in actual embedded Node; original-file downloads, signatures and Mac ZIP roundtrips pass. Universal Mac constructor is implemented | Actual universal construction/runtime, installation/restart/rollback, persistent publisher continuity, authenticated Dev replacement, DMG and release signing |
+| Packaging and updates | Fresh Ubuntu22 AppImage passes permanent-launch admission, autostart and the complete owned runtime. Debian metadata consumer passes in actual embedded Node; original-file downloads, signatures and Mac ZIP roundtrips pass. Fixed Linux supervisor/package starters are implemented; the first actual universal Mac constructor refuses dirty build provenance | Fresh supervised Linux package runtime; actual universal construction/runtime, installation/restart/rollback, persistent publisher continuity, authenticated Dev replacement, DMG and release signing |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 ## Current package checkpoint
+
+The reviewed Linux launch supervisor is now connected to Stable Debian's fixed
+`/opt/openwhisper/openwhisper-launch`, its desktop/autostart paths and the native
+0.2.5 compatibility entry. Stable AppRun uses the same compiled TypeScript
+bootstrap; the permanent installed AppImage launcher remains byte-identical.
+CLI control bypasses parent admission into the original early command parser.
+Downloaded images without permanent admission retain ordinary GUI startup.
+Restart requires complete receipt EOF, original GUI exit/close and separate
+replacement authentication; the current bootstrap refuses every update restart.
+No installer or main restart writer is activated. Eighteen focused supervisor
+cases and eleven bootstrap/packaging cases pass; one host archive-tool case
+skips. Independent review fixes exit-to-pipe closure and monotonic deadline
+gaps. The combined source passes typing, normal app/shared-UI build and1198 tests
+in17.66 seconds, with34 explicit native/opt-in skips and zero failures. Actual
+new supervised packages remain to be built and exercised; earlier immutable
+runtime results below do not establish that new behavior.
+
+Both original thin jobs in
+[CI 37876878846](https://github.com/juferdinand/OpenWhisper/actions/runs/37876878846)
+pass on Intel and ARM, confirming both preceding fixture corrections. API head
+is `1708a1e2`; actual package producer is synthetic merge
+`814a7faf96d46cad94c94a92afc866c717823d21`. Universal construction refuses
+`development-build.modified` before staging or invoking the official merger.
+No universal ZIP or native universal runtime is produced. The production native
+builder's generated `macos-retirement/build-production/` directory was not
+ignored; this fixed output is now ignored, while sources/pins remain tracked.
+The original dirty-path list is unavailable, so it is not claimed as the sole
+cause. CI now explicitly refuses any unexplained dirty source before the final
+Stable build. The strict clean-source constructor gate stays intact; the next
+normal CI must verify this correction and actual universal behavior.
 
 Fresh clean `340dee3fb60cbf5abf6819553d9b575848919305` Ubuntu22 packages
 retain their original source inventory. The 119,618,040-byte AppImage has
@@ -86,8 +116,9 @@ have stopped already. Retained native snapshots still report running; subsequent
 same-owner full reap and cleanup succeed. The reviewed three-file test correction
 keeps early admission false while preserving the actual kernel level and every
 mandatory full-reap/close receipt. Twenty-one focused tests and typing pass;
-production code and deadlines stay unchanged. Universal jobs still await both
-successful original thin jobs.
+production code and deadlines stay unchanged. Both matching original thin jobs
+subsequently pass in CI37876878846; its separate construction refusal is recorded
+above.
 
 Earlier package checkpoints follow with their original producers and scopes.
 

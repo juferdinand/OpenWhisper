@@ -9,6 +9,7 @@ import { z } from "zod";
 import { parseApplicationBuildModule } from "../src/contracts/build-identity.js";
 import { developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
 import { appImageLauncher } from "../src/services/linux-appimage-launcher.js";
+import { linuxSupervisorLauncher } from "../src/cli/linux-supervisor-bootstrap.js";
 export { appImageLauncher };
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -54,6 +55,7 @@ async function inventory(path: string, prefix = "", iconLink?: string): Promise<
 }
 
 function appRun(executable: string): string {
+  if (executable === "openwhisper") return linuxSupervisorLauncher("appimage");
   return ["#!/bin/sh", "set -eu", 'bundle=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)',
     `exec "$bundle/usr/lib/${executable}/${executable}" "$@"`, ""].join("\n");
 }

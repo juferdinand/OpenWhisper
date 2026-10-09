@@ -54,6 +54,7 @@ async function fixture() {
 }
 
 async function stableRecording(input: Awaited<ReturnType<typeof fixture>>) {
+  await input.write("dist/cli/linux-supervisor-bootstrap.js", "inert compiled supervisor fixture; never executed");
   await input.write("dist/main/application-build.js", 'export const APPLICATION_BUILD = {"version":1,"kind":"stable","appId":"io.github.whisperfree","productName":"OpenWhisper"};\n');
   const metadata: unknown = JSON.parse(input.metadata);
   assert.ok(metadata && typeof metadata === "object");
@@ -174,13 +175,17 @@ test("stable validation package preserves inputs and uses persistent Linux ident
     assert.deepEqual(await readFile(join(app, "dist/main/development-recording-build.js")), descriptor);
     assert.equal(await readFile(join(app, "dist/resources/development-build.json"), "utf8"), input.build);
     const desktop = await readFile(join(result.debianRoot, "usr/share/applications/io.github.whisperfree.desktop"), "utf8");
-    assert.match(desktop, /^Name=OpenWhisper$/mu); assert.match(desktop, /^Exec=\/opt\/openwhisper\/openwhisper$/mu);
+    assert.match(desktop, /^Name=OpenWhisper$/mu); assert.match(desktop, /^Exec=\/opt\/openwhisper\/openwhisper-launch$/mu);
     assert.match(desktop, /^Icon=io\.github\.whisperfree$/mu); assert.match(desktop, /^StartupWMClass=io\.github\.whisperfree$/mu);
     assert.match(await readFile(join(result.debianRoot, "DEBIAN/control"), "utf8"), /^Package: io-github-whisperfree$/mu);
     const legacyEntry = join(result.debianRoot, "usr/bin/openwhisper-desktop"), entryInfo = await lstat(legacyEntry);
     assert.ok(entryInfo.isFile()); assert.equal(entryInfo.isSymbolicLink(), false);
     assert.equal(entryInfo.mode & 0o7777, 0o755);
-    assert.equal(await readFile(legacyEntry, "utf8"), '#!/bin/sh\nexec /opt/openwhisper/openwhisper "$@"\n');
+    assert.equal(await readFile(legacyEntry, "utf8"), '#!/bin/sh\nexec /opt/openwhisper/openwhisper-launch "$@"\n');
+    const companion = join(result.debianRoot, "opt/openwhisper/openwhisper-launch");
+    assert.equal((await lstat(companion)).mode & 0o7777, 0o755);
+    assert.match(await readFile(companion, "utf8"), /^exec \/opt\/openwhisper\/openwhisper \/opt\/openwhisper\/resources\/app\/dist\/cli\/linux-supervisor-bootstrap\.js "\$@"$/mu);
+    assert.equal(await readFile(join(app, "dist/cli/linux-supervisor-bootstrap.js"), "utf8"), "inert compiled supervisor fixture; never executed");
     const unexpectedExecution = join(input.base, "unexpected-command"), forwarded = ["--control", "status", "", "two words", "*", "a\\b",
       "line\nbreak", `$(touch ${unexpectedExecution})`, `\`touch ${unexpectedExecution}\``];
     // Override only the fixed shell exec boundary: capture actual argument expansion without launching the app.
@@ -188,7 +193,7 @@ test("stable validation package preserves inputs and uses persistent Linux ident
       "owned-legacy-entry", legacyEntry, ...forwarded], { encoding: "utf8", shell: false, timeout: 1_000, maxBuffer: 16 * 1024 });
     assert.ifError(intercepted.error); assert.equal(intercepted.signal, null); assert.equal(intercepted.status, 23);
     assert.equal(intercepted.stderr, "");
-    assert.deepEqual(intercepted.stdout.split("\0"), ["/opt/openwhisper/openwhisper", ...forwarded, ""]);
+    assert.deepEqual(intercepted.stdout.split("\0"), ["/opt/openwhisper/openwhisper-launch", ...forwarded, ""]);
     await assert.rejects(lstat(unexpectedExecution), { code: "ENOENT" });
     assert.match(await readFile(join(result.directory, "notices/README.txt"), "utf8"), /Unsigned; no stable update channel/u);
     assert.deepEqual(await readFile(join(input.root, "dist/main/development-recording-build.js")), descriptor);

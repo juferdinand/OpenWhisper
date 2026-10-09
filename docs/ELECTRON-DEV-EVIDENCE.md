@@ -1,5 +1,49 @@
 # Electron development evidence
 
+## Linux supervised package entry and original universal provenance refusal
+
+The fixed Linux bootstrap uses only the packaged Stable build/version/layout;
+it never opens a profile or audio in the parent. Stable Debian's regular0755
+companion, legacy native restart entry, desktop and explicit autostart agree on
+the permanent companion. Stable AppRun starts the same compiled entry inside
+its current extraction; the existing installed image launcher is unchanged.
+Control arguments retain the early direct ELF route, including invalid commands;
+an uninstalled image keeps direct GUI startup without a fabricated restart target.
+
+The supervisor captures its permanent target before launching one original GUI.
+A nonce-bound version receipt is limited to512 bytes and requires EOF/pipe close,
+normal original child close and caller-owned replacement authentication. The
+original native exit starts a5-second closure-only watchdog; an inherited open
+pipe cannot suppress it. Absolute monotonic acceptance checks include synchronous
+validation work. No living-GUI recording cutoff is introduced. Initial independent
+review findings and corrections are retained; eighteen focused cases pass in340ms.
+Eleven bootstrap/packaging checks pass in353ms, with one actual `dpkg-deb` case
+explicitly skipped on this host. Inert shell interception verifies unchanged
+empty/special arguments and cleared Node injection without executing Electron.
+One combined required check passes strict typing, normal app/shared-UI build and
+1198 tests in17.66 seconds, with34 explicit native/opt-in skips and zero failures.
+
+The bootstrap currently refuses every replacement request. No GUI restart writer,
+installer, signature handoff or rollback is activated. Actual fd3 preservation,
+new package process ownership and complete normal closure remain a fresh runtime
+gate; older immutable package results below are separate evidence.
+
+Original [CI 37876878846](https://github.com/juferdinand/OpenWhisper/actions/runs/37876878846)
+passes both Intel/ARM thin jobs, including both previously corrected fixtures and
+Dev/Stable original exits. API head1708a1e2 differs from actual synthetic producer
+814a7faf96d46cad94c94a92afc866c717823d21. Universal construction fails admission
+at `development-build.modified` before staging/merging; no universal archive or
+native runtime cell runs. Original logs remain retained without a rerun.
+
+The production retirement builder creates an unignored nested `build-production/`
+output. Ignore checks confirm the omission and the reviewed correction ignores
+only that generated directory. Native sources, CMake input, header/license pins
+and build scripts remain visible. The original job did not retain dirty paths;
+causality to its flag is an inference, not a claimed original observation. Final
+Stable CI now rejects any remaining dirty paths before building. Universal
+`modified: false` admission and artifact checks are unchanged; actual success
+must come from the next normal CI source run.
+
 ## Fresh permanent AppImage runtime and reviewed universal/installer source
 
 The exact clean `340dee3fb60cbf5abf6819553d9b575848919305` source produces a
@@ -76,7 +120,7 @@ Thirteen focused metadata/constructor checks pass; actual universal assembly,
 signing and runtime are pending the normal CI run, without a manual dispatch.
 
 The original public 0.2.5 Debian archive's fixed SHA matches the retained release
-asset; read-only ar/tar listing proves `/usr/bin/openwhisper-desktop`. New stable
+asset; read-only ar/tar listing proves `/usr/bin/openwhisper-desktop`. At294a8955, stable
 packaging provides that regular0755 path with fixed
 `exec /opt/openwhisper/openwhisper "$@"`; Dev excludes it. Existing owned inert
 package tests confirm entry bytes/type/mode, preserved empty/special arguments
@@ -109,8 +153,9 @@ The reviewed correction affects three existing test files: early admission is
 false with no challenge/pending request/nonces, independently of initial kernel
 level. That real level stays recorded; the same owner must still become reaped
 and settle reads before PASS. Twenty-one focused portable cases and typing pass.
-No delay, rebind, native guard, production behavior or deadline changes. Matching
-actual Mac CI and universal construction remain pending.
+No delay, rebind, native guard, production behavior or deadline changes. Both
+matching original thin jobs subsequently pass in CI37876878846; its distinct
+universal construction refusal is recorded above.
 
 ## Historical Mac ZIP acceptance and installed-launch source increment
 

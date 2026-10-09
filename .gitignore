@@ -43,3 +43,4 @@ __pycache__/
 /electron/.local/
 /electron/vendor/
 /electron/native/build-*/
+/electron/native/macos-retirement/build-production/

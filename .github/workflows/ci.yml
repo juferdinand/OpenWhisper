@@ -192,6 +192,10 @@ jobs:
         env:
           OPENWHISPER_OWNED_MAC_PACKAGE_SMOKE: '1'
         run: |
+          if test -n "$(git status --porcelain)"; then
+            git status --short
+            exit 1
+          fi
           npm run build -- --recording --stable
           node --import tsx scripts/package-macos-preview.ts --output "$RUNNER_TEMP/openwhisper-mac-stable" > "$RUNNER_TEMP/openwhisper-mac-stable-result.json"
           node --import tsx tests/owned-macos-package-smoke.ts --package "$RUNNER_TEMP/openwhisper-mac-stable/OpenWhisper.app" --evidence "$RUNNER_TEMP/openwhisper-mac-stable-smoke" --fixtures "$PWD/.local/speech-fixtures" --variant stable
