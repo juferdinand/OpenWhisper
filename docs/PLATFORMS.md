@@ -40,6 +40,10 @@ GPU selection belongs to speech: `services/speech/` owns backend resources, cont
 window fallback; `workers/speech/` owns the isolated inference protocol. Vulkan/shaderc/header
 pins in `app/native/` and `scripts/native-dependencies.ts` are build inputs, not another feature.
 
+Recording level/time updates use a small validated, generation-bound telemetry event. Full state
+still covers initialization, phase changes and other feature updates; telemetry never carries user
+text. Keep stale-generation and delayed-initial-state regression coverage when changing this path.
+
 ## Reuse and interface decisions
 
 The application already uses Zod for runtime contracts, `tar` for archives, Koffi for focused FFI,

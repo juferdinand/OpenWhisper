@@ -24,9 +24,9 @@ const modelId = utf8(1024).min(1).refine(
 const fraction = z.number().finite().min(0).max(1);
 const userText = utf8(MAX_USER_TEXT_BYTES);
 
-export const tabSchema = z.enum(["setup", "general", "models", "snippets", "history", "about"]);
+const tabSchema = z.enum(["setup", "general", "models", "snippets", "history", "about"]);
 export type Tab = z.infer<typeof tabSchema>;
-export const uiLanguageSchema = z.enum(["en", "de"]);
+const uiLanguageSchema = z.enum(["en", "de"]);
 export type UILanguage = z.infer<typeof uiLanguageSchema>;
 
 export const snippetSchema = z.strictObject({
@@ -109,7 +109,7 @@ export const modelSchema = z.strictObject({
 });
 export type Model = z.infer<typeof modelSchema>;
 
-export const macStateSchema = z.strictObject({
+const macStateSchema = z.strictObject({
   microphone_allowed: z.boolean(),
   recording_shortcut: z.boolean(),
   shortcut_toggle_only: z.boolean().optional(),
@@ -120,9 +120,7 @@ export const macStateSchema = z.strictObject({
   updates_configured: z.boolean(),
   launch_at_login_pending: z.boolean().optional(),
 });
-export type MacState = z.infer<typeof macStateSchema>;
-
-export const updateStateSchema = z.strictObject({
+const updateStateSchema = z.strictObject({
   configured: z.boolean(),
   status: z.enum(["idle", "checking", "current", "available", "downloading", "installing", "error"]),
   version: utf8(128).nullable(),
@@ -175,6 +173,7 @@ export const appStateSchema = z.strictObject({
   // A finite safe integer is a wire constraint, not an automatic recording cutoff.
   elapsed: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   level: fraction.optional(),
+  recording_generation: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
   model_directory: utf8(4096),
   profile: z.literal("development").optional(),
   recording_available: z.boolean().optional(),
@@ -188,16 +187,50 @@ export const appStateSchema = z.strictObject({
   { message: "State exceeds the supported transport size" },
 );
 export type AppState = z.infer<typeof appStateSchema>;
-export type State = AppState;
+
+const recordingTelemetrySchema = z.strictObject({
+  generation: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  elapsed: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  level: fraction,
+});
+export type RecordingTelemetry = z.infer<typeof recordingTelemetrySchema>;
+
+interface RecordingSnapshotProjection {
+  readonly phase: string;
+  readonly generation: number;
+  readonly elapsedMs: number;
+  readonly busy: boolean;
+  readonly recoveryAvailable: boolean;
+  readonly error: string | null;
+  readonly transcript: string;
+}
+
+export function isSteadyRecordingUpdate(
+  previous: RecordingSnapshotProjection,
+  next: RecordingSnapshotProjection,
+): boolean {
+  return previous.phase === "recording" && next.phase === "recording" &&
+    previous.generation === next.generation && next.elapsedMs >= previous.elapsedMs &&
+    previous.busy === next.busy && previous.recoveryAvailable === next.recoveryAvailable &&
+    previous.error === next.error && previous.transcript === next.transcript;
+}
+
+export function isCurrentRecordingTelemetry(
+  state: Pick<AppState, "status" | "recording_generation" | "elapsed">,
+  telemetry: RecordingTelemetry,
+): boolean {
+  return state.status === "recording" && state.recording_generation !== undefined &&
+    telemetry.generation === state.recording_generation && telemetry.elapsed >= state.elapsed;
+}
 
 const noArgs = z.strictObject({});
 const modelArgs = z.strictObject({ id: modelId });
 const actionResult = z.union([z.null(), z.undefined()]);
-export const localProcessingFailureSchema = z.enum([
+const localProcessingFailureSchema = z.enum([
   "INVALID_REQUEST", "INVALID_PROFILE", "DISABLED", "MODEL_REQUIRED", "BUSY", "CANCELLED", "CLOSED",
   "TIMEOUT", "CONNECTION_FAILED", "HTTP_REJECTED", "RESPONSE_TOO_LARGE", "RESPONSE_READ_FAILED", "INVALID_RESPONSE",
 ]);
-export const localProcessingPreviewResultSchema = z.discriminatedUnion("ok", [
+const localProcessingPreviewResultSchema = z.discriminatedUnion("ok", [
   z.strictObject({ ok: z.literal(true), text: localProcessingOutputSchema }),
   z.strictObject({ ok: z.literal(false), code: localProcessingFailureSchema }),
 ]);
@@ -236,7 +269,7 @@ export const commandInputSchemas = {
   check_updates: noArgs,
   install_update: noArgs,
 };
-export const commandNameSchema = z.strictObject(commandInputSchemas).keyof();
+const commandNameSchema = z.strictObject(commandInputSchemas).keyof();
 export type CommandName = z.infer<typeof commandNameSchema>;
 export const commandOutputSchemas = {
   get_state: appStateSchema,
@@ -287,8 +320,8 @@ export function validateCommandOutput(name: CommandName, value: unknown) {
   return commandOutputSchemas[name].parse(value);
 }
 
-export const eventSchemas = { state: appStateSchema, navigate: tabSchema };
-export const eventNameSchema = z.strictObject(eventSchemas).keyof();
+const eventSchemas = { state: appStateSchema, recording_telemetry: recordingTelemetrySchema, navigate: tabSchema };
+const eventNameSchema = z.strictObject(eventSchemas).keyof();
 export type EventName = z.infer<typeof eventNameSchema>;
 export type EventPayload<N extends EventName> = z.infer<(typeof eventSchemas)[N]>;
 export function validateEventName(value: unknown): EventName {

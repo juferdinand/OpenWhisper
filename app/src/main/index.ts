@@ -9,7 +9,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
-  appStateSchema, modelSchema, preferencesSchema, validateEvent, MAX_USER_TEXT_BYTES, MAX_UI_REQUEST_BYTES,
+  appStateSchema, modelSchema, preferencesSchema, validateEvent, isSteadyRecordingUpdate,
+  MAX_USER_TEXT_BYTES, MAX_UI_REQUEST_BYTES,
   type AppState, type EventName, type EventPayload, type UpdateState,
 } from "../contracts/ui/state.js";
 import { PreferenceStore } from "../services/settings/preferences.js";
@@ -299,8 +300,21 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     host = await DevelopmentRecordingHost.open(resolve(distribution, ".."), descriptor, inventory, {
       recoveryPath: profile.paths.recovery,
       sourceDiscoveryFailure: (failure) => { console.error(formatSourceDiscoveryFailure(failure)); },
-      snapshot: (value) => { recording = value; if (value.phase !== "error") message = "";
-        if (value.phase === "starting" || value.phase === "recording") deliveryNotice = ""; notify(); },
+      snapshot: (value) => {
+        const previous = recording;
+        const hadMessage = message !== "";
+        const hadDeliveryNotice = (value.phase === "starting" || value.phase === "recording") && deliveryNotice !== "";
+        recording = value;
+        if (value.phase !== "error") message = "";
+        if (value.phase === "starting" || value.phase === "recording") deliveryNotice = "";
+        if (isSteadyRecordingUpdate(previous, value) && !hadMessage && !hadDeliveryNotice) {
+          emit("recording_telemetry", {
+            generation: value.generation,
+            elapsed: Math.min(Number.MAX_SAFE_INTEGER, Math.floor(value.elapsedMs / 1000)),
+            level: value.level,
+          });
+        } else notify();
+      },
       progress: (value) => { inferenceProgress = recording.elapsedMs > 0
         ? Math.min(1, value.completedSamples / (recording.elapsedMs * 16)) : 0; notify(); },
       delivery: { deliver: async (text, context) => {
@@ -345,46 +359,51 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     en: localeSchema.parse(JSON.parse(await readFile(join(distribution, "resources/locales/en.json"), "utf8")) as unknown),
     de: localeSchema.parse(JSON.parse(await readFile(join(distribution, "resources/locales/de.json"), "utf8")) as unknown),
   };
-  const state = (): AppState => appStateSchema.parse({
-    updates,
-    launch_at_login_available: !!autostart && loginFact !== undefined,
-    platform,
-    ...(platform === "macos" ? { macos: {
-      microphone_allowed: microphoneAllowed, recording_shortcut: macShortcut?.state().configuring ?? false,
-      shortcut_toggle_only: macRecording, clipboard_restore_available: false,
-      shortcut_hint: "Press and release a keyboard key. Escape cancels.",
-      editor: "", recommended: [], updates_configured: updates.configured, launch_at_login_pending: loginFact?.pending ?? false,
-    } } : {}),
-    version, status: recording.phase === "starting" ? "recording"
-      : ["stopping", "restoring", "discarding"].includes(recording.phase) ? "transcribing" : recording.phase,
-    message: message || deliveryNotice || (Buffer.byteLength(recording.transcript, "utf8") > MAX_USER_TEXT_BYTES
-      ? "The complete transcript exceeds the preview size. Use Copy to retrieve the full text."
-      : recording.error ? `Recording failed: ${recording.error}.` : descriptor ? "" : "Recording is not available in this development preview."),
-    transcript: Buffer.byteLength(recording.transcript, "utf8") <= MAX_USER_TEXT_BYTES ? recording.transcript : "",
-    transcript_preview_omitted: Buffer.byteLength(recording.transcript, "utf8") > MAX_USER_TEXT_BYTES,
-    history: history.snapshot().filter((text) => Buffer.byteLength(text, "utf8") <= MAX_USER_TEXT_BYTES),
-    preferences: { ...preferences.snapshot(), ...(loginFact ? { launch_at_login: loginFact.requested } : {}) },
-    models: [...catalog.models, ...installed.filter((item) => !catalog.models.some((model) => model.id === item.model.id)).map((item) => item.model)],
-    installed: installed.map((item) => item.model.id), microphones: sources.map((source) => source.id),
-    session: process.env["XDG_SESSION_TYPE"] ?? "unknown",
-    desktop: process.env["XDG_CURRENT_DESKTOP"] ?? "unknown", clipboard_available: descriptor !== null,
-    shortcut_portal: shortcut.available, paste_portal: pasteState.available, shortcut: macShortcut?.state().label ?? shortcut.label,
-    native_shortcuts: macShortcut?.state().available ?? shortcut.nativeAvailable,
-    shortcut_configuring: shortcut.configuring && !shortcut.nativeX11,
-    native_x11: shortcut.nativeX11 ?? false, native_paste: !!macPaste, native_mouse: false, native_middle_mouse: false,
-    recording_shortcut: (macShortcut?.state().configuring ?? false) || !!keyCapture || !!shortcut.nativeX11 && shortcut.configuring,
-    paste_ready: macPaste ? accessibilityAllowed : pasteState.ready, paste_configuring: pasteState.configuring, gpu_available: false, gpu_supported: false,
-    gpu_device: null, gpu_fallback: identity.kind === "stable" && preferences.snapshot().gpu, recovery_available: recording.recoveryAvailable,
-    overlay_available: !!overlay && !overlay.isDestroyed() && (!waylandOverlay || waylandOverlay.available),
-    download, progress: download ? downloadProgress : inferenceProgress,
-    elapsed: Math.min(Number.MAX_SAFE_INTEGER, Math.floor(recording.elapsedMs / 1000)), level: recording.level,
-    model_directory: profile.paths.models,
-    ...(identity.kind === "development" ? { profile: "development", development_build: `${build.commit.slice(0, 12)}${build.modified ? "+modified" : ""}` } : {}),
-    recording_available: !recordingRetired && updateReserved !== "install" && !!host && (macRecording ? microphoneAllowed || recording.busy : !!audioServer || recording.busy) &&
-      (recording.busy || installed.some((item) => item.model.id === preferences.snapshot().model)),
-    local_processing: processingProfile.snapshot(),
-    local_processing_invalid_profile: processingProfile.invalidContent,
-  });
+  const state = (): AppState => {
+    const preferenceSnapshot = preferences.snapshot();
+    const macShortcutState = macShortcut?.state();
+    return appStateSchema.parse({
+      updates,
+      launch_at_login_available: !!autostart && loginFact !== undefined,
+      platform,
+      ...(platform === "macos" ? { macos: {
+        microphone_allowed: microphoneAllowed, recording_shortcut: macShortcutState?.configuring ?? false,
+        shortcut_toggle_only: macRecording, clipboard_restore_available: false,
+        shortcut_hint: "Press and release a keyboard key. Escape cancels.",
+        editor: "", recommended: [], updates_configured: updates.configured, launch_at_login_pending: loginFact?.pending ?? false,
+      } } : {}),
+      version, status: recording.phase === "starting" ? "recording"
+        : ["stopping", "restoring", "discarding"].includes(recording.phase) ? "transcribing" : recording.phase,
+      message: message || deliveryNotice || (Buffer.byteLength(recording.transcript, "utf8") > MAX_USER_TEXT_BYTES
+        ? "The complete transcript exceeds the preview size. Use Copy to retrieve the full text."
+        : recording.error ? `Recording failed: ${recording.error}.` : descriptor ? "" : "Recording is not available in this development preview."),
+      transcript: Buffer.byteLength(recording.transcript, "utf8") <= MAX_USER_TEXT_BYTES ? recording.transcript : "",
+      transcript_preview_omitted: Buffer.byteLength(recording.transcript, "utf8") > MAX_USER_TEXT_BYTES,
+      history: history.snapshot().filter((text) => Buffer.byteLength(text, "utf8") <= MAX_USER_TEXT_BYTES),
+      preferences: { ...preferenceSnapshot, ...(loginFact ? { launch_at_login: loginFact.requested } : {}) },
+      models: [...catalog.models, ...installed.filter((item) => !catalog.models.some((model) => model.id === item.model.id)).map((item) => item.model)],
+      installed: installed.map((item) => item.model.id), microphones: sources.map((source) => source.id),
+      session: process.env["XDG_SESSION_TYPE"] ?? "unknown",
+      desktop: process.env["XDG_CURRENT_DESKTOP"] ?? "unknown", clipboard_available: descriptor !== null,
+      shortcut_portal: shortcut.available, paste_portal: pasteState.available, shortcut: macShortcutState?.label ?? shortcut.label,
+      native_shortcuts: macShortcutState?.available ?? shortcut.nativeAvailable,
+      shortcut_configuring: shortcut.configuring && !shortcut.nativeX11,
+      native_x11: shortcut.nativeX11 ?? false, native_paste: !!macPaste, native_mouse: false, native_middle_mouse: false,
+      recording_shortcut: (macShortcutState?.configuring ?? false) || !!keyCapture || !!shortcut.nativeX11 && shortcut.configuring,
+      paste_ready: macPaste ? accessibilityAllowed : pasteState.ready, paste_configuring: pasteState.configuring, gpu_available: false, gpu_supported: false,
+      gpu_device: null, gpu_fallback: identity.kind === "stable" && preferenceSnapshot.gpu, recovery_available: recording.recoveryAvailable,
+      overlay_available: !!overlay && !overlay.isDestroyed() && (!waylandOverlay || waylandOverlay.available),
+      download, progress: download ? downloadProgress : inferenceProgress,
+      elapsed: Math.min(Number.MAX_SAFE_INTEGER, Math.floor(recording.elapsedMs / 1000)), level: recording.level,
+      recording_generation: recording.generation,
+      model_directory: profile.paths.models,
+      ...(identity.kind === "development" ? { profile: "development", development_build: `${build.commit.slice(0, 12)}${build.modified ? "+modified" : ""}` } : {}),
+      recording_available: !recordingRetired && updateReserved !== "install" && !!host && (macRecording ? microphoneAllowed || recording.busy : !!audioServer || recording.busy) &&
+        (recording.busy || installed.some((item) => item.model.id === preferenceSnapshot.model)),
+      local_processing: processingProfile.snapshot(),
+      local_processing_invalid_profile: processingProfile.invalidContent,
+    });
+  };
 
   const uiSession = session.defaultSession;
   uiSession.setPermissionRequestHandler((_contents, _permission, callback) => { callback(false); });

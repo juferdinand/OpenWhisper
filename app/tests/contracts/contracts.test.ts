@@ -194,8 +194,9 @@ test("history indices and serialized native trigger profiles have finite integer
   ]) assert.equal(preferencesSchema.safeParse({ ...state().preferences, x11_trigger: trigger }).success, false);
 });
 
-test("only state and fixed navigation events are accepted with validated payloads", () => {
+test("only fixed state, recording telemetry, and navigation events are accepted", () => {
   assert.equal(validateEventName("state"), "state");
+  assert.equal(validateEventName("recording_telemetry"), "recording_telemetry");
   assert.equal(validateEventName("navigate"), "navigate");
   assert.deepEqual(validateEvent("state", state()), state());
   assert.equal(validateEvent("navigate", "models"), "models");

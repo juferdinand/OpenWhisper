@@ -1,5 +1,6 @@
 import { invoke } from "./bridge.js";
 import { t } from "./i18n.js";
+import { escapeHtml as escape } from "./escape-html.js";
 import {
   defaultLocalProcessingProfile,
   localProcessingProfilePatchSchema,
@@ -64,15 +65,6 @@ function refresh() {
       current.invalidProfile,
     );
 }
-const escape = (text: string) =>
-  text.replace(
-    /[&<>"']/g,
-    (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-        c
-      ]!,
-  );
-
 /** The renderer retains preview fields for this session; host transport never adds them to app state. */
 export function mountProcessingPreview(
   root: HTMLElement,
@@ -204,9 +196,8 @@ export function mountProcessingPreview(
         feedback = "";
         refresh();
       });
-    root
-      .querySelector("#processing-send")!
-      .addEventListener("click", async () => {
+    root.querySelector("#processing-send")!.addEventListener("click", () => {
+      void (async () => {
         if (requestID || saves) return;
         const id = crypto.randomUUID();
         if (
@@ -246,10 +237,10 @@ export function mountProcessingPreview(
             refresh();
           }
         }
-      });
-    root
-      .querySelector("#processing-cancel")!
-      .addEventListener("click", async () => {
+      })();
+    });
+    root.querySelector("#processing-cancel")!.addEventListener("click", () => {
+      void (async () => {
         if (!requestID) return;
         const id = requestID;
         requestID = undefined;
@@ -264,7 +255,8 @@ export function mountProcessingPreview(
             refresh();
           }
         }
-      });
+      })();
+    });
   }
   for (const name of profileKeys) {
     const control = root.querySelector<

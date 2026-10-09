@@ -17,6 +17,7 @@ declare global {
     openwhisper?: DesktopBridge;
     testState: AppState;
     publishState(): void;
+    publishTelemetry(payload: { generation: number; elapsed: number; level: number }): void;
     calls: { command: string }[];
   }
 }
@@ -222,6 +223,7 @@ async function start(
   platform: "linux" | "macos",
   overlay = false,
   fresh = false,
+  initialStateRace = false,
 ) {
   let savedPreferences: unknown = null;
   await page.exposeBinding("loadTestPreferences", () => savedPreferences);
@@ -229,7 +231,7 @@ async function start(
     savedPreferences = preferences;
   });
   await page.addInitScript(
-    ({ platform, models, overlay, fresh }) => {
+    ({ platform, models, overlay, fresh, initialStateRace }) => {
       const host = window as any;
       host.__OPENWHISPER_OVERLAY__ = platform === "macos" && overlay;
       host.calls = [];
@@ -281,6 +283,7 @@ async function start(
         download: null,
         progress: 0,
         elapsed: 0,
+        recording_generation: 7,
         model_directory: "/test/models",
         macos: {
           microphone_allowed: false,
@@ -296,6 +299,9 @@ async function start(
         const snapshot = JSON.parse(JSON.stringify(state));
         for (const callback of callbacks.get("state") ?? []) callback(snapshot);
       };
+      const publishTelemetry = (payload: unknown) => {
+        for (const callback of callbacks.get("recording_telemetry") ?? []) callback(payload);
+      };
       const invoke = async (command: string, args: any = {}) => {
         host.calls.push({ command, args });
         if (command === "enable_paste" && host.rejectPortal) {
@@ -307,7 +313,16 @@ async function start(
         if (command === "get_state") {
           const saved = await host.loadTestPreferences();
           if (saved) state.preferences = saved;
-          return JSON.parse(JSON.stringify(state));
+          const initial = JSON.parse(JSON.stringify(state));
+          if (initialStateRace) {
+            state.status = "recording";
+            state.recording_generation = 8;
+            state.elapsed = 4;
+            state.level = 0.5;
+            publish();
+            publishTelemetry({ generation: 8, elapsed: 5, level: 0.7 });
+          }
+          return initial;
         }
         if (command === "save_preferences") {
           if (host.saveDelay)
@@ -358,6 +373,7 @@ async function start(
       };
       host.testState = state;
       host.publishState = publish;
+      host.publishTelemetry = publishTelemetry;
       host.openwhisper = {
         async invoke(command: CommandName, args: unknown) {
           const result = await invoke(command, args);
@@ -381,7 +397,7 @@ async function start(
         },
       };
     },
-    { platform, models: catalog, overlay, fresh },
+    { platform, models: catalog, overlay, fresh, initialStateRace },
   );
   await page.goto(
     pathToFileURL(resolve("dist/index.html")).href +
@@ -398,6 +414,43 @@ async function start(
     }),
   ).toBeVisible();
 }
+
+test("recording telemetry follows the newest full state and ignores stale generations and final updates", async ({
+  page,
+}) => {
+  await start(page, "linux", false, false, true);
+  await expect(page.locator("#record-label")).toHaveText("Recording · 0:05");
+  expect(
+    await page.locator("#record-control").evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element).getPropertyValue("--voice-level")),
+    ),
+  ).toBeCloseTo(0.76);
+
+  await page.evaluate(() => {
+    const host = window as any;
+    host.publishTelemetry({ generation: 7, elapsed: 99, level: 1 });
+  });
+  await expect(page.locator("#record-label")).toHaveText("Recording · 0:05");
+  expect(
+    await page.locator("#record-control").evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element).getPropertyValue("--voice-level")),
+    ),
+  ).toBeCloseTo(0.76);
+
+  await page.evaluate(() => {
+    const host = window as any;
+    host.testState.status = "done";
+    host.testState.level = 0;
+    host.publishState();
+    host.publishTelemetry({ generation: 8, elapsed: 6, level: 1 });
+  });
+  await expect(page.locator("#record-label")).toHaveText("Start dictation");
+  expect(
+    await page.locator("#record-control").evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element).getPropertyValue("--voice-level")),
+    ),
+  ).toBeCloseTo(0.2);
+});
 
 for (const platform of ["linux", "macos"] as const) {
   test(`${platform}: floating recorder shows a long-running timer and stop/cancel actions`, async ({
