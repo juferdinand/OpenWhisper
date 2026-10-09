@@ -11,15 +11,15 @@ German; dictation can use multiple languages.
 
 ## Project status
 
-The latest public release is **0.2.5**. It uses the original native macOS and Linux hosts.
-The Electron **0.3.0** replacement is in development and acceptance; its builds and tests do not
-make it a public release or establish full platform parity. See [current implementation status](docs/ELECTRON-STATUS.md)
-and the [migration plan](docs/ELECTRON-MIGRATION.md).
+The current release is **0.3.0**, a shared Electron app for macOS and Linux. Automated package,
+update, and owned-runtime checks cover the scopes listed in [release status](docs/ELECTRON-STATUS.md);
+they do not establish every desktop, device, or distribution combination. The older native 0.2.5
+source and evidence remain available as an immutable reference.
 
-| Platform | Public release | Electron replacement |
+| Platform | Current release | Notes |
 | --- | --- | --- |
-| macOS 14+ | 0.2.5 DMG and ZIP | 0.3.0 automated package/update checks pass; physical microphone, permission and insertion acceptance remain open |
-| Linux x86_64 | 0.2.5 AppImage and Debian package | 0.3.0 acceptance in progress; see [Linux status](docs/LINUX.md) |
+| macOS 14+ | 0.3.0 DMG and ZIP | Self-signed and not Apple-notarized; see [signing](docs/SIGNING.md) |
+| Linux x86_64 | 0.3.0 AppImage and Debian package | Automated evidence and boundaries in [Linux status](docs/LINUX.md) |
 | Windows | None | Not implemented; tracked by [issue #35](https://github.com/juferdinand/OpenWhisper/issues/35) |
 
 The immutable [0.2.5 source snapshot](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4)
@@ -27,7 +27,7 @@ preserves the legacy hosts and their historical evidence.
 
 ## Features
 
-The public 0.2.5 applications provide local Whisper and Parakeet recognition, model selection,
+The app provides local Whisper and Parakeet recognition, model selection,
 vocabulary correction, snippets, history, a shared settings interface, and English/German
 interface translations. Platform integrations and validation differ; consult the applicable
 [Linux evidence](docs/LINUX.md) and [platform overview](docs/PLATFORMS.md).
@@ -38,20 +38,21 @@ locally and can work offline once a model is present.
 
 ## Installation
 
-Download only from the [official Releases page](https://github.com/juferdinand/OpenWhisper/releases).
-The currently published assets are for 0.2.5.
+Download 0.3.0 only from the [official Releases page](https://github.com/juferdinand/OpenWhisper/releases)
+and verify files against its `SHA256SUMS`.
 
-### macOS 0.2.5
+### macOS
 
-Download the [macOS DMG](https://github.com/juferdinand/OpenWhisper/releases/download/v0.2.5/OpenWhisper-macOS.dmg),
+Download the [macOS DMG](https://github.com/juferdinand/OpenWhisper/releases/download/v0.3.0/OpenWhisper-macOS.dmg),
 drag OpenWhisper to Applications, eject the volume, then launch it from Applications. The
-[ZIP](https://github.com/juferdinand/OpenWhisper/releases/download/v0.2.5/OpenWhisper-macOS.zip)
-is also available. The app requires macOS 14 or later and microphone permission. Its release
-signature is self-signed and the app is not notarized; see [signing details](docs/SIGNING.md).
+[ZIP](https://github.com/juferdinand/OpenWhisper/releases/download/v0.3.0/OpenWhisper-macOS.zip)
+is also available. The app requires macOS 14 or later and microphone
+permission. Its release signature is self-signed and the app is not notarized; see
+[signing details](docs/SIGNING.md).
 
-### Linux 0.2.5
+### Linux x86_64
 
-Download and run the [AppImage](https://github.com/juferdinand/OpenWhisper/releases/download/v0.2.5/OpenWhisper-Linux-x86_64.AppImage):
+Download and run the [AppImage](https://github.com/juferdinand/OpenWhisper/releases/download/v0.3.0/OpenWhisper-Linux-x86_64.AppImage):
 
 ```bash
 chmod +x OpenWhisper-Linux-x86_64.AppImage
@@ -59,7 +60,7 @@ chmod +x OpenWhisper-Linux-x86_64.AppImage
 ```
 
 If FUSE is unavailable, use `APPIMAGE_EXTRACT_AND_RUN=1` for that launch. On Debian or Ubuntu,
-install the [Debian package](https://github.com/juferdinand/OpenWhisper/releases/download/v0.2.5/OpenWhisper-Linux-amd64.deb):
+install the [Debian package](https://github.com/juferdinand/OpenWhisper/releases/download/v0.3.0/OpenWhisper-Linux-amd64.deb):
 
 ```bash
 sudo apt install ./OpenWhisper-Linux-amd64.deb
@@ -68,24 +69,15 @@ sudo apt install ./OpenWhisper-Linux-amd64.deb
 Verify downloads against the release's `SHA256SUMS`. Linux desktop and package evidence is
 summarized in [Linux status](docs/LINUX.md).
 
+When moving from 0.2.5, download and install 0.3.0 manually. The original app's GUI updater has
+not been demonstrated to update to Electron; back up data you need before changing installations.
+
 For a per-user install of the **legacy 0.2.5 AppImage only**, review and download the installer
 from the immutable 0.2.5 source commit:
 [install-release.py](https://raw.githubusercontent.com/juferdinand/OpenWhisper/d69b43bf6e7017c61089e117e79af34f57f297c4/linux/scripts/install-release.py).
 It requires Python 3.10+, OpenSSL 3, and `unsquashfs`; it verifies and installs the signed 0.2.5
-AppImage. This legacy script does not install an Electron build. The 0.3.0 Electron release has
-not been published.
-
-Electron release artifacts, when approved for publication, use an AppImage and Debian package.
-The normal package-manager/launcher commands are:
-
-```bash
-chmod +x OpenWhisper-Linux-x86_64.AppImage
-./OpenWhisper-Linux-x86_64.AppImage
-sudo apt install ./OpenWhisper-Linux-amd64.deb
-```
-
-Those commands do not make a candidate artifact public or authorize replacing an installed app.
-The legacy 0.2.5 updater does not establish cross-host migration to Electron.
+AppImage. This legacy script does not install or update the Electron app; see [Linux status](docs/LINUX.md)
+for the tested scope of the package transition.
 
 ## Privacy and safety
 
@@ -100,9 +92,9 @@ before installing updates. Do not install a development candidate over a working
 
 ## Development
 
-The Electron source is in `app/`; the Electron-only renderer is in `app/ui/`; catalog, schemas,
-and test vectors are in `app/data/`. Native speech bindings and focused OS adapters are in
-`app/native/`. Legacy 0.2.5 hosts remain available at the immutable source link above.
+The Electron source is in `app/`; its renderer is in `app/ui/`; the production catalog is in
+`app/data/`; and test fixtures are in `app/tests/fixtures/`. Native speech bindings and focused OS
+adapters are in `app/native/`. Legacy 0.2.5 hosts remain at the immutable source link above.
 
 Use Node.js 24–26 and npm. To run the isolated development app:
 

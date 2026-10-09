@@ -13,9 +13,8 @@ the app requires no account or subscription.
 
 ## Delivery and acceptance
 
-- The published version is 0.2.5. The Electron 0.3.0 replacement is still under acceptance;
-  consult [the current status](docs/ELECTRON-STATUS.md) and do not describe a candidate as a
-  published release or claim unpassed desktop coverage.
+- The current release is Electron 0.3.0 for macOS and Linux. Consult [release status](docs/ELECTRON-STATUS.md)
+  for tested scope and limitations; do not claim untested desktop, device, or distribution coverage.
 - Work in an isolated branch/worktree, keep changes reviewable, and run focused checks while
   editing. Run the required common checks once for a complete increment. Prepare functional
   changes with automated evidence and independent review; merge through the normal PR workflow
@@ -116,15 +115,14 @@ and document individual runtime/system-tool exceptions in `app/knip.jsonc`.
 
 ## Releases and security
 
-The public 0.2.5 macOS and Linux applications use separate native hosts and update identities.
-Electron replacement, signed package, and upgrade gates are recorded in
-[the Electron status](docs/ELECTRON-STATUS.md). Do not imply an automatic migration between
-host formats until that exact path has passed acceptance.
+The 0.3.0 Electron app uses persistent macOS and Linux signing identities. The original 0.2.5
+app's GUI updater has not been demonstrated to update to Electron; document manual installation
+when describing that transition. Do not claim data migration without evidence for that exact path.
 
 macOS releases are self-signed and not Apple-notarized. Linux update signatures are version-bound.
 See [release signing](docs/SIGNING.md) and [security policy](SECURITY.md). Keep signing material
 out of Git, logs, artifacts, issues, and pull requests. Never rotate a release identity casually.
 
-Linux-specific published 0.2.5 behavior and evidence are linked from
-[Linux status](docs/LINUX.md) and its immutable source snapshot. Current Electron package evidence
-must remain separate from that legacy record. See [platform architecture](docs/PLATFORMS.md).
+Current Linux package and test scope are recorded in [Linux status](docs/LINUX.md). The immutable
+0.2.5 source snapshot is historical evidence for the former native host; keep it separate from
+Electron results. See [platform architecture](docs/PLATFORMS.md).
