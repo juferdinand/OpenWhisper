@@ -47,6 +47,14 @@ A Darwin regression copies a real Mach-O into the exact helper filename and
 calls production inspection without executing it. That case is explicitly
 skipped under Linux; actual universal success remains pending normal CI.
 
+The next [normal CI 37885999655](https://github.com/juferdinand/OpenWhisper/actions/runs/37885999655)
+fails an additional legacy-tool comparison at its separate five-second startup
+bound on Intel, before calling the corrected production helper. That redundant
+negative invocation is removed; the owned real-file positive regression and
+production tool policy remain intact. Six focused cases and strict typing pass,
+with the actual Darwin case explicitly skipped on Linux. Universal confirmation
+still requires the next normal CI; this test failure is not a `-m` product result.
+
 The inactive AppImage consumer adds an installed-only continuation step. It
 reauthenticates the fixed installed 0755 candidate without weakening private
 0600 staged-file admission, writes a bounded private recovery hint, and closes

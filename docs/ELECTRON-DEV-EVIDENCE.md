@@ -19,6 +19,12 @@ parentheses. The source fix preserves the original native path and all gates;
 a real-file Darwin regression is present but explicitly skipped on Linux.
 No successful universal ZIP or native runtime is claimed from that failed run.
 
+The following normal CI37885999655 Intel suite times out only the regression's
+extra legacy `otool -l` invocation at 5,000ms; production `-m` is not reached.
+Removing that comparison retains the exact owned Mach-O filename, production
+inspection, unchanged bytes and cleanup. Six focused cases and typing pass;
+the Darwin case skips on Linux. Native confirmation remains pending normal CI.
+
 The inactive AppImage continuation consumer retains its exact predecessor and
 private record, reauthenticates the installed candidate and closes originals
 before returning a same-parent pre-exec check/rollback capability. It reads no

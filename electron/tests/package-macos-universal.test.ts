@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -21,9 +20,6 @@ test("Darwin load-command inspection opens a real Mach-O helper ending in parent
   try {
     await mkdir(dirname(absolute), { recursive: true }); await copyFile("/usr/bin/true", absolute); await chmod(absolute, 0o600);
     const original = await readFile(absolute);
-    const legacy = spawnSync("/usr/bin/otool", ["-l", absolute], { shell: false, encoding: "utf8", timeout: 5_000, maxBuffer: 128 * 1024 });
-    assert.equal(legacy.error, undefined); assert.equal(legacy.signal, null); assert.notEqual(legacy.status, 0);
-    assert.match(legacy.stderr, /can't open file|No such file or directory/u);
     assert.match(readMacUniversalLoadCommands(absolute, path), /cmd\s+LC_(?:BUILD_VERSION|VERSION_MIN_MACOSX)/u);
     assert.deepEqual(await readFile(absolute), original);
   } finally { await rm(root, { recursive: true, force: true }); }
