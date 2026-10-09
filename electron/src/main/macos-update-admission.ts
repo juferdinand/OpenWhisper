@@ -35,7 +35,7 @@ export function getLastMacosUpdateAdmissionObservation(): MacosUpdateAdmissionOb
 export function macosUpdatePublisherArguments(bundle: string, fingerprint: string): readonly string[] {
   if (!/^[a-f0-9]{40}$/u.test(fingerprint)) throw new Error("Invalid Mac update publisher.");
   return ["--verify", "--deep", "--strict", "--all-architectures", "--test-requirement",
-    `certificate leaf = H\"${fingerprint}\"`, bundle];
+    `=certificate leaf = H\"${fingerprint}\"`, bundle];
 }
 const effects: Effects = { platform: process.platform, uid: process.getuid?.(), canonical: realpathSync,
   writableParent: (path) => accessSync(path, constants.W_OK | constants.X_OK),

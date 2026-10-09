@@ -29,7 +29,7 @@ test("Mac update capability requires the fixed compiled publisher and actual run
   assert.deepEqual(getLastMacosUpdateAdmissionObservation(), { stage: "complete", outcome: "accepted" });
   assert.ok(Object.isFrozen(getLastMacosUpdateAdmissionObservation()));
   assert.deepEqual(macosUpdatePublisherArguments(bundle, fingerprint), ["--verify", "--deep", "--strict", "--all-architectures",
-    "--test-requirement", `certificate leaf = H\"${fingerprint}\"`, bundle]);
+    "--test-requirement", `=certificate leaf = H\"${fingerprint}\"`, bundle]);
   assert.throws(() => macosUpdatePublisherArguments(bundle, "-"));
 });
 test("original admission refusal is frozen and content-free until another explicit attempt", () => {
