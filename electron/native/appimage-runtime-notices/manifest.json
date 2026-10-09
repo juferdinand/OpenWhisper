@@ -2,8 +2,39 @@
   "runtimeCommit": "dd6cebedcbddde9c82f89b011e8e1d40b6e43868",
   "upstreamBuild": "https://github.com/AppImage/type2-runtime/blob/dd6cebedcbddde9c82f89b011e8e1d40b6e43868/scripts/common/install-dependencies.sh",
   "upstreamMakefile": "https://github.com/AppImage/type2-runtime/blob/dd6cebedcbddde9c82f89b011e8e1d40b6e43868/src/runtime/Makefile",
-  "classification": "LICENSE_TEXTS_AND_UPSTREAM_BUILD_PROVENANCE_ONLY",
-  "publicDistributionGate": "Confirm complete corresponding patched LGPL source and a usable relinking method for this static runtime before public distribution; these text snapshots do not claim that proof.",
+  "classification": "LICENSE_TEXTS_AND_LGPL_SOURCE_RELINK_BUNDLE",
+  "publicDistributionGate": "The complete pinned type2-runtime and patched libfuse source inputs plus relinking instructions are bundled. Exact Alpine package revisions for other static libraries remain unattested.",
+  "sourceBundle": {
+    "runtimeSource": {
+      "path": "type2-runtime-dd6cebedcbddde9c82f89b011e8e1d40b6e43868.tar.gz",
+      "url": "https://codeload.github.com/AppImage/type2-runtime/tar.gz/dd6cebedcbddde9c82f89b011e8e1d40b6e43868",
+      "bytes": 31069,
+      "sha256": "f5fec23be76e50e2445ed2d018bac49b367490fc483c62c4637e99ec705d27ba"
+    },
+    "libfuseSource": {
+      "path": "fuse-3.15.0.tar.xz",
+      "url": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz",
+      "bytes": 4589124,
+      "sha256": "70589cfd5e1cff7ccd6ac91c86c01be340b227285c5e200baa284e401eea2ca0"
+    },
+    "squashfuseSource": {
+      "path": "squashfuse-0.5.2.tar.gz",
+      "url": "https://github.com/vasi/squashfuse/archive/0.5.2.tar.gz",
+      "bytes": 75404,
+      "sha256": "db0238c5981dabbd80ee09ae15387f390091668ca060a7bc38047912491443d3"
+    },
+    "libfusePatch": {
+      "path": "mount.c.diff",
+      "url": "https://raw.githubusercontent.com/AppImage/type2-runtime/dd6cebedcbddde9c82f89b011e8e1d40b6e43868/patches/libfuse/mount.c.diff",
+      "bytes": 3060,
+      "sha256": "1c7fd9e26717545a476b226b083a9f9d05676c180edbd71a04bbd8a73599dc44"
+    },
+    "relinkingInstructions": {
+      "path": "RELINKING.md",
+      "bytes": 3440,
+      "sha256": "9512d72dd276f0a243471733c0842d32bbd2c0f42217ed489d9b8e04989891c0"
+    }
+  },
   "entries": [
     {
       "path": "libfuse-LICENSE",

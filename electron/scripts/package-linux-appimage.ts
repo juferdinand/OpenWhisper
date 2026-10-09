@@ -10,6 +10,7 @@ import { parseApplicationBuildModule } from "../src/contracts/build-identity.js"
 import { developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
 import { appImageLauncher } from "../src/services/linux-appimage-launcher.js";
 import { linuxSupervisorLauncher } from "../src/cli/linux-supervisor.js";
+import { appImageRuntimeSourceSchema, createAppImageRuntimeSourceBundle, packagePinnedAppImageRuntimeSources } from "./appimage-runtime-source.js";
 export { appImageLauncher };
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -20,7 +21,8 @@ const toolsSchema = z.strictObject({ appimagetool: pinSchema, runtime: pinSchema
   licenseBytes: z.number().int().positive(), licenseSha256: z.string().regex(/^[a-f0-9]{64}$/u) }) });
 const noticeNames = ["libfuse-LICENSE", "libfuse-LGPL2.txt", "squashfuse-LICENSE", "musl-COPYRIGHT", "zstd-LICENSE", "zlib-LICENSE", "mimalloc-LICENSE"] as const;
 const runtimeNoticesSchema = z.strictObject({ runtimeCommit: z.string(), upstreamBuild: z.string().url(), upstreamMakefile: z.string().url(),
-  classification: z.literal("LICENSE_TEXTS_AND_UPSTREAM_BUILD_PROVENANCE_ONLY"), publicDistributionGate: z.string(),
+  classification: z.literal("LICENSE_TEXTS_AND_LGPL_SOURCE_RELINK_BUNDLE"), publicDistributionGate: z.string(),
+  sourceBundle: appImageRuntimeSourceSchema,
   entries: z.array(artifactSchema.extend({ path: z.enum(noticeNames), source: z.string().url(), scope: z.string() })).length(noticeNames.length),
 }).refine((value) => new Set(value.entries.map((entry) => entry.path)).size === noticeNames.length);
 type Entry = { readonly type: "file" | "directory" | "symlink"; readonly target?: string; readonly mode: number; readonly bytes: number; readonly sha256: string };
@@ -138,6 +140,7 @@ export async function packageLinuxAppImage(options: LinuxAppImageOptions): Promi
   for (const required of ["LICENSE", "LICENSES.chromium.html", "notices/OpenWhisper-LICENSE", "resources/app/dist/ui/app-icon.png"]) {
     if (before[required]?.type !== "file") throw new Error("MISSING_PACKAGE_NOTICE_OR_ICON");
   }
+  const runtimeSourceBundle = await createAppImageRuntimeSourceBundle(runtimeNotices.runtimeCommit, runtimeNotices.sourceBundle);
   await mkdir(output, { mode: 0o700 });
   const appDir = join(output, "AppDir"), payload = join(appDir, "usr/lib", executable);
   await mkdir(dirname(payload), { recursive: true }); await cp(directory, payload, { recursive: true, errorOnExist: true, force: false });
@@ -151,6 +154,7 @@ export async function packageLinuxAppImage(options: LinuxAppImageOptions): Promi
   const componentNotices = join(payload, "notices/AppImage-runtime-components"); await mkdir(componentNotices);
   await writeFile(join(componentNotices, "manifest.json"), noticesManifestBytes);
   for (const notice of runtimeNotices.entries) await cp(join(noticesRoot, notice.path), join(componentNotices, notice.path), { errorOnExist: true, force: false });
+  await packagePinnedAppImageRuntimeSources(join(componentNotices, "source"), runtimeSourceBundle.files, runtimeSourceBundle.sourceFiles);
   const launcher = join(output, `${executable}-launch`); await writeFile(launcher, appImageLauncher(), { mode: 0o755 });
   const toolExtraction = join(output, "tool"); await mkdir(toolExtraction);
   command(join(tools, "appimagetool-x86_64.AppImage"), ["--appimage-extract"], toolExtraction, join(output, "tool-extraction-command.json"));
