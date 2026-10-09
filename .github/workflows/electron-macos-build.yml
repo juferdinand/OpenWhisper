@@ -72,6 +72,7 @@ jobs:
         env:
           CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
           CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+          OPENWHISPER_OWNED_MAC_PUBLISHER: '1'
         run: |
           set -euo pipefail
           set +x
@@ -79,7 +80,8 @@ jobs:
           umask 077
           private="$RUNNER_TEMP/mac-signing-private"
           mkdir -m 700 "$private"
-          LC_ALL=C /usr/bin/security list-keychains -d user | node --import tsx tests/owned-macos-publisher.ts keychain-list > "$private/previous-keychains"
+          LC_ALL=C /usr/bin/security list-keychains -d user | node --import tsx tests/owned-macos-publisher.ts keychain-list > "$private/previous-keychains.partial"
+          mv "$private/previous-keychains.partial" "$private/previous-keychains"
           keychain="$private/signing.keychain-db"
           password="$(uuidgen)"
           printf '::add-mask::%s\n' "$password"
@@ -206,6 +208,7 @@ jobs:
         env:
           CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
           CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+          OPENWHISPER_OWNED_MAC_PUBLISHER: '1'
         run: |
           set -euo pipefail
           set +x
@@ -213,7 +216,8 @@ jobs:
           umask 077
           private="$RUNNER_TEMP/mac-signing-private"
           mkdir -m 700 "$private"
-          LC_ALL=C /usr/bin/security list-keychains -d user | node --import tsx tests/owned-macos-publisher.ts keychain-list > "$private/previous-keychains"
+          LC_ALL=C /usr/bin/security list-keychains -d user | node --import tsx tests/owned-macos-publisher.ts keychain-list > "$private/previous-keychains.partial"
+          mv "$private/previous-keychains.partial" "$private/previous-keychains"
           keychain="$private/signing.keychain-db"
           password="$(uuidgen)"
           printf '::add-mask::%s\n' "$password"
