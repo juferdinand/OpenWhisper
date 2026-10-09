@@ -1,4 +1,4 @@
-import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync, type BigIntStats } from "node:fs";
+import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync, fchmodSync, fsyncSync, linkSync, mkdtempSync, rmdirSync, unlinkSync, writeSync, type BigIntStats } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { buildIdentitySchema } from "../contracts/build-identity.js";
@@ -63,54 +63,123 @@ function processIdentity(pid: number, uid: bigint): ProcessIdentity {
 }
 const sameProcess = (a: ProcessIdentity, b: ProcessIdentity): boolean => a.pid === b.pid && a.parent === b.parent && a.start === b.start;
 
+/** Read-only structural admission, without a launcher or publisher/signature capability. */
+function appImageStructure(input: Input): Readonly<{ image: string; launcher: string; uid: bigint; assertUnchanged(): void }> {
+  const build = buildIdentitySchema.safeParse(input.build), user = process.getuid?.();
+  if (process.platform !== "linux" || !build.success || build.data.kind !== "stable" || !input.packaged ||
+      user === undefined || user === 0 || input.pid !== process.pid) return refuse();
+  const home = input.home, appDir = input.environment.APPDIR, image = input.environment.APPIMAGE;
+  if (!path(home) || !appDir || !path(appDir) || !image || image !== join(home, ".local/lib/whisperfree/OpenWhisper.AppImage") ||
+      realpathSync(home) !== home || realpathSync(appDir) !== appDir) return refuse();
+  const payload = join(appDir, "usr/lib/openwhisper"), launcher = join(home, ".local/lib/whisperfree/openwhisper-launch");
+  if (input.executable !== join(payload, "openwhisper") || input.resourcesPath !== join(payload, "resources") ||
+      input.appPath !== join(payload, "resources/app") || realpathSync(input.executable) !== input.executable ||
+      realpathSync(input.appPath) !== input.appPath || realpathSync(input.resourcesPath) !== input.resourcesPath) refuse();
+  const uid = BigInt(user), beforeDirectories = directories(dirname(image), home, uid), imageIdentity = fileIdentity(image, uid);
+  if (!same(statSync(`/proc/${input.pid}/exe`, { bigint: true }), statSync(input.executable, { bigint: true }))) refuse();
+  const chain: ProcessIdentity[] = []; let pid = input.pid, matched = false;
+  for (let depth = 0; depth < 8 && pid > 0; depth++) {
+    if (chain.some((value) => value.pid === pid)) refuse();
+    const before = processIdentity(pid, uid), running = statSync(`/proc/${pid}/exe`, { bigint: true });
+    const after = processIdentity(pid, uid); if (!sameProcess(before, after)) refuse();
+    chain.push(before);
+    if (pid !== input.pid && same(running, imageIdentity)) { matched = true; break; }
+    pid = before.parent;
+  }
+  if (!matched) refuse();
+  const assertUnchanged = (): void => {
+    try {
+      for (const [name, before] of beforeDirectories) {
+        const current = lstatSync(name, { bigint: true });
+        if (current.dev !== before.dev || current.ino !== before.ino || current.uid !== before.uid || current.mode !== before.mode) refuse();
+      }
+      if (!same(imageIdentity, fileIdentity(image, uid))) refuse();
+      for (const before of chain) if (!sameProcess(before, processIdentity(before.pid, uid))) refuse();
+      if (!same(imageIdentity, statSync(`/proc/${chain.at(-1)!.pid}/exe`, { bigint: true }))) refuse();
+    } catch { refuse(); }
+  };
+  assertUnchanged(); return Object.freeze({ image, launcher, uid, assertUnchanged });
+}
+function launcherGuard(launcher: string, uid: bigint): () => void {
+  const identity = fileIdentity(launcher, uid), template = appImageLauncher(), hash = createHash("sha256").update(template).digest("hex");
+  const check = (): void => {
+    if (identity.size !== BigInt(Buffer.byteLength(template)) ||
+        createHash("sha256").update(boundedText(launcher, 16 * 1024)).digest("hex") !== hash || !same(identity, fileIdentity(launcher, uid))) refuse();
+  };
+  check(); return check;
+}
+const absent = (name: string): boolean => {
+  try { lstatSync(name); return false; } catch (error: unknown) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return true; throw error;
+  }
+};
+
+/** Local compatibility repair only; no network, signature admission, desktop edit or replacement of existing files. */
+export async function ensureLinuxAppImageLauncher(input: Input): Promise<void> {
+  try {
+    const structural = appImageStructure(input), { launcher, uid } = structural;
+    if (!absent(launcher)) { launcherGuard(launcher, uid)(); structural.assertUnchanged(); return; }
+    const stage = mkdtempSync(join(dirname(launcher), ".openwhisper-launch-")), staged = join(stage, "launcher");
+    const stageIdentity = lstatSync(stage, { bigint: true });
+    let identity: BigIntStats | undefined, published = false;
+    const guardStage = (): void => {
+      structural.assertUnchanged();
+      const current = lstatSync(stage, { bigint: true });
+      if (!current.isDirectory() || current.isSymbolicLink() || current.uid !== uid || (current.mode & 0o7777n) !== 0o700n ||
+          current.dev !== stageIdentity.dev || current.ino !== stageIdentity.ino) refuse();
+    };
+    try {
+      guardStage();
+      const fd = openSync(staged, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      try {
+        identity = fstatSync(fd, { bigint: true });
+        const bytes = Buffer.from(appImageLauncher()); let offset = 0;
+        while (offset < bytes.length) {
+          const written = writeSync(fd, bytes, offset, bytes.length - offset, offset);
+          if (!Number.isInteger(written) || written < 1 || written > bytes.length - offset) refuse(); offset += written;
+        }
+        fchmodSync(fd, 0o755); fsyncSync(fd); identity = fstatSync(fd, { bigint: true });
+        if (!same(identity, fileIdentity(staged, uid))) refuse();
+      } finally { closeSync(fd); }
+      guardStage(); linkSync(staged, launcher); published = true;
+      const linked = lstatSync(launcher, { bigint: true });
+      if (!identity || linked.dev !== identity.dev || linked.ino !== identity.ino || linked.nlink !== 2n ||
+          !same(linked, lstatSync(staged, { bigint: true }))) refuse();
+      unlinkSync(staged); identity = fileIdentity(launcher, uid);
+      launcherGuard(launcher, uid)(); structural.assertUnchanged();
+    } catch {
+      // Only our captured inode can be withdrawn. A racing destination or unsafe ancestry is preserved.
+      guardStage();
+      if (published && identity && !absent(launcher)) {
+        const named = lstatSync(launcher, { bigint: true });
+        if (named.dev !== identity.dev || named.ino !== identity.ino || named.uid !== uid) refuse();
+        unlinkSync(launcher);
+      }
+      refuse();
+    } finally {
+      guardStage();
+      if (!absent(staged)) {
+        const named = lstatSync(staged, { bigint: true });
+        if (!identity || named.dev !== identity.dev || named.ino !== identity.ino || named.uid !== uid || !named.isFile()) refuse();
+        unlinkSync(staged);
+      }
+      rmdirSync(stage);
+    }
+  } catch { refuse(); }
+}
+
 /** Environment values are hints only. The permanent image must be a live same-user kernel ancestor executable. */
 export async function admitLinuxInstalledLaunch(input: Input): Promise<LinuxInstalledLaunch | undefined> {
   if (process.platform !== "linux") return undefined;
   const executable = selectLinuxAutostartExecutable(input);
   if (executable) return Object.freeze({ kind: "debian", executable, arguments: Object.freeze([] as const) });
-  const build = buildIdentitySchema.safeParse(input.build), user = process.getuid?.();
-  if (!build.success || build.data.kind !== "stable" || !input.packaged || user === undefined || user === 0 || input.pid !== process.pid) return undefined;
   try {
-    const home = input.home, appDir = input.environment.APPDIR, image = input.environment.APPIMAGE;
-    if (!path(home) || !appDir || !path(appDir) || !image || image !== join(home, ".local/lib/whisperfree/OpenWhisper.AppImage") ||
-        realpathSync(home) !== home || realpathSync(appDir) !== appDir) return undefined;
-    const payload = join(appDir, "usr/lib/openwhisper"), launcher = join(home, ".local/lib/whisperfree/openwhisper-launch");
-    if (input.executable !== join(payload, "openwhisper") || input.resourcesPath !== join(payload, "resources") ||
-        input.appPath !== join(payload, "resources/app") || realpathSync(input.executable) !== input.executable ||
-        realpathSync(input.appPath) !== input.appPath || realpathSync(input.resourcesPath) !== input.resourcesPath) return undefined;
-    const uid = BigInt(user), beforeDirectories = directories(dirname(image), home, uid);
-    const imageIdentity = fileIdentity(image, uid), launcherIdentity = fileIdentity(launcher, uid);
-    const template = appImageLauncher(), launcherHash = createHash("sha256").update(template).digest("hex");
-    const checkLauncher = (): void => {
-      if (launcherIdentity.size !== BigInt(Buffer.byteLength(template)) ||
-          createHash("sha256").update(boundedText(launcher, 16 * 1024)).digest("hex") !== launcherHash ||
-          !same(launcherIdentity, fileIdentity(launcher, uid))) refuse();
-    };
-    checkLauncher();
-    if (!same(statSync(`/proc/${input.pid}/exe`, { bigint: true }), statSync(input.executable, { bigint: true }))) return undefined;
-    const chain: ProcessIdentity[] = []; let pid = input.pid, matched = false;
-    for (let depth = 0; depth < 8 && pid > 0; depth++) {
-      if (chain.some((value) => value.pid === pid)) refuse();
-      const before = processIdentity(pid, uid), running = statSync(`/proc/${pid}/exe`, { bigint: true });
-      const after = processIdentity(pid, uid); if (!sameProcess(before, after)) refuse();
-      chain.push(before);
-      if (pid !== input.pid && same(running, imageIdentity)) { matched = true; break; }
-      pid = before.parent;
-    }
-    if (!matched) return undefined;
+    const structural = appImageStructure(input), checkLauncher = launcherGuard(structural.launcher, structural.uid);
     const assertUnchanged = (): void => {
-      try {
-        for (const [name, before] of beforeDirectories) {
-          const current = lstatSync(name, { bigint: true });
-          if (current.dev !== before.dev || current.ino !== before.ino || current.uid !== before.uid || current.mode !== before.mode) refuse();
-        }
-        if (!same(imageIdentity, fileIdentity(image, uid))) refuse(); checkLauncher();
-        for (const before of chain) if (!sameProcess(before, processIdentity(before.pid, uid))) refuse();
-        const ancestor = chain.at(-1)!;
-        if (!same(imageIdentity, statSync(`/proc/${ancestor.pid}/exe`, { bigint: true }))) refuse();
-      } catch { refuse(); }
+      try { structural.assertUnchanged(); checkLauncher(); } catch { refuse(); }
     };
     assertUnchanged();
-    return Object.freeze({ kind: "appimage", executable: launcher, arguments: Object.freeze([image] as const), assertUnchanged });
+    return Object.freeze({ kind: "appimage", executable: structural.launcher,
+      arguments: Object.freeze([structural.image] as const), assertUnchanged });
   } catch { return undefined; }
 }

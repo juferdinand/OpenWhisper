@@ -26,7 +26,7 @@ class Shortcuts {
 function key(type: "keyDown" | "keyUp", name = "F8", overrides: Partial<MacosShortcutInput> = {}): MacosShortcutInput {
   return { type, key: name, code: name, shift: false, control: false, alt: false, meta: false, ...overrides };
 }
-function fixture(configure = async () => {}) {
+function fixture(configure = async () => {}, setupAllowed?: () => boolean) {
   const shortcuts = new Shortcuts(), states: MacosShortcutState[] = [], commands: string[] = [];
   let allowed = true, identity: RecordingIdentity = { epoch: "original", generation: 0 };
   let snapshot: Pick<RecordingSnapshot, "phase" | "busy" | "recoveryAvailable"> =
@@ -46,7 +46,8 @@ function fixture(configure = async () => {}) {
       return identity;
     } }, snapshot: () => snapshot, available: () => allowed, configure, serialize, cleanupSerialize: serialize,
   });
-  const adapter = new MacosShortcut({ shortcuts, capture, allowed: () => allowed, changed: (state) => { states.push(state); } });
+  const adapter = new MacosShortcut({ shortcuts, capture, allowed: () => allowed,
+    ...(setupAllowed ? { setupAllowed } : {}), changed: (state) => { states.push(state); } });
   return { adapter, shortcuts, states, commands,
     deny: () => { allowed = false; },
     phase: (phase: typeof snapshot.phase, recoveryAvailable = false) => {
@@ -79,6 +80,22 @@ test("explicit capture commits only on matching release with press-time modifier
     f.adapter.consume(key("keyUp", "d", { code: "KeyD" }));
     assert.equal(f.adapter.state().accelerator, "Command+Shift+D");
     assert.equal(f.adapter.state().result, "ENABLED"); assert.deepEqual(f.commands, []);
+  } finally { await f.adapter.close(); }
+});
+
+test("an owned setup reservation admits capture while global recording stays blocked and update denial still applies", async () => {
+  let setupAllowed = true;
+  const f = fixture(undefined, () => setupAllowed);
+  try {
+    f.adapter.bind("F8"); f.deny(); f.shortcuts.fire(); await turn();
+    assert.deepEqual(f.commands, []);
+    f.adapter.prepareCapture(); assert.equal(f.adapter.state().configuring, true);
+    f.adapter.consume(key("keyDown", "F9")); f.adapter.consume(key("keyUp", "F9"));
+    assert.equal(f.adapter.state().accelerator, "F9"); f.shortcuts.fire("F9"); await turn();
+    assert.deepEqual(f.commands, []);
+    setupAllowed = false;
+    assert.throws(() => f.adapter.prepareCapture(), (error: unknown) => error instanceof MacosShortcutError && error.code === "UNAVAILABLE");
+    assert.equal(f.adapter.state().configuring, false); assert.equal(f.adapter.state().accelerator, "F9");
   } finally { await f.adapter.close(); }
 });
 

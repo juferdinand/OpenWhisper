@@ -25,7 +25,7 @@ export interface LinuxSupervisorEffects {
 export interface LinuxSupervisorUpdates {
   action(kind: "check" | "install", signal: AbortSignal): Promise<LinuxUpdatePublicState>;
   /** Long installation and full audit run after original GUI retirement, outside the final close/exec fence. */
-  installPrepared(version: string): Promise<Readonly<{ assertForExec(): void }>>;
+  installPrepared(version: string): Promise<Readonly<{ assertForExec(): void; rollbackBeforeExec?(): Promise<void> }>>;
   /** Failed or uncertain installation must preserve its source; only safe abandoned preparation is discarded. */
   discardPrepared(): Promise<void>;
 }
@@ -121,7 +121,6 @@ export async function runLinuxSupervisor(options: Options, effects: LinuxSupervi
   const currentVersion = options.currentVersion, revalidateReplacement = options.revalidateReplacement, updates = options.updates;
   try { parseUpdateVersion(currentVersion); } catch { throw new LinuxRestartError("INVALID_REQUEST"); }
   const target = capture(options.launch), argv = Object.freeze([...options.argv]), nonce = randomBytes(32).toString("hex"), initialEnvironment = Object.freeze(cleanEnvironment());
-  if (updates && target.kind !== "debian") throw new LinuxRestartError("INVALID_REQUEST");
   const child = effects.launch(argv, { ...initialEnvironment, [LINUX_RESTART_NONCE]: nonce, [LINUX_RESTART_VERSION]: currentVersion,
     ...(updates ? { [LINUX_UPDATE_PROTOCOL]: "2" } : {}) });
   let channel: LinuxUpdateParentChannel | undefined, retirementRequest: Promise<void> | undefined;
@@ -147,6 +146,7 @@ export async function runLinuxSupervisor(options: Options, effects: LinuxSupervi
     throw new LinuxRestartError("CHANNEL_FAILED");
   }
   finally { closedObserved = true; clearTimeout(timer); }
+  let installed: Awaited<ReturnType<LinuxSupervisorUpdates["installPrepared"]>> | undefined;
   try {
     if (expired || (deadline !== undefined && performance.now() >= deadline)) throw new LinuxRestartError("CHANNEL_FAILED");
     const receipt = await afterClose(() => reading);
@@ -155,7 +155,6 @@ export async function runLinuxSupervisor(options: Options, effects: LinuxSupervi
     if (updates) {
       // Retirement and actual original process/duplex closure are complete. Polkit and hashing own their longer lifetimes.
       await retirementRequest;
-      let installed: Readonly<{ assertForExec(): void }>;
       try { installed = await updates.installPrepared(receipt.installedVersion); }
       catch { throw new LinuxRestartError("REVALIDATION_FAILED"); }
       const deadline = performance.now() + 5000;
@@ -169,6 +168,9 @@ export async function runLinuxSupervisor(options: Options, effects: LinuxSupervi
     if (target.kind === "appimage") for (const key of ["APPIMAGE", "APPDIR", "ARGV0", "TARGET_APPIMAGE", "NO_CLEANUP", "APPIMAGE_EXTRACT_AND_RUN", "TMPDIR"]) delete environment[key];
     try { return effects.exec(target.executable, [target.executable, ...target.arguments, ...argv], environment); }
     catch { throw new LinuxRestartError("EXEC_FAILED"); }
+  } catch (error: unknown) {
+    await installed?.rollbackBeforeExec?.();
+    throw error;
   } finally {
     child.pipe.destroy();
     await channel?.close();

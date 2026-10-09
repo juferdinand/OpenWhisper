@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readUpdateFeed, UPDATE_FEED_BYTES, UpdateFeedError } from "../src/services/update-feed.js";
-import { LINUX_UPDATE_FEED_URL, LINUX_UPDATE_REPOSITORY } from "../src/services/update-policy.js";
+import { readCurrentAppImageSignature, readUpdateFeed, UPDATE_FEED_BYTES, UpdateFeedError } from "../src/services/update-feed.js";
+import { LINUX_UPDATE_FEED_URL, LINUX_UPDATE_REPOSITORY, UPDATE_POLICY_LIMITS } from "../src/services/update-policy.js";
 import { deferred, FakeTransport, type ResponseScript } from "./model-download-fixtures.js";
 
 const failure = (code: UpdateFeedError["code"]) => (error: unknown): boolean => error instanceof UpdateFeedError && error.code === code && error.message === code;
@@ -99,4 +99,103 @@ test("Cancellation and expiry retain original header and body work until it sett
   await assert.rejects(readUpdateFeed({ ...input, signal: cancelled.signal }, { transport() { requests++; throw new Error("unexpected"); } }), failure("CANCELLED"));
   await assert.rejects(readUpdateFeed({ ...input, currentVersion: "v0.2.4" }, { transport() { requests++; throw new Error("unexpected"); } }), failure("INVALID_INPUT"));
   assert.equal(requests, 0);
+});
+
+const currentSignature = { currentVersion: "0.2.5" };
+const signatureEndpoint = `${LINUX_UPDATE_REPOSITORY}/releases/download/v0.2.5/OpenWhisper-Linux-x86_64.AppImage.sig`;
+const signatureText = "Opaque current signature 日本語\n";
+function signatureResponse(text = signatureText): ResponseScript {
+  const bytes = Buffer.from(text);
+  return { headers: { status: 200, raw: ["Content-Length", String(bytes.length), "Content-Encoding", "identity"] }, chunks: [bytes] };
+}
+test("Current AppImage sidecar uses the exact captured version and returns opaque text after original redirect close", async () => {
+  const gate = deferred<void>(), transport = new FakeTransport([
+    { headers: { status: 302, raw: ["Location", "https://release-assets.githubusercontent.com/current?opaque=not-logged"] }, closeGate: gate.promise },
+    signatureResponse(),
+  ]);
+  const reading = readCurrentAppImageSignature(currentSignature, { transport: () => transport });
+  try { await turn(); assert.equal(transport.requests.length, 1); assert.equal(transport.requests[0]?.url.href, signatureEndpoint); }
+  finally { gate.accept(); }
+  assert.equal(await reading, signatureText); assert.equal(transport.requests.length, 2); assert.equal(transport.closes, 1);
+  assert.ok(transport.requests.every((request) => request.method === "GET"));
+  const newerCurrent = new FakeTransport([signatureResponse()]);
+  assert.equal(await readCurrentAppImageSignature({ currentVersion: "0.3.0" }, { transport: () => newerCurrent }), signatureText);
+  assert.equal(newerCurrent.requests[0]?.url.href, signatureEndpoint.replace("v0.2.5", "v0.3.0"));
+  // This reader neither parses a feed nor authenticates the returned signature against an image.
+  const split = Buffer.from(signatureText), exact = "é".repeat(UPDATE_POLICY_LIMITS.signatureBytes / 2);
+  for (const script of [{ ...signatureResponse(), chunks: [split.subarray(0, 26), split.subarray(26)] }, signatureResponse(exact)]) {
+    const owner = new FakeTransport([script]);
+    assert.equal(await readCurrentAppImageSignature(currentSignature, { transport: () => owner }), script.chunks?.length === 2 ? signatureText : exact);
+    assert.equal(owner.closes, 1);
+  }
+});
+test("Current signature redirects reject latest, other versions, assets, repositories, loops and excess hops", async () => {
+  for (const location of [LINUX_UPDATE_FEED_URL, signatureEndpoint.replace("/download/v0.2.5/", "/latest/download/"),
+    signatureEndpoint.replace("v0.2.5", "v0.3.0"), signatureEndpoint.replace("OpenWhisper-Linux-x86_64.AppImage.sig", "OpenWhisper-Linux-amd64.deb.sig"),
+    signatureEndpoint.replace("juferdinand", "other"), `${signatureEndpoint}?query=1`, `${signatureEndpoint}#fragment`,
+    "http://release-assets.githubusercontent.com/current", "https://user@release-assets.githubusercontent.com/current",
+    "https://release-assets.githubusercontent.com:444/current", "https://objects.githubusercontent.com/current", signatureEndpoint]) {
+    const transport = new FakeTransport([{ headers: { status: 302, raw: ["Location", location] } }]);
+    await assert.rejects(readCurrentAppImageSignature(currentSignature, { transport: () => transport }), failure("INVALID_REDIRECT"));
+    assert.equal(transport.requests.length, 1); assert.equal(transport.closes, 1);
+  }
+  const loop = new FakeTransport([{ headers: { status: 302, raw: ["Location", "https://release-assets.githubusercontent.com/current"] } },
+    { headers: { status: 307, raw: ["Location", "/current"] } }]);
+  await assert.rejects(readCurrentAppImageSignature(currentSignature, { transport: () => loop }), failure("INVALID_REDIRECT"));
+  assert.equal(loop.requests.length, 2); assert.equal(loop.closes, 1);
+  const hops = new FakeTransport(Array.from({ length: 6 }, (_, index) => ({ headers: { status: 302,
+    raw: ["Location", `https://release-assets.githubusercontent.com/current-${index}`] } })));
+  await assert.rejects(readCurrentAppImageSignature(currentSignature, { transport: () => hops }), failure("INVALID_REDIRECT"));
+  assert.equal(hops.requests.length, 6); assert.equal(hops.closes, 1);
+});
+test("Current signature text enforces the 16 KiB byte bound, identity encoding, fatal UTF-8 and complete transport", async () => {
+  const cases: readonly [ResponseScript, UpdateFeedError["code"]][] = [
+    [{ headers: { status: 404, raw: [] } }, "INVALID_METADATA"],
+    [{ headers: { status: 200, raw: ["Content-Length", String(UPDATE_POLICY_LIMITS.signatureBytes + 1)] } }, "INVALID_METADATA"],
+    [{ headers: { status: 200, raw: [] }, chunks: [Buffer.alloc(8192), Buffer.alloc(8192), Buffer.alloc(1)] }, "INVALID_METADATA"],
+    [signatureResponse("é".repeat(8193)), "INVALID_METADATA"],
+    [{ ...signatureResponse(), headers: { status: 200, raw: ["Content-Encoding", "gzip"] } }, "INVALID_METADATA"],
+    [{ ...signatureResponse(), headers: { status: 200, raw: ["Content-Length", "1", "content-length", "1"] } }, "INVALID_METADATA"],
+    [{ headers: { status: 200, raw: [] }, chunks: [Buffer.from([0xff])] }, "INVALID_METADATA"],
+    [{ headers: { status: 200, raw: [] }, chunks: [Buffer.alloc(0)] }, "INVALID_METADATA"],
+    [signatureResponse(" \n\t"), "INVALID_METADATA"],
+    [{ headers: { status: 200, raw: [] } }, "TRANSPORT_FAILED"],
+    [{ ...signatureResponse(), complete: false }, "TRANSPORT_FAILED"], [{ ...signatureResponse(), failed: true }, "TRANSPORT_FAILED"],
+    [{ ...signatureResponse(), headers: { status: 200, raw: ["Content-Length", "16000"] } }, "TRANSPORT_FAILED"],
+  ];
+  for (const [script, code] of cases) {
+    const transport = new FakeTransport([script]);
+    await assert.rejects(readCurrentAppImageSignature(currentSignature, { transport: () => transport }), failure(code)); assert.equal(transport.closes, 1);
+  }
+});
+test("Current signature cancellation and expiry await original pending work and cleanup", async (t) => {
+  for (const phase of ["headers", "body"] as const) for (const timeout of [false, true]) {
+    const entered = deferred<void>(), release = deferred<void>(), controller = new AbortController();
+    const transport = new FakeTransport([{ ...signatureResponse(), ...(phase === "headers" ? { headersGate: release.promise } : {}) }]);
+    const original = transport.request.bind(transport); let settled = false;
+    transport.request = (...args) => {
+      const exchange = original(...args);
+      if (phase === "headers") { entered.accept(); return exchange; }
+      return { ...exchange, body: { async *[Symbol.asyncIterator]() { entered.accept(); await release.promise; yield* exchange.body; } } };
+    };
+    if (timeout) t.mock.timers.enable({ apis: ["setTimeout"] });
+    const reading = assert.rejects(readCurrentAppImageSignature({ ...currentSignature, signal: controller.signal }, { transport: () => transport }),
+      failure(timeout ? "TIMEOUT" : "CANCELLED")).then(() => { settled = true; });
+    try {
+      await entered.promise; if (timeout) t.mock.timers.tick(phase === "headers" ? 15_000 : 30_000); else controller.abort();
+      await turn(); assert.equal(settled, false); assert.equal(transport.closes, 1);
+    } finally { release.accept(); try { await reading; } finally { if (timeout) t.mock.timers.reset(); } }
+  }
+  const cancelled = new AbortController(); cancelled.abort(); let requests = 0;
+  const inert = { transport() { requests++; throw new Error("unexpected"); } };
+  await assert.rejects(readCurrentAppImageSignature({ ...currentSignature, signal: cancelled.signal }, inert), failure("CANCELLED"));
+  for (const currentVersion of ["v0.2.5", "00.2.5", "0.2.5/../latest", "18446744073709551616.0.0"]) {
+    await assert.rejects(readCurrentAppImageSignature({ currentVersion }, inert), failure("INVALID_INPUT"));
+  }
+  assert.equal(requests, 0);
+  const gate = deferred<void>(), transport = new FakeTransport([signatureResponse()], gate.promise); let settled = false;
+  const reading = readCurrentAppImageSignature(currentSignature, { transport: () => transport }).then(() => { settled = true; });
+  try { await turn(); assert.equal(transport.closes, 1); assert.equal(settled, false); } finally { gate.accept(); await reading; }
+  const broken = new FakeTransport([signatureResponse()]); broken.close = () => Promise.reject(new Error("private cleanup diagnostic"));
+  await assert.rejects(readCurrentAppImageSignature(currentSignature, { transport: () => broken }), failure("CLEANUP_FAILED"));
 });

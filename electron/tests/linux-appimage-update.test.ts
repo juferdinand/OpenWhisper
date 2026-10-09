@@ -5,7 +5,7 @@ import { chmod, link, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { test } from "node:test";
-import { LinuxAppImageUpdateError, admitSignedAppImageLaunch, prepareAppImageUpdate, validateAppImageUpdateHeader,
+import { LinuxAppImageUpdateError, admitSignedAppImageLaunch, repairSignedAppImageLaunch, prepareAppImageUpdate, validateAppImageUpdateHeader,
   type AppImageExecContinuation, type PreparedAppImageUpdate } from "../src/services/linux-appimage-update.js";
 import { LinuxUpdateSignatureError } from "../src/services/linux-update-signature.js";
 import { retainOwnedUpdateDownload } from "../src/services/update-staging.js";
@@ -286,4 +286,71 @@ test("Original signed current pair admits only its exact version and retains a p
     assert.throws(admitted.assertUnchanged, failure("SOURCE_CHANGED"));
     assert.equal(await readFile(f.signed, "utf8"), "stale or replaced sidecar");
   } finally { await f.cleanup(); }
+});
+
+
+test("Current-signature repair refuses unauthenticated bytes before any sidecar mutation", { skip: !supported }, async () => {
+  const f = await fixture();
+  try {
+    const header = Buffer.alloc(64); Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]).copy(header);
+    Buffer.from([0x41, 0x49, 2]).copy(header, 8); header.writeUInt16LE(3, 16); header.writeUInt16LE(62, 18); header.writeUInt32LE(1, 20);
+    await writeFile(f.image, header); await writeFile(f.launcher, appImageLauncher());
+    const input = { home: f.input.home, version: "0.2.5", launch: f.input.launch, signature: "" };
+    await assert.rejects(repairSignedAppImageLaunch(input), LinuxUpdateSignatureError);
+    assert.equal(await readFile(f.signed, "utf8"), "inert predecessor signature"); await cleanInstallation(f.image);
+    await unlink(f.signed);
+    await assert.rejects(repairSignedAppImageLaunch(input), LinuxUpdateSignatureError);
+    assert.equal(await lstat(f.signed).catch(() => undefined), undefined);
+    assert.deepEqual((await readdir(dirname(f.image))).sort(), ["OpenWhisper.AppImage", "openwhisper-launch"]);
+    assert.equal(await retainedDescriptors([f.image, f.launcher]), 0);
+  } finally { await f.cleanup(); }
+});
+
+test("Current-signature repair authenticates exact cached bytes and repairs stale and missing sidecars without execution", ownedOptions, async () => {
+  const f = await originalFixture();
+  try {
+    await writeFile(f.image, await readFile(f.path)); await writeFile(f.launcher, appImageLauncher());
+    const input = { home: f.input.home, version: "0.2.5", launch: f.input.launch, signature: f.input.signature };
+    await assert.rejects(repairSignedAppImageLaunch({ ...input, version: "0.2.4" }),
+      (error: unknown) => error instanceof LinuxUpdateSignatureError && error.code === "SIGNED_VERSION_MISMATCH");
+    assert.equal(await readFile(f.signed, "utf8"), "inert predecessor signature"); await cleanInstallation(f.image);
+    const first = await repairSignedAppImageLaunch(input); first.assertUnchanged();
+    assert.equal(await readFile(f.signed, "utf8"), f.input.signature);
+    assert.equal((await lstat(f.signed)).mode & 0o777, 0o644); await cleanInstallation(f.image);
+    assert.equal(await retainedDescriptors([f.image, f.signed, f.launcher]), 0);
+    await unlink(f.signed); assert.throws(first.assertUnchanged, failure("SOURCE_CHANGED"));
+    const second = await repairSignedAppImageLaunch(input); second.assertUnchanged(); await cleanInstallation(f.image);
+    assert.equal(await readFile(f.signed, "utf8"), f.input.signature);
+    await writeFile(f.signed, "later replacement"); assert.throws(second.assertUnchanged, failure("SOURCE_CHANGED"));
+    assert.equal(await retainedDescriptors([f.image, f.signed, f.launcher]), 0);
+  } finally { await f.cleanup(); }
+});
+
+test("Current-signature repair restores its captured sidecar on partial move/publication and preserves foreign destinations", ownedOptions, async () => {
+  for (const state of ["moved", "published", "foreign"] as const) {
+    const f = await originalFixture();
+    try {
+      await writeFile(f.image, await readFile(f.path)); await writeFile(f.launcher, appImageLauncher());
+      const old = await lstat(f.signed, { bigint: true });
+      await assert.rejects(repairSignedAppImageLaunch({ home: f.input.home, version: "0.2.5", launch: f.input.launch, signature: f.input.signature }, {
+        async move(from, to) { await rename(from, to); if (state === "moved") throw new Error("owned post-move fault"); },
+        async publish(from, to) {
+          if (state === "published") await link(from, to);
+          if (state === "foreign") await writeFile(to, "foreign signature", { mode: 0o644 });
+          throw new Error("owned publication fault");
+        },
+      }), failure(state === "foreign" ? "ROLLBACK_FAILED" : "PREPARE_FAILED"));
+      assert.equal(await readFile(f.signed, "utf8"), state === "foreign" ? "foreign signature" : "inert predecessor signature");
+      if (state === "foreign") {
+        const stage = (await readdir(dirname(f.image))).find((name) => name.startsWith(".openwhisper-signature-")); assert.ok(stage);
+        const backup = join(dirname(f.image), stage, "previous.sig");
+        assert.equal(await readFile(backup, "utf8"), "inert predecessor signature");
+        assert.equal((await lstat(backup, { bigint: true })).ino, old.ino);
+      } else {
+        assert.equal((await lstat(f.signed, { bigint: true })).ino, old.ino);
+        assert.equal((await lstat(f.signed)).mode & 0o777, 0o600); await cleanInstallation(f.image);
+      }
+      assert.equal(await retainedDescriptors([f.image, f.signed, f.launcher]), 0);
+    } finally { await f.cleanup(); }
+  }
 });

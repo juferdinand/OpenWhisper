@@ -210,6 +210,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let notify = (): void => {};
   let autostart: LinuxAutostart | MacosAutostart | undefined;
   let updateAdmitted = false;
+  let automaticUpdateCheckAllowed = true;
   let loginFact: { readonly requested: boolean; readonly pending?: boolean } | undefined;
   let loginRefresh = 0;
   const refreshLogin = async (): Promise<void> => {
@@ -224,7 +225,12 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         const launch = await admitLinuxInstalledLaunch({ build: identity, packaged: app.isPackaged, home: homedir(), pid: process.pid,
           executable: await realpath(process.execPath), appPath: await realpath(app.getAppPath()),
           resourcesPath: await realpath(process.resourcesPath), environment: process.env });
-        updateAdmitted = launch?.kind === "debian";
+        updateAdmitted = launch !== undefined;
+        if (launch?.kind === "appimage") {
+          updates = { ...updates, package: "appimage" };
+          // A migrated preference must not silently fetch a missing/stale current-image signature.
+          automaticUpdateCheckAllowed = false;
+        }
         if (launch) autostart = await LinuxAutostart.open({ appId: profile.appId,
           configHome: dirname(profile.roots.config),
           configDirs: (process.env["XDG_CONFIG_DIRS"] || "/etc/xdg").split(":").filter(Boolean),
@@ -485,8 +491,9 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   });
   if (host && macRecording && process.platform === "darwin") {
     macShortcut = new MacosShortcut({ shortcuts: globalShortcut,
-      allowed: () => !shutdownInProgress && !recordingControl && !recording.recoveryAvailable &&
+      allowed: () => !shutdownInProgress && updateReserved !== "install" && !recordingControl && !recording.recoveryAvailable &&
         !["stopping", "transcribing", "restoring", "discarding"].includes(recording.phase),
+      setupAllowed: () => !shutdownInProgress && updateReserved !== "install" && !recording.busy && !recording.recoveryAvailable,
       capture: createRecordingControlPort({ owner: host, snapshot: () => recording, configure: configureRecording,
         available: () => !shutdownInProgress && state().recording_available === true,
         serialize: withRecordingControl, cleanupSerialize: (operation) => withRecordingControl(operation, true) }),
@@ -636,6 +643,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       void finishShutdown(true).catch(() => {}); return;
     }
     const value = response.state;
+    if (updateReserved === "check" && (value.status === "idle" || value.status === "available")) automaticUpdateCheckAllowed = true;
     updates = { ...updates, error: null, progress: 0,
       status: value.status === "idle" ? "current" : value.status === "checking" ? "checking"
         : value.status === "available" ? "available" : value.status === "failed" ? "error" : "installing",
@@ -864,7 +872,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   if (updateChannel) {
     const autoCheck = (): void => {
       if (shutdownInProgress) return;
-      if (updates.configured && preferences.snapshot().auto_check_updates && !updateReserved) void requestUpdate("check").catch(() => {});
+      if (automaticUpdateCheckAllowed && updates.configured && preferences.snapshot().auto_check_updates && !updateReserved) void requestUpdate("check").catch(() => {});
       autoCheckTimer = setTimeout(autoCheck, 24 * 60 * 60 * 1000);
     };
     autoCheckTimer = setTimeout(autoCheck, 10_000);

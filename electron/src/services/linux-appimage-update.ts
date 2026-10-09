@@ -136,6 +136,119 @@ export async function admitSignedAppImageLaunch(input: { readonly home: string; 
     if (closed.some((result) => result.status === "rejected")) fail("CLEANUP_FAILED");
   }
 }
+/** Explicit-check repair only. Supplied signature text grants no authority until the original current image verifies.
+ * Missing/stale safely owned sidecars may be repaired; unexpected files and foreign publication races are preserved. */
+export async function repairSignedAppImageLaunch(input: { readonly home: string; readonly version: string;
+  readonly launch: Extract<LinuxInstalledLaunch, { kind: "appimage" }>; readonly signature: unknown },
+  effects: Partial<AppImageUpdateEffects> = {}): Promise<Readonly<{ assertUnchanged(): void }>> {
+  const { home, version, launch, signature } = input, user = process.getuid?.();
+  const image = join(home, ".local/lib/whisperfree/OpenWhisper.AppImage"), launcher = join(dirname(image), "openwhisper-launch"), signed = `${image}.sig`;
+  try { parseUpdateVersion(version); } catch { return fail("INVALID_INPUT"); }
+  if (process.platform !== "linux" || process.arch !== "x64" || user === undefined || user === 0 || typeof signature !== "string" ||
+      !isAbsolute(home) || resolve(home) !== home || /[\p{Cc}]/u.test(home) || await realpath(home) !== home ||
+      launch.kind !== "appimage" || launch.executable !== launcher || launch.arguments.length !== 1 || launch.arguments[0] !== image) fail("INVALID_INPUT");
+  const uid = BigInt(user), ancestors = directories(dirname(image), home, uid), io = { move: rename, publish: link, ...effects };
+  let file: FileHandle | undefined, old: FileHandle | undefined, copy: FileHandle | undefined, launcherFile: FileHandle | undefined;
+  let oldIdentity: BigIntStats | undefined, copyIdentity: BigIntStats | undefined, backupIdentity: BigIntStats | undefined;
+  let stage: string | undefined, source = "", backup = "", publicationAttempted = false, committed = false;
+  let stageGuard: Awaited<ReturnType<typeof assertPrivateUpdateDirectory>> | undefined;
+  let admitted: Readonly<{ assertUnchanged(): void }> | undefined;
+  const guard = async (): Promise<void> => { launch.assertUnchanged(); assertDirectories(ancestors); await stageGuard?.assertUnchanged(); };
+  const removeCopy = async (): Promise<void> => {
+    if (!copy || !copyIdentity || !await optional(source)) return;
+    await guard();
+    const current = await observe(copy, source, uid, copyIdentity.mode & 0o7777n);
+    if (current.dev !== copyIdentity.dev || current.ino !== copyIdentity.ino) fail("SOURCE_CHANGED"); await unlink(source);
+  };
+  try {
+    await guard();
+    file = await open(image, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const initial = await file.stat({ bigint: true }), mode = initial.mode & 0o7777n;
+    if ((mode & 0o7022n) !== 0n || !(mode & 0o111n)) fail("SOURCE_CHANGED");
+    const imageIdentity = await observe(file, image, uid, mode, initial);
+    launcherFile = await open(launcher, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const launcherIdentity = await launcherFile.stat({ bigint: true }), launcherMode = launcherIdentity.mode & 0o7777n;
+    if ((launcherMode & 0o7022n) !== 0n || !(launcherMode & 0o111n) ||
+        !(await readBounded(launcherFile, launcher, uid, launcherMode, launcherIdentity, 16 * 1024)).equals(Buffer.from(appImageLauncher()))) fail("SOURCE_CHANGED");
+    oldIdentity = await optional(signed);
+    if (oldIdentity) {
+      old = await open(signed, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      const oldMode = oldIdentity.mode & 0o7777n;
+      if (oldMode !== 0o600n && oldMode !== 0o644n) fail("SOURCE_CHANGED");
+      await readBounded(old, signed, uid, oldMode, oldIdentity, UPDATE_POLICY_LIMITS.signatureBytes);
+    }
+    const current = async (): Promise<void> => {
+      await guard(); await observe(launcherFile!, launcher, uid, launcherMode, launcherIdentity);
+      if (old && oldIdentity) await observe(old, signed, uid, oldIdentity.mode & 0o7777n, oldIdentity);
+      else if (await optional(signed)) fail("SOURCE_CHANGED");
+    };
+    const header = Buffer.alloc(64);
+    if ((await file.read(header, 0, 64, 0)).bytesRead !== 64) fail("INVALID_PACKAGE"); validateAppImageUpdateHeader(header);
+    await verifyLinuxUpdateStream(fileChunks(file, image, uid, mode, imageIdentity, current), signature, version);
+    await current();
+    // No sidecar or stage mutation happens before authentication of the original current image.
+    stage = await mkdtemp(join(dirname(image), ".openwhisper-signature-"));
+    stageGuard = await assertPrivateUpdateDirectory(stage); source = join(stage, "current.sig"); backup = join(stage, "previous.sig");
+    copy = await open(source, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    copyIdentity = await observe(copy, source, uid, 0o600n);
+    const bytes = Buffer.from(signature); let position = 0;
+    while (position < bytes.length) {
+      const { bytesWritten } = await copy.write(bytes, position, bytes.length - position, position);
+      if (bytesWritten < 1 || bytesWritten > bytes.length - position) fail("PREPARE_FAILED"); position += bytesWritten;
+    }
+    copyIdentity = await observe(copy, source, uid, 0o600n); await copy.sync();
+    await copy.chmod(0o644); copyIdentity = await observe(copy, source, uid, 0o644n, copyIdentity, true);
+    await current(); await observe(file, image, uid, mode, imageIdentity);
+    if (old && oldIdentity) {
+      await io.move(signed, backup);
+      backupIdentity = await observe(old, backup, uid, oldIdentity.mode & 0o7777n, oldIdentity, true);
+    }
+    await guard(); await observe(file, image, uid, mode, imageIdentity);
+    publicationAttempted = true; await io.publish(source, signed);
+    const linked = await observe(copy, signed, uid, 0o644n, copyIdentity, true, 2n);
+    await observe(copy, source, uid, 0o644n, linked, false, 2n); await unlink(source);
+    copyIdentity = await observe(copy, signed, uid, 0o644n, linked, true);
+    await syncDirectory(dirname(image)); await syncDirectory(stage);
+    admitted = await admitSignedAppImageLaunch({ home, version, launch }); admitted.assertUnchanged(); committed = true;
+    if (old && oldIdentity && backupIdentity) {
+      await guard(); await observe(old, backup, uid, oldIdentity.mode & 0o7777n, backupIdentity); await unlink(backup); backupIdentity = undefined;
+    }
+    await guard(); await rmdir(stage); stage = undefined;
+  } catch (error: unknown) {
+    if (committed) return fail("CLEANUP_FAILED");
+    try {
+      await guard();
+      // A move/publish effect may finish and then throw. Inspect only the original owned descriptors/inodes.
+      if (!backupIdentity && old && oldIdentity && backup && await optional(backup)) {
+        backupIdentity = await observe(old, backup, uid, oldIdentity.mode & 0o7777n, oldIdentity, true);
+      }
+      if (publicationAttempted && copy && copyIdentity && await optional(signed)) {
+        const staged = await optional(source), links = staged ? 2n : 1n;
+        const published = await observe(copy, signed, uid, 0o644n, copyIdentity, true, links);
+        if (!staged) {
+          await link(signed, source);
+          await observe(copy, source, uid, 0o644n, published, true, 2n);
+        }
+        await unlink(signed); copyIdentity = await observe(copy, source, uid, 0o644n, published, true);
+      }
+      if (old && oldIdentity && backupIdentity) {
+        if (await optional(signed)) fail("ROLLBACK_FAILED");
+        await observe(old, backup, uid, oldIdentity.mode & 0o7777n, backupIdentity);
+        await link(backup, signed);
+        const linked = await observe(old, signed, uid, oldIdentity.mode & 0o7777n, backupIdentity, true, 2n);
+        await observe(old, backup, uid, oldIdentity.mode & 0o7777n, linked, false, 2n); await unlink(backup); backupIdentity = undefined;
+      }
+      await removeCopy();
+      if (stage) { await guard(); await rmdir(stage); stage = undefined; }
+    } catch { return fail("ROLLBACK_FAILED"); }
+    if (error instanceof LinuxUpdateSignatureError || error instanceof LinuxAppImageUpdateError) throw error;
+    return fail("PREPARE_FAILED");
+  } finally {
+    const results = await Promise.allSettled([file?.close(), old?.close(), copy?.close(), launcherFile?.close()]);
+    if (results.some((result) => result.status === "rejected")) fail("CLEANUP_FAILED");
+  }
+  if (!admitted) fail("PREPARE_FAILED"); admitted.assertUnchanged(); return admitted;
+}
 /** Synthetic filesystem faults only; production uses fixed same-filesystem rename/link operations. */
 export interface AppImageUpdateEffects { move(from: string, to: string): Promise<void>; publish(from: string, to: string): Promise<void> }
 export interface PreparedAppImageUpdate {

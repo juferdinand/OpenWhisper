@@ -13,6 +13,8 @@ export interface MacosShortcutOptions {
   readonly shortcuts: Pick<GlobalShortcut, "register" | "unregister">;
   readonly capture: ControlCapturePort;
   readonly allowed: () => boolean;
+  /** Explicit setup can already own the recording-control reservation that blocks global callbacks. */
+  readonly setupAllowed?: () => boolean;
   readonly changed: (state: MacosShortcutState) => void;
 }
 export type MacosShortcutInput = Pick<Input, "type" | "key" | "code" | "shift" | "control" | "alt" | "meta"> &
@@ -115,7 +117,7 @@ export class MacosShortcut {
   }
   prepareCapture(): void {
     this.ensureOpen();
-    if (!this.options.allowed()) throw new MacosShortcutError("UNAVAILABLE");
+    if (!(this.options.setupAllowed ?? this.options.allowed)()) throw new MacosShortcutError("UNAVAILABLE");
     if (this.configuring) return;
     this.previous = this.binding?.accelerator ?? null;
     this.unregister(); this.candidate = undefined; this.configuring = true; this.publish("NONE");

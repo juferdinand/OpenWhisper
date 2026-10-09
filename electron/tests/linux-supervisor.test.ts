@@ -152,11 +152,11 @@ test("replacement synchronous work is inside the absolute callback deadline", as
 });
 
 // Inert original-channel composition: no feed, download, installer, process or executable is substituted into production.
-function updateFixture(install: LinuxSupervisorUpdates["installPrepared"]) {
+function updateFixture(install: LinuxSupervisorUpdates["installPrepared"], target: LinuxInstalledLaunch = launch) {
   const input = fixture(), [parent, peer] = duplexPair(); let retired = false;
   const effects: LinuxSupervisorEffects = { ...input.effects,
     launch(argv, env) { return { ...input.effects.launch(argv, env), pipe: parent }; } };
-  const original = runLinuxSupervisor({ launch, currentVersion: "0.3.0", argv: ["literal value"],
+  const original = runLinuxSupervisor({ launch: target, currentVersion: "0.3.0", argv: ["literal value"],
     revalidateReplacement: async () => { assert.fail("V2 must not invoke the historical V1 validator."); },
     updates: {
       async action(kind) { input.calls.push(kind); return kind === "check"
@@ -229,5 +229,28 @@ test("V2 final synchronous refusal or deadline prevents fixed exec after the lon
       await assert.rejects(input.original, { code: "REVALIDATION_FAILED" });
       assert.equal(input.calls.includes("exec"), false);
     } finally { await input.cleanup(); }
+  }
+});
+
+test("AppImage V2 uses its captured permanent pair and rolls back once after final refusal or exec failure", async () => {
+  for (const finalRefusal of [false, true]) {
+    let rollbacks = 0;
+    const image = join(homedir(), ".local/lib/whisperfree/OpenWhisper.AppImage"), launcher = join(homedir(), ".local/lib/whisperfree/openwhisper-launch");
+    const input = updateFixture(async () => ({ assertForExec() {
+      if (finalRefusal) throw new Error("Owned final observation changed.");
+    }, async rollbackBeforeExec() { rollbacks++; } }), { kind: "appimage", executable: launcher, arguments: [image], assertUnchanged() {} });
+    try {
+      await input.prepare(); await input.gui.acknowledgeRetired(); await input.gui.closed;
+      input.acceptClose({ code: 0, signal: null });
+      await assert.rejects(input.original, { code: finalRefusal ? "REVALIDATION_FAILED" : "EXEC_FAILED" });
+      assert.equal(rollbacks, 1);
+      assert.equal(input.calls.includes("exec"), !finalRefusal);
+      if (!finalRefusal) {
+        assert.deepEqual(input.replacement()?.argv, [launcher, image, "literal value"]);
+        assert.equal(input.replacement()?.environment.APPIMAGE, undefined);
+        assert.equal(input.replacement()?.environment.TMPDIR, undefined);
+      }
+    } finally { await input.cleanup(); }
+    assert.equal(rollbacks, 1);
   }
 });

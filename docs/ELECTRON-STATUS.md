@@ -18,14 +18,14 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | macOS dictation | Actual Intel/Apple Silicon thin Dev/Stable and same-ZIP Universal Stable packages pass sandbox, signed utilities, public-audio CPU recognition, shortcut setup/removal, migration, edited-state restart and clean exits at 5bfd71b1 | Physical microphone/TCC, actual target insertion, device changes and Metal selection remain open |
 | Linux desktop integration | Owned stock KDE 5.27 native Wayland F8, binding Quit/crash recovery and paste into separate Wayland/XWayland editors pass. Genuine X11 shortcuts and all five no-display CLI commands pass, including installed stable autostart enable/disable and generated-target restart | Expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Live LM Studio/Ollama trials and remaining provider/workflow scope are deferred to #11, outside 0.3.0; ordinary dictation remains independent |
-| Packaging and updates | Ordinary Debian/AppImage checks pass. Debian's actual packaged check/error/Quit path and fresh signed installed audit pass, including retained-snapshot mutation refusal. The inactive AppImage consumer retains both image and signature. Earlier ordinary Mac Universal checks pass | Genuine signed upgrade/restart, AppImage activation and migration, persistent Mac publisher and installation handoff, authenticated Dev replacement, DMG/release signing; resolve the two current Mac CI failures |
+| Packaging and updates | Ordinary Debian/AppImage checks pass. Debian's actual packaged check/error/Quit path and fresh signed installed audit pass, including retained-snapshot mutation refusal. AppImage supervisor wiring and explicit current-signature repair are source-reviewed. Mac replacement transaction is prepared but inactive. Earlier ordinary Mac Universal checks pass | Genuine signed upgrade/restart, actual AppImage migration, persistent Mac publisher and production installation handoff, authenticated Dev replacement, DMG/release signing; confirm the Mac shortcut correction in CI |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 ## Current package checkpoint
 
 The combined source increment passes strict typing, the normal application/shared
-UI build and 1,251 tests: 1,295 total, zero failures and 44 explicit native/opt-in
-skips in 18.49 seconds. The generated standalone Debian driver imports and retains
+UI build and 1,269 tests: 1,315 total, zero failures and 46 explicit native/opt-in
+skips in 18.50 seconds. The generated standalone Debian driver imports and retains
 its argument checks without executing acceptance. Independent source reviews pass.
 
 Debian updates connect directly to the existing
@@ -62,13 +62,29 @@ unchanged installation and refused after mutation. The original container exits0
 and is removed. This supersedes the earlier audit failure without assigning its
 unlogged cause. A genuinely newer signed upgrade and same-PID exec remain open.
 
-AppImage retains V1. Its independently reviewed inactive consumer authenticates
-the signed current image/version, preserves and restores the image/signature pair,
-and retains a final physical guard after descriptor closure. Ten focused cases
-pass using cached original signed 0.2.5 bytes; the inert-predecessor transaction
-fixtures do not prove a genuine upgrade. Explicit clean Stable AppImage construction
-now supports the fixed release asset name; construction alone grants no update or
-publication authority. Activation and missing/stale-sidecar migration remain open.
+AppImage now connects to the existing V2 parent channel and shared Update controls.
+Structural admission can provision only the missing fixed launcher after checking
+the original live image's kernel ancestry and physical layout. This local step
+does not access the network or authorize installation. An explicit Check now
+authenticates the installed image/signature pair; a missing or stale sidecar can
+be repaired from the bounded signature for the exact current release, verified
+against the original image and existing key before publication. Candidate preparation
+requires this signed-current guard. Automatic checks remain suppressed until a
+successful explicit check in each session; the saved preference is preserved.
+The consumer preserves and restores the image/signature pair and checks the
+installed target after original descriptor closure, immediately before exec.
+Focused cached-signature and inert-predecessor fixtures establish source behavior,
+not a genuine newer signed upgrade. Actual installed migration and same-PID
+restart remain open. Clean Stable construction supports the fixed release asset
+name without granting signing or publication authority.
+
+The inactive Mac replacement transaction authenticates the candidate against the
+running application's designated requirement before any swap, copies to a private
+sibling, and retains the predecessor with exclusive same-filesystem renames.
+Physical tree checks and guarded rollback preserve foreign replacements. Five
+owned-file cases pass with synthetic publisher/rename effects; they do not prove
+Darwin installation or relaunch. Production build policy, main/UI activation,
+original native retirement and captured-target relaunch remain open.
 
 The next owned Mac publisher job reuses admitted same-run thin packages and the
 existing signing identity, then compares the candidate with the original pinned
@@ -90,8 +106,15 @@ and deadlines pass in this invocation, without proving a diagnostic-caused fix.
 Later [CI 37897858417](https://github.com/juferdinand/OpenWhisper/actions/runs/37897858417),
 actual producer `a70819eb`, fails Intel's early-exit retirement fixture and ARM's
 shortcut setup. The reviewed Intel fixture now establishes kernel PID absence
-before testing absent-at-bind behavior. ARM shortcut focus/start/commit diagnostics
-are separated; no production fix or current Mac pass is inferred from these changes.
+before testing absent-at-bind behavior. Both thin jobs in the following
+[CI 37901055238](https://github.com/juferdinand/OpenWhisper/actions/runs/37901055238)
+pass retirement but fail the newly isolated `shortcut-capture-start` phase.
+The setup operation holds the recording-control reservation and previously
+rejected itself through the global recording guard. The source correction gives
+setup its own idle/recovery/shutdown/update checks while keeping global recording
+reserved. The new composition regression and all ten focused shortcut cases pass;
+timeouts and runtime assertions are unchanged. Confirmation in actual Mac CI and
+the dependent persistent-publisher job remains pending.
 
 ### Preceding Universal failure and reviewed correction
 
