@@ -13,7 +13,7 @@ import { parseUpdateVersion } from "../src/services/update-policy.js";
 import { captureSignedMacDescriptor, digestMacPreviewFile as digest, inspectMacBinary, inspectMacMinimumOS,
   inspectMacPreviewFiles, insideOutMacCodePaths, macPreviewCodesignArguments, macPreviewSigningPolicy,
   readMacPreviewRecordingDescriptor, verifyMacPreviewBundleMetadata, verifyMacPreviewRecordingDescriptor,
-  type MacPreviewSigningMode } from "./package-macos-preview.js";
+  macPreviewUpdatePolicy, writeMacPreviewUpdateBuild, type MacPreviewSigningMode } from "./package-macos-preview.js";
 
 type Architecture = "arm64" | "x64";
 const architectures = ["arm64", "x64"] as const;
@@ -169,7 +169,8 @@ async function admit(directory: string, architecture: Architecture) {
   return { directory, root, identity, version: metadata.version, source, recording, original, mach, koffiMach };
 }
 
-export interface MacUniversalOptions { readonly arm64AppPath: string; readonly x64AppPath: string; readonly output: string; readonly signingMode?: MacPreviewSigningMode }
+export interface MacUniversalOptions { readonly arm64AppPath: string; readonly x64AppPath: string; readonly output: string;
+  readonly signingMode?: MacPreviewSigningMode; readonly enableUpdates?: boolean }
 /** Normalize only captured architecture differences in fresh copies; never mutate the original thin packages. */
 export async function stageMacUniversalInputs(options: MacUniversalOptions) {
   z.object({ name: z.literal("@electron/universal"), version: z.literal(mergerPin.version), license: z.literal("MIT") })
@@ -178,6 +179,7 @@ export async function stageMacUniversalInputs(options: MacUniversalOptions) {
   const input = { arm64: await admit(options.arm64AppPath, "arm64"), x64: await admit(options.x64AppPath, "x64") };
   if (!same(input.arm64.identity, input.x64.identity) || input.arm64.version !== input.x64.version || !same(input.arm64.source, input.x64.source)) throw new Error("Thin Mac provenance differs.");
   const signing = macPreviewSigningPolicy(options.signingMode ?? "ad-hoc", input.arm64.identity, input.arm64.version, input.arm64.source, process.env["SIGN_IDENTITY"]);
+  macPreviewUpdatePolicy(options.enableUpdates, input.arm64.identity, signing);
   if (!isAbsolute(options.output) || resolve(options.output) !== options.output || /[\u0000-\u001f\u007f]/u.test(options.output) || !await absent(options.output) || await realpath(dirname(options.output)) !== dirname(options.output) ||
     architectures.some((architecture) => beneath(input[architecture].directory, options.output) || beneath(options.output, input[architecture].directory))) throw new Error("Expected a fresh isolated canonical output.");
   await mkdir(options.output, { mode: 0o700 });
@@ -226,12 +228,17 @@ export async function stageMacUniversalInputs(options: MacUniversalOptions) {
   return { input, staged, captured, signing, merger, copies, nativeFiles: [...allowedMach].sort(), output: options.output };
 }
 
-async function verifyMerged(stage: Awaited<ReturnType<typeof stageMacUniversalInputs>>, signed = false): Promise<void> {
+async function verifyMerged(stage: Awaited<ReturnType<typeof stageMacUniversalInputs>>, signed = false,
+  updateBuild?: Readonly<{ bytes: number; sha256: string }>): Promise<void> {
   const directory = stage.merger.outAppPath;
   const actual = await inventory(directory), reference = stage.copies.x64;
   for (const name of ["app.asar", "app-x64", "app-arm64"]) if (!await absent(join(directory, "Contents/Resources", name))) throw new Error("Universal merger introduced an architecture shim.");
   for (const key of new Set([...reference.keys(), ...actual.keys()])) {
     if (stage.nativeFiles.includes(key) || key === snapshotRelative("arm64")) continue;
+    if (signed && key === `${appRelative}/dist/main/macos-update-build.js`) {
+      if (!updateBuild || !same(actual.get(key), { kind: "file", mode: 0o644, ...updateBuild })) throw new Error("Universal updater configuration changed.");
+      continue;
+    }
     if (signed && (key === descriptorRelative || key === "Contents/Resources/notices/mac-universal-validation-package.json" ||
       key.endsWith("/_CodeSignature") || key.endsWith("/_CodeSignature/CodeResources"))) continue;
     if (key.endsWith("/Info.plist")) {
@@ -260,6 +267,7 @@ export async function packageMacUniversal(options: MacUniversalOptions): Promise
   if (process.platform !== "darwin" || !architectures.includes(process.arch as Architecture) || process.getuid?.() === 0) throw new Error("Universal Mac packaging requires a non-root Darwin host.");
   for (const directory of [options.arm64AppPath, options.x64AppPath]) tool("/usr/bin/codesign", ["--verify", "--deep", "--strict", directory]);
   const stage = await stageMacUniversalInputs(options);
+  const updatePolicy = macPreviewUpdatePolicy(options.enableUpdates, stage.input.arm64.identity, stage.signing);
   await makeUniversalApp(stage.merger); await verifyMerged(stage);
   const directory = stage.merger.outAppPath, root = join(directory, appRelative), appMach = stage.nativeFiles.filter((path) => beneath(appRelative, path));
   for (const path of appMach) tool("/usr/bin/codesign", macPreviewCodesignArguments(stage.signing, join(directory, path)));
@@ -269,17 +277,18 @@ export async function packageMacUniversal(options: MacUniversalOptions): Promise
     x64: await captureSignedMacDescriptor(root, stage.captured.architectures.x64) } });
   await build({ stdin: { contents: `export const DEVELOPMENT_RECORDING_BUILD: unknown = ${JSON.stringify(final)};`, loader: "ts" },
     outfile: join(root, "dist/main/development-recording-build.js"), platform: "node", format: "esm", target: "node24", sourcemap: false });
+  const updateBuild = await writeMacPreviewUpdateBuild(root, updatePolicy);
   await writeFile(join(directory, "Contents/Resources/notices/mac-universal-validation-package.json"), JSON.stringify({ version: 1,
     classification: "UNIVERSAL_VALIDATION_ONLY", source: stage.input.arm64.source, sourceVersion: stage.input.arm64.version,
     runtimeVersion: "44.7.0", applicationBuild: stage.input.arm64.identity, merger: mergerPin, signingMode: stage.signing.mode, originalThinRecording: stage.captured,
-    signedRecording: final, updateAuthority: false, runtimeAcceptance: false,
-    limitations: ["No notarization", "No stable update channel or public release acceptance", "No microphone/TCC or desktop runtime acceptance"] }, null, 2), { mode: 0o644 });
+    signedRecording: final, updateAuthority: false, updateConfigured: updatePolicy !== null, publicationAuthority: false, runtimeAcceptance: false,
+    limitations: ["No notarization", ...(updatePolicy ? ["No update installation or public release acceptance"] : ["No stable update channel or public release acceptance"]), "No microphone/TCC or desktop runtime acceptance"] }, null, 2), { mode: 0o644 });
   for (const path of insideOutMacCodePaths(stage.nativeFiles.filter((path) => !beneath(appRelative, path)))) tool("/usr/bin/codesign", macPreviewCodesignArguments(stage.signing, join(directory, path)));
   const containers = (await readdir(join(directory, "Contents/Frameworks"))).filter((name) => name.endsWith(".framework") || name.endsWith(".app"));
   for (const name of containers) tool("/usr/bin/codesign", macPreviewCodesignArguments(stage.signing, join(directory, "Contents/Frameworks", name)));
   tool("/usr/bin/codesign", macPreviewCodesignArguments(stage.signing, directory));
   tool("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--all-architectures", directory]);
-  await verifyMerged(stage, true);
+  await verifyMerged(stage, true, updateBuild);
   for (const architecture of architectures) await verifyMacPreviewRecordingDescriptor(root, final.architectures[architecture]);
   const helpers = containers.filter((name) => name.endsWith(".app"));
   verifyMacPreviewBundleMetadata(directory, stage.input.arm64.identity, stage.input.arm64.version, helpers);
@@ -293,10 +302,12 @@ export async function packageMacUniversal(options: MacUniversalOptions): Promise
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
-  if (![6, 8].includes(args.length) || args[0] !== "--arm64-app" || args[2] !== "--x64-app" || args[4] !== "--output" ||
-    !args[1] || !args[3] || !args[5] || (args.length === 8 && (args[6] !== "--signing-mode" || args[7] !== "persistent-validation"))) throw new Error("Usage: package-macos-universal.ts --arm64-app /owned/OpenWhisper.app --x64-app /owned/OpenWhisper.app --output /fresh/output [--signing-mode persistent-validation]");
+  if (![6, 8, 9].includes(args.length) || args[0] !== "--arm64-app" || args[2] !== "--x64-app" || args[4] !== "--output" ||
+    !args[1] || !args[3] || !args[5] || (args.length >= 8 && (args[6] !== "--signing-mode" || args[7] !== "persistent-validation")) ||
+    (args.length === 9 && args[8] !== "--enable-updates")) throw new Error("Usage: package-macos-universal.ts --arm64-app /owned/OpenWhisper.app --x64-app /owned/OpenWhisper.app --output /fresh/output [--signing-mode persistent-validation [--enable-updates]]");
   try {
-    console.log(JSON.stringify(await packageMacUniversal({ arm64AppPath: args[1], x64AppPath: args[3], output: args[5], ...(args.length === 8 ? { signingMode: "persistent-validation" } : {}) })));
+    console.log(JSON.stringify(await packageMacUniversal({ arm64AppPath: args[1], x64AppPath: args[3], output: args[5], ...(args.length >= 8 ? {
+      signingMode: "persistent-validation", ...(args.length === 9 ? { enableUpdates: true } : {}) } : {}) })));
   } catch (error: unknown) {
     const diagnostic = process.env["OPENWHISPER_UNIVERSAL_DIAGNOSTIC"];
     if (diagnostic && isAbsolute(diagnostic) && resolve(diagnostic) === diagnostic) {

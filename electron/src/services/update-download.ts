@@ -8,8 +8,9 @@ import { assertPrivateUpdateDirectory, MAX_UPDATE_STAGE_BYTES, retainOwnedUpdate
 type Failure = "INVALID_INPUT" | "CANCELLED" | "TIMEOUT" | "REDIRECT_FAILED" | "METADATA_FAILED" | "PAYLOAD_TOO_LARGE" | "TRANSPORT_FAILED" | "WRITE_FAILED" | "CLEANUP_FAILED";
 export class UpdateDownloadError extends Error {
   readonly cleanup: (() => Promise<void>) | undefined;
-  constructor(readonly code: Failure, cleanup?: () => Promise<void>) {
-    super(code); this.name = "UpdateDownloadError"; this.cleanup = cleanup;
+  readonly ownersSettled: (() => boolean) | undefined;
+  constructor(readonly code: Failure, cleanup?: () => Promise<void>, ownersSettled?: () => boolean) {
+    super(code); this.name = "UpdateDownloadError"; this.cleanup = cleanup; this.ownersSettled = ownersSettled;
   }
 }
 const fail = (code: Failure): never => { throw new UpdateDownloadError(code); };
@@ -107,13 +108,16 @@ export async function downloadUpdateCandidate(input: UpdateDownloadInput, effect
   let stageIdentity: BigIntStats | undefined, fileIdentity: BigIntStats | undefined;
   let transport: ModelDownloadTransport | undefined, transportClosing: Promise<void> | undefined, fileClosing: Promise<void> | undefined;
   let reading: Promise<IteratorResult<Uint8Array>> | undefined, retained: Readonly<OwnedUpdateDownload> | undefined;
+  let transportClosed = false, readSettled = false, fileClosed = false;
+  const ownersSettled = (): boolean => (!transport || transportClosed) && (!reading || readSettled) &&
+    (!file || (retained ? retained.ownersSettled?.() === true : fileClosed));
   let cleaning: Promise<void> | undefined;
   const cleanup = (): Promise<void> => {
     cleaning ??= Promise.resolve().then(async () => {
-      if (transport) { transportClosing ??= Promise.resolve().then(() => transport!.close()); await transportClosing; }
-      await reading?.catch(() => {});
+      if (transport) { transportClosing ??= Promise.resolve().then(() => transport!.close()); await transportClosing; transportClosed = true; }
+      await reading?.catch(() => {}); readSettled = true;
       if (retained) { await retained.cleanup(); return; }
-      if (file) { fileClosing ??= Promise.resolve().then(() => file!.close()); await fileClosing; }
+      if (file) { fileClosing ??= Promise.resolve().then(() => file!.close()); await fileClosing; fileClosed = true; }
       if (!stageDirectory) return;
       await cacheGuard?.assertUnchanged();
       const currentStage = await lstat(stageDirectory, { bigint: true });
@@ -131,7 +135,7 @@ export async function downloadUpdateCandidate(input: UpdateDownloadInput, effect
       await stageGuard?.assertUnchanged(); await cacheGuard?.assertUnchanged();
       if (!same(await lstat(stageDirectory, { bigint: true }), stageIdentity)) return fail("CLEANUP_FAILED");
       await rmdir(stageDirectory); stageDirectory = undefined;
-    }).catch(() => { throw new UpdateDownloadError("CLEANUP_FAILED", cleanup); });
+    }).catch(() => { throw new UpdateDownloadError("CLEANUP_FAILED", cleanup, ownersSettled); });
     const original = cleaning; void original.catch(() => { if (cleaning === original) cleaning = undefined; }); return original;
   };
   try {
@@ -188,7 +192,7 @@ export async function downloadUpdateCandidate(input: UpdateDownloadInput, effect
     await cacheGuard.assertUnchanged(); await stageGuard.assertUnchanged(); active();
     retained = await retainOwnedUpdateDownload({ file, stageDirectory, artifactName, maximumBytes: maximum }); active();
     if (retained.bytes !== received) return fail("TRANSPORT_FAILED");
-    transportClosing ??= Promise.resolve().then(() => transport!.close()); await transportClosing; active();
+    transportClosing ??= Promise.resolve().then(() => transport!.close()); await transportClosing; transportClosed = true; active();
     return retained;
   } catch (error: unknown) {
     controller.abort(); await cleanup();

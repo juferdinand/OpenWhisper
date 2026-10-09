@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,6 +7,8 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
 import { appImageArtifactName, appImageLauncher, packageLinuxAppImage } from "../scripts/package-linux-appimage.js";
+
+import { validateOwnedAppImageConstruction } from "./owned-signed-debian.js";
 
 const supported = process.platform === "linux" && process.arch === "x64";
 
@@ -82,4 +85,50 @@ test("AppImage packager refuses overlap and unpinned tools before creating outpu
     await assert.rejects(packageLinuxAppImage({ directory, tools, output }), /APPIMAGE_TOOL_PIN_MISMATCH/);
     await assert.rejects(lstat(output), { code: "ENOENT" });
   } finally { await rm(base, { recursive: true, force: true }); }
+});
+
+
+function constructionFixture() {
+  const digest = (value: string): string => createHash("sha256").update(value).digest("hex");
+  const source = { commit: "0123456789abcdef0123456789abcdef01234567", modified: false as const }, sourceVersion = "0.3.0";
+  const sourceInventory = { resources: { type: "directory", mode: 0o755, bytes: 0, sha256: digest("") },
+    "resources/app.js": { type: "file", mode: 0o644, bytes: 1, sha256: digest("x") } };
+  const image = { bytes: 10, sha256: digest("inert image") }, launcher = { bytes: Buffer.byteLength(appImageLauncher()), sha256: digest(appImageLauncher()) };
+  const inventory = { files: { "OpenWhisper-Linux-x64/resources/app.js": { bytes: 1, sha256: digest("x") },
+    "appimage/OpenWhisper-Linux-x86_64.AppImage": image, "appimage/openwhisper-launch": launcher },
+    modes: { "OpenWhisper-Linux-x64": 0o755, "OpenWhisper-Linux-x64/resources": 0o755,
+      "OpenWhisper-Linux-x64/resources/app.js": 0o644, "appimage/OpenWhisper-Linux-x86_64.AppImage": 0o755, "appimage/openwhisper-launch": 0o755 } };
+  const tools = { appimagetool: "synthetic fixed pin", runtime: "synthetic fixed pin" };
+  const receipt = { classification: "UNSIGNED_CONSTRUCTION_ONLY", applicationProducer: source, version: sourceVersion,
+    buildIdentity: { version: 1, kind: "stable", appId: "io.github.whisperfree", productName: "OpenWhisper" },
+    canonicalStableValidation: true, sourceDirectory: "/producer/OpenWhisper-Linux-x64", sourceInventory,
+    image: { path: "/producer/appimage/OpenWhisper-Linux-x86_64.AppImage", ...image },
+    launcher: { path: "/producer/appimage/openwhisper-launch", sha256: launcher.sha256 }, tools,
+    runtimeDigestMd5Only: true, passiveExtractionMatches: true, originalInputUnchanged: true,
+    runtimeAcceptance: false, updateAuthority: false, publicDistributionAuthorized: false };
+  return { receipt, expected: { source, sourceVersion, inventory }, tools };
+}
+
+test("Owned canonical AppImage receipt binds source, exact payload and tool pins without claiming signature or runtime", () => {
+  const f = constructionFixture(); validateOwnedAppImageConstruction(f.receipt, f.expected, f.tools);
+  for (const changed of [
+    { ...f.receipt, applicationProducer: { ...f.receipt.applicationProducer, modified: true } },
+    { ...f.receipt, applicationProducer: { ...f.receipt.applicationProducer, commit: "f".repeat(40) } },
+    { ...f.receipt, version: "0.2.5" }, { ...f.receipt, canonicalStableValidation: false },
+    { ...f.receipt, buildIdentity: { version: 1, kind: "development", appId: "io.github.whisperfree.dev", productName: "OpenWhisper Dev" } },
+    { ...f.receipt, passiveExtractionMatches: false }, { ...f.receipt, originalInputUnchanged: false },
+    { ...f.receipt, runtimeAcceptance: true }, { ...f.receipt, updateAuthority: true }, { ...f.receipt, publicDistributionAuthorized: true },
+    { ...f.receipt, tools: { ...f.tools, runtime: "changed" } },
+    { ...f.receipt, image: { ...f.receipt.image, path: "/producer/Preview.AppImage" } },
+    { ...f.receipt, image: { ...f.receipt.image, sha256: "f".repeat(64) } },
+    { ...f.receipt, sourceInventory: { ...f.receipt.sourceInventory, foreign: f.receipt.sourceInventory.resources } },
+    { ...f.receipt, sourceInventory: { resources: f.receipt.sourceInventory.resources } },
+  ]) assert.throws(() => validateOwnedAppImageConstruction(changed, f.expected, f.tools));
+  for (const change of ["digest", "mode", "type"] as const) {
+    const receipt = structuredClone(f.receipt);
+    if (change === "digest") receipt.sourceInventory["resources/app.js"].sha256 = "f".repeat(64);
+    if (change === "mode") receipt.sourceInventory["resources/app.js"].mode = 0o600;
+    if (change === "type") receipt.sourceInventory["resources/app.js"].type = "directory";
+    assert.throws(() => validateOwnedAppImageConstruction(receipt, f.expected, f.tools));
+  }
 });

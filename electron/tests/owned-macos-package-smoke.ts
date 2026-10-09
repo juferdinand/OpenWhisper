@@ -12,7 +12,7 @@ import { legacyMacosMigrationContextSchema } from "../src/services/legacy-macos-
 import { decodedLegacyMacosPlistSchema } from "../src/workers/macos-legacy-plist.js";
 import { pinnedRuntimeEnvironment } from "../scripts/runtime.js";
 import { macUpdateZip } from "./fixtures/mac-update-zip.js";
-import { classifyMacPublisherFixtureResult, parseMacPackageSmokeArguments, validateUniversalMacPackageMetadata } from "./fixtures/mac-package-metadata.js";
+import { classifyMacPublisherFixtureResult, parseMacPackageSmokeArguments, validateMacPackageUpdateConfiguration, validateUniversalMacPackageMetadata } from "./fixtures/mac-package-metadata.js";
 
 // Stable selection changes only this launcher; the captured package must independently match.
 if (process.platform !== "darwin" || process.getuid?.() === 0 || process.env["GITHUB_ACTIONS"] !== "true" ||
@@ -47,10 +47,14 @@ const packageMetadata = packageFormat === "universal"
     applicationBuild: capturedBuild, source: JSON.parse(await readFile(join(sourceRoot, "dist/resources/development-build.json"), "utf8")) as unknown,
     recordingModule: sourceDescriptor.toString("utf8"), host: { platform: "darwin", architecture: process.arch },
   })
-  : z.object({ architecture: z.literal(process.arch), sourceVersion: z.string().regex(/^\d+\.\d+\.\d+$/u),
-    runtimeVersion: z.literal("44.7.0"), applicationBuild: buildIdentitySchema,
-    signingMode: z.enum(["ad-hoc", "persistent-validation"]) }).parse(JSON.parse(await readFile(join(sourceBundle,
-      `Contents/Resources/notices/${stable ? "mac-stable-validation-package" : "mac-dev-package"}.json`), "utf8")) as unknown);
+  : await (async () => {
+    const receipt: unknown = JSON.parse(await readFile(join(sourceBundle,
+      `Contents/Resources/notices/${stable ? "mac-stable-validation-package" : "mac-dev-package"}.json`), "utf8"));
+    return { ...z.object({ architecture: z.literal(process.arch), sourceVersion: z.string().regex(/^\d+\.\d+\.\d+$/u),
+      runtimeVersion: z.literal("44.7.0"), applicationBuild: buildIdentitySchema,
+      signingMode: z.enum(["ad-hoc", "persistent-validation"]) }).parse(receipt),
+      updateConfigured: validateMacPackageUpdateConfiguration(receipt) };
+  })();
 assert.deepEqual(packageMetadata.applicationBuild, capturedBuild);
 
 const ownedHome = join(evidence, "home"), legacyRoot = join(ownedHome, "Library/Application Support/WhisperFree");
@@ -89,6 +93,8 @@ let signatureAdmission: unknown;
 let archiveAdmission: unknown;
 let installation: unknown;
 let stableMigration: unknown;
+let updateConfiguration: unknown;
+let automaticUpdatePreferencePatch: unknown;
 let restartExit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
 const checks: string[] = [];
 try {
@@ -151,6 +157,18 @@ try {
   page = await application.firstWindow();
   await expect(page.locator(".sidebar-brand strong")).toHaveText(capturedBuild.productName, { timeout: 15_000 });
   assert.equal(page.url(), "app://openwhisper/index.html");
+  const state = async () => appStateSchema.parse(await page!.evaluate(() => window.openwhisper!.invoke("get_state", {})));
+  if (packageMetadata.updateConfigured) {
+    stage = "owned-update-preference";
+    const before = await state();
+    assert.equal(before.updates.configured, true); assert.equal(before.macos?.updates_configured, true);
+    automaticUpdatePreferencePatch = { originalAutoCheckRequested: before.preferences.auto_check_updates,
+      originalUpdateStatus: before.updates.status, requestedPatch: { auto_check_updates: false },
+      networkAbsence: "NOT_ASSERTED; ordinary startup may already have made an authorized read-only metadata request",
+      explicitCheckDownloadInstall: "NOT_INVOKED" };
+    await page.evaluate(() => window.openwhisper!.invoke("save_preferences", { changes: { auto_check_updates: false } }));
+    await expect.poll(async () => (await state()).preferences.auto_check_updates, { timeout: 10_000 }).toBe(false);
+  }
   stage = "package-identity";
   identity = await application.evaluate(({ app, BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows().find((item) => item.webContents.getURL() === "app://openwhisper/index.html");
@@ -345,8 +363,14 @@ try {
     ? "Original fd3 Mac ZIP extraction accepts actual packaged app and refuses version, traversal, symlink and corrupt archives with complete owned cleanup"
     : "Actual original-fd3 ZIP publisher acceptance is unavailable at the measured universal ad-hoc requirement; same-version and hostile archive refusals and complete owned cleanup pass");
   stage = "native-composition";
-  const state = async () => appStateSchema.parse(await page!.evaluate(() => window.openwhisper!.invoke("get_state", {})));
   const initial = await state();
+  assert.equal(initial.updates.configured, packageMetadata.updateConfigured);
+  assert.equal(initial.macos?.updates_configured, packageMetadata.updateConfigured);
+  updateConfiguration = { expected: packageMetadata.updateConfigured, updatesConfigured: initial.updates.configured,
+    macosUpdatesConfigured: initial.macos?.updates_configured, signingMode: packageMetadata.signingMode,
+    automaticUpdatePreferencePatch,
+    scope: "Actual normal main self-publisher/build-policy/UI configuration only; no explicit check, download, installation or publication acceptance" };
+  checks.push("Actual normal main update configuration matches explicit persistent producer evidence; legacy receipts default off");
   assert.equal(initial.profile, stable ? undefined : "development"); assert.equal(initial.platform, "macos");
   assert.equal(initial.native_shortcuts, true, "The packaged normal main must enable Mac keyboard controls.");
   assert.equal(initial.macos?.shortcut_toggle_only, true, "The Mac recording descriptor must be active.");
@@ -657,6 +681,9 @@ try {
     await expect(page.locator(".sidebar-brand strong")).toHaveText(capturedBuild.productName, { timeout: 15_000 });
     assert.equal(page.url(), "app://openwhisper/index.html");
     const retained = await state();
+    assert.equal(retained.updates.configured, packageMetadata.updateConfigured);
+    assert.equal(retained.macos?.updates_configured, packageMetadata.updateConfigured);
+    if (packageMetadata.updateConfigured) assert.equal(retained.preferences.auto_check_updates, false);
     assert.equal(retained.profile, undefined); assert.equal(retained.status, "idle"); assert.deepEqual(retained.installed, ["tiny"]);
     assert.equal(retained.preferences.vocabulary, vocabulary); assert.deepEqual(retained.preferences.snippets, [ownedSnippet]);
     assert.equal(retained.preferences.macos_shortcut ?? null, null);
@@ -670,7 +697,8 @@ try {
     input: "CDP to owned window only; no OS global input injection", microphone: stable && packageFormat === "thin"
       ? "No permission request, capture Start, recording stream or inference in this stable smoke"
       : "No permission request, capture Start or microphone operation; pinned public inference fixture only",
-    installation, nativeUtilityLoading, signatureAdmission, archiveAdmission, stableMigration, tccAttribution: "Permission and real microphone behavior remain pending", exit, restartExit,
+    installation, nativeUtilityLoading, signatureAdmission, archiveAdmission, stableMigration, updateConfiguration, automaticUpdatePreferencePatch,
+    tccAttribution: "Permission and real microphone behavior remain pending", exit, restartExit,
     scope: stable ? (packageFormat === "universal"
       ? "Actual universal stable normal main, native empty-domain migration/UI/preferences/shortcut/restart/clean Quit and host capture Configure/Close plus CPU Tiny/JFK utilities; no capture Start or microphone"
       : "Actual stable normal main/bundle/native empty-domain migration/UI/preferences/regular shortcut/restart/clean Quit; no stable recording or CPU claim")
@@ -679,7 +707,7 @@ try {
 } catch (error: unknown) {
   failure = error instanceof Error ? { name: error.name, message: error.message.slice(0, 2000) } : { name: "UNKNOWN" };
   if (page && !page.isClosed()) await page.screenshot({ path: join(evidence, "failure.png"), fullPage: true }).catch(() => {});
-  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "FAIL", stage, packageFormat, applicationBuild: capturedBuild, identity, checks, installation, nativeUtilityLoading, signatureAdmission, archiveAdmission, stableMigration,
+  await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "FAIL", stage, packageFormat, applicationBuild: capturedBuild, identity, checks, installation, nativeUtilityLoading, signatureAdmission, archiveAdmission, stableMigration, updateConfiguration, automaticUpdatePreferencePatch,
     error: failure }, null, 2), { mode: 0o600 });
   process.exitCode = 1;
 } finally {

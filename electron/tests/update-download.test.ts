@@ -176,7 +176,7 @@ unixTest("a failed original close exposes the same retained cleanup obligation a
   } finally { await originalClose?.(); }
 }));
 unixTest("a replaced producer artifact is preserved after original close with an explicit failed cleanup receipt", async () => fixture(async (input) => {
-  let replacement: string | undefined;
+  let replacement: string | undefined, refusal: UpdateDownloadError | undefined;
   await assert.rejects(downloadUpdateCandidate(input, { transport: () => new FakeTransport([response()]),
     async write(file, chunk, offset, length, position) {
       const result = await file.write(chunk, offset, length, position);
@@ -184,9 +184,36 @@ unixTest("a replaced producer artifact is preserved after original close with an
       replacement = join(input.cacheDirectory, stages[0]!, candidate.assetName);
       await rename(replacement, `${replacement}.original`); await writeFile(replacement, "replacement", { mode: 0o600 });
       return result.bytesWritten;
-    } }), failure("CLEANUP_FAILED"));
+    } }), (error: unknown) => {
+      if (error instanceof UpdateDownloadError) refusal = error;
+      return failure("CLEANUP_FAILED")(error);
+    });
+  assert.ok(refusal?.cleanup); assert.equal(refusal.ownersSettled?.(), true);
+  await assert.rejects(refusal.cleanup(), failure("CLEANUP_FAILED"));
+  assert.equal(refusal.ownersSettled?.(), true);
   assert.ok(replacement); assert.equal(await readFile(replacement, "utf8"), "replacement");
   assert.deepEqual(await readFile(`${replacement}.original`), bytes);
+}));
+
+unixTest("a rejected original transport close never certifies owner settlement or manufactures a second close", async () => fixture(async (input) => {
+  class RefusingTransport extends FakeTransport {
+    override async close(): Promise<void> { this.closes++; throw new Error("Owned transport close refusal"); }
+  }
+  const transport = new RefusingTransport([response()]);
+  let original: FileHandle | undefined, refusal: UpdateDownloadError | undefined;
+  try {
+    await assert.rejects(downloadUpdateCandidate(input, { transport: () => transport,
+      async write(file, chunk, offset, length, position) {
+        original = file; return (await file.write(chunk, offset, length, position)).bytesWritten;
+      } }), (error: unknown) => {
+        if (error instanceof UpdateDownloadError) refusal = error;
+        return failure("CLEANUP_FAILED")(error);
+      });
+    assert.ok(original && refusal?.cleanup); assert.equal(refusal.ownersSettled?.(), false);
+    await assert.rejects(refusal.cleanup(), failure("CLEANUP_FAILED"));
+    assert.equal(refusal.ownersSettled?.(), false); assert.equal(transport.closes, 1);
+    assert.ok((await original.stat()).isFile());
+  } finally { await original?.close(); } // Owned inert fixture only; the production refusal remains unsettled.
 }));
 
 const assets = process.env["OPENWHISPER_OWNED_UPDATE_SIGNATURE_ASSETS"];

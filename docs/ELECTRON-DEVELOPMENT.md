@@ -226,6 +226,17 @@ installer refuses them. Normal startup opens stable storage and performs migrati
 so assembly does not authorize replacing or launching against a live installation.
 Actual stable GUI and nonempty legacy preference-cache acceptance remain pending.
 
+Persistent signing uses the explicit `--signing-mode persistent-validation` option
+and an exact `SIGN_IDENTITY` certificate fingerprint from the existing signing
+identity. This alone keeps updates disabled. A separate `--enable-updates` option,
+available only with persistent Stable signing, embeds the fixed repository and
+leaf certificate fingerprint before final signing. Both thin and Universal
+constructors support this choice; it grants no publication or installation
+acceptance. Main independently verifies the current publisher, original running
+bundle and writable installation parent before exposing shared Update controls.
+Normal development/ad-hoc builds retain a null policy. See the
+[current update evidence and remaining runtime gates](ELECTRON-STATUS.md).
+
 The next source increment supports exact Linux `--control start|stop|toggle|cancel|status`
 before GUI/profile initialization. It contacts only the already-running same-user
 stable or Dev owner selected by the captured build, without service activation.

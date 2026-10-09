@@ -27,6 +27,8 @@ export interface OwnedUpdateDownload extends UpdateFileObservation {
   readonly file: FileHandle;
   readonly stageDirectory: string;
   readonly artifactName: UpdateArtifactName;
+  /** Resource settlement only; private filesystem cleanup may still refuse a changed stage. */
+  readonly ownersSettled?: () => boolean;
   /** Call only after all original writes and consuming operations settle. Removes no extraction child or replacement. */
   cleanup(): Promise<void>;
 }
@@ -97,12 +99,12 @@ export async function inspectOwnedUpdateFile(input: OwnedUpdateFileInput): Promi
 export async function retainOwnedUpdateDownload(input: OwnedUpdateFileInput): Promise<Readonly<OwnedUpdateDownload>> {
   const { file, stageDirectory, artifactName } = input;
   const observed = await capture(input);
-  let closing: Promise<void> | undefined, cleaning: Promise<void> | undefined, complete = false;
+  let closing: Promise<void> | undefined, cleaning: Promise<void> | undefined, complete = false, fileClosed = false;
   const cleanup = (): Promise<void> => {
     cleaning ??= Promise.resolve().then(async () => {
       if (complete) return;
       closing ??= Promise.resolve().then(() => file.close());
-      await closing;
+      await closing; fileClosed = true;
       await observed.assertDirectories();
       const named = await lstat(observed.path, { bigint: true }).catch((error: unknown) => {
         if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
@@ -121,5 +123,5 @@ export async function retainOwnedUpdateDownload(input: OwnedUpdateFileInput): Pr
     return original;
   };
   return Object.freeze({ file, stageDirectory, artifactName,
-    bytes: observed.bytes, assertUnchanged: observed.assertUnchanged, cleanup });
+    bytes: observed.bytes, assertUnchanged: observed.assertUnchanged, cleanup, ownersSettled: () => fileClosed });
 }

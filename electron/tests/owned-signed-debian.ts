@@ -3,25 +3,35 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as nodeFs from "node:fs";
 import { createRequire } from "node:module";
-import { isAbsolute, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { parseApplicationBuildModule } from "../src/contracts/build-identity.js";
+import { buildIdentitySchema, parseApplicationBuildModule } from "../src/contracts/build-identity.js";
 import { developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
 import { validateDebianUpdateMetadata } from "../src/services/linux-debian-update.js";
 import { LINUX_UPDATE_PUBLIC_KEY } from "../src/services/linux-update-signature.js";
+import { appImageLauncher } from "../src/services/linux-appimage-launcher.js";
 import { isNewerUpdateVersion, parseUpdateVersion } from "../src/services/update-policy.js";
 
 // Owned CI acceptance only. Signing, root installation and namespace ownership stay in the workflow.
-const artifact = "OpenWhisper-Linux-amd64.deb", directory = "OpenWhisper-Linux-x64";
+const debianArtifact = "OpenWhisper-Linux-amd64.deb", imageArtifact = "appimage/OpenWhisper-Linux-x86_64.AppImage", directory = "OpenWhisper-Linux-x64";
+type Package = "deb" | "appimage";
+const artifactPath = (kind: Package): string => kind === "deb" ? debianArtifact : imageArtifact;
+const receiptPath = (kind: Package): string => kind === "deb" ? "candidate-receipt.json" : "appimage-candidate-receipt.json";
+const candidatePaths = (kind: Package): readonly string[] => kind === "deb" ? [debianArtifact, directory] :
+  [directory, imageArtifact, "appimage/openwhisper-launch", "appimage/receipt.json", "appimage/construction-command.json", "appimage/passive-extraction-command.json"];
 const physicalFs = process.versions["electron"] ? createRequire(import.meta.url)("original-fs") as typeof nodeFs : nodeFs;
 const { constants, createReadStream } = physicalFs;
 const { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, writeFile } = physicalFs.promises;
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/u), commitSchema = z.string().regex(/^[a-f0-9]{40}$/u);
 const fileSchema = z.strictObject({ bytes: z.number().int().nonnegative().max(1024 ** 3), sha256: hashSchema });
-const receiptSchema = z.strictObject({ version: z.literal(1), classification: z.literal("CANONICAL_STABLE_VALIDATION_ONLY"),
-  source: z.strictObject({ commit: commitSchema, modified: z.literal(false) }), sourceVersion: z.string(),
-  files: z.record(z.string(), fileSchema), modes: z.record(z.string(), z.number().int().min(0).max(0o7777)) });
+const sourceSchema = z.strictObject({ commit: commitSchema, modified: z.literal(false) });
+const receiptFields = { source: sourceSchema, sourceVersion: z.string(),
+  files: z.record(z.string(), fileSchema), modes: z.record(z.string(), z.number().int().min(0).max(0o7777)) };
+const receiptSchema = z.union([
+  z.strictObject({ version: z.literal(1), classification: z.literal("CANONICAL_STABLE_VALIDATION_ONLY"), ...receiptFields }),
+  z.strictObject({ version: z.literal(2), classification: z.literal("CANONICAL_STABLE_APPIMAGE_VALIDATION_ONLY"), package: z.literal("appimage"), ...receiptFields }),
+]);
 type Inventory = Pick<z.infer<typeof receiptSchema>, "files" | "modes">;
 type ChildReceipt = { pid: number; code: number | null; signal: NodeJS.Signals | null; closed: true;
   absent: boolean; timedOut: boolean; stdoutBytes: number; stderrBytes: number };
@@ -33,12 +43,17 @@ function absolute(value: string | undefined): string {
 }
 export function parseOwnedSignedDebianArguments(args: readonly string[]) {
   const mode = z.enum(["capture", "admit", "verify", "embedded-verify", "audit", "audit-mismatch", "audit-mutation"]).parse(args[0]);
-  const toolsRequired = mode === "admit" || mode === "verify";
-  assert.equal(args.length, mode === "capture" ? 3 : toolsRequired ? 7 : 5);
+  const toolsRequired = mode === "admit" || mode === "verify", count = mode === "capture" ? 3 : toolsRequired ? 7 : 5;
+  const packageKind: Package = args.length === count ? "deb" : "appimage";
+  assert.equal(args.length, count + (packageKind === "appimage" ? 2 : 0));
+  if (packageKind === "appimage") {
+    assert.equal(args[count], "--package"); assert.equal(args[count + 1], "appimage");
+    assert.ok(["capture", "admit", "verify", "embedded-verify"].includes(mode));
+  }
   assert.equal(args[1], "--candidate");
   if (toolsRequired) assert.equal(args[3], "--tools");
   if (mode !== "capture") assert.equal(args[toolsRequired ? 5 : 3], "--evidence");
-  return { mode, candidate: absolute(args[2]), tools: toolsRequired ? absolute(args[4]) : undefined,
+  return { mode, package: packageKind, candidate: absolute(args[2]), tools: toolsRequired ? absolute(args[4]) : undefined,
     evidence: mode === "capture" ? undefined : absolute(args[toolsRequired ? 6 : 4]) };
 }
 async function bounded(path: string, limit = 2 * 1024 * 1024): Promise<string> {
@@ -70,7 +85,7 @@ async function writeReceipt(path: string, value: unknown): Promise<void> {
 async function packageFacts(candidate: string) {
   const app = join(candidate, directory, "resources/app"), dist = join(app, "dist");
   assert.equal(parseApplicationBuildModule(await bounded(join(dist, "main/application-build.js"))).kind, "stable");
-  const source = receiptSchema.shape.source.parse(JSON.parse(await bounded(join(dist, "resources/development-build.json"))) as unknown);
+  const source = sourceSchema.parse(JSON.parse(await bounded(join(dist, "resources/development-build.json"))) as unknown);
   const version = (await bounded(join(dist, "resources/VERSION"), 128)).trim(); parseUpdateVersion(version);
   assert.ok(isNewerUpdateVersion(version, "0.2.5"));
   assert.equal(z.object({ version: z.string() }).parse(JSON.parse(await bounded(join(app, "package.json"))) as unknown).version, version);
@@ -88,11 +103,49 @@ async function packageFacts(candidate: string) {
   }
   return { source, sourceVersion: version };
 }
-async function admittedCandidate(candidate: string, matchSource: boolean) {
-  const receipt = receiptSchema.parse(JSON.parse(await bounded(join(candidate, "candidate-receipt.json"))) as unknown);
+/** Pure receipt consistency only; publisher authentication still requires both real signature verifiers. */
+export function validateOwnedAppImageConstruction(value: unknown, expected: {
+  readonly source: z.infer<typeof sourceSchema>; readonly sourceVersion: string; readonly inventory: Inventory;
+}, tools: unknown): void {
+  const entry = fileSchema.extend({ type: z.enum(["file", "directory"]), mode: z.number().int().min(0).max(0o7777) });
+  const receipt = z.object({ classification: z.literal("UNSIGNED_CONSTRUCTION_ONLY"), applicationProducer: sourceSchema,
+    buildIdentity: buildIdentitySchema, version: z.string(), canonicalStableValidation: z.literal(true), sourceDirectory: z.string(),
+    sourceInventory: z.record(z.string(), entry), image: fileSchema.extend({ path: z.string() }),
+    launcher: z.object({ path: z.string(), sha256: hashSchema }), tools: z.unknown(), runtimeDigestMd5Only: z.literal(true),
+    passiveExtractionMatches: z.literal(true), originalInputUnchanged: z.literal(true), runtimeAcceptance: z.literal(false),
+    updateAuthority: z.literal(false), publicDistributionAuthorized: z.literal(false) }).parse(value);
+  assert.deepEqual(receipt.applicationProducer, expected.source); assert.equal(receipt.version, expected.sourceVersion);
+  assert.equal(receipt.buildIdentity.kind, "stable"); assert.deepEqual(receipt.tools, tools);
+  assert.equal(basename(absolute(receipt.sourceDirectory)), directory); assert.equal(basename(absolute(receipt.image.path)), basename(imageArtifact));
+  assert.equal(basename(absolute(receipt.launcher.path)), "openwhisper-launch");
+  assert.deepEqual(expected.inventory.files[imageArtifact], { bytes: receipt.image.bytes, sha256: receipt.image.sha256 });
+  const launcher = Buffer.from(appImageLauncher());
+  assert.deepEqual(expected.inventory.files["appimage/openwhisper-launch"], { bytes: launcher.length, sha256: createHash("sha256").update(launcher).digest("hex") });
+  assert.equal(receipt.launcher.sha256, expected.inventory.files["appimage/openwhisper-launch"]?.sha256);
+  assert.equal(expected.inventory.modes[imageArtifact], 0o755); assert.equal(expected.inventory.modes["appimage/openwhisper-launch"], 0o755);
+  const names = Object.keys(expected.inventory.modes).filter((name) => name.startsWith(`${directory}/`)).map((name) => name.slice(directory.length + 1));
+  assert.deepEqual(Object.keys(receipt.sourceInventory).sort(), names.sort());
+  for (const [name, entry] of Object.entries(receipt.sourceInventory)) {
+    const path = `${directory}/${name}`, file = expected.inventory.files[path];
+    assert.equal(entry.mode, expected.inventory.modes[path]);
+    if (file) { assert.equal(entry.type, "file"); assert.deepEqual(file, { bytes: entry.bytes, sha256: entry.sha256 }); }
+    else { assert.equal(entry.type, "directory"); assert.equal(entry.bytes, 0); }
+  }
+}
+async function admittedCandidate(candidate: string, matchSource: boolean, kind: Package = "deb") {
+  const receipt = receiptSchema.parse(JSON.parse(await bounded(join(candidate, receiptPath(kind)))) as unknown);
+  assert.equal(receipt.version, kind === "deb" ? 1 : 2);
   assert.ok(Object.keys(receipt.files).length <= 16_384 && Object.keys(receipt.modes).length <= 16_384);
-  assert.deepEqual(await packageFacts(candidate), { source: receipt.source, sourceVersion: receipt.sourceVersion });
-  assert.deepEqual(await inventory(candidate, [artifact, directory]), { files: receipt.files, modes: receipt.modes });
+  const facts = await packageFacts(candidate);
+  assert.deepEqual(facts, { source: receipt.source, sourceVersion: receipt.sourceVersion });
+  const observed = await inventory(candidate, candidatePaths(kind));
+  assert.deepEqual(observed, { files: receipt.files, modes: receipt.modes });
+  if (kind === "appimage") {
+    const construction: unknown = JSON.parse(await bounded(join(candidate, "appimage/receipt.json")));
+    const pins = matchSource ? JSON.parse(await bounded(join(absolute(process.env["GITHUB_WORKSPACE"]), "electron/native/appimage-tools.json"))) as unknown
+      : z.object({ tools: z.unknown() }).parse(construction).tools;
+    validateOwnedAppImageConstruction(construction, { ...facts, inventory: observed }, pins);
+  }
   if (matchSource) {
     assert.equal(receipt.source.commit, commitSchema.parse(process.env["GITHUB_SHA"]));
     assert.equal(receipt.sourceVersion, (await bounded(join(absolute(process.env["GITHUB_WORKSPACE"]), "VERSION"), 128)).trim());
@@ -140,9 +193,10 @@ async function admittedTools(root: string) {
     .parse(JSON.parse(await bounded(join(root, "tauri.conf.json"))) as unknown);
   assert.equal(observed.modes["verify-update"], 0o755); return observed;
 }
-async function embedded(candidate: string, mode: "embedded-verify" | "audit" | "audit-mismatch" | "audit-mutation") {
-  const receipt = await admittedCandidate(candidate, false);
-  const installed = mode !== "embedded-verify";
+async function embedded(candidate: string, mode: "embedded-verify" | "audit" | "audit-mismatch" | "audit-mutation", kind: Package) {
+  const artifact = artifactPath(kind), stagedArtifact = kind === "deb" ? debianArtifact : "OpenWhisper-Linux-x86_64.AppImage",
+    receipt = await admittedCandidate(candidate, false, kind);
+  const installed = mode !== "embedded-verify"; if (installed) assert.equal(kind, "deb");
   assert.equal(process.versions["electron"], "44.7.0"); assert.match(process.versions.node, /^24\./u);
   if (installed) { assert.equal(process.getuid?.(), 1000); assert.equal(process.execPath, "/opt/openwhisper/openwhisper"); }
   const root = installed ? "/opt/openwhisper/resources/app" : join(candidate, directory, "resources/app");
@@ -152,7 +206,7 @@ async function embedded(candidate: string, mode: "embedded-verify" | "audit" | "
   const signatures = require(join(root, "dist/services/linux-update-signature.js")) as typeof import("../src/services/linux-update-signature.js");
   const signatureBefore = await hash(join(candidate, `${artifact}.sig`));
   const stage = join(evidence!, "stage"); await mkdir(stage, { mode: 0o700 });
-  const file = await open(join(stage, artifact), constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  const file = await open(join(stage, stagedArtifact), constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   let download: Awaited<ReturnType<typeof staging.retainOwnedUpdateDownload>> | undefined;
   let finalGuard: (() => void) | undefined, mismatch: ((error: unknown) => boolean) | undefined;
   try {
@@ -168,13 +222,13 @@ async function embedded(candidate: string, mode: "embedded-verify" | "audit" | "
       }
       await file.sync();
     } finally { await source.close(); }
-    download = await staging.retainOwnedUpdateDownload({ file, stageDirectory: stage, artifactName: artifact });
+    download = await staging.retainOwnedUpdateDownload({ file, stageDirectory: stage, artifactName: stagedArtifact });
     const signature = await bounded(join(candidate, `${artifact}.sig`), 16 * 1024);
-    assert.deepEqual(await hash(join(stage, artifact)), receipt.files[artifact]);
+    assert.deepEqual(await hash(join(stage, stagedArtifact)), receipt.files[artifact]);
     if (!installed) {
       phase = "embedded-fixed-key";
-      await verifier.verifyOwnedLinuxUpdateFile({ ...download, artifactName: artifact, signature, version: receipt.sourceVersion });
-      await assert.rejects(verifier.verifyOwnedLinuxUpdateFile({ ...download, artifactName: artifact, signature, version: "0.0.0" }),
+      await verifier.verifyOwnedLinuxUpdateFile({ ...download, artifactName: stagedArtifact, signature, version: receipt.sourceVersion });
+      await assert.rejects(verifier.verifyOwnedLinuxUpdateFile({ ...download, artifactName: stagedArtifact, signature, version: "0.0.0" }),
         (error: unknown) => error instanceof signatures.LinuxUpdateSignatureError && error.code === "SIGNED_VERSION_MISMATCH");
     } else {
       phase = "installed-service-import";
@@ -219,8 +273,8 @@ async function embedded(candidate: string, mode: "embedded-verify" | "audit" | "
   }
   // The final installed observation deliberately survives original source descriptor cleanup.
   if (finalGuard) { assert.ok(mismatch); if (mode === "audit") finalGuard(); else assert.throws(finalGuard, mismatch); }
-  await assert.rejects(lstat(stage), { code: "ENOENT" }); await admittedCandidate(candidate, false);
-  return { source: receipt.source, version: receipt.sourceVersion, archive: receipt.files[artifact], signature: signatureBefore,
+  await assert.rejects(lstat(stage), { code: "ENOENT" }); await admittedCandidate(candidate, false, kind);
+  return { package: kind, appImageRuntime: "NOT_TESTED", migration: "NOT_TESTED", upgrade: "NOT_TESTED", source: receipt.source, version: receipt.sourceVersion, archive: receipt.files[artifact], signature: signatureBefore,
     runtime: { electron: process.versions["electron"], node: process.versions.node }, uid: process.getuid?.(), originalSourceClosed: true,
     stageAbsent: true, finalGuardAfterSourceClose: installed ? mode === "audit" ? "ACCEPTED" : "REFUSED" : "NOT_TESTED",
     installed: installed ? mode === "audit" ? "ACCEPTED" : "INSTALLED_MISMATCH" : "NOT_TESTED",
@@ -237,35 +291,39 @@ async function main() {
     phase = args.mode;
     if (args.mode === "capture") {
       const facts = await packageFacts(args.candidate); assert.equal(facts.source.commit, commitSchema.parse(process.env["GITHUB_SHA"]));
-      const receipt = receiptSchema.parse({ version: 1, classification: "CANONICAL_STABLE_VALIDATION_ONLY", ...facts,
-        ...await inventory(args.candidate, [artifact, directory]) });
-      await writeReceipt(join(args.candidate, "candidate-receipt.json"), receipt); await admittedCandidate(args.candidate, true); return;
+      const receipt = receiptSchema.parse({ ...(args.package === "deb" ? { version: 1, classification: "CANONICAL_STABLE_VALIDATION_ONLY" }
+        : { version: 2, classification: "CANONICAL_STABLE_APPIMAGE_VALIDATION_ONLY", package: "appimage" }), ...facts,
+        ...await inventory(args.candidate, candidatePaths(args.package)) });
+      await writeReceipt(join(args.candidate, receiptPath(args.package)), receipt); await admittedCandidate(args.candidate, true, args.package); return;
     }
-    if (args.mode === "embedded-verify" || args.mode === "audit" || args.mode === "audit-mismatch" || args.mode === "audit-mutation") details = await embedded(args.candidate, args.mode);
+    if (args.mode === "embedded-verify" || args.mode === "audit" || args.mode === "audit-mismatch" || args.mode === "audit-mutation") details = await embedded(args.candidate, args.mode, args.package);
     else {
-      const candidate = await admittedCandidate(args.candidate, true); assert.ok(args.tools); const tools = await admittedTools(args.tools);
-      phase = "canonical-debian-metadata";
-      validateDebianUpdateMetadata(await run("/usr/bin/dpkg-deb", ["--showformat=${Package}\\n${Version}\\n${Architecture}\\n", "--show", join(args.candidate, artifact)], 0), candidate.sourceVersion);
+      const artifact = artifactPath(args.package), candidate = await admittedCandidate(args.candidate, true, args.package);
+      assert.ok(args.tools); const tools = await admittedTools(args.tools);
+      if (args.package === "deb") {
+        phase = "canonical-debian-metadata";
+        validateDebianUpdateMetadata(await run("/usr/bin/dpkg-deb", ["--showformat=${Package}\\n${Version}\\n${Architecture}\\n", "--show", join(args.candidate, artifact)], 0), candidate.sourceVersion);
+      }
       const signatureBefore = args.mode === "verify" ? await hash(join(args.candidate, `${artifact}.sig`)) : undefined;
       if (args.mode === "verify") {
         phase = "embedded-original-source-verification";
         const embeddedEvidence = join(evidence!, "embedded");
         await run(join(args.candidate, directory, "openwhisper"), [fileURLToPath(import.meta.url), "embedded-verify", "--candidate", args.candidate,
-          "--evidence", embeddedEvidence], 0, { ELECTRON_RUN_AS_NODE: "1" });
+          "--evidence", embeddedEvidence, ...(args.package === "appimage" ? ["--package", "appimage"] : [])], 0, { ELECTRON_RUN_AS_NODE: "1" });
         assert.equal(z.object({ status: z.literal("PASS") }).parse(JSON.parse(await bounded(join(embeddedEvidence, "result.json"))) as unknown).status, "PASS");
         phase = "native-original-source-verification";
         for (const [version, status] of [[candidate.sourceVersion, 0], ["0.0.0", 1]] as const) await run(join(args.tools, "verify-update"),
           [join(args.tools, "tauri.conf.json"), join(args.candidate, artifact), join(args.candidate, `${artifact}.sig`), version], status);
       }
-      assert.deepEqual(await admittedCandidate(args.candidate, true), candidate); assert.deepEqual(await admittedTools(args.tools), tools);
+      assert.deepEqual(await admittedCandidate(args.candidate, true, args.package), candidate); assert.deepEqual(await admittedTools(args.tools), tools);
       if (signatureBefore) assert.deepEqual(await hash(join(args.candidate, `${artifact}.sig`)), signatureBefore);
-      details = { source: candidate.source, version: candidate.sourceVersion, archive: candidate.files[artifact], tools,
+      details = { package: args.package, appImageRuntime: "NOT_TESTED", migration: "NOT_TESTED", upgrade: "NOT_TESTED", source: candidate.source, version: candidate.sourceVersion, archive: candidate.files[artifact], tools,
         signature: signatureBefore ?? "NOT_YET_PRESENT" };
     }
     await writeReceipt(join(evidence!, "result.json"), { status: "PASS", mode: args.mode, classification: "OWNED_SIGNED_CANDIDATE_EVIDENCE_ONLY", details, children });
   } catch {
     if (evidence) await writeReceipt(join(evidence, "result.json"), { status: "FAIL", mode: args.mode, phase, children });
-    process.stderr.write("Owned signed Debian acceptance failed.\n"); process.exitCode = 1;
+    process.stderr.write("Owned signed Linux candidate acceptance failed.\n"); process.exitCode = 1;
   }
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

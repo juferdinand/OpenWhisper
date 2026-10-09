@@ -18,15 +18,16 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | macOS dictation | Actual Intel/Apple Silicon thin Dev/Stable and same-ZIP Universal Stable packages pass sandbox, signed utilities, public-audio CPU recognition, shortcut setup/removal, migration, edited-state restart and clean exits at 5bfd71b1 | Physical microphone/TCC, actual target insertion, device changes and Metal selection remain open |
 | Linux desktop integration | Owned stock KDE 5.27 native Wayland F8, binding Quit/crash recovery and paste into separate Wayland/XWayland editors pass. Genuine X11 shortcuts and all five no-display CLI commands pass, including installed stable autostart enable/disable and generated-target restart | Expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Live LM Studio/Ollama trials and remaining provider/workflow scope are deferred to #11, outside 0.3.0; ordinary dictation remains independent |
-| Packaging and updates | Ordinary Debian/AppImage checks pass. Debian's actual packaged check/error/Quit path and fresh signed installed audit pass, including retained-snapshot mutation refusal. AppImage supervisor wiring and explicit current-signature repair are source-reviewed. Mac replacement transaction is prepared but inactive. Earlier ordinary Mac Universal checks pass | Genuine signed upgrade/restart, actual AppImage migration, persistent Mac publisher and production installation handoff, authenticated Dev replacement, DMG/release signing; confirm the Mac shortcut correction in CI |
+| Packaging and updates | Ordinary Debian/AppImage checks pass. Debian's actual packaged check/error/Quit path and fresh signed installed audit pass, including retained-snapshot mutation refusal. AppImage supervisor wiring and explicit current-signature repair are source-reviewed. Mac Update controls, persistent-build admission and installation handoff are connected in source. Earlier ordinary Mac Universal checks pass | Genuine signed upgrade/restart and actual AppImage migration, actual persistent Mac publisher/installation/relaunch, authenticated Dev replacement, DMG/release signing; confirm the Mac shortcut and physical-temp fixture corrections in CI |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 ## Current package checkpoint
 
 The combined source increment passes strict typing, the normal application/shared
-UI build and 1,269 tests: 1,315 total, zero failures and 46 explicit native/opt-in
-skips in 18.50 seconds. The generated standalone Debian driver imports and retains
-its argument checks without executing acceptance. Independent source reviews pass.
+UI build and 1,286 tests: 1,332 total, zero failures and 46 explicit native/opt-in
+skips in 18.48 seconds. The generated standalone Linux candidate driver imports and
+retains its explicit Debian/AppImage argument checks without executing acceptance.
+Independent source reviews pass.
 
 Debian updates connect directly to the existing
 parent supervisor, V2 channel and shared Update controls. Only a canonical
@@ -62,6 +63,13 @@ unchanged installation and refused after mutation. The original container exits0
 and is removed. This supersedes the earlier audit failure without assigning its
 unlogged cause. A genuinely newer signed upgrade and same-PID exec remain open.
 
+The next canonical CI path also wraps that same completed Stable directory in an
+AppImage, using checksum-checked appimagetool/runtime inputs without another native
+build. Its separate receipt binds the fixed image, launcher and construction
+provenance before the existing owner-only signer. Both embedded and native
+verifiers require the exact signed version. Actual construction, timing and
+signature results remain pending; this path performs no AppImage launch or upgrade.
+
 AppImage now connects to the existing V2 parent channel and shared Update controls.
 Structural admission can provision only the missing fixed launcher after checking
 the original live image's kernel ancestry and physical layout. This local step
@@ -78,18 +86,38 @@ not a genuine newer signed upgrade. Actual installed migration and same-PID
 restart remain open. Clean Stable construction supports the fixed release asset
 name without granting signing or publication authority.
 
-The inactive Mac replacement transaction authenticates the candidate against the
+The Mac replacement transaction authenticates the candidate against the
 running application's designated requirement before any swap, copies to a private
 sibling, and retains the predecessor with exclusive same-filesystem renames.
 Physical tree checks and guarded rollback preserve foreign replacements. Five
 owned-file cases pass with synthetic publisher/rename effects; they do not prove
-Darwin installation or relaunch. Production build policy, main/UI activation,
-original native retirement and captured-target relaunch remain open.
+Darwin installation or relaunch. Main now connects shared Update controls to the
+existing bounded feed/download/archive services. Original archive owners close
+before handoff, and original native recording/speech cleanup precedes replacement
+and the fixed captured-executable relaunch. Immediate failures restore only the
+same transaction; a retired session cannot advertise recording availability.
+Scheduling relaunch supplies no successor acknowledgment, so the predecessor
+remains retained after successful scheduling. Actual installation/relaunch and
+new-version confirmation remain open.
+
+Ordinary builds and persistent validation alone keep Mac updates disabled. Only
+an explicit `--enable-updates` persistent Stable package embeds the fixed repository
+and exact certificate fingerprint before signing. Runtime checks bind the strict
+all-architecture certificate requirement to the current process's designated
+requirement and require a writable installation parent. This capability is optional;
+an unavailable publisher or installation must not prevent ordinary dictation.
+Failed downloads retain their original cleanup obligation. Original resource
+settlement is distinct from private filesystem cleanup: Quit can preserve refused
+files only after the original transport/read/file owners are known to have settled.
 
 The next owned Mac publisher job reuses admitted same-run thin packages and the
 existing signing identity, then compares the candidate with the original pinned
 0.2.5 binary's designated requirement. Temporary credentials are cleaned before
-runtime acceptance. This is a prepared CI path, not a persistent-publisher result.
+runtime acceptance. The next candidate explicitly configures updates; owned smoke
+checks actual main/UI admission, then disables automatic metadata checks through
+ordinary preferences. Startup might already have made its normal metadata request;
+the harness neither initiates an installation nor claims network absence.
+This is a prepared CI path, not a persistent-publisher or installation result.
 
 All five relevant Mac jobs in
 [normal CI 37892162932](https://github.com/juferdinand/OpenWhisper/actions/runs/37892162932)
@@ -115,6 +143,14 @@ setup its own idle/recovery/shutdown/update checks while keeping global recordin
 reserved. The new composition regression and all ten focused shortcut cases pass;
 timeouts and runtime assertions are unchanged. Confirmation in actual Mac CI and
 the dependent persistent-publisher job remains pending.
+
+The following [CI 37903127605](https://github.com/juferdinand/OpenWhisper/actions/runs/37903127605),
+actual synthetic producer `38d8c608` (API head `ef0c9158`), stops all three Mac jobs
+in the default unit suite before application packaging or smoke. Three AppImage
+parent fixtures and five Mac transaction fixtures pass temporary aliases into
+physical-ancestry admission. Their reviewed correction canonicalizes only the
+owned temporary roots with `realpath`; production safety rules remain unchanged.
+This failure supplies no runtime result for the preceding shortcut correction.
 
 ### Preceding Universal failure and reviewed correction
 

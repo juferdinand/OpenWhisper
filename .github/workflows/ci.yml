@@ -35,7 +35,7 @@ jobs:
           npm ci --prefix electron
       - name: Install native CPU and desktop validation tools (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build pkg-config libglib2.0-dev desktop-file-utils
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build pkg-config libglib2.0-dev desktop-file-utils squashfs-tools
       - name: Check isolated Electron foundation
         working-directory: electron
         run: |
@@ -84,12 +84,35 @@ jobs:
           node --import tsx scripts/package-linux-preview.ts \
             --output "$RUNNER_TEMP/openwhisper-linux-canonical" --canonical-stable-validation \
             > "$RUNNER_TEMP/openwhisper-linux-canonical-result.json"
+          tools="$RUNNER_TEMP/openwhisper-appimage-tools"
+          test ! -e "$tools"
+          mkdir -m 700 "$tools"
+          for component in appimagetool runtime; do
+            if test "$component" = appimagetool; then filename=appimagetool-x86_64.AppImage; else filename=runtime-x86_64; fi
+            url="$(jq -er ".$component.url" native/appimage-tools.json)"
+            bytes="$(jq -er ".$component.bytes" native/appimage-tools.json)"
+            digest="$(jq -er ".$component.sha256" native/appimage-tools.json)"
+            curl --fail --location --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 120 \
+              --output "$tools/$filename" "$url"
+            test "$(wc -c < "$tools/$filename")" -eq "$bytes"
+            printf '%s  %s\n' "$digest" "$tools/$filename" | sha256sum --check --status
+            chmod 755 "$tools/$filename"
+          done
+          unsquashfs -version > "$RUNNER_TEMP/openwhisper-appimage-extractor.txt"
+          sha256sum "$(command -v unsquashfs)" >> "$RUNNER_TEMP/openwhisper-appimage-extractor.txt"
+          node --import tsx scripts/package-linux-appimage.ts \
+            --directory "$RUNNER_TEMP/openwhisper-linux-canonical/OpenWhisper-Linux-x64" \
+            --output "$RUNNER_TEMP/openwhisper-linux-canonical/appimage" --tools "$tools" --canonical-stable-validation \
+            > "$RUNNER_TEMP/openwhisper-linux-canonical-appimage-result.json"
           node_modules/.bin/esbuild tests/owned-signed-debian.ts \
             --bundle --platform=node --format=esm --target=node24 --external:original-fs \
             --outfile="$RUNNER_TEMP/owned-signed-debian.mjs"
           node "$RUNNER_TEMP/owned-signed-debian.mjs" capture --candidate "$RUNNER_TEMP/openwhisper-linux-canonical"
+          node "$RUNNER_TEMP/owned-signed-debian.mjs" capture --candidate "$RUNNER_TEMP/openwhisper-linux-canonical" --package appimage
           tar -C "$RUNNER_TEMP/openwhisper-linux-canonical" -cf "$RUNNER_TEMP/openwhisper-linux-canonical.tar" \
-            OpenWhisper-Linux-amd64.deb OpenWhisper-Linux-x64 candidate-receipt.json
+            OpenWhisper-Linux-amd64.deb OpenWhisper-Linux-x64 candidate-receipt.json appimage-candidate-receipt.json \
+            appimage/OpenWhisper-Linux-x86_64.AppImage appimage/openwhisper-launch appimage/receipt.json \
+            appimage/construction-command.json appimage/passive-extraction-command.json
       - name: Upload the same-run canonical Linux candidate
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -98,6 +121,8 @@ jobs:
           path: |
             ${{ runner.temp }}/openwhisper-linux-canonical.tar
             ${{ runner.temp }}/openwhisper-linux-canonical-result.json
+            ${{ runner.temp }}/openwhisper-linux-canonical-appimage-result.json
+            ${{ runner.temp }}/openwhisper-appimage-extractor.txt
             ${{ runner.temp }}/owned-signed-debian.mjs
           if-no-files-found: error
           retention-days: 14
@@ -507,7 +532,7 @@ jobs:
           node --import tsx scripts/package-macos-universal.ts \
             --arm64-app "$RUNNER_TEMP/publisher-extracted-arm64/OpenWhisper.app" \
             --x64-app "$RUNNER_TEMP/publisher-extracted-x64/OpenWhisper.app" \
-            --output "$RUNNER_TEMP/mac-publisher-output" --signing-mode persistent-validation \
+            --output "$RUNNER_TEMP/mac-publisher-output" --signing-mode persistent-validation --enable-updates \
             > "$evidence/package-result.json"
           umask 077
           original="$private/old-release/OpenWhisper.app"
@@ -558,7 +583,7 @@ jobs:
     with:
       artifact_name: OpenWhisper-Linux-development-${{ github.sha }}
   linux_signed_candidate:
-    name: Owned signed Electron Debian audit
+    name: Owned signed Electron Linux candidates
     needs: [electron, linux]
     if: >-
       github.actor == github.repository_owner && github.actor != 'dependabot[bot]' &&
@@ -597,6 +622,9 @@ jobs:
           node "$RUNNER_TEMP/signed-candidate-packet/owned-signed-debian.mjs" admit \
             --candidate "$RUNNER_TEMP/signed-candidate" --tools "$RUNNER_TEMP/signed-tools" \
             --evidence "$RUNNER_TEMP/signed-evidence/admission"
+          node "$RUNNER_TEMP/signed-candidate-packet/owned-signed-debian.mjs" admit \
+            --candidate "$RUNNER_TEMP/signed-candidate" --tools "$RUNNER_TEMP/signed-tools" \
+            --evidence "$RUNNER_TEMP/signed-evidence/appimage-admission" --package appimage
       - name: Sign only the admitted canonical candidate with the existing key
         id: sign
         env:
@@ -615,7 +643,12 @@ jobs:
             printf '%s\n' '::error::The admitted candidate signing step failed.'
             exit 1
           fi
-          printf '%s\n' '{"status":"SIGNED","scope":"Private canonical candidate; no public release or updater activation"}' > "$RUNNER_TEMP/signed-evidence/signing.json"
+          if ! node "$RUNNER_TEMP/signed-tools/node_modules/@tauri-apps/cli/tauri.js" signer sign \
+            --app-version "$version" "$RUNNER_TEMP/signed-candidate/appimage/OpenWhisper-Linux-x86_64.AppImage" >/dev/null 2>&1; then
+            printf '%s\n' '::error::The admitted AppImage signing step failed.'
+            exit 1
+          fi
+          printf '%s\n' '{"status":"SIGNED","scope":"Private canonical Debian and AppImage; no AppImage runtime, migration or upgrade evidence"}' > "$RUNNER_TEMP/signed-evidence/signing.json"
           printf '%s\n' 'available=true' >> "$GITHUB_OUTPUT"
       - name: Verify exact signed bytes and version with embedded Electron and the existing Rust oracle
         if: steps.sign.outputs.available == 'true'
@@ -625,6 +658,9 @@ jobs:
           node "$RUNNER_TEMP/signed-candidate-packet/owned-signed-debian.mjs" verify \
             --candidate "$RUNNER_TEMP/signed-candidate" --tools "$RUNNER_TEMP/signed-tools" \
             --evidence "$RUNNER_TEMP/signed-evidence/verification"
+          node "$RUNNER_TEMP/signed-candidate-packet/owned-signed-debian.mjs" verify \
+            --candidate "$RUNNER_TEMP/signed-candidate" --tools "$RUNNER_TEMP/signed-tools" \
+            --evidence "$RUNNER_TEMP/signed-evidence/appimage-verification" --package appimage
       - name: Install and audit only inside the original disposable Ubuntu namespace
         if: steps.sign.outputs.available == 'true'
         env:

@@ -49,6 +49,10 @@ import { WaylandRecordingOverlay } from "./wayland-recording-overlay.js";
 import { MacosShortcut } from "./macos-shortcut.js";
 import { MacosPaste } from "./macos-paste.js";
 import { MacosAutostart } from "./macos-autostart.js";
+import { APPLICATION_MACOS_UPDATE_BUILD } from "./macos-update-build.js";
+import { admitMacosUpdates, type MacosUpdateAdmission } from "./macos-update-admission.js";
+import { createMacosUpdateCoordinator, handoffMacosUpdate } from "./macos-update-coordinator.js";
+import type { PreparedMacosUpdateInstall } from "../services/macos-update-install.js";
 import { LinuxAutostart } from "../services/linux-autostart.js";
 import { admitLinuxInstalledLaunch } from "./linux-installed-launch.js";
 import { openLinuxUpdateGuiChannel, LINUX_UPDATE_PROTOCOL, type LinuxUpdateGuiChannel, type LinuxUpdateResponse } from "./linux-update-channel.js";
@@ -193,6 +197,11 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let shutdownTask: Promise<void> | undefined;
   let updateReserved: "check" | "install" | undefined;
   let updateChannel: LinuxUpdateGuiChannel | undefined;
+  let macUpdateAdmission: MacosUpdateAdmission | undefined;
+  let macUpdates: ReturnType<typeof createMacosUpdateCoordinator> | undefined;
+  let macUpdateAbort: AbortController | undefined, macUpdateOperation: Promise<unknown> | undefined;
+  let macPrepared: Readonly<PreparedMacosUpdateInstall> | undefined;
+  let recordingRetired = false;
   let autoCheckTimer: ReturnType<typeof setTimeout> | undefined;
   let updates: UpdateState = { configured: false, status: "idle", version: null, progress: 0, error: null,
     package: identity.kind === "stable" ? process.platform === "darwin" ? "macos" : "deb" : "development" };
@@ -239,6 +248,17 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       }
     } catch { /* Keep persisted requests intact when installation or OS facts are unavailable. */ }
     await refreshLogin();
+  }
+  if (process.platform === "darwin" && identity.kind === "stable") {
+    try {
+      macUpdateAdmission = admitMacosUpdates({ policy: APPLICATION_MACOS_UPDATE_BUILD, identity,
+        packaged: app.isPackaged, currentVersion: version, executable: await realpath(process.execPath) });
+      if (macUpdateAdmission) {
+        macUpdates = createMacosUpdateCoordinator({ admission: macUpdateAdmission, identity,
+          currentVersion: version, cacheDirectory: profile.paths.cache });
+        updates = { ...updates, configured: true };
+      }
+    } catch { updates = { ...updates, status: "error", error: "Update services are unavailable in this installation." }; }
   }
   if (updateAdmitted) {
     try { updateChannel = openLinuxUpdateGuiChannel(version, receiveUpdate); }
@@ -332,7 +352,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       microphone_allowed: microphoneAllowed, recording_shortcut: macShortcut?.state().configuring ?? false,
       shortcut_toggle_only: macRecording, clipboard_restore_available: false,
       shortcut_hint: "Press and release a keyboard key. Escape cancels.",
-      editor: "", recommended: [], updates_configured: false, launch_at_login_pending: loginFact?.pending ?? false,
+      editor: "", recommended: [], updates_configured: updates.configured, launch_at_login_pending: loginFact?.pending ?? false,
     } } : {}),
     version, status: recording.phase === "starting" ? "recording"
       : ["stopping", "restoring", "discarding"].includes(recording.phase) ? "transcribing" : recording.phase,
@@ -359,7 +379,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     elapsed: Math.min(Number.MAX_SAFE_INTEGER, Math.floor(recording.elapsedMs / 1000)), level: recording.level,
     model_directory: profile.paths.models,
     ...(identity.kind === "development" ? { profile: "development", development_build: `${build.commit.slice(0, 12)}${build.modified ? "+modified" : ""}` } : {}),
-    recording_available: updateReserved !== "install" && !!host && (macRecording ? microphoneAllowed || recording.busy : !!audioServer || recording.busy) &&
+    recording_available: !recordingRetired && updateReserved !== "install" && !!host && (macRecording ? microphoneAllowed || recording.busy : !!audioServer || recording.busy) &&
       (recording.busy || installed.some((item) => item.model.id === preferences.snapshot().model)),
     local_processing: processingProfile.snapshot(),
     local_processing_invalid_profile: processingProfile.invalidContent,
@@ -458,7 +478,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     notify();
   };
   const withRecordingControl = <T>(operation: () => Promise<T>, duringShutdown = false): Promise<T> => {
-    if (recordingControl || (!duringShutdown && (shutdownInProgress || updateReserved === "install"))) return Promise.reject(new Error("Recording control is busy."));
+    if (recordingControl || (!duringShutdown && (recordingRetired || shutdownInProgress || updateReserved === "install"))) return Promise.reject(new Error("Recording control is busy."));
     // Reserve before the first await so configuration and request changes cannot overlap.
     recordingControl = true; cancelRequested = false;
     const task = Promise.resolve().then(operation).finally(() => {
@@ -487,6 +507,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     else { await configureRecording(); if (cancelRequested) return; inferenceProgress = 0; await host.command("start"); }
   });
   const cancelRecording = (): Promise<void> => action(async () => {
+    if (recordingRetired) throw new Error("Recording is unavailable until the app restarts.");
     cancelRequested = true; if (host?.isConfigured()) await host.command("cancel");
   });
   if (host && macRecording && process.platform === "darwin") {
@@ -612,13 +633,36 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     } else { notify(); }
   });
   window.on("blur", () => { macShortcut?.focusLost(); if (keyCapture) { keyCapture = undefined; contents.setIgnoreMenuShortcuts(false); notify(); } });
-  function finishShutdown(retiring: boolean): Promise<void> {
-    if (shutdownTask) return retiring ? Promise.reject(new Error("Shutdown already started.")) : shutdownTask;
+  function finishShutdown(retiring: boolean, macHandoff?: Readonly<PreparedMacosUpdateInstall>): Promise<void> {
+    if (shutdownTask) return retiring || macHandoff ? Promise.reject(new Error("Shutdown already started.")) : shutdownTask;
     shutdownInProgress = true; cancelRequested = true; processing.close(); downloadAbort?.abort();
+    if (!macHandoff) macUpdateAbort?.abort();
     clearTimeout(autoCheckTimer); autoCheckTimer = undefined;
     keyCapture = undefined; contents.setIgnoreMenuShortcuts(false);
-    shutdownTask = (async () => { await recordingOperation?.catch(() => {}); await downloading; await downloads.finalize();
+    let nativeCleanupStarted = false;
+    const closeOwners = async (): Promise<void> => {
+      await recordingOperation?.catch(() => {}); await downloading; await downloads.finalize();
+      nativeCleanupStarted = true;
       await macShortcut?.close(); macPaste?.close(); await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); await waylandOverlay?.close();
+      if (macRecording) { recordingRetired = true; host = undefined; configured = false; }
+    };
+    shutdownTask = (async () => {
+      if (!macHandoff) {
+        await macUpdateOperation?.catch(() => {});
+        await macUpdates?.settleForQuit();
+        if (macPrepared) {
+          const prepared = macPrepared; macPrepared = undefined;
+          // A refused optional-update cleanup retains its stage, without trapping ordinary Quit.
+          await prepared.discard().catch(() => {});
+        }
+        await closeOwners();
+      } else {
+        const executable = macUpdateAdmission?.executable;
+        if (!executable) throw new Error("Update relaunch is unavailable.");
+        await handoffMacosUpdate(macHandoff, { retire: closeOwners,
+          relaunch: () => app.relaunch({ execPath: executable, args: [] }) });
+        macPrepared = undefined;
+      }
       if (updateChannel) {
         if (retiring) { await updateChannel.acknowledgeRetired(); await updateChannel.closed; }
         else {
@@ -633,7 +677,14 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       await updateChannel?.close();
       // Preserve uncertain owners and the private recovery files for explicit review.
       shutdownInProgress = false; shutdownTask = undefined;
-      message = "Recording cleanup could not finish. Recording data and uncertain processes are kept."; notify(); throw error;
+      if (macRecording && nativeCleanupStarted) recordingRetired = true;
+      if (macHandoff) {
+        macPrepared = undefined; updateReserved = undefined;
+        updates = { ...updates, configured: false, status: "error", error: "The update could not be completed." };
+      }
+      message = recordingRetired ? "Restart the app before recording again. Update backups and uncertain processes are kept."
+        : "Recording cleanup could not finish. Recording data and uncertain processes are kept.";
+      notify(); throw error;
     });
     return shutdownTask;
   }
@@ -653,15 +704,46 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     notify();
   }
   const requestUpdate = async (kind: "check" | "install"): Promise<void> => {
-    if (!updateChannel || !updates.configured || updateReserved || shutdownInProgress) throw new Error("Update services are unavailable or busy.");
+    if ((!updateChannel && !macUpdates) || !updates.configured || updateReserved || shutdownInProgress) throw new Error("Update services are unavailable or busy.");
     if (kind === "install" && (updates.status !== "available" || recordingControl || recording.busy || recording.recoveryAvailable || downloading ||
         keyCapture || shortcut.configuring || pasteState.configuring || macShortcut?.state().configuring || !preferences.snapshot().setup_completed)) {
       throw new Error("Finish the current recording, download or setup before installing an update.");
     }
     // A request resolves after its write, not its terminal response. Keep the reservation until that response or retirement.
     updateReserved = kind; updates = { ...updates, status: kind === "check" ? "checking" : "installing", error: null, progress: 0 }; notify();
-    try { await updateChannel.request(kind); }
-    catch { await updateChannel.close(); throw new Error("The update connection failed."); }
+    if (macUpdates) {
+      const controller = new AbortController(); macUpdateAbort = controller;
+      try {
+        if (kind === "check") {
+          const task = macUpdates.check(controller.signal); macUpdateOperation = task;
+          const candidate = await task;
+          if (macUpdateOperation === task) macUpdateOperation = undefined;
+          if (shutdownInProgress) return;
+          updates = { ...updates, status: candidate ? "available" : "current", version: candidate?.version ?? null, error: null };
+          updateReserved = undefined; notify();
+        } else {
+          const task = macUpdates.prepareInstall(controller.signal).then((prepared) => { macPrepared = prepared; return prepared; });
+          macUpdateOperation = task;
+          const prepared = await task;
+          if (macUpdateOperation === task) macUpdateOperation = undefined;
+          if (shutdownInProgress) return;
+          await finishShutdown(false, prepared);
+        }
+      } catch {
+        if (!shutdownInProgress) {
+          updateReserved = undefined; updates = { ...updates, status: "error", error: "The update could not be completed." }; notify();
+        }
+        throw new Error("The update could not be completed.");
+      } finally {
+        macUpdateOperation = undefined;
+        if (macUpdateAbort === controller) macUpdateAbort = undefined;
+      }
+      return;
+    }
+    const channel = updateChannel;
+    if (!channel) { updateReserved = undefined; throw new Error("Update services are unavailable."); }
+    try { await channel.request(kind); }
+    catch { await channel.close(); throw new Error("The update connection failed."); }
   };
   app.on("before-quit", (event) => {
     if (shutdownComplete) return;
@@ -869,7 +951,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       if (overlay === loadingOverlay) overlay = undefined;
     }
   }
-  if (updateChannel) {
+  if (updateChannel || macUpdates) {
     const autoCheck = (): void => {
       if (shutdownInProgress) return;
       if (automaticUpdateCheckAllowed && updates.configured && preferences.snapshot().auto_check_updates && !updateReserved) void requestUpdate("check").catch(() => {});

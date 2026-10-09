@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
 import { SPEECH_ENTRY_FILES } from "../src/services/speech-entry-graph.js";
-import { classifyMacPublisherFixtureResult, parseMacPackageSmokeArguments, validateUniversalMacPackageMetadata } from "./fixtures/mac-package-metadata.js";
+import { classifyMacPublisherFixtureResult, parseMacPackageSmokeArguments, validateMacPackageUpdateConfiguration, validateUniversalMacPackageMetadata } from "./fixtures/mac-package-metadata.js";
 import { parseMacPublisherIdentity, parseMacPublisherKeychains, parseMacPublisherZipListing, parseOwnedMacPublisherArguments,
   validateMacPublisherCompletion } from "./owned-macos-publisher.js";
 const artifact = { bytes: 123, sha256: "a".repeat(64) };
@@ -45,9 +45,24 @@ test("actual V2 and indexed originals agree on both architectures while final si
     const input = fixture(); input.host.architecture = architecture;
     const result = validateUniversalMacPackageMetadata(input);
     assert.equal(result.signingMode, "ad-hoc");
+    assert.equal(result.updateConfigured, false);
     assert.equal(result.recordingDescriptor.architecture, architecture);
     assert.deepEqual(result.recordingDescriptor, input.receipt.signedRecording.architectures[architecture]);
   }
+});
+test("Mac update configuration defaults off and requires explicit Stable persistent producer evidence", () => {
+  const original = fixture();
+  assert.equal(validateMacPackageUpdateConfiguration(original.receipt), false);
+  assert.equal(validateMacPackageUpdateConfiguration({ ...original.receipt, updateConfigured: false, publicationAuthority: false }), false);
+  const enabled = { ...original.receipt, signingMode: "persistent-validation", updateConfigured: true, publicationAuthority: false };
+  assert.equal(validateMacPackageUpdateConfiguration(enabled), true);
+  assert.equal(validateUniversalMacPackageMetadata({ ...original, receipt: enabled }).updateConfigured, true);
+  for (const receipt of [{ ...enabled, signingMode: "ad-hoc" }, { ...enabled, publicationAuthority: true },
+    { ...enabled, applicationBuild: { version: 1, kind: "development", appId: "io.github.whisperfree.dev", productName: "OpenWhisper Dev" } },
+    ...[null, 1, "true"].map((updateConfigured) => ({ ...enabled, updateConfigured }))]) {
+    assert.throws(() => validateMacPackageUpdateConfiguration(receipt));
+  }
+  assert.throws(() => validateUniversalMacPackageMetadata({ ...original, receipt: { ...enabled, updateAuthority: true } }));
 });
 test("missing or swapped originals and source, identity, version or descriptor mismatches refuse universal evidence", () => {
   const original = fixture();

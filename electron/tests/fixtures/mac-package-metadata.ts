@@ -27,11 +27,22 @@ const universalReceiptSchema = z.strictObject({ version: z.literal(1), classific
     integrity: z.literal("sha512-MonS1kfkZdSEkLZI0pdR/TCx8ecxwRSFm7sORfwIkDI9UaIbHnk4Mgeqq+Ob9qDQRV8LZ9+hHCmimpA9BRcNxw=="),
     licenseSha256: z.literal("edab8abb78d9c5b36944c3e00aebf6a90eb32378993f49ac8a3904007029c629") }),
   signingMode: z.enum(["ad-hoc", "persistent-validation"]), originalThinRecording: darwinUniversalRecordingDescriptorSchema,
-  signedRecording: darwinUniversalRecordingDescriptorSchema, updateAuthority: z.literal(false), runtimeAcceptance: z.literal(false),
+  signedRecording: darwinUniversalRecordingDescriptorSchema, updateAuthority: z.literal(false),
+  updateConfigured: z.boolean().optional(), publicationAuthority: z.literal(false).optional(), runtimeAcceptance: z.literal(false),
   limitations: z.array(z.string().max(256)).max(16) });
 const thinReceiptSchema = z.object({ version: z.literal(1), architecture: z.enum(["arm64", "x64"]), source: sourceSchema,
   sourceVersion: versionSchema, runtimeVersion: z.literal("44.7.0"), applicationBuild: buildIdentitySchema,
   unsignedRecording: developmentRecordingDescriptorSchema, signedRecording: developmentRecordingDescriptorSchema });
+
+/** Configuration is producer evidence, never publisher or publication authority. Legacy receipts default off. */
+export function validateMacPackageUpdateConfiguration(input: unknown): boolean {
+  const value = z.object({ applicationBuild: buildIdentitySchema, signingMode: z.enum(["ad-hoc", "persistent-validation"]),
+    updateConfigured: z.boolean().default(false), publicationAuthority: z.literal(false).optional() }).parse(input);
+  if (value.updateConfigured) {
+    assert.equal(value.signingMode, "persistent-validation"); assert.equal(value.applicationBuild.kind, "stable");
+  }
+  return value.updateConfigured;
+}
 
 /** Consistency of original package evidence only; normal main still performs native admission. */
 export function validateUniversalMacPackageMetadata(input: {
@@ -56,7 +67,8 @@ export function validateUniversalMacPackageMetadata(input: {
   }
   const selected = selectDevelopmentRecordingDescriptor(actual, input.host);
   return { sourceVersion: receipt.sourceVersion, runtimeVersion: receipt.runtimeVersion, applicationBuild: identity,
-    source: receipt.source, recordingDescriptor: selected, signingMode: receipt.signingMode };
+    source: receipt.source, recordingDescriptor: selected, signingMode: receipt.signingMode,
+    updateConfigured: validateMacPackageUpdateConfiguration(receipt) };
 }
 
 /** Only the producer-admitted ad-hoc universal fixture has this known publisher limitation. */

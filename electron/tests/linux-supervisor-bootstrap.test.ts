@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, mkdir, lstat, open, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, lstat, open, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -60,7 +60,8 @@ test("both fixed shell bootstraps clear Node injection and preserve literal appl
 
 // Inert host authority only: owned files, no signature verification, feed, installer or process execution.
 async function appImageFixture() {
-  const home = await mkdtemp(join(tmpdir(), "openwhisper-appimage-parent-")), events: string[] = [];
+  // Darwin's temporary base can contain /var aliases; production admission requires physical ancestry.
+  const home = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-appimage-parent-"))), events: string[] = [];
   const file = await open(join(home, "inert-download"), "wx", 0o600);
   const selected: LinuxUpdateCandidate = { package: "appimage", authentication: "unauthenticated", version: "0.3.1", notes: "",
     assetName: "OpenWhisper-Linux-x86_64.AppImage", assetURL: `${LINUX_UPDATE_REPOSITORY}/releases/download/v0.3.1/OpenWhisper-Linux-x86_64.AppImage`,

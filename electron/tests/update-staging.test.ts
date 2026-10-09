@@ -92,7 +92,9 @@ unixTest("cleanup closes the original but preserves a replacement artifact and o
     const stage = await retainOwnedUpdateDownload(f.input), original = join(f.input.stageDirectory, "original");
     await rename(f.path, original); await writeFile(f.path, "replacement", { mode: 0o600 });
     await assert.rejects(stage.assertUnchanged(), failure("FILE_CHANGED"));
+    assert.equal(stage.ownersSettled?.(), false);
     await assert.rejects(stage.cleanup(), failure("CLEANUP_FAILED"));
+    assert.equal(stage.ownersSettled?.(), true);
     await assert.rejects(f.file.stat(), { code: "EBADF" });
     assert.equal(await readFile(f.path, "utf8"), "replacement"); assert.equal(await readFile(original, "utf8"), "owned bytes");
   } finally { await rm(f.root, { recursive: true, force: true }); }

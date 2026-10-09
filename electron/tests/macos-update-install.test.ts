@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { constants } from "node:fs";
-import { cp, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { lstatSync, mkdirSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,7 +22,7 @@ async function bundle(path: string, version: string, text: string): Promise<void
   await symlink("A", join(path, "Contents/Frameworks/Test.framework/Versions/Current"));
 }
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "openwhisper-mac-install-")), applications = join(root, "Applications"), stage = join(root, "download");
+  const root = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-mac-install-"))), applications = join(root, "Applications"), stage = join(root, "download");
   await mkdir(applications, { mode: 0o755 }); await mkdir(stage, { mode: 0o700 });
   const currentBundle = join(applications, "OpenWhisper.app"), source = join(stage, "unpacked/OpenWhisper.app");
   await bundle(currentBundle, "0.2.4", "inert predecessor"); await bundle(source, "0.2.5", "inert candidate");

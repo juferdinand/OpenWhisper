@@ -16,7 +16,7 @@ test("Owned signed Debian roles require exact argument selectors and canonical a
   assert.equal(parseOwnedSignedDebianArguments(["capture", "--candidate", "/owned/candidate"]).mode, "capture");
   for (const mode of ["admit", "verify"]) {
     assert.deepEqual(parseOwnedSignedDebianArguments([mode, "--candidate", "/owned/candidate", "--tools", "/owned/tools", "--evidence", "/owned/evidence"]),
-      { mode, candidate: "/owned/candidate", tools: "/owned/tools", evidence: "/owned/evidence" });
+      { mode, package: "deb", candidate: "/owned/candidate", tools: "/owned/tools", evidence: "/owned/evidence" });
   }
   for (const mode of ["embedded-verify", "audit", "audit-mismatch", "audit-mutation"]) {
     assert.equal(parseOwnedSignedDebianArguments([mode, "--candidate", "/owned/candidate", "--evidence", "/owned/evidence"]).mode, mode);
@@ -27,6 +27,19 @@ test("Owned signed Debian roles require exact argument selectors and canonical a
     ["audit", "--tools", "/owned/candidate", "--evidence", "/owned/evidence"],
     ["verify", "--candidate", "/owned/candidate", "--evidence", "/owned/tools", "--tools", "/owned/evidence"]]) {
     assert.throws(() => parseOwnedSignedDebianArguments(args));
+  }
+});
+
+test("Owned AppImage signature roles require an explicit variant and never select installed Debian audit", () => {
+  for (const mode of ["capture", "admit", "verify", "embedded-verify"]) {
+    const args = [mode, "--candidate", "/owned/candidate", ...(mode === "admit" || mode === "verify" ? ["--tools", "/owned/tools"] : []),
+      ...(mode === "capture" ? [] : ["--evidence", "/owned/evidence"]), "--package", "appimage"];
+    assert.equal(parseOwnedSignedDebianArguments(args).package, "appimage");
+    assert.throws(() => parseOwnedSignedDebianArguments([...args.slice(0, -1), "deb"]));
+    assert.throws(() => parseOwnedSignedDebianArguments([...args, "extra"]));
+  }
+  for (const mode of ["audit", "audit-mismatch", "audit-mutation"]) {
+    assert.throws(() => parseOwnedSignedDebianArguments([mode, "--candidate", "/owned/candidate", "--evidence", "/owned/evidence", "--package", "appimage"]));
   }
 });
 
