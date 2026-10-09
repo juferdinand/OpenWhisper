@@ -7,6 +7,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { stageMacUniversalInputs } from "../scripts/package-macos-universal.js";
+import { readMacosPublisherRequirement } from "../scripts/macos-publisher-signature.js";
 import { validateMacUpdateBundleFiles } from "../src/services/macos-update-archive.js";
 
 // Owned publisher evidence only. The workflow owns credentials and temporary-keychain cleanup.
@@ -105,7 +106,7 @@ export function validateMacPublisherCompletion(input: unknown) {
     archiveAdmission: z.object({ publisherAvailability: z.literal("ACCEPTED") }) }),
     cleanup: z.object({ status: z.literal("PASS") }), staged: oracleResult, zip: oracleResult, package: packageResult }).parse(input);
 }
-type Tool = "/usr/bin/git" | "/usr/bin/zipinfo" | "/usr/bin/tar" | "/usr/bin/codesign" | "/usr/bin/plutil" | "/usr/bin/swift";
+type Tool = "/usr/bin/git" | "/usr/bin/zipinfo" | "/usr/bin/tar" | "/usr/bin/codesign" | "/usr/bin/plutil";
 const children: { tool: Tool; closed: true; absent: boolean; code: number | null; signal: NodeJS.Signals | null; timedOut: boolean }[] = [];
 let phase = "arguments", evidence: string | undefined, privateRoot: string | undefined;
 async function tool(executable: Tool, args: readonly string[], cwd?: string): Promise<string> {
@@ -115,7 +116,7 @@ async function tool(executable: Tool, args: readonly string[], cwd?: string): Pr
     stdio: ["ignore", "pipe", "pipe"] });
   let failed = false, timedOut = false, output = Buffer.alloc(0), stderrBytes = 0;
   const stop = (): void => { failed = true; if (child.pid) { try { process.kill(-child.pid, "SIGKILL"); } catch { /* Await original close. */ } } };
-  const timer = setTimeout(() => { timedOut = true; stop(); }, executable === "/usr/bin/tar" || executable === "/usr/bin/swift" ? 120_000 : 30_000);
+  const timer = setTimeout(() => { timedOut = true; stop(); }, executable === "/usr/bin/tar" ? 120_000 : 30_000);
   child.on("error", () => { failed = true; }); child.stdout.on("error", stop); child.stderr.on("error", stop);
   child.stdout.on("data", (bytes: Buffer) => { if (output.length + bytes.length > 8 * 1024 * 1024) stop(); else output = Buffer.concat([output, bytes]); });
   child.stderr.on("data", (bytes: Buffer) => { stderrBytes += bytes.length; if (stderrBytes > 64 * 1024) stop(); });
@@ -193,9 +194,9 @@ async function oracle(temp: string, workspace: string) {
   const original = await extract(archive, join(privateRoot!, "old-release"));
   const plist = JSON.parse(await tool("/usr/bin/plutil", ["-convert", "json", "-o", "-", join(original, "Contents/Info.plist")])) as unknown;
   z.object({ CFBundleIdentifier: z.literal("io.github.whisperfree"), CFBundleShortVersionString: z.literal("0.2.5") }).parse(plist);
-  await tool("/usr/bin/swift", [join(workspace, "macos/scripts/extract-signing-requirement.swift"), original, join(privateRoot!, "original-requirement.bin")]);
+  const originalRequirement = readMacosPublisherRequirement(original);
   await receipt("old-oracle-admission.json", { status: "PASS", releaseId: pin.release, sourceCommit: pin.commit, assetId: pin.asset,
-    zipSha256: pin.sha256, binarySignature: "ACCEPTED", requirementSha256: (await hash(join(privateRoot!, "original-requirement.bin"))).sha256,
+    zipSha256: pin.sha256, binarySignature: "ACCEPTED", requirementSha256: originalRequirement.sha256, requirementBytes: originalRequirement.bytes,
     children, scope: "Pinned unchanged original 0.2.5 binary and updater source; original Security designated requirement" });
 }
 async function runtimeInput(temp: string) {

@@ -595,13 +595,13 @@ jobs:
           umask 077
           original="$private/old-release/OpenWhisper.app"
           successor_source="$(jq -er .source "$RUNNER_TEMP/publisher-successor-source/source-path.json")"
-          /bin/bash ../macos/scripts/test-release-signature.sh "$RUNNER_TEMP/mac-publisher-output/OpenWhisper.app" "$original" > "$evidence/old-requirement-staged.json"
-          /bin/bash ../macos/scripts/test-release-signature.sh "$RUNNER_TEMP/mac-publisher-output/archive-check/OpenWhisper.app" "$original" > "$evidence/old-requirement-zip.json"
+          node --import tsx scripts/test-macos-publisher-signature.ts verify --original "$original" --candidate "$RUNNER_TEMP/mac-publisher-output/OpenWhisper.app" > "$evidence/old-requirement-staged.json"
+          node --import tsx scripts/test-macos-publisher-signature.ts verify --original "$original" --candidate "$RUNNER_TEMP/mac-publisher-output/archive-check/OpenWhisper.app" > "$evidence/old-requirement-zip.json"
           node --import tsx scripts/package-owned-macos-successor.ts \
             --source "$successor_source" --output "$RUNNER_TEMP/mac-publisher-successor" \
             > "$evidence/successor-package-result.json"
-          /bin/bash ../macos/scripts/test-release-signature.sh "$RUNNER_TEMP/mac-publisher-successor/OpenWhisper.app" "$original" > "$evidence/successor-old-requirement-staged.json"
-          /bin/bash ../macos/scripts/test-release-signature.sh "$RUNNER_TEMP/mac-publisher-successor/archive-check/OpenWhisper.app" "$original" > "$evidence/successor-old-requirement-zip.json"
+          node --import tsx scripts/test-macos-publisher-signature.ts verify --original "$original" --candidate "$RUNNER_TEMP/mac-publisher-successor/OpenWhisper.app" > "$evidence/successor-old-requirement-staged.json"
+          node --import tsx scripts/test-macos-publisher-signature.ts verify --original "$original" --candidate "$RUNNER_TEMP/mac-publisher-successor/archive-check/OpenWhisper.app" > "$evidence/successor-old-requirement-zip.json"
           /bin/bash "$private/cleanup.sh"
           trap - EXIT INT TERM
           /usr/bin/git worktree remove --force "$successor_source"
