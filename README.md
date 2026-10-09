@@ -430,7 +430,7 @@ The macOS development builds use ad-hoc signing and do not enable the in-app upd
 Linux CI builds development `.deb` and AppImage artifacts on Ubuntu 22.04; packaging success
 alone does not certify every desktop. **Main pushes do not create a tag, change the version,
 or publish a release.** The manual Release workflow builds and tests macOS and Linux together.
-After both succeed, it creates the version commit/tag and uploads all four packages with combined
+The requested version must already be committed. After both succeed, it tags that exact source and uploads all four packages with combined
 checksums. It creates a draft by default for final artifact verification before publication. Download packages from [Releases](https://github.com/juferdinand/OpenWhisper/releases/latest).
 Tests use shared cases from
 [`shared/test-vectors.json`](shared/test-vectors.json).
@@ -465,10 +465,12 @@ The script asks for its password and uploads only the selected file.
 The public release identity is already configured. Preserve it when preparing future releases;
 replacing it with a newly generated local certificate would break update signature compatibility.
 
-Then start the workflow under **Actions → Release → Run workflow**, supplying a new version
-in `X.Y.Z` format. The workflow applies the same version to both platform builds, then runs the
-macOS and Linux tests and packaging in parallel. Only after both succeed does the publication job
-create the version commit/tag and upload the universal DMG/ZIP, `OpenWhisper-Linux-x86_64.AppImage`,
+Prepare the version with `npm run set-version --prefix electron -- X.Y.Z`, review the manifest
+changes, and merge them through the normal PR workflow. Then start **Actions → Release → Run workflow**
+with that committed version. The Electron macOS and Linux builders use the exact same source
+commit and existing signing identities in parallel. Only after both succeed does publication
+verify the exact artifact sets and checksums, reverify Linux signatures, and tag the tested
+commit if remote `main` still matches. It uploads the universal DMG/ZIP, `OpenWhisper-Linux-x86_64.AppImage`,
 `OpenWhisper-Linux-amd64.deb`, Linux `.sig` files, `latest.json`, and a combined `SHA256SUMS`. No separate CI dispatch or manual asset
 upload is needed. Packages are also retained as Actions artifacts.
 The workflow creates a draft by default. Verify its complete asset set, checksums and signatures,

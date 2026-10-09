@@ -23,8 +23,9 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 
 ## Current package checkpoint
 
-The current source increment passes 1,302 tests: 1,348 total, zero failures and
-46 explicit native/opt-in skips in 17.99 seconds. Independent source reviews pass.
+The current release-workflow increment passes 1,318 tests: 1,366 total, zero failures and
+48 explicit native/opt-in skips in 17.92 seconds. Strict typing, deterministic preflight
+and the application/UI build pass. Independent source reviews pass.
 The genuine signed Debian and AppImage upgrade scopes are recorded below.
 
 `npm run preflight --prefix electron` checks all workflows with pinned actionlint
@@ -37,8 +38,20 @@ offline checks; upstream license contents are preserved verbatim.
 Explicit Electron release-construction paths now prepare canonical Debian/AppImage
 and Universal Mac ZIP/DMG names. Mac disk-image verification uses strict publisher
 checks and full signed-tree comparison without the legacy Swift verifier. These
-paths are source-reviewed and covered by focused fixtures; actual release-mode
-construction, signing and publication through the Release workflow remain open.
+paths are source-reviewed and covered by focused fixtures. The manual Release workflow
+now calls reusable Electron builders, verifies exact canonical artifacts and Linux
+signatures, and tags the committed version without rewriting source after packaging.
+Positive metadata tests use pinned public 0.2.5 Linux signatures; their inert Mac
+artifacts do not establish Mac package acceptance. Actual release-mode construction,
+signing and publication through these new workflows remain open.
+
+[CI 37923073475](https://github.com/juferdinand/OpenWhisper/actions/runs/37923073475)
+passes static preflight, both common Electron jobs, both thin Mac native jobs and
+Universal construction. The persistent publisher job stops before credentials:
+directory-only Git ignore patterns failed to ignore the two owned dependency aliases.
+The exact-path correction preserves unrelated untracked-file rejection and passes a
+temporary-Git regression. Persistent self/ZIP publisher admission and the genuine
+newer-version install/relaunch still need successful CI evidence.
 
 [CI 37919640284](https://github.com/juferdinand/OpenWhisper/actions/runs/37919640284)
 passes both thin Mac jobs, Universal construction and actual Universal runtime

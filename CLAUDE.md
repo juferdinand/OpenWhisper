@@ -211,20 +211,23 @@ for key continuity and a future Developer ID migration; changing identities requ
 
 - CI runs tests, builds a universal app, verifies its DMG, and uploads the DMG and ZIP as Actions artifacts.
   CI builds use ad-hoc signing and do not enable the in-app updater.
-- The manual Release workflow runs from `main`, checks the requested `X.Y.Z` version, and builds
-  macOS and Linux in parallel with that version. macOS uses the persistent signing identity;
-  CI and Release share `.github/workflows/linux-build.yml` for Linux tests and packaging.
-  Only after both builds succeed does the publication job commit/tag the version, verify artifact
+- The manual Release workflow runs from `main` and requires the requested `X.Y.Z` version to
+  already be committed in `VERSION` and the application/UI manifests and locks. Prepare a
+  version change with `npm run set-version --prefix electron -- X.Y.Z` and review it before release.
+  The Electron macOS and Linux reusable workflows build that exact source in parallel with
+  the existing signing identities. Only after both builds succeed does publication verify artifact
   checksums, and upload DMG, ZIP, AppImage, Debian package, Linux signatures, `latest.json`, and combined `SHA256SUMS`.
   It creates a complete draft by default for final artifact verification. The `draft` input controls
-  publication. No separate CI dispatch or manual Linux attachment is needed. Do not relabel
+  publication. It tags the tested source only if remote `main` still matches; it never changes
+  source versions after building. No separate CI dispatch or manual Linux attachment is needed. Do not relabel
   packages from an older version.
 - Linux release signing uses `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
   Preserve the embedded public key and `requireSignedVersion`; never rotate the key casually.
   First-run completion and interface language must survive upgrades.
 - `WFUpdateRepository` is set through `UPDATE_REPO` during release builds.
 - The DMG is the primary installation download. The in-app updater still consumes the ZIP asset.
-  Verify the mounted DMG and its contained app with `macos/scripts/verify-dmg.sh` before publication.
+  `electron/scripts/package-macos-release.ts` verifies the mounted Electron DMG, publisher,
+  complete signed application tree, installer guide and Applications shortcut before publication.
 - Signing requires the repository secrets `SIGNING_CERT_P12` and `SIGNING_CERT_PASSWORD`.
   `macos/scripts/export-dev-cert.sh owner/repo /path/to/identity.p12` uploads one encrypted identity
   previously exported using Keychain Access. Never export all keychain identities or rotate the release key.
@@ -235,7 +238,7 @@ for key continuity and a future Developer ID migration; changing identities requ
 - Linux CI builds on Ubuntu 22.04, checks both host UI adapters, and uploads development
   packages. A main push never changes versions, tags, or public releases. Linux public releases
   require the documented automated package/runtime checks; do not present intended distro support as tested.
-- The manual version step uses `linux/scripts/set-version.py` to synchronize all manifests.
+- The typed version helper synchronizes active and still-present legacy manifests until host retirement.
 - CI repeats weekly. See `SECURITY.md` for the security policy.
 - Renovate tracks Cargo, npm, Actions, and whisper.cpp versions; keep SHA pins and auto-merge disabled.
   A whisper.cpp update also needs a reviewed SHA-256 change; never bypass checksum verification.
