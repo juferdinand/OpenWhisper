@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { chmod, copyFile, lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
 import { parseApplicationBuildModule } from "../src/contracts/application/build-identity.js";
 import { developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
@@ -23,6 +23,23 @@ const inside = (parent: string, child: string): boolean => {
 
 export interface LinuxReleasePackageOptions { readonly output: string; readonly tools: string; readonly root?: string }
 export interface LinuxReleasePackageResult { readonly debian: string; readonly appImage: string; readonly receipt: string }
+export interface LinuxReleaseUpdatePolicyDescriptor {
+  readonly publicKey: string;
+  readonly feedURL: string;
+  readonly requireSignedVersion: true;
+}
+
+/** Validate the values exposed by the workflow's emitted modules against this package constructor. */
+export function linuxReleaseUpdatePolicyDescriptor(signatureModule: Readonly<Record<string, unknown>>,
+  policyModule: Readonly<Record<string, unknown>>, signatureSource: string): LinuxReleaseUpdatePolicyDescriptor {
+  const publicKey = z.string().min(1).parse(signatureModule["LINUX_UPDATE_PUBLIC_KEY"]);
+  const feedURL = z.string().url().parse(policyModule["LINUX_UPDATE_FEED_URL"]);
+  if (publicKey !== LINUX_UPDATE_PUBLIC_KEY || feedURL !== LINUX_UPDATE_FEED_URL ||
+      typeof signatureModule["verifyLinuxUpdateStream"] !== "function" || !signatureSource.includes("SIGNED_VERSION_MISMATCH")) {
+    throw new Error("LINUX_RELEASE_UPDATE_POLICY_MISMATCH");
+  }
+  return Object.freeze({ publicKey: LINUX_UPDATE_PUBLIC_KEY, feedURL: LINUX_UPDATE_FEED_URL, requireSignedVersion: true });
+}
 
 async function inventory(path: string, prefix = ""): Promise<Record<string, { bytes: number; mode: number; sha256: string }>> {
   const result: Record<string, { bytes: number; mode: number; sha256: string }> = {};
@@ -63,12 +80,14 @@ export async function packageLinuxRelease(options: LinuxReleasePackageOptions): 
       version !== (await readFile(resolve(root, "../VERSION"), "utf8")).trim() || build.modified || build.commit !== git(["rev-parse", "HEAD"]) ||
       git(["status", "--porcelain"]) !== "") throw new Error("LINUX_RELEASE_SOURCE_MISMATCH");
 
-  const signatureModule = await readFile(join(root, "dist/services/update/linux/linux-update-signature.js"), "utf8");
-  const policyModule = await readFile(join(root, "dist/services/update/common/update-policy.js"), "utf8");
-  if (!signatureModule.includes(JSON.stringify(LINUX_UPDATE_PUBLIC_KEY)) || !signatureModule.includes("SIGNED_VERSION_MISMATCH") ||
-      !policyModule.includes(JSON.stringify(LINUX_UPDATE_FEED_URL))) {
-    throw new Error("LINUX_RELEASE_UPDATE_POLICY_MISMATCH");
-  }
+  const signatureModulePath = join(root, "dist/services/update/linux/linux-update-signature.js");
+  const policyModulePath = join(root, "dist/services/update/common/update-policy.js");
+  const [signatureModule, policyModule, signatureModuleBytes, policyModuleBytes] = await Promise.all([
+    import(pathToFileURL(signatureModulePath).href) as Promise<Readonly<Record<string, unknown>>>,
+    import(pathToFileURL(policyModulePath).href) as Promise<Readonly<Record<string, unknown>>>,
+    readFile(signatureModulePath), readFile(policyModulePath),
+  ]);
+  const updatePolicy = linuxReleaseUpdatePolicyDescriptor(signatureModule, policyModule, signatureModuleBytes.toString("utf8"));
 
   const recordingModule = await readFile(join(root, "dist/main/development-recording-build.js"), "utf8");
   const descriptorLiteral = /(?:export\s+)?const DEVELOPMENT_RECORDING_BUILD\s*=\s*(\{[^]*?\});/u.exec(recordingModule)?.[1];
@@ -107,8 +126,8 @@ export async function packageLinuxRelease(options: LinuxReleasePackageOptions): 
   const receipt = join(output, "release-construction-receipt.json");
   await writeFile(receipt, `${JSON.stringify({ classification: "CANONICAL_STABLE_LINUX_RELEASE_CONSTRUCTION_UNSIGNED",
     source: { commit: build.commit, modified: false }, version, buildIdentity: identity,
-    updatePolicy: { publicKey: LINUX_UPDATE_PUBLIC_KEY, feedURL: LINUX_UPDATE_FEED_URL, requireSignedVersion: true,
-      signatureModuleSha256: hash(Buffer.from(signatureModule)), policyModuleSha256: hash(Buffer.from(policyModule)) },
+    updatePolicy: { ...updatePolicy,
+      signatureModuleSha256: hash(signatureModuleBytes), policyModuleSha256: hash(policyModuleBytes) },
     native, notices, artifacts: {
       debian: { path: debian, bytes: debBytes.length, sha256: hash(debBytes), package: "io-github-whisperfree", version, architecture: "amd64" },
       appImage: { path: image, bytes: imageBytes.length, sha256: hash(imageBytes), mode: (await lstat(image)).mode & 0o7777 },
