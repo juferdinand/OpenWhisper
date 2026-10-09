@@ -236,6 +236,8 @@ jobs:
       - name: Construct and verify one same-source universal validation ZIP
         working-directory: electron
         shell: bash
+        env:
+          OPENWHISPER_UNIVERSAL_DIAGNOSTIC: ${{ runner.temp }}/openwhisper-mac-universal-failure.json
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -254,6 +256,14 @@ jobs:
             --x64-app "$RUNNER_TEMP/extracted-x64/OpenWhisper.app" \
             --output "$RUNNER_TEMP/openwhisper-mac-universal" \
             > "$RUNNER_TEMP/openwhisper-mac-universal-result.json"
+      - name: Retain the bounded universal construction failure diagnostic
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Electron-universal-construction-diagnostic-${{ github.sha }}
+          path: ${{ runner.temp }}/openwhisper-mac-universal-failure.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload the verified universal ZIP and original producer receipts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

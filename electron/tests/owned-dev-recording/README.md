@@ -1,5 +1,18 @@
 # Owned normal Linux Dev recording
 
+For the immutable supervised `2ce4` Debian package only, append
+`--resource-diagnostic` after the frozen producer SHA. This closed diagnostic mode
+keeps the existing actions, assertions and 256-task cap. Private 0600 snapshots
+record original same-user process identities, fixed roles, bounded thread-state
+counts and cgroup counters before startup and around ready/Retry/Cancel/CLI Start.
+No argv, environment, nonce, paths, thread names or user text are emitted.
+If the actual Start command fails, one separately compiled test sidecar uses the
+same packaged embedded Node and descriptor-verified native bus addon to attempt
+only opening and closing the already-owned session connection. Its categorical
+result and original process close are separately attributed; they cannot recover
+the category discarded by the original CLI. The original Start assertion still
+fails. No production source, cap, package, UI factory or update authority changes.
+
 For the clean `2ce4a2285bf90de15fe9294bfa1c30630d1ab8bc` supervisor packages,
 append `--supervised-launch --producer-receipt /absolute/frozen-producer.json
 --producer-sha256 <exact-64-hex-sha256>` after the Stable Debian or AppImage arguments.

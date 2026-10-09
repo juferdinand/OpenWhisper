@@ -4,7 +4,7 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink,
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { inspectUniversalMacBinary, stageMacUniversalInputs } from "../scripts/package-macos-universal.js";
+import { inspectUniversalMacBinary, macUniversalFailureDiagnostic, macUniversalToolFailure, stageMacUniversalInputs } from "../scripts/package-macos-universal.js";
 import { darwinUniversalRecordingDescriptorSchema, developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
 import { SPEECH_ENTRY_FILES } from "../src/services/speech-entry-graph.js";
 
@@ -12,6 +12,23 @@ const app = "Contents/Resources/app", commit = "0123456789abcdef0123456789abcdef
 const native = ["dist/native/capture/openwhisper_macos_capture.node", "dist/native/openwhisper_macos_capture.node",
   "dist/native/openwhisper_macos_retirement.node", "dist/native/speech/cpu/openwhisper_speech.node", "dist/native/openwhisper_speech.node"];
 const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+test("failed native tool diagnostics retain the exact boundary while redacting private paths and identities", () => {
+  const path = "Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework", absolute = `/private/owned/${path}`, identity = "a".repeat(40);
+  const diagnostic = macUniversalToolFailure("/usr/bin/otool", { status: 1, signal: null, stderr: `otool: ${absolute}: malformed load command ${identity} https://private.invalid/token\u001b` }, ["-l", absolute], path);
+  assert.equal(diagnostic.nativePath, path); assert.equal(diagnostic.tool, "/usr/bin/otool"); assert.equal(diagnostic.category, "tool-exit"); assert.equal(diagnostic.exit, 1);
+  assert.match(diagnostic.stderr, /malformed load command/u); assert.doesNotMatch(diagnostic.stderr, /private|aaaa|token|\u001b/u);
+  const overflow = macUniversalToolFailure("/usr/bin/otool", { status: null, signal: "SIGTERM", stderr: "x".repeat(20_000) }, [], path);
+  assert.equal(overflow.category, "tool-signal"); assert.equal(overflow.signal, "SIGTERM"); assert.equal(overflow.stderr.length, 4096); assert.equal(overflow.stderrTruncated, true);
+  for (const stderr of [null, undefined]) {
+    const failedSpawn = macUniversalToolFailure("/usr/bin/otool", { status: null, signal: null, error: new Error("private spawn path /home/user"), stderr }, [], path);
+    assert.equal(failedSpawn.category, "tool-spawn"); assert.equal(failedSpawn.tool, "/usr/bin/otool"); assert.equal(failedSpawn.exit, null);
+    assert.equal(failedSpawn.stderr, ""); assert.equal(failedSpawn.stderrTruncated, false); assert.doesNotMatch(JSON.stringify(failedSpawn), /private|home\/user/u);
+  }
+  assert.throws(() => macUniversalToolFailure("/usr/bin/otool", { status: 1, signal: null, stderr: "" }, [], "Contents/../private"));
+  assert.throws(() => macUniversalToolFailure("/usr/bin/otool", { status: 1, signal: null, stderr: "" }, [], "/private/home"));
+  assert.deepEqual(macUniversalFailureDiagnostic(new Error("private signing secret /home/user")), { version: 1, status: "FAIL", category: "construction", tool: null,
+    nativePath: null, exit: null, signal: null, stderr: "", stderrTruncated: false });
+});
 function thin(architecture: "arm64" | "x64"): Buffer {
   const bytes = Buffer.alloc(32); bytes.writeUInt32LE(0xfeedfacf); bytes.writeUInt32LE(architecture === "arm64" ? 0x100000c : 0x1000007, 4); return bytes;
 }

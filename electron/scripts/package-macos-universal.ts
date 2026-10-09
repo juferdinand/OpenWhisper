@@ -63,9 +63,38 @@ async function inventory(root: string): Promise<Map<string, Item>> {
   await visit(root); return result;
 }
 function inventoryEqual(a: Map<string, Item>, b: Map<string, Item>): boolean { return same([...a].sort(), [...b].sort()); }
-function tool(command: "/usr/bin/codesign" | "/usr/bin/otool" | "/usr/bin/ditto" | "/usr/bin/plutil", args: readonly string[]): string {
+const toolSchema = z.enum(["/usr/bin/codesign", "/usr/bin/otool", "/usr/bin/ditto", "/usr/bin/plutil"]);
+const failureSchema = z.strictObject({ version: z.literal(1), status: z.literal("FAIL"), category: z.enum(["tool-exit", "tool-signal", "tool-spawn", "construction"]),
+  tool: toolSchema.nullable(), nativePath: z.string().max(1024).nullable(), exit: z.number().int().nullable(),
+  signal: z.string().regex(/^SIG[A-Z0-9]{1,12}$/u).nullable(), stderr: z.string().max(4096), stderrTruncated: z.boolean() });
+type Tool = z.infer<typeof toolSchema>;
+type ToolFailure = z.infer<typeof failureSchema>;
+/** System-tool diagnostics only; arguments, absolute paths, URLs and signing identities are never retained. */
+export function macUniversalToolFailure(command: Tool, result: { status: number | null; signal: NodeJS.Signals | null; error?: Error; stderr: unknown },
+  args: readonly string[], nativePath: string | null = null): ToolFailure {
+  if (nativePath !== null && (!nativePath.startsWith("Contents/") || nativePath.split("/").some((part) => ["", ".", ".."].includes(part)) ||
+      /[\\\u0000-\u001f\u007f]/u.test(nativePath))) throw new Error("Invalid diagnostic native path.");
+  const originalStderr = typeof result.stderr === "string" ? result.stderr : "";
+  let stderr = originalStderr.slice(0, 16_384);
+  for (const value of [...args].sort((a, b) => b.length - a.length)) if (isAbsolute(value) || /^[a-f0-9]{40}$/iu.test(value)) stderr = stderr.replaceAll(value, "<redacted>");
+  stderr = stderr.replace(/https?:\/\/[^\s]+/giu, "<redacted-url>").replace(/\/[A-Za-z0-9_.~/-]+/gu, "<redacted-path>")
+    .replace(/\b[a-f0-9]{40,64}\b/giu, "<redacted-identity>").replace(/[^\x20-\x7e\n\t]/gu, "?");
+  const stderrTruncated = originalStderr.length > 16_384 || stderr.length > 4096;
+  return failureSchema.parse({ version: 1, status: "FAIL", category: result.error ? "tool-spawn" : result.signal ? "tool-signal" : "tool-exit",
+    tool: command, nativePath, exit: result.status, signal: result.signal, stderr: stderr.slice(0, 4096), stderrTruncated });
+}
+class MacUniversalToolError extends Error {
+  constructor(readonly diagnostic: ToolFailure) {
+    super(`Universal Mac validation tool failed: ${diagnostic.tool}, exit=${diagnostic.exit ?? "unavailable"}.`);
+  }
+}
+export function macUniversalFailureDiagnostic(error: unknown): ToolFailure {
+  return error instanceof MacUniversalToolError ? error.diagnostic : failureSchema.parse({ version: 1, status: "FAIL", category: "construction",
+    tool: null, nativePath: null, exit: null, signal: null, stderr: "", stderrTruncated: false });
+}
+function tool(command: Tool, args: readonly string[], nativePath: string | null = null): string {
   const result = spawnSync(command, [...args], { shell: false, encoding: "utf8", timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });
-  if (result.error || result.status !== 0 || result.signal !== null) throw new Error(`Universal Mac validation tool failed: ${command}, exit=${result.status ?? "unavailable"}.`);
+  if (result.error || result.status !== 0 || result.signal !== null) throw new MacUniversalToolError(macUniversalToolFailure(command, result, args, nativePath));
   return result.stdout;
 }
 
@@ -216,7 +245,7 @@ async function verifyMerged(stage: Awaited<ReturnType<typeof stageMacUniversalIn
     const koffi = architectures.find((architecture) => stage.input[architecture].koffiMach.includes(path));
     if (koffi) { if (!inspectMacBinary(bytes, koffi)) throw new Error("Invalid Koffi native input."); }
     else inspectUniversalMacBinary(bytes);
-    inspectMacMinimumOS(tool("/usr/bin/otool", ["-l", join(directory, path)]), path);
+    inspectMacMinimumOS(tool("/usr/bin/otool", ["-l", join(directory, path)], path), path);
   }
   for (const architecture of architectures) if (!same(await digest(join(directory, snapshotRelative(architecture))), await digest(join(stage.input[architecture].directory, snapshotRelative(architecture))))) throw new Error("Original architecture snapshot changed.");
   for (const architecture of architectures) if (!inventoryEqual(await inventory(stage.staged[architecture]), stage.copies[architecture]) ||
@@ -262,5 +291,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const args = process.argv.slice(2);
   if (![6, 8].includes(args.length) || args[0] !== "--arm64-app" || args[2] !== "--x64-app" || args[4] !== "--output" ||
     !args[1] || !args[3] || !args[5] || (args.length === 8 && (args[6] !== "--signing-mode" || args[7] !== "persistent-validation"))) throw new Error("Usage: package-macos-universal.ts --arm64-app /owned/OpenWhisper.app --x64-app /owned/OpenWhisper.app --output /fresh/output [--signing-mode persistent-validation]");
-  console.log(JSON.stringify(await packageMacUniversal({ arm64AppPath: args[1], x64AppPath: args[3], output: args[5], ...(args.length === 8 ? { signingMode: "persistent-validation" } : {}) })));
+  try {
+    console.log(JSON.stringify(await packageMacUniversal({ arm64AppPath: args[1], x64AppPath: args[3], output: args[5], ...(args.length === 8 ? { signingMode: "persistent-validation" } : {}) })));
+  } catch (error: unknown) {
+    const diagnostic = process.env["OPENWHISPER_UNIVERSAL_DIAGNOSTIC"];
+    if (diagnostic && isAbsolute(diagnostic) && resolve(diagnostic) === diagnostic) {
+      try { await writeFile(diagnostic, JSON.stringify(macUniversalFailureDiagnostic(error)), { mode: 0o600, flag: "wx" }); }
+      catch { /* Diagnostic failure must not replace the original construction refusal. */ }
+    }
+    throw error;
+  }
 }

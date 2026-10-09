@@ -19,6 +19,7 @@ import { parseApplicationBuildModule } from "../../src/contracts/build-identity.
 import { parseControlStatus, type ControlWireStatus } from "../../src/platforms/linux/shared/control-status.js";
 import { controlTarget } from "../../src/platforms/linux/shared/control-identity.js";
 import type { ControlCommand, ControlAction } from "../../src/cli/arguments.js";
+import { diagnosticIdentity, resourceSnapshot, type DiagnosticRoot } from "./resource-diagnostic.js";
 
 declare global { interface Window { openwhisper?: DesktopBridge } }
 const execute = promisify(execFile);
@@ -27,6 +28,22 @@ const packaged = process.env.OPENWHISPER_PACKAGE_DIRECTORY === "/payload/package
 const stablePackage = process.env.OPENWHISPER_STABLE_PACKAGE === "1";
 const installedDebian = process.env.OPENWHISPER_INSTALLED_DEBIAN === "1";
 const supervisedLaunch = process.env.OPENWHISPER_SUPERVISED_LAUNCH === "1";
+const resourceDiagnostic = process.env.OPENWHISPER_RESOURCE_DIAGNOSTIC === "1";
+const diagnosticRoots: DiagnosticRoot[] = [];
+let resourceSequence = 0;
+async function captureResources(boundary: string): Promise<void> {
+  if (!resourceDiagnostic) return;
+  assert.ok(resourceSequence < 32);
+  const roots = [...diagnosticRoots];
+  for (const owner of owners) if (!owner.closeObserved && owner.child.pid) {
+    try { roots.push(await diagnosticIdentity(owner.child.pid, "server")); } catch {}
+  }
+  for (const owner of appOwners) if (!owner.closeObserved && owner.supervisor) {
+    roots.push(await diagnosticIdentity(owner.supervisor.pid, "supervisor"), await diagnosticIdentity(owner.supervisor.guiPid, "gui"));
+  }
+  const snapshot = JSON.stringify({ boundary, ...await resourceSnapshot(roots) }); assert.ok(Buffer.byteLength(snapshot) <= 64 * 1024);
+  await writeFile(join(evidence, `resource-snapshot-${resourceSequence++}.json`), snapshot, { mode: 0o600, flag: "wx" });
+}
 const appImage = process.env.OPENWHISPER_APPIMAGE === "1";
 const appImageStartupOnly = process.env.OPENWHISPER_APPIMAGE_STARTUP_ONLY === "1";
 const appImageAdmission = appImage && process.env.OPENWHISPER_APPIMAGE_ADMISSION === "1";
@@ -126,6 +143,7 @@ async function assertInstalledPackage(source = "/payload/package", installed = "
 async function main(): Promise<void> {
   assert.equal(process.platform, "linux"); assert.equal(process.arch, "x64"); assert.equal(process.getuid?.(), 1000);
   if (supervisedLaunch) assert.ok(packaged && stablePackage && nativeX11 && (installedDebian !== appImage) && !appImageStartupOnly);
+  if (resourceDiagnostic) { assert.ok(supervisedLaunch && installedDebian && !appImage); diagnosticRoots.push(await diagnosticIdentity(process.pid, "driver")); }
   assert.equal(process.versions.node, "24.21.0");
   assert.equal(sha(await readFile(process.execPath)), "7fde7b8afa198da66257f42ee2001d874c7355631e6d1579a5fb5ef1f246df4c");
   assert.equal(sha(await readFile(executable)), "10a14d05c6ff4f94075cfb3eeb6ed6571be33ebcc08cbd675b5ce9ff84706564");
@@ -475,6 +493,7 @@ async function main(): Promise<void> {
   // Only the explicit overlay test uses inner Xwayland; owned F8 injection keeps the outer display.
   const applicationEnvironment = kdeOverlay ? await ownedInnerXwaylandEnvironment() : env;
   await checkpoint("launch-normal-application");
+  await captureResources("before-startup");
   const launchApplication = async () => {
   appCloseObserved = false;
   startupRetentionEnabled = appImage && stage === "launch-normal-application"; startupPhase = "launch";
@@ -735,9 +754,16 @@ async function main(): Promise<void> {
     assert.equal(basename(executable), capturedControl.kind === "stable" ? "openwhisper" : "openwhisper-dev");
     const before = application ? await application.evaluate(({ BrowserWindow }) => ({ pid: process.pid, windows: BrowserWindow.getAllWindows().length })) : undefined;
     await assertControlStorage();
+    if (command === "start") await captureResources("before-cli-start");
     const started = performance.now();
     const request = execute(appImage ? imageLauncher : supervisedLaunch && installedDebian ? debianLaunchTarget : executable, [...(appImage ? [permanentImage] : []), "--control", command], { env: controlEnvironment, timeout: 8000, maxBuffer: 32 * 1024 });
     const original = request.child, pid = original.pid; assert.ok(pid);
+    const runningSnapshot = resourceDiagnostic && command === "start" ? (async () => {
+      try { diagnosticRoots.push(await diagnosticIdentity(pid, "cli")); await captureResources("cli-start-original-running"); }
+      catch { await writeFile(join(evidence, `cli-running-snapshot-${commandRecords.length}.json`), JSON.stringify({ pid,
+        outcome: "ORIGINAL_CLI_RETIRED_OR_SNAPSHOT_UNAVAILABLE" }), { mode: 0o600, flag: "wx" }); }
+    })() : undefined;
+    void runningSnapshot?.catch(() => {});
     const imageProcesses = new Map<number, ImageProcess>(); let imageObserving = appImage;
     const imageObservation = appImage ? (async () => { while (imageObserving) { await observeImageProcesses(pid, imageProcesses); await delay(25); } })() : undefined;
     void imageObservation?.catch(() => {});
@@ -748,7 +774,8 @@ async function main(): Promise<void> {
     try {
       let reply: Awaited<typeof request> | undefined, requestFailure: unknown;
       try { reply = await request; } catch (error: unknown) { requestFailure = error; }
-      imageObserving = false; await imageObservation; await owner.closed;
+      imageObserving = false; await imageObservation; await owner.closed; await runningSnapshot;
+      if (command === "start") await captureResources("after-cli-start-close");
       if (appImage) {
         assert.ok([...imageProcesses.values()].some((process) => process.role === "runtime"));
         for (const process of imageProcesses.values()) await assert.rejects(lstat(`/proc/${process.pid}`), { code: "ENOENT" });
@@ -781,6 +808,22 @@ async function main(): Promise<void> {
         strictStdoutParse: parsed !== undefined && stdout.endsWith("\n"), originalCloseObserved: owner.closeObserved, pidAbsent,
         scope: "Private owned container command only; no raw stdout or host inputs." }), { mode: 0o600, flag: "wx" });
       assert.equal(owner.closeObserved, true); assert.equal(pidAbsent, true); assert.ok(warnings.length <= 1);
+      if (resourceDiagnostic && command === "start" && !absent && !reply) {
+        const probe = execute(executable, ["/payload/resource-diagnostic.mjs", "--native-open-probe"], {
+          env: { ...controlEnvironment, ELECTRON_RUN_AS_NODE: "1", OPENWHISPER_RESOURCE_DIAGNOSTIC: "1" }, timeout: 8000, maxBuffer: 32 * 1024 });
+        const probeOriginal = probe.child, probePid = probeOriginal.pid;
+        const probeOwner = { child: probeOriginal, closed: Promise.resolve(), closeObserved: false };
+        probeOwner.closed = new Promise<void>((accept) => probeOriginal.once("close", () => { probeOwner.closeObserved = true; accept(); })); owners.push(probeOwner);
+        let probeSucceeded = false, spawnCategory: "SPAWN_REFUSED" | "PROCESS_FAILED" | "NONE" = "NONE";
+        try { await probe; probeSucceeded = true; } catch { spawnCategory = probePid ? "PROCESS_FAILED" : "SPAWN_REFUSED"; }
+        await probeOwner.closed;
+        let absent = probePid === undefined; if (probePid) try { await lstat(`/proc/${probePid}`); } catch (error: unknown) { absent = error instanceof Error && "code" in error && error.code === "ENOENT"; }
+        await writeFile(join(evidence, "native-open-sidecar-process.json"), JSON.stringify({ pid: probePid ?? null, spawnCategory, exitCode: probeOriginal.exitCode,
+          signal: probeOriginal.signalCode, probeSucceeded, originalCloseObserved: probeOwner.closeObserved, pidAbsent: absent,
+          storage: await assertControlStorage(),
+          scope: "SEPARATE_POST_CLI_PROBE_NOT_ORIGINAL_CLI_CATEGORY" }), { mode: 0o600, flag: "wx" });
+        await captureResources("after-native-open-sidecar-close");
+      }
       if (absent) {
         assert.equal(reply, undefined);
         z.object({ code: z.literal(1), killed: z.literal(false), signal: z.null(), stdout: z.literal(""), stderr: z.string() }).parse(requestFailure);
@@ -874,6 +917,7 @@ async function main(): Promise<void> {
   assert.deepEqual(await page.evaluate(() => ({ process: "process" in globalThis, require: "require" in globalThis,
     bridge: typeof window.openwhisper?.invoke })), { process: false, require: false, bridge: "function" });
   checks.push("normal main/shared UI/preload; private Tiny inventory; enumeration with zero streams; sandboxed renderer");
+  await captureResources("after-ready");
   if (stablePackage) {
     await checkpoint("actual-stable-migrated-recording-retry");
     await expect(page.locator("#record-label")).toHaveText("Retry transcription"); await page.locator("#record").click();
@@ -884,6 +928,7 @@ async function main(): Promise<void> {
     assert.equal(retried.recovery_available, false); assert.deepEqual(await readdir(profile.paths.recovery), []);
     assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), ""); await assertStableOriginals(); await assertNoDevControl();
     checks.push("normal stable startup migrates before private paths/services; UI Retry uses in-place Tiny CPU with saved GPU opt-in, clipboard/history and no capture stream; originals retained");
+    await captureResources("after-recovery-retry");
   }
   await checkpoint("owned-portal-cancel-and-retry");
   if (!nativeX11) assert.equal((await state()).shortcut_portal, true);
@@ -1567,11 +1612,13 @@ async function main(): Promise<void> {
     await delay(750); assert.equal((await state()).status, "recording");
     assert.equal((await pactl(["list", "short", "source-outputs"])).trim().split("\n").filter(Boolean).length, 1);
     await page.locator("#cancel").click(); await until(async () => (await state()).status === "idle");
+    await captureResources("after-x11-first-cancel");
     await page.locator("#record").click(); await until(async () => (await state()).status === "recording");
     await nativeKey(false); await delay(150); assert.equal((await state()).status, "recording");
     await page.locator("#cancel").click(); await until(async () => (await state()).status === "idle");
     await page.evaluate(() => window.openwhisper?.invoke("save_preferences", { changes: { hold_to_record: false } }));
     checks.push("actual native X11 held/repeated F8 owns one capture; GUI Cancel then later GUI Start; stale key release cannot stop the later owner");
+    await captureResources("after-x11-second-cancel");
   } else {
   await portal("PortalMode", "pending"); await page.locator('[data-portal="enable_shortcut"]').click();
   await until(async () => !!(await state()).shortcut_configuring);
@@ -1597,6 +1644,7 @@ async function main(): Promise<void> {
   assert.equal((await state()).recovery_available, false); assert.deepEqual(await readdir(profile.paths.recovery), []);
   assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
   checks.push("actual UI Cancel closes the original capture without recovery");
+  await captureResources("after-ui-cancel");
   if (!stablePackage || packaged) {
   await checkpoint("actual-command-start-ui-cancel");
   assert.equal(await control("start"), "recording"); await until(async () => (await state()).status === "recording");

@@ -18,10 +18,63 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | macOS dictation | Actual Intel/Apple Silicon Dev packages pass sandbox, signed utilities, CPU recognition of public audio, shortcut setup/removal and original Quit. Normal stable packages pass migration, edited-state restart and clean exits at b892d86 | Physical microphone/TCC, actual target insertion and device changes; Metal selection remains open |
 | Linux desktop integration | Owned stock KDE 5.27 native Wayland F8, binding Quit/crash recovery and paste into separate Wayland/XWayland editors pass. Genuine X11 shortcuts and all five no-display CLI commands pass, including installed stable autostart enable/disable and generated-target restart | Expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
-| Packaging and updates | Fresh supervised Debian reaches actual CPU dictation, recovery, X11 and autostart; a later command fails session-bus admission. Inactive Debian/AppImage consumers authenticate original downloads; private AppImage swap/rollback checks pass. Mac thin packages pass on ARM; Intel's latest test run times out | Resolve the fresh Linux command failure; complete supervised AppImage and universal Mac runtime; connect installation/restart/rollback, persistent publisher continuity, authenticated Dev replacement, DMG and release signing |
+| Packaging and updates | Fresh supervised Debian passes all 18 runtime checks in a separate diagnostic; an earlier session-admission failure remains tracked. Inactive consumers authenticate downloads; private AppImage swap/rollback and public metadata reads pass. Both Mac thin packages pass; universal construction fails at an unclassified `otool` boundary | Complete supervised AppImage and universal Mac runtime; connect installation/restart/rollback, persistent publisher continuity, authenticated Dev replacement, DMG and release signing; retain the Linux resource-margin bug |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 ## Current package checkpoint
+
+The inactive release-metadata reader uses the fixed Linux feed or admitted Mac
+repository API, limits response sizes and retains original pending work through
+cancellation/closure. Linux redirects must keep the exact versioned `latest.json`
+and agree with its body; Mac API redirects are refused. Existing model/artifact
+transport policies are unchanged. Thirteen focused checks and independent review
+pass. Two actual read-only HTTPS requests project version 0.2.5 against synthetic
+current 0.2.4; these candidates remain unauthenticated. No package download,
+installer or UI update activation follows.
+
+An inactive V2 parent/GUI channel adds bounded commands and public states on
+the caller-owned duplex, bound to its current version and startup nonce. The
+GUI supplies no candidate URL, path or installation authority. Parent retirement
+requires its prepared version, explicit retirement request, matching acknowledgment
+and clean original duplex closure. Original action settlement remains retained
+through cancellation/disconnect. Callback-chained actions and blocked-write
+closure have focused regressions. Bootstrap, native cleanup and installers are
+not connected to this channel yet; V1 remains intact.
+
+The combined reviewed increment passes TypeScript checks, the normal application
+and shared-UI build, and 1,216 tests in 18.22 seconds: zero failures and 38
+explicit native/opt-in skips. Workflow YAML and Bash syntax pass. These source
+checks do not replace the separately identified immutable-package evidence.
+
+Both original thin jobs in
+[CI 37881571843](https://github.com/juferdinand/OpenWhisper/actions/runs/37881571843)
+pass, confirming the preceding Intel fixture correction. API head `26e02ab0`
+differs from actual synthetic package producer
+`2bba516dc4c8a14acdbf66fdd7bd0d016a6edf67`. Clean-source admission passes and
+the official universal merger runs. The first unsigned native verification then
+fails at `/usr/bin/otool` exit 1. Its original path/stderr were not retained;
+cause remains unclassified. No universal ZIP, final signing or universal runtime
+passes. A reviewed bounded failure receipt now preserves the relative native
+file, tool/category/status and sanitized stderr on the next normal constructor,
+without changing gates or repeating the old run.
+
+The earlier Linux failure remains narrower than a native bus-opening result:
+the callback verifies/loads its addon before calling the native connection.
+CPU inference is capped at eight threads. One independently reviewed diagnostic
+uses the unchanged clean `2ce4a228` Debian package and 256-task limit. All 18
+original runtime checks pass in 46.04 seconds, including CLI control, CPU
+recognition, recovery, clipboard, X11, autostart and both original supervised
+closures. The private namespace is removed and package inputs remain unchanged.
+The separate native-open probe does not run because Start succeeds.
+
+Twelve bounded snapshots record 208 tasks after readiness, 225 after Retry and
+227 after the sampled Cancel operations. Peak usage reaches 255 of 256, with
+no limit rejection. The supervisor remains at 13 threads and the GUI changes
+from 38 to 39; sampled CLI identities disappear after close. This demonstrates
+a small transient resource margin, without proving the earlier failure's cause
+or absence of all leaks. [Issue #37](https://github.com/juferdinand/OpenWhisper/issues/37)
+retains the earlier failure separately; no product fix or physical-device
+coverage is claimed.
 
 The reviewed Linux launch supervisor is now connected to Stable Debian's fixed
 `/opt/openwhisper/openwhisper-launch`, its desktop/autostart paths and the native
@@ -47,8 +100,9 @@ cap once; causation remains unproven and is tracked in
 [issue #37](https://github.com/juferdinand/OpenWhisper/issues/37). Cleanup requests
 ordinary app close without forced termination and closes private services;
 the final per-PID successful-Quit assertion was not reached. This failed run is
-retained without a retry. Its cause and remaining runtime checks are open. Supervised AppImage runtime
-has not run. Earlier immutable runtime results remain separate producers.
+retained separately from the passing diagnostic above. Its cause remains open.
+Supervised AppImage runtime has not run. Earlier immutable runtime results remain
+separate producers.
 
 The inactive AppImage consumer independently authenticates an adjacent private
 copy, retains the exact predecessor and supports explicit commit or rollback.

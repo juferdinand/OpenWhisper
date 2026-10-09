@@ -41,7 +41,16 @@ export function createUpdateDownloadTransport(io: ModelDownloadHTTPSIO = {
   return createPublicHTTPSTransport((hostname) => ["github.com", "release-assets.githubusercontent.com"].includes(hostname), io);
 }
 
-function createPublicHTTPSTransport(allowedHost: (hostname: string) => boolean, io: ModelDownloadHTTPSIO): ModelDownloadTransport {
+/** Public release metadata only. Exact endpoint/redirect admission stays with the feed reader. */
+export function createUpdateFeedTransport(io: ModelDownloadHTTPSIO = {
+  createAgent: (options) => new Agent(options), request,
+}): ModelDownloadTransport {
+  return createPublicHTTPSTransport((hostname) => ["api.github.com", "github.com", "release-assets.githubusercontent.com"].includes(hostname),
+    io, { "User-Agent": "OpenWhisper" });
+}
+
+function createPublicHTTPSTransport(allowedHost: (hostname: string) => boolean, io: ModelDownloadHTTPSIO,
+  publicHeaders: Readonly<Record<string, string>> = {}): ModelDownloadTransport {
   const agent = io.createAgent({ keepAlive: false, rejectUnauthorized: true, proxyEnv: {} });
   const exchanges = new Set<ModelDownloadExchange>(); let closing: Promise<void> | undefined;
   return {
@@ -96,7 +105,7 @@ function createPublicHTTPSTransport(allowedHost: (hostname: string) => boolean, 
       };
       exchanges.add(exchange);
       try {
-        owned = io.request(url, { method, agent, rejectUnauthorized: true, headers: { "Accept-Encoding": "identity" },
+        owned = io.request(url, { method, agent, rejectUnauthorized: true, headers: { ...publicHeaders, "Accept-Encoding": "identity" },
           maxHeaderSize: 16 * 1024 }, (message) => {
           response = message;
           message.once("error", failure); message.once("aborted", failure);

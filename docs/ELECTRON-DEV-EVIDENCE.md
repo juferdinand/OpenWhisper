@@ -1,5 +1,59 @@
 # Electron development evidence
 
+## Release metadata and original universal verification boundary
+
+The inactive reader reuses the owned HTTPS transport with fixed public endpoints,
+strict redirect/version projection, bounded headers/body and retained pending
+header/body work on cancellation. Thirteen focused cases pass; source review is
+separate from two successful real read-only Linux-feed/Mac-API observations.
+Both announce 0.2.5 against synthetic current 0.2.4 and retain the unauthenticated
+marker. No artifact download, signature success, installer or UI activation is
+inferred. Model/artifact transport policy stays unchanged.
+
+The inactive V2 duplex channel has nine focused cases plus six unchanged V1
+cases. Independent review first found a terminal-publication/action overlap and
+an outgoing-write close hang; both original failures are retained. The corrected
+tests chain check, install and retirement directly from reply callbacks and
+close a backpressured unread write. Entered actions remain owned until their
+actual settlement. This is channel source evidence, with no package, bootstrap,
+native-cleanup, installer or restart activation.
+
+Independent review passes the final reader, channel, constructor diagnostics and
+owned resource harness. The combined source passes typing, application/shared-UI
+build and 1,216 tests in 18.22 seconds, with zero failures and 38 explicit
+native/opt-in skips. Workflow YAML and Bash syntax pass separately.
+
+Original [CI 37881571843](https://github.com/juferdinand/OpenWhisper/actions/runs/37881571843)
+passes both thin Dev/Stable jobs at actual producer
+`2bba516dc4c8a14acdbf66fdd7bd0d016a6edf67`, distinct from API head `26e02ab0`.
+Clean-source admission passes before the official merger. Unsigned merged native
+verification fails at `otool` exit 1; original path/stderr are absent. Final signing,
+universal ZIP and both universal runtimes are unexecuted. A bounded diagnostic
+receipt/upload now preserves that missing tool/native boundary while retaining
+all strict gates. Unknown/null spawn stderr cannot replace the original failure;
+six focused constructor cases and independent review pass. This is observability
+source, not a claimed repair of the unclassified original failure.
+
+## Separate supervised Debian resource diagnostic
+
+One reviewed diagnostic executes the unchanged clean `2ce4a228` Debian package
+under the original 256-task cap. All 18 existing checks pass in 46.04 seconds;
+the original CLI processes, both supervised GUI/parent chains and private
+services close, the namespace is removed and source/package comparisons pass.
+This includes CPU recognition, recovery, clipboard, X11, autostart and generated
+permanent-target restart. It uses private audio and an owned X11 session.
+
+Twelve bounded snapshots show 208 tasks after readiness, 225 after Retry and 227
+after the sampled Cancel operations, with a later peak of 255 and no rejection.
+The supervisor stays at 13 threads, the GUI changes from 38 to 39, and original
+CLI identities depart after close. Unknown descendant roles remain unclassified.
+The native-open sidecar does not run because both Start invocations succeed.
+
+The earlier failure and its peak of 256 with one rejection remain separate in
+[issue #37](https://github.com/juferdinand/OpenWhisper/issues/37). This passing
+observation supplies package acceptance evidence without proving a product fix,
+the original allocating owner, physical desktop support or a real login session.
+
 ## AppImage transaction and fresh supervised package checkpoint
 
 An independently reviewed inactive AppImage consumer authenticates both the

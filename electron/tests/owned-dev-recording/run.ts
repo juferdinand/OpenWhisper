@@ -32,7 +32,8 @@ const appImage = stablePackage && args[10] === "--appimage-bundle";
 const appImageStartupOnly = appImage && args[12] === "--appimage-startup-only";
 const supervisedLaunch = stablePackage && (installedDebian || appImage) && args[12] === "--supervised-launch";
 const appImageAdmission = appImage && (args[12] === "--appimage-admission" || supervisedLaunch);
-if (args.length !== (supervisedLaunch ? 17 : appImageStartupOnly || appImageAdmission ? 13 : installedDebian || appImage ? 12 : packaged ? installPackage || stablePackage ? 10 : 9 : copiedNode ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
+const resourceDiagnostic = supervisedLaunch && installedDebian && args[17] === "--resource-diagnostic";
+if (args.length !== (resourceDiagnostic ? 18 : supervisedLaunch ? 17 : appImageStartupOnly || appImageAdmission ? 13 : installedDebian || appImage ? 12 : packaged ? installPackage || stablePackage ? 10 : 9 : copiedNode ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
     || process.platform !== "linux" || process.arch !== "x64" || process.getuid?.() === 0) throw new Error("INVALID_EXECUTION");
 const output = absolute.parse(args[1]), planning = absolute.parse(args[3]), fixtures = absolute.parse(args[5]);
 const packageDirectory = packaged ? absolute.parse(args[8]) : undefined;
@@ -212,6 +213,8 @@ if (portalFixture) {
 for (const name of ["ggml-tiny.bin", "jfk.f32"]) await cp(join(fixtures, name), join(payload, "fixtures", name), { errorOnExist: true, force: false });
 const bundled = await build({ entryPoints: [join(root, "tests/owned-dev-recording/driver.ts")], outfile: join(payload, "driver.mjs"),
   platform: "node", format: "esm", target: "node24", bundle: true, external: ["@playwright/test"], metafile: true, sourcemap: false });
+if (resourceDiagnostic) await build({ entryPoints: [join(root, "tests/owned-dev-recording/resource-diagnostic.ts")], outfile: join(payload, "resource-diagnostic.mjs"),
+  platform: "node", format: "esm", target: "node24", bundle: true, sourcemap: false });
 // Test dependencies stay outside the packaged application's production tree.
 for (const name of ["@playwright/test", "playwright", "playwright-core"]) {
   await mkdir(dirname(join(payload, "node_modules", name)), { recursive: true, mode: 0o700 });
@@ -389,7 +392,7 @@ try {
       permanentExecutable: "/opt/openwhisper/openwhisper", actualLoginSession: "NOT_TESTED" }), { mode: 0o600 });
   }
   await required(["exec", "--user", "1000:1000", container, "/usr/bin/chmod", "-R", "a-w",
-    ...(packaged ? ["/payload/driver.mjs", "/payload/node", "/payload/fixtures", "/payload/node_modules"] : ["/payload"])]);
+    ...(packaged ? ["/payload/driver.mjs", ...(resourceDiagnostic ? ["/payload/resource-diagnostic.mjs"] : []), "/payload/node", "/payload/fixtures", "/payload/node_modules"] : ["/payload"])]);
   if (debianPackage) await required(["exec", "--user", "1000:1000", container, "/usr/bin/chmod", "a-w", "/payload/package.deb"]);
   // Bound software rendering threads in the owned desktop, not application
   // inference. Keep the same process cap and genuine compositor/portal path.
@@ -401,7 +404,7 @@ try {
     "--output", "/tmp/owned-desktop", "--timeout", "180", "--", "/payload/node", "/payload/driver.mjs"]
     : nativeX11 ? ["OPENWHISPER_NATIVE_X11=1", ...(packaged ? ["OPENWHISPER_PACKAGE_DIRECTORY=/payload/package"] : []),
       ...(installPackage ? ["OPENWHISPER_INSTALL_PACKAGE=1"] : []), ...(stablePackage ? ["OPENWHISPER_STABLE_PACKAGE=1"] : []),
-      ...(installedDebian ? ["OPENWHISPER_INSTALLED_DEBIAN=1"] : []), ...(supervisedLaunch ? ["OPENWHISPER_SUPERVISED_LAUNCH=1"] : []), ...(appImage ? ["OPENWHISPER_APPIMAGE=1"] : []),
+      ...(installedDebian ? ["OPENWHISPER_INSTALLED_DEBIAN=1"] : []), ...(supervisedLaunch ? ["OPENWHISPER_SUPERVISED_LAUNCH=1"] : []), ...(resourceDiagnostic ? ["OPENWHISPER_RESOURCE_DIAGNOSTIC=1"] : []), ...(appImage ? ["OPENWHISPER_APPIMAGE=1"] : []),
       ...(appImageAdmission ? ["OPENWHISPER_APPIMAGE_ADMISSION=1", `OPENWHISPER_APPIMAGE_SHA256=${appImageInput!.image.sha256}`] : []),
       ...(appImageStartupOnly ? ["OPENWHISPER_APPIMAGE_STARTUP_ONLY=1"] : []), "/payload/node", "/payload/driver.mjs"]
     : ["/opt/node/bin/node", "/payload/driver.mjs"];

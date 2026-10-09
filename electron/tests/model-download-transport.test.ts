@@ -6,7 +6,7 @@ import { globalAgent } from "node:https";
 import type { Socket } from "node:net";
 import { Readable } from "node:stream";
 import test from "node:test";
-import { createModelDownloadTransport, createUpdateDownloadTransport, MODEL_DOWNLOAD_CHUNK_BYTES, ModelDownloadTransportError, type ModelDownloadHTTPSIO } from "../src/services/model-download-transport.js";
+import { createModelDownloadTransport, createUpdateDownloadTransport, createUpdateFeedTransport, MODEL_DOWNLOAD_CHUNK_BYTES, ModelDownloadTransportError, type ModelDownloadHTTPSIO } from "../src/services/model-download-transport.js";
 
 class InertSocket extends EventEmitter {
   destroyed = false; closed = false; hold = false;
@@ -44,6 +44,18 @@ function effects(prepare: (request: InertRequest) => void = () => {}, data: Uint
     } };
   return { io, agent, requests, requestOptions, agentOptions };
 }
+test("release metadata transport adds only the fixed public user agent and exact API host", async () => {
+  const fake = effects(), transport = createUpdateFeedTransport(fake.io), signal = new AbortController().signal;
+  for (const url of ["https://api.github.com/repos/owner/repo/releases/latest", "https://github.com/file", "https://release-assets.githubusercontent.com/file"]) {
+    const exchange = transport.request(new URL(url), "GET", signal); await exchange.headers; await exchange.close();
+  }
+  for (const url of ["https://api.github.com.evil.invalid/file", "https://objects.githubusercontent.com/file", "https://hf.co/file"]) {
+    assert.throws(() => transport.request(new URL(url), "GET", signal), ModelDownloadTransportError);
+  }
+  assert.equal(fake.requests.length, 3);
+  for (const options of fake.requestOptions) assert.deepEqual(options.headers, { "User-Agent": "OpenWhisper", "Accept-Encoding": "identity" });
+  assert.deepEqual(fake.agentOptions, [{ keepAlive: false, rejectUnauthorized: true, proxyEnv: {} }]); await transport.close();
+});
 test("fixed HTTPS effects force certificate verification empty proxy policy and no environment credentials", async () => {
   const names = ["NODE_TLS_REJECT_UNAUTHORIZED", "NODE_USE_ENV_PROXY", "HTTPS_PROXY", "ALL_PROXY", "HF_TOKEN"] as const;
   const original = new Map(names.map((name) => [name, process.env[name]]));
