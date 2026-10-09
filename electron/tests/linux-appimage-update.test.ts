@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { link, mkdir, mkdtemp, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, link, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { test } from "node:test";
-import { LinuxAppImageUpdateError, prepareAppImageUpdate, validateAppImageUpdateHeader } from "../src/services/linux-appimage-update.js";
+import { LinuxAppImageUpdateError, prepareAppImageUpdate, validateAppImageUpdateHeader,
+  type AppImageExecContinuation, type PreparedAppImageUpdate } from "../src/services/linux-appimage-update.js";
 import { LinuxUpdateSignatureError } from "../src/services/linux-update-signature.js";
 import { retainOwnedUpdateDownload } from "../src/services/update-staging.js";
+import { appImageLauncher } from "../src/services/linux-appimage-launcher.js";
 
 const supported = process.platform === "linux" && process.arch === "x64" && process.getuid?.() !== 0;
 const artifactName = "OpenWhisper-Linux-x86_64.AppImage";
@@ -150,4 +152,91 @@ test("Changed launch files refuse before replacement and caller cleanup cannot r
     await assert.rejects(prepared.discard(), failure("INVALID_STATE"));
     release(); await installing; await prepared.rollback(); await cleanInstallation(pending.image);
   } finally { release?.(); await pending.cleanup(); }
+});
+
+async function continuationFixture() {
+  const f = await originalFixture();
+  await writeFile(f.launcher, appImageLauncher(), { mode: 0o755 });
+  return f;
+}
+async function retainedDescriptors(paths: readonly string[]): Promise<number> {
+  const names = await readdir("/proc/self/fd");
+  const identities = await Promise.all(paths.map((path) => lstat(path, { bigint: true }).catch(() => undefined)));
+  const descriptors = await Promise.all(names.map((name) => stat(`/proc/self/fd/${name}`, { bigint: true }).catch(() => undefined)));
+  return descriptors.filter((value) => value && identities.some((identity) => identity && identity.dev === value.dev && identity.ino === value.ino)).length;
+}
+async function continuationStage(image: string): Promise<string> {
+  const names = (await readdir(dirname(image))).filter((name) => name.startsWith(".openwhisper-update-"));
+  assert.equal(names.length, 1); return join(dirname(image), names[0]!);
+}
+
+test("Durable continuation retains the predecessor and settles original descriptors before inactive exec admission", ownedOptions, async () => {
+  const f = await continuationFixture();
+  let prepared: PreparedAppImageUpdate | undefined, continuation: AppImageExecContinuation | undefined;
+  try {
+    prepared = await prepareAppImageUpdate(f.input);
+    await assert.rejects(prepared.prepareExecContinuation(), failure("INVALID_STATE"));
+    await prepared.install(); const stage = await continuationStage(f.image), backup = join(stage, "previous.AppImage");
+    assert.equal(await retainedDescriptors([f.image, backup]), 2);
+    const first = prepared.prepareExecContinuation(); assert.equal(prepared.prepareExecContinuation(), first);
+    await assert.rejects(prepared.commit(), failure("INVALID_STATE"));
+    await assert.rejects(prepared.rollback(), failure("INVALID_STATE"));
+    continuation = await first; assert.ok(Object.isFrozen(continuation));
+    assert.equal(await retainedDescriptors([f.image, backup, join(stage, "continuation.json")]), 0);
+    assert.equal((await lstat(stage)).mode & 0o777, 0o700);
+    assert.equal((await lstat(join(stage, "continuation.json"))).mode & 0o777, 0o600);
+    const bytes = await readFile(join(stage, "continuation.json")); assert.ok(bytes.length <= 32 * 1024);
+    const record: unknown = JSON.parse(bytes.toString("utf8"));
+    assert.ok(record && typeof record === "object");
+    assert.deepEqual(Object.keys(record).sort(), ["artifact", "directory", "installed", "installedVersion", "launcher",
+      "predecessor", "predecessorSha256", "predecessorVersion", "schemaVersion", "signature", "stage"]);
+    assert.ok(!bytes.toString("utf8").includes(f.root));
+    const check = continuation.assertInstalledForExec(); assert.equal(continuation.assertInstalledForExec(), check); await check;
+    assert.equal(await retainedDescriptors([f.image, backup]), 0);
+    assert.equal(await readFile(backup, "utf8"), "inert private predecessor");
+    await f.download.assertUnchanged();
+    // No image or exec is invoked. The same parent can still restore after a refused handoff.
+    const rollback = continuation.rollbackBeforeExec(); assert.equal(continuation.rollbackBeforeExec(), rollback); await rollback;
+    assert.equal(await readFile(f.image, "utf8"), "inert private predecessor"); await cleanInstallation(f.image);
+    assert.equal(await retainedDescriptors([f.image, backup]), 0);
+    await assert.rejects(continuation.assertInstalledForExec(), failure("INVALID_STATE"));
+  } finally {
+    await continuation?.rollbackBeforeExec().catch(() => {});
+    await prepared?.rollback().catch(() => {}); await prepared?.discard().catch(() => {}); await f.cleanup();
+  }
+});
+
+test("Continuation refuses foreign records before closure and preserves replacements after closure", ownedOptions, async () => {
+  for (const changed of ["record-before", "record-after", "candidate", "backup-mode", "unknown-child"] as const) {
+    const f = await continuationFixture();
+    let prepared: PreparedAppImageUpdate | undefined, continuation: AppImageExecContinuation | undefined;
+    try {
+      prepared = await prepareAppImageUpdate(f.input); await prepared.install();
+      const stage = await continuationStage(f.image), record = join(stage, "continuation.json"), backup = join(stage, "previous.AppImage");
+      if (changed === "record-before") {
+        await writeFile(record, "foreign record", { mode: 0o600 });
+        await assert.rejects(prepared.prepareExecContinuation(), failure("SOURCE_CHANGED"));
+        assert.equal(await readFile(record, "utf8"), "foreign record");
+        // Existing rollback restores the old image but refuses to remove the foreign stage child.
+        await assert.rejects(prepared.rollback(), failure("ROLLBACK_FAILED"));
+        assert.equal(await readFile(f.image, "utf8"), "inert private predecessor");
+        continue;
+      }
+      continuation = await prepared.prepareExecContinuation();
+      if (changed === "record-after") { await rename(record, `${record}.original`); await writeFile(record, "foreign record", { mode: 0o600 }); }
+      if (changed === "candidate") { await rename(f.image, `${f.image}.original`); await writeFile(f.image, "foreign candidate", { mode: 0o755 }); }
+      if (changed === "backup-mode") await chmod(backup, 0o700);
+      if (changed === "unknown-child") await writeFile(join(stage, "unknown"), "foreign child", { mode: 0o600 });
+      await assert.rejects(continuation.assertInstalledForExec());
+      await assert.rejects(continuation.rollbackBeforeExec(), failure("ROLLBACK_FAILED"));
+      assert.equal(await readFile(backup, "utf8"), "inert private predecessor");
+      assert.equal(await retainedDescriptors([f.image, backup, record]), 0);
+      if (changed === "candidate") assert.equal(await readFile(f.image, "utf8"), "foreign candidate");
+      if (changed === "record-after") assert.equal(await readFile(record, "utf8"), "foreign record");
+      await f.download.assertUnchanged();
+    } finally {
+      await continuation?.rollbackBeforeExec().catch(() => {});
+      await prepared?.rollback().catch(() => {}); await prepared?.discard().catch(() => {}); await f.cleanup();
+    }
+  }
 });

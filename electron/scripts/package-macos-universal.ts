@@ -97,6 +97,10 @@ function tool(command: Tool, args: readonly string[], nativePath: string | null 
   if (result.error || result.status !== 0 || result.signal !== null) throw new MacUniversalToolError(macUniversalToolFailure(command, result, args, nativePath));
   return result.stdout;
 }
+/** Disable archive(member) parsing so native helper names remain literal file paths. */
+export function readMacUniversalLoadCommands(absolutePath: string, nativePath: string): string {
+  return tool("/usr/bin/otool", ["-l", "-m", absolutePath], nativePath);
+}
 
 /** Inspect exactly two non-overlapping native slices, then retain the existing thin signing-policy checks. */
 export function inspectUniversalMacBinary(bytes: Buffer): void {
@@ -245,7 +249,7 @@ async function verifyMerged(stage: Awaited<ReturnType<typeof stageMacUniversalIn
     const koffi = architectures.find((architecture) => stage.input[architecture].koffiMach.includes(path));
     if (koffi) { if (!inspectMacBinary(bytes, koffi)) throw new Error("Invalid Koffi native input."); }
     else inspectUniversalMacBinary(bytes);
-    inspectMacMinimumOS(tool("/usr/bin/otool", ["-l", join(directory, path)], path), path);
+    inspectMacMinimumOS(readMacUniversalLoadCommands(join(directory, path), path), path);
   }
   for (const architecture of architectures) if (!same(await digest(join(directory, snapshotRelative(architecture))), await digest(join(stage.input[architecture].directory, snapshotRelative(architecture))))) throw new Error("Original architecture snapshot changed.");
   for (const architecture of architectures) if (!inventoryEqual(await inventory(stage.staged[architecture]), stage.copies[architecture]) ||

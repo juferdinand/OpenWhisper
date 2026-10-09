@@ -197,7 +197,7 @@ async function main(): Promise<void> {
     XDG_RUNTIME_DIR: runtime, PIPEWIRE_RUNTIME_DIR: runtime, PIPEWIRE_REMOTE: "pipewire-0",
     PULSE_SERVER: `unix:${runtime}/pulse/native`, DBUS_SESSION_BUS_ADDRESS: `unix:path=${runtime}/bus`,
     DBUS_SYSTEM_BUS_ADDRESS: `unix:path=${runtime}/disabled-system-bus`,
-    XDG_SESSION_TYPE: "x11", XDG_CURRENT_DESKTOP: "Owned X11", LIBGL_ALWAYS_SOFTWARE: "1", GALLIUM_DRIVER: "llvmpipe",
+    XDG_SESSION_TYPE: "x11", XDG_CURRENT_DESKTOP: "Owned X11", LIBGL_ALWAYS_SOFTWARE: "1", GALLIUM_DRIVER: "llvmpipe", LP_NUM_THREADS: "2",
   };
   if (installedDebian || appImageAdmission) { env.XDG_CONFIG_DIRS = join(home, "system-config"); await mkdir(env.XDG_CONFIG_DIRS, { mode: 0o700 }); }
   const permanentImage = join(home, ".local/lib/whisperfree/OpenWhisper.AppImage"), imageLauncher = join(dirname(permanentImage), "openwhisper-launch");

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { inspectUniversalMacBinary, macUniversalFailureDiagnostic, macUniversalToolFailure, stageMacUniversalInputs } from "../scripts/package-macos-universal.js";
+import { inspectUniversalMacBinary, macUniversalFailureDiagnostic, macUniversalToolFailure, readMacUniversalLoadCommands, stageMacUniversalInputs } from "../scripts/package-macos-universal.js";
 import { darwinUniversalRecordingDescriptorSchema, developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
 import { SPEECH_ENTRY_FILES } from "../src/services/speech-entry-graph.js";
 
@@ -12,6 +13,21 @@ const app = "Contents/Resources/app", commit = "0123456789abcdef0123456789abcdef
 const native = ["dist/native/capture/openwhisper_macos_capture.node", "dist/native/openwhisper_macos_capture.node",
   "dist/native/openwhisper_macos_retirement.node", "dist/native/speech/cpu/openwhisper_speech.node", "dist/native/openwhisper_speech.node"];
 const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+test("Darwin load-command inspection opens a real Mach-O helper ending in parentheses literally", {
+  skip: process.platform !== "darwin" ? "Requires the actual Darwin otool and system Mach-O fixture." : false,
+}, async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "owned-otool-literal-"))); await chmod(root, 0o700);
+  const path = "Contents/Frameworks/Electron Helper (GPU).app/Contents/MacOS/Electron Helper (GPU)", absolute = join(root, path);
+  try {
+    await mkdir(dirname(absolute), { recursive: true }); await copyFile("/usr/bin/true", absolute); await chmod(absolute, 0o600);
+    const original = await readFile(absolute);
+    const legacy = spawnSync("/usr/bin/otool", ["-l", absolute], { shell: false, encoding: "utf8", timeout: 5_000, maxBuffer: 128 * 1024 });
+    assert.equal(legacy.error, undefined); assert.equal(legacy.signal, null); assert.notEqual(legacy.status, 0);
+    assert.match(legacy.stderr, /can't open file|No such file or directory/u);
+    assert.match(readMacUniversalLoadCommands(absolute, path), /cmd\s+LC_(?:BUILD_VERSION|VERSION_MIN_MACOSX)/u);
+    assert.deepEqual(await readFile(absolute), original);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 test("failed native tool diagnostics retain the exact boundary while redacting private paths and identities", () => {
   const path = "Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework", absolute = `/private/owned/${path}`, identity = "a".repeat(40);
   const diagnostic = macUniversalToolFailure("/usr/bin/otool", { status: 1, signal: null, stderr: `otool: ${absolute}: malformed load command ${identity} https://private.invalid/token\u001b` }, ["-l", absolute], path);

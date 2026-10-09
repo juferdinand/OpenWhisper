@@ -18,10 +18,46 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | macOS dictation | Actual Intel/Apple Silicon Dev packages pass sandbox, signed utilities, CPU recognition of public audio, shortcut setup/removal and original Quit. Normal stable packages pass migration, edited-state restart and clean exits at b892d86 | Physical microphone/TCC, actual target insertion and device changes; Metal selection remains open |
 | Linux desktop integration | Owned stock KDE 5.27 native Wayland F8, binding Quit/crash recovery and paste into separate Wayland/XWayland editors pass. Genuine X11 shortcuts and all five no-display CLI commands pass, including installed stable autostart enable/disable and generated-target restart | Expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
-| Packaging and updates | Fresh supervised Debian passes all 18 runtime checks in a separate diagnostic; an earlier session-admission failure remains tracked. Inactive consumers authenticate downloads; private AppImage swap/rollback and public metadata reads pass. Both Mac thin packages pass; universal construction fails at an unclassified `otool` boundary | Complete supervised AppImage and universal Mac runtime; connect installation/restart/rollback, persistent publisher continuity, authenticated Dev replacement, DMG and release signing; retain the Linux resource-margin bug |
+| Packaging and updates | Unchanged supervised Debian and AppImage pass all 18 runtime checks; the owned X11 rendering budget is corrected. Inactive consumers authenticate downloads and preserve the AppImage predecessor through handoff. Both Mac thin packages pass; the universal `otool` filename failure has a source fix | Confirm universal Mac construction/runtime; connect installation/restart/rollback, installed Debian audit, persistent publisher continuity, authenticated Dev replacement, DMG and release signing; retain earlier resource failures separately |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 ## Current package checkpoint
+
+The unchanged clean `2ce4a228` supervised AppImage now passes all 18 runtime
+checks in 64.59 seconds. Its permanent image, extracted resources and original
+supervisor/GUI chains are admitted; CLI control, CPU recognition, clipboard,
+Retry/Discard, native X11, autostart and generated-target restarts pass. Three
+original launch chains exit normally, their PIDs/extractions disappear, and
+private services and namespace close. Original package/source/mode comparisons
+pass. Only the independently reviewed owned X11 environment changes:
+`LP_NUM_THREADS=2`, matching the existing KDE rendering budget. The task cap
+stays 256. Actual peak/events are not recorded in this passing normal mode;
+no lower measured task count is claimed. The earlier case remains a separate
+failure: GLib could not create its `gdbus` thread and four limit rejections were
+recorded. This corrects the test environment, not the production package.
+
+Original [CI 37884060187](https://github.com/juferdinand/OpenWhisper/actions/runs/37884060187)
+passes both thin Mac Dev/Stable jobs at actual producer `6776c53c`, distinct from
+API head `1524f150`. Universal verification identifies `Electron Helper (GPU)`.
+The file is read and its Mach-O header checked before `otool`; Apple's default
+archive-member syntax then misinterprets its final `(GPU)` as a member name.
+The reviewed correction adds `-m` while retaining the exact path and all native,
+minimum-OS, signing and source gates. See the [Apple tool documentation](https://github.com/apple-oss-distributions/cctools/blob/e0d56624eca2a76c2ace4c21850df9e666de4ca5/man/otool-classic.1#L188).
+A Darwin regression copies a real Mach-O into the exact helper filename and
+calls production inspection without executing it. That case is explicitly
+skipped under Linux; actual universal success remains pending normal CI.
+
+The inactive AppImage consumer adds an installed-only continuation step. It
+reauthenticates the fixed installed 0755 candidate without weakening private
+0600 staged-file admission, writes a bounded private recovery hint, and closes
+both original candidate/predecessor descriptors. The same parent can recheck
+the installed candidate and roll back before a refused exec using new guarded
+descriptors. The backup remains on disk; persisted records grant no automatic
+rollback or execution authority. Six existing private-file cases pass at the
+new production hash, followed by two corrected new cases with five refusal
+variants. They use original signed 0.2.5 bytes, synthetic current 0.2.4 and an
+inert predecessor on host Node; no image or exec runs. Bootstrap/installer/UI
+activation and next-generation cleanup remain separate work.
 
 The inactive release-metadata reader uses the fixed Linux feed or admitted Mac
 repository API, limits response sizes and retains original pending work through
@@ -42,8 +78,8 @@ closure have focused regressions. Bootstrap, native cleanup and installers are
 not connected to this channel yet; V1 remains intact.
 
 The combined reviewed increment passes TypeScript checks, the normal application
-and shared-UI build, and 1,216 tests in 18.22 seconds: zero failures and 38
-explicit native/opt-in skips. Workflow YAML and Bash syntax pass. These source
+and shared-UI build, and 1,216 tests in 18.24 seconds: zero failures and 41
+explicit native/opt-in skips (1,257 total). Workflow YAML and Bash syntax pass. These source
 checks do not replace the separately identified immutable-package evidence.
 
 Both original thin jobs in
@@ -101,8 +137,9 @@ cap once; causation remains unproven and is tracked in
 ordinary app close without forced termination and closes private services;
 the final per-PID successful-Quit assertion was not reached. This failed run is
 retained separately from the passing diagnostic above. Its cause remains open.
-Supervised AppImage runtime has not run. Earlier immutable runtime results remain
-separate producers.
+The first supervised AppImage case separately reaches the same task cap; the
+corrected owned-rendering verification above passes. Earlier immutable runtime
+results remain separate producers.
 
 The inactive AppImage consumer independently authenticates an adjacent private
 copy, retains the exact predecessor and supports explicit commit or rollback.

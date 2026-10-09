@@ -1,8 +1,11 @@
+import { createHash } from "node:crypto";
 import { constants, type BigIntStats } from "node:fs";
-import { link, lstat, mkdtemp, open, realpath, rename, rmdir, unlink, type FileHandle } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { link, lstat, mkdtemp, open, readdir, realpath, rename, rmdir, unlink, type FileHandle } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { LinuxInstalledLaunch } from "../main/linux-installed-launch.js";
 import { verifyOwnedLinuxUpdateFile } from "./linux-update-file.js";
+import { MAX_LINUX_UPDATE_BYTES, verifyLinuxUpdateStream } from "./linux-update-signature.js";
+import { appImageLauncher } from "./linux-appimage-launcher.js";
 import { isNewerUpdateVersion } from "./update-policy.js";
 import { assertPrivateUpdateDirectory, inspectOwnedUpdateFile, type OwnedUpdateDownload } from "./update-staging.js";
 
@@ -49,6 +52,14 @@ export interface PreparedAppImageUpdate {
   commit(): Promise<void>;
   /** Cancel preparation or clean a failed transaction whose predecessor was restored. */
   discard(): Promise<void>;
+  /** Preserve a private recovery hint and predecessor; no successful exec or next-generation acceptance is implied. */
+  prepareExecContinuation(): Promise<Readonly<AppImageExecContinuation>>;
+}
+export interface AppImageExecContinuation {
+  /** Reauthenticate the fixed installed image, settling all temporary descriptors before returning. */
+  assertInstalledForExec(): Promise<void>;
+  /** Same original parent only, after exec refused; never reads a persisted record as authority. */
+  rollbackBeforeExec(): Promise<void>;
 }
 
 /** Inactive host consumer. The caller retains the original download and parent-owned restart/signature handoff. */
@@ -85,11 +96,11 @@ export async function prepareAppImageUpdate(input: {
   const closeOwned = (): Promise<void> => closing ??= Promise.allSettled([copy?.close(), old.close()]).then((results) => {
     if (results.some((result) => result.status === "rejected")) fail("CLEANUP_FAILED");
   });
-  const removeCopy = async (): Promise<void> => {
-    if (!copy || !source || !copyIdentity) return;
+  const removeCopy = async (file = copy): Promise<void> => {
+    if (!file || !source || !copyIdentity) return;
     await guard(); const named = await optional(source);
     // Cleanup owns this descriptor/inode; partial own writes are not installation authority.
-    if (named) { await observe(copy, source, uid, copyIdentity.mode & 0o7777n); await unlink(source); }
+    if (named) { await observe(file, source, uid, copyIdentity.mode & 0o7777n); await unlink(source); }
   };
   try {
     const initial = await old.stat({ bigint: true }), mode = initial.mode & 0o7777n;
@@ -133,35 +144,39 @@ export async function prepareAppImageUpdate(input: {
     return fail("PREPARE_FAILED");
   }
   const candidate = copy!, stage = directory!, preparedPath = source!, previousPath = backup!;
-  let phase: "prepared" | "installing" | "installed" | "failed" | "closed" = "prepared", installed: BigIntStats | undefined;
+  let phase: "prepared" | "installing" | "installed" | "continuing" | "continued" | "rolling-back" | "failed" | "closed" = "prepared", installed: BigIntStats | undefined;
   let installing: Promise<void> | undefined, finishing: { kind: "rollback" | "commit" | "discard"; promise: Promise<void> } | undefined;
-  const assertInstalled = async (): Promise<void> => {
-    if (phase !== "installed" || !installed) fail("INVALID_STATE");
+  const assertCandidate = async (): Promise<void> => {
+    if (!installed) fail("INVALID_STATE");
     await guard(); await observe(candidate, image, uid, 0o755n, installed);
   };
-  const restore = async (): Promise<void> => {
+  const assertInstalled = async (): Promise<void> => {
+    if (phase !== "installed") fail("INVALID_STATE");
+    await assertCandidate();
+  };
+  const restore = async (predecessor = old): Promise<void> => {
     if (!backupIdentity) fail("ROLLBACK_FAILED");
-    await guard(); await observe(old, previousPath, uid, oldIdentity.mode & 0o7777n, backupIdentity);
+    await guard(); await observe(predecessor, previousPath, uid, oldIdentity.mode & 0o7777n, backupIdentity);
     if (await optional(image)) fail("ROLLBACK_FAILED");
     await link(previousPath, image);
-    const linked = await observe(old, image, uid, oldIdentity.mode & 0o7777n, backupIdentity, true, 2n);
-    await observe(old, previousPath, uid, oldIdentity.mode & 0o7777n, linked, false, 2n);
-    await unlink(previousPath); oldIdentity = await observe(old, image, uid, oldIdentity.mode & 0o7777n, linked, true);
+    const linked = await observe(predecessor, image, uid, oldIdentity.mode & 0o7777n, backupIdentity, true, 2n);
+    await observe(predecessor, previousPath, uid, oldIdentity.mode & 0o7777n, linked, false, 2n);
+    await unlink(previousPath); oldIdentity = await observe(predecessor, image, uid, oldIdentity.mode & 0o7777n, linked, true);
     backupIdentity = undefined; await syncDirectory(dirname(image)); await syncDirectory(stage);
   };
-  const withdrawCandidate = async (): Promise<void> => {
+  const withdrawCandidate = async (published = candidate): Promise<void> => {
     await guard();
     const target = await optional(image);
     if (!target) return;
     const expected = installed ?? copyIdentity;
     if (!expected) fail("ROLLBACK_FAILED");
     const staged = await optional(preparedPath), links = staged ? 2n : 1n;
-    const published = await observe(candidate, image, uid, 0o755n, expected, true, links);
+    const observed = await observe(published, image, uid, 0o755n, expected, true, links);
     if (staged) {
-      await observe(candidate, preparedPath, uid, 0o755n, published, false, 2n);
+      await observe(published, preparedPath, uid, 0o755n, observed, false, 2n);
       await unlink(image);
     } else await io.move(image, preparedPath);
-    copyIdentity = await observe(candidate, preparedPath, uid, 0o755n, published, true);
+    copyIdentity = await observe(published, preparedPath, uid, 0o755n, observed, true);
   };
   const install = (): Promise<void> => {
     if (installing) return installing;
@@ -219,6 +234,145 @@ export async function prepareAppImageUpdate(input: {
     });
     finishing = { kind, promise }; return promise;
   };
-  return Object.freeze({ version: expectedVersion, bytes: original.bytes, install, assertInstalled,
+  const recordPath = join(stage, "continuation.json");
+  let recordIdentity: BigIntStats | undefined, continuing: Promise<Readonly<AppImageExecContinuation>> | undefined;
+  async function* chunks(file: FileHandle, path: string, mode: bigint, identity: BigIntStats): AsyncGenerator<Buffer> {
+    if (identity.size < 1n || identity.size > BigInt(MAX_LINUX_UPDATE_BYTES)) fail("SOURCE_CHANGED");
+    const block = Buffer.alloc(64 * 1024), bytes = Number(identity.size);
+    let position = 0;
+    while (position < bytes) {
+      await guard(); await observe(file, path, uid, mode, identity);
+      const wanted = Math.min(block.length, bytes - position), { bytesRead } = await file.read(block, 0, wanted, position);
+      if (bytesRead <= 0 || bytesRead > wanted) fail("SOURCE_CHANGED");
+      position += bytesRead; yield block.subarray(0, bytesRead);
+    }
+    if ((await file.read(block, 0, 1, position)).bytesRead !== 0) fail("SOURCE_CHANGED");
+    await guard(); await observe(file, path, uid, mode, identity);
+  }
+  const authenticateInstalled = async (file: FileHandle): Promise<void> => {
+    const identity = installed ?? fail("INVALID_STATE");
+    await verifyLinuxUpdateStream(chunks(file, image, 0o755n, identity), signature, expectedVersion);
+  };
+  const assertLauncher = async (): Promise<void> => {
+    await guard();
+    const file = await open(launcher, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const template = Buffer.from(appImageLauncher());
+      if (launcherIdentity.size !== BigInt(template.length)) fail("SOURCE_CHANGED");
+      await observe(file, launcher, uid, launcherIdentity.mode & 0o7777n, launcherIdentity);
+      const bytes = Buffer.alloc(template.length); let position = 0;
+      while (position < bytes.length) {
+        const { bytesRead } = await file.read(bytes, position, bytes.length - position, position);
+        if (!bytesRead) fail("SOURCE_CHANGED"); position += bytesRead;
+      }
+      if (!bytes.equals(template)) fail("SOURCE_CHANGED");
+      await observe(file, launcher, uid, launcherIdentity.mode & 0o7777n, launcherIdentity); await guard();
+    } finally { await file.close(); }
+  };
+  const assertRecord = async (): Promise<void> => {
+    await guard();
+    const names = (await readdir(stage)).sort();
+    if (!recordIdentity || !same(recordIdentity, await lstat(recordPath, { bigint: true })) ||
+        !backupIdentity || !same(backupIdentity, await lstat(previousPath, { bigint: true })) ||
+        names.length !== 2 || names[0] !== "continuation.json" || names[1] !== "previous.AppImage") fail("SOURCE_CHANGED");
+  };
+  const encodeIdentity = (value: BigIntStats) => Object.fromEntries(
+    (["dev", "ino", "uid", "mode", "nlink", "size", "mtimeNs", "ctimeNs"] as const).map((key) => [key, value[key].toString()]));
+  const prepareExecContinuation = (): Promise<Readonly<AppImageExecContinuation>> => {
+    if (continuing) return continuing;
+    if (phase !== "installed" || finishing) return Promise.reject(new LinuxAppImageUpdateError("INVALID_STATE"));
+    phase = "continuing";
+    return continuing = Promise.resolve().then(async () => {
+      let record: FileHandle | undefined, recordClosing: Promise<void> | undefined;
+      try {
+        await assertCandidate(); await assertLauncher();
+        const predecessorIdentity = backupIdentity ?? fail("SOURCE_CHANGED");
+        if ((await readdir(stage)).join() !== "previous.AppImage") fail("SOURCE_CHANGED");
+        await observe(old, previousPath, uid, oldIdentity.mode & 0o7777n, predecessorIdentity);
+        await authenticateInstalled(candidate);
+        const hash = createHash("sha256");
+        for await (const chunk of chunks(old, previousPath, oldIdentity.mode & 0o7777n, predecessorIdentity)) hash.update(chunk);
+        const directoryIdentity = await lstat(stage, { bigint: true });
+        const bytes = Buffer.from(JSON.stringify({ schemaVersion: 1, artifact: artifactName, stage: basename(stage),
+          predecessorVersion: currentVersion, installedVersion: expectedVersion, signature,
+          directory: { dev: directoryIdentity.dev.toString(), ino: directoryIdentity.ino.toString(),
+            uid: directoryIdentity.uid.toString(), mode: directoryIdentity.mode.toString() },
+          launcher: encodeIdentity(launcherIdentity), installed: encodeIdentity(installed!),
+          predecessor: encodeIdentity(predecessorIdentity), predecessorSha256: hash.digest("hex") }));
+        if (bytes.length > 32 * 1024) fail("INVALID_INPUT");
+        await guard();
+        record = await open(recordPath, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+        recordIdentity = await observe(record, recordPath, uid, 0o600n);
+        let position = 0;
+        while (position < bytes.length) {
+          const { bytesWritten } = await record.write(bytes, position, bytes.length - position, position);
+          if (!bytesWritten) fail("PREPARE_FAILED"); position += bytesWritten;
+        }
+        recordIdentity = await observe(record, recordPath, uid, 0o600n);
+        await record.sync(); await syncDirectory(stage); await syncDirectory(dirname(image));
+        await assertRecord(); await assertCandidate(); await observe(old, previousPath, uid, oldIdentity.mode & 0o7777n, backupIdentity);
+        recordClosing = record.close(); await recordClosing; record = undefined;
+        await closeOwned(); phase = "continued";
+      } catch (error: unknown) {
+        // Until original closure starts, the existing same-parent rollback still owns its original handles.
+        let uncertain = false;
+        if (record && !recordClosing) {
+          try { await guard(); await observe(record, recordPath, uid, 0o600n); await unlink(recordPath); }
+          catch { uncertain = true; }
+          await record.close().catch(() => { uncertain = true; });
+        } else if (recordClosing && record) {
+          uncertain = true;
+        } else if (recordIdentity && !closing) {
+          try { await guard(); if (!same(recordIdentity, await lstat(recordPath, { bigint: true }))) fail("SOURCE_CHANGED"); await unlink(recordPath); }
+          catch { uncertain = true; }
+        }
+        phase = closing || uncertain ? "failed" : "installed";
+        if (phase === "failed") await closeOwned().catch(() => {});
+        if (error instanceof LinuxAppImageUpdateError) throw error;
+        return fail("PREPARE_FAILED");
+      }
+      let checking: Promise<void> | undefined, rollingBack: Promise<void> | undefined;
+      const assertInstalledForExec = (): Promise<void> => {
+        if (phase !== "continued") return Promise.reject(new LinuxAppImageUpdateError("INVALID_STATE"));
+        if (checking) return checking;
+        const operation = Promise.resolve().then(async () => {
+          await assertRecord(); await assertLauncher();
+          const file = await open(image, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+          try { await authenticateInstalled(file); await assertRecord(); }
+          finally { await file.close(); }
+        });
+        checking = operation;
+        void operation.finally(() => { if (checking === operation) checking = undefined; }).catch(() => {});
+        return operation;
+      };
+      const rollbackBeforeExec = (): Promise<void> => {
+        if (rollingBack) return rollingBack;
+        if (phase !== "continued") return Promise.reject(new LinuxAppImageUpdateError("INVALID_STATE"));
+        phase = "rolling-back";
+        const originalCheck = checking;
+        return rollingBack = Promise.resolve().then(async () => {
+          let published: FileHandle | undefined, predecessor: FileHandle | undefined;
+          try {
+            await originalCheck; await assertRecord(); await assertLauncher();
+            published = await open(image, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+            predecessor = await open(previousPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+            await authenticateInstalled(published);
+            if (!backupIdentity) fail("ROLLBACK_FAILED");
+            await observe(predecessor, previousPath, uid, oldIdentity.mode & 0o7777n, backupIdentity);
+            await assertRecord(); await withdrawCandidate(published); await restore(predecessor); await removeCopy(published);
+            if (!recordIdentity || !same(recordIdentity, await lstat(recordPath, { bigint: true }))) fail("SOURCE_CHANGED");
+            await unlink(recordPath);
+          } catch { fail("ROLLBACK_FAILED"); }
+          finally {
+            const results = await Promise.allSettled([published?.close(), predecessor?.close()]);
+            if (results.some((result) => result.status === "rejected")) fail("CLEANUP_FAILED");
+          }
+          await guard(); await rmdir(stage); await syncDirectory(dirname(image)); phase = "closed";
+        });
+      };
+      return Object.freeze({ assertInstalledForExec, rollbackBeforeExec });
+    });
+  };
+  return Object.freeze({ version: expectedVersion, bytes: original.bytes, install, assertInstalled, prepareExecContinuation,
     rollback: () => finish("rollback"), commit: () => finish("commit"), discard: () => finish("discard") });
 }

@@ -1,5 +1,14 @@
 # Owned normal Linux Dev recording
 
+The private X11 environment forces Mesa llvmpipe and sets `LP_NUM_THREADS=2`,
+matching the existing owned KDE rendering budget. This bounds software rendering
+workers independently of CPU inference; the 256-task cap and runtime assertions
+remain intact. [Mesa documents this variable](https://docs.mesa3d.org/envvars.html#envvar-LP_NUM_THREADS)
+as a rendering-worker count, with CPU-core count as its default. The earlier
+supervised AppImage case hit the cap and reported GLib thread-allocation failure;
+its failed result remains separate from verification with this corrected harness.
+Production packages and the user's environment are unchanged.
+
 For the immutable supervised `2ce4` Debian package only, append
 `--resource-diagnostic` after the frozen producer SHA. This closed diagnostic mode
 keeps the existing actions, assertions and 256-task cap. Private 0600 snapshots

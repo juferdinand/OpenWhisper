@@ -1,5 +1,38 @@
 # Electron development evidence
 
+## Supervised AppImage and literal Mac helper filenames
+
+The unchanged clean `2ce4a228` AppImage passes all 18 ordinary runtime assertions
+in 64.59 seconds after the private X11 llvmpipe rendering budget is set to two
+workers, matching owned KDE. The 256-task cap, package, inference and assertions
+remain unchanged. The first case's actual GLib `gdbus` allocation refusal and
+four cap rejections are preserved separately. Passing normal-mode peak/events
+were not captured; no measured reduction is inferred. Three original supervised
+chains close with exit 0/PID absence, extraction/temp cleanup and complete
+package/source/mode roundtrip. The private namespace is removed.
+
+Both thin jobs in [CI 37884060187](https://github.com/juferdinand/OpenWhisper/actions/runs/37884060187)
+pass at actual producer `6776c53c` (API head `1524f150`). The original constructor
+diagnostic identifies `Electron Helper (GPU)`: the already-read file is treated
+by `otool` as archive-member syntax. Apple documents `-m` for literal names with
+parentheses. The source fix preserves the original native path and all gates;
+a real-file Darwin regression is present but explicitly skipped on Linux.
+No successful universal ZIP or native runtime is claimed from that failed run.
+
+The inactive AppImage continuation consumer retains its exact predecessor and
+private record, reauthenticates the installed candidate and closes originals
+before returning a same-parent pre-exec check/rollback capability. It reads no
+persisted record as authority. Six prior cases and two new cases with five
+refusal variants pass using pinned signed 0.2.5 bytes and an inert predecessor;
+no image/exec/new generation is run. Initial test assumptions about FD pathname
+counting and error category were corrected and retained. Actual upgrade/restart,
+new-generation cleanup and activation remain open.
+
+The combined source checkpoint passes strict typing, the normal application and
+shared-UI build, and 1,216 tests in 18.24 seconds: zero failures, 41 explicit
+native/opt-in skips and 1,257 total. The actual package and private-file evidence
+above remain separate from this source suite.
+
 ## Release metadata and original universal verification boundary
 
 The inactive reader reuses the owned HTTPS transport with fixed public endpoints,
