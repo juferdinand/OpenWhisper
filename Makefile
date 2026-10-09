@@ -1,35 +1,26 @@
-# Entry point for all platforms. See each platform directory for details.
-.PHONY: mac mac-install linux linux-test linux-run linux-install test clean
-LINUX_FEATURES ?= custom-protocol,vulkan
+# Electron is the supported host application. Native platform adapters remain
+# behind its locked TypeScript package and platform-specific build scripts.
+.PHONY: setup test build linux mac clean
 
-linux:
-	bash linux/scripts/fetch-native.sh
-	python3 linux/scripts/fetch-vulkan-headers.py
-	cd shared/ui && npm ci && npm run build
-	cargo build --locked --release --manifest-path linux/Cargo.toml -p openwhisper-desktop --features $(LINUX_FEATURES)
+setup:
+	npm ci --prefix app/ui
+	npm ci --prefix app
 
-linux-test:
-	python3 linux/scripts/test-local-installer.py
-	bash linux/scripts/fetch-native.sh
-	cd shared/ui && npm ci && npm run build
-	cargo test --locked --manifest-path linux/Cargo.toml --workspace
-	cargo clippy --locked --manifest-path linux/Cargo.toml --workspace --all-targets -- -D warnings
-	python3 linux/scripts/check-assets.py
+test: setup
+	npm run typecheck --prefix app
+	npm test --prefix app
 
-linux-run:
-	linux/target/release/openwhisper-desktop
+build: setup
+	npm run setup --prefix app
+	npm run build --prefix app
 
-linux-install:
-	bash linux/scripts/install-local.sh
+linux: setup
+	npm run setup --prefix app
+	npm run build --prefix app -- --stable --recording
 
-mac:
-	$(MAKE) -C macos app
-
-mac-install:
-	$(MAKE) -C macos install
-
-test:
-	$(MAKE) -C macos test
+mac: setup
+	npm run setup --prefix app
+	npm run build --prefix app -- --stable --recording
 
 clean:
-	$(MAKE) -C macos clean
+	rm -rf app/dist app/native/build-cpu app/native/capture/build app/native/linux-bus/build app/native/macos-capture/build app/native/macos-retirement/build app/native/macos-retirement/build-production

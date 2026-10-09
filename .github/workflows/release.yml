@@ -81,9 +81,9 @@ jobs:
         with:
           node-version: "24.21.0"
           cache: npm
-          cache-dependency-path: electron/package-lock.json
+          cache-dependency-path: app/package-lock.json
       - name: Install locked publication validator dependencies
-        run: npm ci --prefix electron
+        run: npm ci --prefix app
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: OpenWhisper-electron-macOS-v${{ inputs.version }}
@@ -93,7 +93,7 @@ jobs:
           name: OpenWhisper-electron-Linux-v${{ inputs.version }}
           path: ${{ runner.temp }}/release-input/linux
       - name: Validate exact builder artifacts and stage canonical assets
-        working-directory: electron
+        working-directory: app
         env:
           MACOS_DIR: ${{ runner.temp }}/release-input/macos
           LINUX_DIR: ${{ runner.temp }}/release-input/linux

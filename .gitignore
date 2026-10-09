@@ -5,8 +5,10 @@ build/
 xcuserdata/
 *.xcodeproj
 Package.resolved
+!/app/tests/build/
+!/app/tests/build/**
 /macos/Vendor/
-# Shared UI and Linux build outputs
+# Legacy Linux build outputs
 /linux/target/
 /linux/node_modules/
 /linux/dist/
@@ -30,17 +32,16 @@ Package.resolved
 
 __pycache__/
 
-/shared/ui/node_modules
-/shared/ui/dist/
-/shared/ui/test-results/
-/shared/ui/playwright-report/
-
-# Electron development outputs and private profiles
-/electron/node_modules
-/electron/dist/
-/electron/test-results/
-/electron/.profiles/
-/electron/.local/
-/electron/vendor/
-/electron/native/build-*/
-/electron/native/macos-retirement/build-production/
+# Application dependencies and generated output (exact paths also ignore aliases)
+/app/node_modules
+/app/dist/
+/app/test-results/
+/app/.profiles/
+/app/.local/
+/app/vendor/
+/app/native/build-*/
+/app/native/macos-retirement/build-production/
+/app/ui/node_modules
+/app/ui/dist/
+/app/ui/test-results/
+/app/ui/playwright-report/

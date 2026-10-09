@@ -45,7 +45,7 @@ capabilities even when the distribution name matches a target. Test released App
 test `.deb` installation separately on Debian-family systems. A package build or container test
 cannot substitute for an actual graphical session.
 
-The [acceptance report format](LINUX.md#acceptance-evidence) requires release/checksum,
+The [acceptance report format](LINUX.md#checks-and-evidence) requires release/checksum,
 distribution, desktop/session, portals, package type, hardware, and a result for each feature.
 Agents can run fixture, isolated compositor, owned permission-dialog and private virtual-source
 tests. Physical microphones, device events and actual logout/login remain separately identified
@@ -54,13 +54,13 @@ of bug reports; completed automated acceptance issues can close with those limit
 
 ## Platform structure and Electron
 
-`shared/ui/` owns the settings and recording interface used by macOS and Linux.
+`app/ui/` owns the Electron renderer, settings and recording interface; its bridge is not a Tauri or WebKit adapter.
 `linux/` owns the Linux Rust host, packages, native build dependencies, and host tests.
 Within the host, `desktops/kde/` owns direct trigger capture, KGlobalAccel and KWin recovery;
 `desktops/shared/` owns desktop-independent portals, clipboard, session helpers and overlays.
 GNOME, X11 and wlroots boundaries document the shared paths they use and the acceptance
 work still required. They do not claim a separate completed native adapter.
-The [platform architecture](PLATFORMS.md#source-ownership) maps these paths explicitly.
+The [platform architecture](PLATFORMS.md#electron-source-layout) maps these paths explicitly.
 Both hosts build the same UI assets; configuration, tests, release tooling and license
 packaging follow the shared location.
 
@@ -78,7 +78,7 @@ GPU backends, packaging, and updates account for the remaining platform-specific
 
 Terminal installation already exists through a downloaded `.deb` and `apt`, or a downloaded
 AppImage and the per-user installer in a source checkout. See the
-[terminal instructions](../README.md#install-from-the-linux-terminal).
+[terminal instructions](../README.md#linux-025).
 There is no project-managed APT/RPM repository, AUR package, or Flatpak distribution today.
 
 The next packaging step is a standalone installer that downloads a pinned release, verifies

@@ -2,61 +2,52 @@
 
 ## Reporting a vulnerability
 
-Please [report security vulnerabilities privately through GitHub](https://github.com/juferdinand/OpenWhisper/security/advisories/new).
-Include the affected version, reproduction steps, and the expected impact. Do not publish signing
-keys, credentials, recordings, or exploit details in a public issue while a fix is being coordinated.
+Report vulnerabilities privately through [GitHub Security Advisories](https://github.com/juferdinand/OpenWhisper/security/advisories/new).
+Include the affected version, reproduction steps, and expected impact. Do not publish signing keys,
+credentials, recordings, or exploit details while a fix is being coordinated. This volunteer
+project has no paid bug bounty or guaranteed response time; security fixes target the latest
+release.
 
-This is a volunteer project without a paid bug bounty or guaranteed response time. Security fixes
-target the latest release; older versions do not receive a separate maintenance branch.
+## Current scope
 
-## Scope and current protections
+The public release is 0.2.5 and contains the legacy native macOS/Linux hosts. The Electron 0.3.0
+replacement is under acceptance. Its strict TypeScript contracts, sandboxed renderer, update
+validators, package checks, and test evidence are described in
+[Electron status](docs/ELECTRON-STATUS.md). Candidate tests are not a complete security audit and
+do not establish physical-device, permission-dialog, or every-desktop coverage.
 
-- The macOS updater checks the expected GitHub repository and asset, the signed app's identity and version,
-  and signing continuity before replacement. Tests cover changed signed files, an unexpected code
-  identity, unsigned apps, unsafe archives, shell metacharacters, and failed replacement rollback.
-- Release signing is currently self-signed, without Apple notarization. Read
-  [the signing decision and its limits](docs/SIGNING.md) before installing.
-- GitHub secret scanning and push protection are enabled. Automated dependency changes
-  require maintainer review.
-- `renovate.json` configures weekly GitHub Actions updates, keeping full commit pins, and tracks
-  whisper.cpp release versions in the download script. Auto-merge is disabled. The hosted
-  [Renovate GitHub App](https://github.com/apps/renovate) must be granted access to this repository
-  before it can run; committing configuration alone does not activate the service.
-- `main` rejects force pushes and deletion, including for administrators. Normal pushes remain
-  possible for the maintainer and release workflow. There is currently one repository administrator.
-- Workflow tokens default to read-only and cannot approve pull requests. Publication needs the
-  release job's explicit write permission. Untrusted pull requests never receive signing secrets.
+macOS releases use a persistent self-signed certificate and are not notarized by Apple. Linux
+release updates use a persistent version-bound signing key. Preserve both identities and their
+validation rules; see [release signing](docs/SIGNING.md). Obtain public downloads from the
+[official Releases page](https://github.com/juferdinand/OpenWhisper/releases) and verify the
+published checksums. A signature verifies integrity and continuity relative to its key, not the
+absence of vulnerabilities or compromise of the distribution account.
 
-Renovate requires dashboard approval before proposing a whisper.cpp update. Maintainers must
-review the upstream release, verify the XCFramework checksum independently, and update its pinned
-SHA-256 before merging. A version-only update deliberately fails checksum verification. Downloaded
-model files are not tracked by this configuration. GitHub vulnerability alerts remain enabled
-independently of the update bot. A checksum proves agreement with a file, not absence of vulnerabilities.
+GitHub Actions use pinned action revisions and read-only token permissions by default. Only
+authorized release jobs receive signing secrets. Secret scanning and push protection are enabled;
+dependency changes require maintainer review. Renovate's configuration keeps auto-merge disabled.
+The hosted Renovate app must be granted repository access before it can run.
 
-These are automated tests and maintainer checks, not an independent security audit. No paid audit
-is planned at this stage. Manual tests for microphone access, Accessibility permissions, hotkeys,
-dictation, and a complete GUI update on a physical Mac remain part of release verification.
+These controls and automated tests are limited evidence. No independent paid security audit has
+been completed. Keep recordings, transcripts, vocabulary, clipboard content, and device names
+out of logs and issue attachments. Unattended tests must use owned fixtures and must not access a
+real microphone or the user's desktop/input devices.
 
-## Known Linux dependency advisory
+## Known legacy Linux dependency advisory
 
-The Linux preview locks `glib 0.18.5` through Tauri 2 / GTK 3. It is affected by
+The retained 0.2.5 Linux host locks `glib 0.18.5` through Tauri 2 / GTK 3. It is affected by
 [RUSTSEC-2024-0429 / GHSA-wrw7-89jp-8q8g](https://rustsec.org/advisories/RUSTSEC-2024-0429.html):
-`VariantStrIter` contains undefined behavior and can dereference a null pointer in optimized builds.
-The upstream fix is in `glib >=0.20`, outside GTK 3's current dependency range; see the
-[Tauri upstream issue](https://github.com/tauri-apps/tauri/issues/12048).
+`VariantStrIter` has undefined behavior and can dereference a null pointer in optimized builds.
+The upstream fix is in `glib >=0.20`, outside GTK 3's dependency range; see the
+[upstream Tauri issue](https://github.com/tauri-apps/tauri/issues/12048).
 
-Review on 2026-10-06 found no calls to `array_iter_str` or uses of `VariantStrIter` in OpenWhisper
-or the locally resolved dependency sources outside glib's own implementation, documentation,
-and tests. This source search is limited evidence, not a proof that the vulnerability is unreachable.
-The GitHub alert remains open and is not suppressed. The preview retains this known dependency
-risk; reassess it when the GTK/Tauri dependency chain changes or a compatible upstream fix is available.
-The native Swift macOS app does not link this Rust dependency.
+A source search found no calls to the affected API in OpenWhisper or its resolved dependencies
+outside glib's own implementation, documentation, and tests. That is limited evidence, not proof
+of unreachability. The GitHub alert remains open and must not be dismissed as harmless. The
+Electron host has a separate dependency graph, but the legacy release remains available until
+replacement and retirement gates complete. The immutable
+[0.2.5 source snapshot](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4)
+preserves the affected dependency lock.
 
-## Linux update verification
-
-Linux 0.2.1+ release builds verify update payloads against an embedded public key and require a
-matching signed version before installation. Strict repository, tag, asset, and increasing-version
-checks reject alternate sources and downgrades. CI tests tampering, foreign signatures, missing
-signed versions, and replayed versions. Debian elevation uses the system authentication agent only;
-the app never collects passwords or retries cancelled authorization through another mechanism.
-See [signing and key continuity](docs/SIGNING.md#linux-update-signatures).
+See [Linux package and acceptance status](docs/LINUX.md) for the separation between published
+0.2.5 evidence and the Electron candidate.

@@ -20,10 +20,10 @@
     {
       "customType": "regex",
       "managerFilePatterns": [
-        "/^macos/scripts/fetch-whisper\\.sh$/"
+        "/^app/native/whisper-source\\.json$/"
       ],
       "matchStrings": [
-        "VERSION=\"(?<currentValue>b[0-9]+)\""
+        "\"tag\":\\s*\"(?<currentValue>b[0-9]+)\""
       ],
       "depNameTemplate": "ggml-org/whisper.cpp",
       "datasourceTemplate": "github-releases",
@@ -43,7 +43,7 @@
       ],
       "dependencyDashboardApproval": true,
       "prBodyNotes": [
-        "Review the upstream release and both platform APIs. Update the XCFramework SHA256 in macos/scripts/fetch-whisper.sh and the matching tag, commit and source archive SHA256 in linux/native/whisper-source.json. CI must pass on macOS and Linux; checksum verification must remain enabled."
+        "Review upstream release notes and Whisper/Parakeet API changes. Update the tag, pinned commit, and source archive SHA256 in app/native/whisper-source.json; keep checksum verification enabled and run the native speech and package checks on macOS and Linux."
       ]
     },
     {

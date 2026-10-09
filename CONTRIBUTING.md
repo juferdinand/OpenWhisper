@@ -1,57 +1,53 @@
 # Contributing to OpenWhisper
 
-Contributions can include bug reports, documentation, tests, or code. The app interface,
-source comments, and project documentation are in English. Please use English for issues
-and pull requests so the wider community can participate.
+Contributions can include bug reports, documentation, tests, or code. Keep the interface, source
+comments, and project documentation in English. Please use English in issues and pull requests so
+the wider community can participate.
 
 ## Reporting bugs and discussing ideas
 
-Check the [existing issues](https://github.com/juferdinand/OpenWhisper/issues) first.
-A useful bug report includes:
+Check the [existing issues](https://github.com/juferdinand/OpenWhisper/issues) first. Include the
+OpenWhisper version or commit, operating system, and steps to reproduce. For desktop problems,
+also include the Linux distribution and desktop/session or the macOS version. Include the model,
+dictation language, output mode, and affected target app when relevant. Remove private dictations,
+tokens, and other confidential information from logs and reports.
 
-- OpenWhisper version or commit and hardware. Include the macOS version, or Linux distribution,
-  desktop, Wayland/X11 session, audio service, and portal backend.
-- Model, dictation language, output mode, and affected target app, if applicable.
-- Steps to reproduce, expected behavior, and actual behavior.
-- Relevant error messages without private dictations, tokens, or other confidential data.
-
-For larger features, open an issue first to agree on the goal and scope.
-Small fixes can be submitted directly as pull requests.
+For larger features, open an issue first to agree on goal and scope. Small fixes can be submitted
+directly as pull requests.
 
 ## Working locally
 
-For macOS, use macOS 14+, a recent Swift toolchain from Xcode or the Command Line Tools,
-and Node.js 22.12+ with npm. For Linux, see [build dependencies](docs/LINUX.md#build-from-source).
-See the [README](README.md#installation) for installation and first launch.
-
-1. Fork the repository and clone your fork.
-2. Create a branch for your change, such as `git switch -c fix/clipboard`.
-3. Keep the change focused on one clearly defined problem.
-4. Verify relevant changes with:
+The Electron application is in `app/` and uses strict TypeScript. Use Node.js 24–26 and npm:
 
 ```bash
-make test
-make mac
+npm ci --prefix app/ui
+npm ci --prefix app
+npm run setup --prefix app
+npm run dev --prefix app -- --dev-profile /absolute/private/path/openwhisper-dev
 ```
 
-For documentation-only changes, check content, links, and formatting.
-Changes to recording, permissions, hotkeys, or text insertion also need manual testing
-on the affected operating system; core tests do not cover all system integration.
-Linux checks: `make linux-test`. Shared UI checks: in `shared/ui/`, run `npm ci`,
-`npm run build`, `npx playwright install chromium`, and `npm run test:ui`.
+Keep Dev data in a separate private profile. Do not use a stable validation candidate as an
+isolated development app. The renderer lives in `app/ui/`, platform-neutral feature logic in
+`app/src/core/`, host services in `app/src/services/`, Linux adapters in
+`app/src/platforms/linux/`, and shared model data and test vectors in `app/data/`. See the
+[platform architecture](docs/PLATFORMS.md#electron-source-layout) and
+[development guide](docs/ELECTRON-DEVELOPMENT.md).
 
-## Structure and tests
+Run checks that cover the change:
 
-- `macos/Sources/OpenWhisperCore/` contains testable text processing, the model catalog, and update validation.
-- `macos/Sources/OpenWhisper/` contains the interface and macOS integration.
-- `shared/ui/src/` is the single custom settings UI used by both macOS and Linux.
-- `linux/src-tauri/` is the Linux backend; `SharedSettingsView.swift` is the Mac bridge.
-- `shared/models.json` is the shared source for models and recommendations.
-- `shared/test-vectors.json` contains text cleanup, vocabulary, and snippet tests. Add an appropriate case when fixing a processing bug.
+```bash
+npm run preflight --prefix app
+npm run typecheck --prefix app
+npm test --prefix app
+npm run build --prefix app/ui
+npm run test:ui --prefix app/ui
+```
 
-Follow the surrounding code style. Change shared data formats deliberately, as they are also
-intended for future platforms. Keep multilingual test inputs and expected results in their
-original language; test names and comments should be in English.
+For focused application tests, run `node --import tsx --test` from `app/` with the relevant test
+paths. `make test` runs the common application checks. `make linux` and `make mac` produce stable
+validation candidates; they do not install or isolate the app. Do not launch a candidate against
+an active profile. See [Electron status](docs/ELECTRON-STATUS.md) for current package and platform
+acceptance boundaries. For documentation-only changes, check content, links, and formatting.
 
 ## Submitting a pull request
 
@@ -59,7 +55,6 @@ Describe the problem, the change, and how you verified it. Include a screenshot 
 interface changes and a reproducible example for bug fixes. Link any related issue and state
 which checks you could not perform.
 
-Do not commit models, build output, recordings, personal configuration, or signing keys.
-Version changes and releases are handled separately through the release workflow.
-
-Contributions to this repository are published under the existing [MIT License](LICENSE).
+Do not commit models, build output, recordings, personal configuration, or signing keys. Version
+changes and releases are handled separately through the release workflow. Contributions to this
+repository are published under the existing [MIT License](LICENSE).

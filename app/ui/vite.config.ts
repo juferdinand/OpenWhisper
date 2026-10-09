@@ -1,0 +1,45 @@
+import { defineConfig } from "vite";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+export default defineConfig({
+  base: "./",
+  resolve: {
+    alias: {
+      zod: fileURLToPath(
+        new URL("./node_modules/zod/index.js", import.meta.url),
+      ),
+    },
+  },
+  build: {
+    target: ["chrome107", "edge107", "firefox104", "safari16"],
+    rolldownOptions: { output: { format: "iife" } },
+  },
+  plugins: [
+    {
+      name: "local-bundled-ui-assets",
+      generateBundle() {
+        for (const locale of ["en", "de"])
+          this.emitFile({
+            type: "asset",
+            fileName: `locales/${locale}.json`,
+            source: readFileSync(
+              new URL(`./locales/${locale}.json`, import.meta.url),
+              "utf8",
+            ),
+          });
+      },
+      apply: "build",
+      // Emit a classic local bundle for the sandboxed Electron renderer without a dev server,
+      // remote UI, or file-origin CORS exception in packaged applications.
+      transformIndexHtml: {
+        order: "post",
+        handler: (html) =>
+          html
+            .replace(/<script /g, "<script defer ")
+            .replace(/type="module"\s*/g, "")
+            .replace(/\bcrossorigin\b/g, ""),
+      },
+    },
+  ],
+});

@@ -1,7 +1,7 @@
 # Isolated Electron development
 
 The [migration plan](ELECTRON-MIGRATION.md) defines replacement and acceptance gates.
-The default build starts **OpenWhisper Dev** with the existing settings UI,
+The default build starts **OpenWhisper Dev** with the Electron-only renderer in `app/ui/`,
 a schema-validated sandboxed bridge and private settings/session directories. An explicit
 CPU recording build connects the shared controls to native capture and clipboard output on
 Linux and macOS. The target version is **0.3.0**; see [current status](ELECTRON-STATUS.md).
@@ -13,13 +13,13 @@ the Models view exposes the selected private model directory.
 
 ## Build and run
 
-Use Node.js 24–26 and npm. Install the locked shared UI dependencies, then the Electron
-development dependencies and explicitly download the pinned Electron runtime:
+Use Node.js 24–26 and npm. Install the locked renderer dependencies, then the application
+dependencies and explicitly download the pinned Electron runtime:
 
 ```bash
-cd shared/ui
+cd app/ui
 npm ci
-cd ../../electron
+cd ..
 npm ci
 npm run setup
 npm run dev
@@ -29,7 +29,7 @@ Before a CI push, run the deterministic static preflight from a Linux x64 or mac
 development machine after both `npm ci` commands:
 
 ```bash
-npm run preflight --prefix electron
+npm run preflight --prefix app
 ```
 
 It downloads and checksum-verifies pinned actionlint and ShellCheck archives once, caches them
@@ -87,7 +87,7 @@ open, so the prototype is not enabled by default. See the
 Build and start the normal shared UI with recording explicitly enabled:
 
 ```bash
-cd electron
+cd app
 npm run dev -- --recording --dev-profile /absolute/private/path/openwhisper-dev
 ```
 
@@ -177,7 +177,7 @@ An existing Linux x64 build can be copied into a separate Dev directory and Debi
 archive without building, downloading, installing or launching it:
 
 ```bash
-cd electron
+cd app
 node --import tsx scripts/package-linux-preview.ts --output /absolute/fresh/output
 ```
 
@@ -200,7 +200,7 @@ acceptance remain separate checks. See the [exact evidence](ELECTRON-DEV-EVIDENC
 A fresh Linux x64 build can capture the persistent stable identity explicitly:
 
 ```bash
-cd electron
+cd app
 npm run build -- --stable --recording
 node --import tsx scripts/package-linux-preview.ts --output /absolute/fresh/output
 ```
@@ -353,12 +353,12 @@ remain separate work. See the [evidence](ELECTRON-DEV-EVIDENCE.md).
 ## Automated checks
 
 ```bash
-cd electron
+cd app
 npm run typecheck
 npm test
 npm run build
 node --import tsx tests/owned-stable-startup.ts # Linux; Darwin requires an owned GitHub-hosted runner
-cd ../shared/ui
+cd ../app/ui
 npm run test:ui
 ```
 
@@ -371,7 +371,7 @@ the Dev UI and bridge, not KDE/GNOME shortcuts, target-app paste or dictation.
 After `npm run setup` and `npm run build`, run it on x86_64 Linux with Docker available:
 
 ```bash
-cd electron
+cd app
 node --import tsx scripts/test-owned-ui.ts --output /absolute/path/new-evidence-directory
 ```
 
@@ -412,7 +412,7 @@ models, including absent-device, software-only Vulkan and absent-loader cases. H
 GPU execution and the macOS Metal profile remain separate gates.
 
 ```bash
-cd electron
+cd app
 npm run build
 npm run build:native
 node --import tsx scripts/fetch-speech-fixtures.ts
@@ -430,7 +430,7 @@ run `build:native` afterward when exercising native workers.
 Optional native primitives and GPU profiles can be built explicitly:
 
 ```bash
-cd electron
+cd app
 node --import tsx scripts/build-native.ts --backend vulkan
 node --import tsx scripts/build-linux-bus.ts
 node --import tsx scripts/build-capture.ts
@@ -441,12 +441,11 @@ OPENWHISPER_CAPTURE_SYNTHETIC_ADDON="$PWD/native/capture/build/openwhisper_captu
 Vulkan builds also need the platform Vulkan loader and the pinned shader compiler graph.
 The portable CPU instruction profile does not remove dynamic library requirements.
 The last command uses synthetic native samples and never opens audio. The owned
-[capture](../electron/tests/owned-capture/README.md),
-[control](../electron/tests/owned-control/README.md) and
-[composed recording](../electron/tests/owned-recording/README.md) procedures isolate
+[control](../app/tests/owned-control/README.md) and
+[composed recording](../app/tests/owned-recording/README.md) procedures isolate
 their services in disposable containers. They do not use the running desktop or profile.
 
-The separate [owned utility probe](../electron/tests/owned-speech/README.md) exercises the
+The separate [owned utility probe](../app/tests/owned-speech/README.md) exercises the
 compiled transport in actual Electron 44.7.0 on Ubuntu 22.04, including incompatible-host
 ABI containment, context reuse, native failures, crashes, an intentionally stopped helper,
 confirmed force-reap before replacement and malformed frames. Its Node utility process
@@ -474,7 +473,7 @@ The separate jobs use `macos-15` and `macos-15-intel`, compile with a macOS 14 d
 target and retain architecture, Mach-O and categorical runtime evidence. They do not prove
 a macOS 14 runtime, hardware/default-input behavior, TCC, signed-helper loading or OS
 retirement from a generic Electron exit event. Reproduce only in the owned Apple CI VM using
-the [synthetic capture procedure](../electron/tests/owned-macos-capture/README.md).
+the [synthetic capture procedure](../app/tests/owned-macos-capture/README.md).
 
 ## Optional text-model preview
 

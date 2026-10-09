@@ -5,8 +5,9 @@ See [implementation status](ELECTRON-STATUS.md) for delivered behavior and remai
 Prepared 2026-10-08 against signed public `v0.2.5`
 (`d69b43bf6e7017c61089e117e79af34f57f297c4`). This is the authoritative record of
 the requested architecture, research answers, development-build strategy and issue/PR disposition.
-Complete and independently review this plan before creating its implementation issue; then
-implement it on an isolated branch with reviewable packages and automated evidence.
+The final source layout is now `app/`, with `app/ui/` and `app/data/`; the renderer is Electron-only.
+Replacement, signing, package construction, and release acceptance are still gated. Keep this plan's
+research record until those gates pass, then consolidate the durable results in the README.
 
 ## Decision and scope
 
@@ -25,7 +26,7 @@ release gates. Retain the existing disabled manual preview and deterministic
 regression checks; ordinary dictation remains independent of model servers.
 
 Replace the Swift/WebKit macOS host and Rust/Tauri Linux host with one Electron application.
-Keep the current `shared/ui` design, icon, Inter font, navigation and English/German interface.
+Keep the current `app/ui` design, icon, Inter font, navigation and English/German interface.
 Use shared Chromium renderer code and one set of typed application services, with explicit platform
 adapters. A later design change is separate work. Windows remains unimplemented.
 Retain macOS 14+ on Apple Silicon and Intel and Linux x86_64 packaging from Ubuntu 22.04.
@@ -52,13 +53,13 @@ after their replacement gates pass. Wrapping the existing hosts permanently is o
 
 Electron does not require our own C/C++ application code. The current boundary contains:
 
-- `electron/native/speech_*.cpp`: bindings to the pinned whisper.cpp/Parakeet library for local
+- `app/native/speech_*.cpp`: bindings to the pinned whisper.cpp/Parakeet library for local
   CPU/GPU inference. These engines are native dependencies; TypeScript orchestrates them.
-- `electron/native/capture/` and `macos-capture/`: miniaudio and CoreAudio bindings for capture
+- `app/native/capture/` and `macos-capture/`: miniaudio and CoreAudio bindings for capture
   and conversion. Browser audio APIs are an alternative subject to the M-CAPTURE parity gate.
-- `electron/native/linux-bus/`: the chosen D-Bus transport binding; KDE/portal policy remains
+- `app/native/linux-bus/`: the chosen D-Bus transport binding; KDE/portal policy remains
   TypeScript. A custom addon is an implementation choice, not an Electron requirement.
-- `electron/native/macos-retirement/`: a process-lifecycle probe and separately gated production
+- `app/native/macos-retirement/`: a process-lifecycle probe and separately gated production
   source role. This custom kernel boundary is also an implementation choice.
 
 Prefer existing Electron/Node APIs or maintained typed adapters where they meet the same
@@ -153,14 +154,12 @@ sync ideas remain private planning; this migration creates no Enterprise feature
 
 ## Target structure and contracts
 
-The transitional application lives in `electron/` while the existing hosts remain.
-The final application directory will be `app/`, as requested. Rename it together
-with P6 host retirement and path consumers, rather than changing package roots in
-the middle of the data/update transition. Windows remains separate follow-up work
+The application now lives in `app/` while legacy host sources remain until replacement gates pass.
+Windows remains separate follow-up work
 in [issue #35](https://github.com/juferdinand/OpenWhisper/issues/35).
 
 ```text
-electron/
+app/
   src/main/                 App lifecycle, trusted windows, tray and service wiring
   src/preload/              Minimal schema-backed renderer API
   src/contracts/            Commands, events, worker messages and runtime schemas
@@ -177,11 +176,8 @@ electron/
   native/                   Minimal compiled bindings/helpers; no Swift/Rust host
   scripts/                  TypeScript build, packaging and development commands
   tests/                    Contract, service, package and native acceptance checks
-shared/
-  ui/                       Existing authoritative renderer, layout and assets
-  locales/                  Existing synchronized English/German messages
-  models.json               Existing authoritative model catalog
-  test-vectors.json         Existing multilingual text-processing fixtures
+app/ui/                      Authoritative renderer, layout, locales and assets
+app/data/                    Model catalog, schemas and multilingual test vectors
 ```
 
 ### Code quality and final repository layout
@@ -212,14 +208,13 @@ The concrete cleanup order is:
    recording/platform/UI setup functions. Move Mac and Linux adapters to their
    respective `platforms/` folders, preserving their APIs and fixed worker entry
    names. Group ordinary tests alongside the corresponding feature hierarchy.
-3. At P6, rename `electron/` to `app/`, move the sole renderer/assets/locales to
-   `app/ui/` and catalog/fixtures to `app/data/`, and remove the unused top-level
-   `shared/` after all consumers migrate. Preserve the existing icon/font/model
-   licenses before removing the old `macos/` and `linux/` source directories.
-4. Update manifest/entry graphs, build paths, CI caches, version tooling,
-   installers, release inputs and documentation in the same reviewed changes.
-   Validate fresh packages; imports compiling alone do not establish package
-   correctness.
+3. P6 source relocation is implemented: the renderer/assets/locales are in `app/ui/`,
+   and catalog/fixtures are in `app/data/`. The Electron renderer uses only the typed
+   preload bridge. Legacy Swift/Tauri host retirement remains gated on package/runtime
+   acceptance; retain its historical sources until those gates pass.
+4. Remaining work includes manifest/entry graphs, CI caches, version tooling, installers,
+   release inputs and final documentation. Validate fresh packages; imports compiling alone
+   do not establish package correctness.
 
 Use small interfaces for genuine platform/process boundaries and stateful
 services. Retain pure functions for text and model rules. Apply the Rule of Three
@@ -234,12 +229,11 @@ durable instructions and replace the growing migration status/evidence diary
 with the final result and exact CI/package references. Preserve evidence before
 removing obsolete descriptions. Keep AGENTS/CLAUDE synchronized and concise.
 
-Renovate already discovers the exact Electron/npm dependencies. Its custom
-whisper.cpp manager currently watches the old Mac script, leaving the Electron
-native source JSON pins outside that manager. Extend coverage for actual native
-pins and coordinate their tag/commit/checksum/header expectations through human
-review and package checks. Do not add a duplicate Electron npm regex manager,
-enable automerge, or remove Cargo/Tauri rules before their manifests disappear.
+Renovate discovers the application and renderer npm manifests without a second npm
+manager. Its custom whisper.cpp manager watches `app/native/whisper-source.json`;
+human review must check the tag, revision, archive checksum, headers and both speech
+APIs. Keep automerge disabled. Retain Cargo/Tauri-specific rules until those legacy
+manifests are removed with the host retirement gates.
 
 The renderer invokes a fixed schema-derived command map, never arbitrary command strings,
 shell commands or paths. Validate sender frame/origin, arguments, responses and events;
@@ -292,7 +286,8 @@ permissions and fixtures. Port behavior and tests together. A feasibility probe 
 keeps the old production release intact and records the replacement gap; it does not redefine
 an existing capability as unsupported to make migration appear complete.
 
-Carry forward the retained version/profile matrix from [Linux validation](LINUX.md#validation-status):
+Carry forward the retained version/profile matrix from the immutable
+[0.2.5 Linux validation record](https://github.com/juferdinand/OpenWhisper/blob/d69b43bf6e7017c61089e117e79af34f57f297c4/docs/LINUX.md#validation-status):
 stock Fedora/Arch/openSUSE Plasma 6 and Ubuntu/Kubuntu Plasma 5.27; GNOME 46/48/49; actual
 Xfce/Cinnamon/MATE/KDE X11; headless Sway and an owned virtual-graphics Hyprland guest.
 Preserve unavailable-portal and unsupported-stock-keymap fallbacks. Modified synthetic keymaps

@@ -23,12 +23,15 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 
 ## Current package checkpoint
 
-The current release-workflow increment passes 1,318 tests: 1,366 total, zero failures and
-48 explicit native/opt-in skips in 17.92 seconds. Strict typing, deterministic preflight
-and the application/UI build pass. Independent source reviews pass.
-The genuine signed Debian and AppImage upgrade scopes are recorded below.
+The current application-layout preparation passes 1,323 common tests: 1,371 total,
+zero failures and 48 explicit native/opt-in skips in 19.88 seconds. Strict typing,
+deterministic preflight and the application/UI build pass. The renderer passed all
+62 focused UI checks. Nine focused release-source/publication checks also pass using
+the unchanged public signed 0.2.5 Linux assets. The source now uses feature folders
+under `app/`, `app/ui/` and `app/data/`; old hosts remain until replacement gates pass.
+This preparation has not yet been pushed or accepted as the final replacement.
 
-`npm run preflight --prefix electron` checks all workflows with pinned actionlint
+`npm run preflight --prefix app` checks all workflows with pinned actionlint
 and ShellCheck, strict TypeScript, shared UI formatting and whitespace. A focused
 YAML check also rejects shell continuations in folded/plain `run` scalars: the
 standard linters do not detect that specific argument-folding failure. CI runs this
@@ -44,6 +47,24 @@ signatures, and tags the committed version without rewriting source after packag
 Positive metadata tests use pinned public 0.2.5 Linux signatures; their inert Mac
 artifacts do not establish Mac package acceptance. Actual release-mode construction,
 signing and publication through these new workflows remain open.
+
+The latest pushed application checkpoint is `cfd8218`. In
+[CI 37930208209](https://github.com/juferdinand/OpenWhisper/actions/runs/37930208209),
+both thin Mac native jobs and Universal construction pass. The persistent Universal
+candidate and genuine private 0.3.1 successor satisfy the unchanged 0.2.5 publisher
+requirement; actual running-app self-admission and original-fd3 ZIP admission also pass.
+Credential cleanup passes. The final handoff test fails before requesting an update:
+its new HOME has no legacy preferences plist, while the actual macOS CurrentUser/AnyHost
+snapshot differs. The production coherence guard rejects that mismatch. A fresh HOME
+does not establish a separate macOS preferences domain. The handoff currently runs
+after a same-bundle-ID smoke on the same runner; separating it onto a fresh runner is
+being prepared. Actual installation and relaunch remain unproved. The signature and
+source checks are retained.
+
+AppImage source/relink bundle `64fd7e2` passes an actual modified-libfuse build and inert image
+extraction/FUSE-free launch. It did not build a production AppImage or establish byte-identical
+rebuilds or additional Alpine compatibility. No physical-device coverage, merge, publication,
+or replacement of the installed application is claimed.
 
 [CI 37923073475](https://github.com/juferdinand/OpenWhisper/actions/runs/37923073475)
 passes static preflight, both common Electron jobs, both thin Mac native jobs and
@@ -75,8 +96,11 @@ data remains intact, and the original GUI/supervisor close normally. All observe
 app processes disappear and the namespace is removed. This check performs no
 recording, installation, retirement or restart and does not prove an upgrade.
 
-Normal Linux CI exports a fresh canonical Stable validation package
-and the already-built, locked signer/verifier tools from the same source.
+Before host retirement, Linux CI exported a fresh canonical Stable validation package
+and the already-built, locked signer/verifier tools from the same source. The layout
+preparation uses the unchanged locked signing CLI in `app/` and the production Electron
+verifier, removing the Rust-tool build dependency. The earlier evidence below retains
+its original independent Rust-oracle scope.
 An owner-only dependent job admits those inputs before accessing the existing
 signing key, verifies exact signed bytes and version through both packaged
 Electron and the native oracle, then installs and audits inside a disposable
@@ -301,7 +325,7 @@ unchanged native inputs/artifacts. Both canonical Debian archives are signed
 with the existing key; the existing native verifier accepts their exact version
 and rejects a wrong version. Neither private version is tagged or published.
 
-The [owned Debian upgrade runner](../electron/tests/owned-debian-upgrade/README.md)
+The [owned Debian upgrade runner](../app/tests/owned-debian-upgrade/README.md)
 installs the older package and drives the ordinary shared **Check now** and
 **Download & install** controls. The packaged production verifier prepares the
 actual newer signed archive. Original GUI/native PIDs are absent before real
@@ -321,7 +345,7 @@ an unlogged underlying cause. After bounded kernel-PID absence observation and
 prompt harness failure reporting were added, the second attempt passes using
 the same immutable package pair. Production retirement requirements are unchanged.
 
-The [owned AppImage upgrade runner](../electron/tests/owned-appimage-upgrade/README.md)
+The [owned AppImage upgrade runner](../app/tests/owned-appimage-upgrade/README.md)
 also passes with existing-key-signed images from those genuine versioned Ubuntu
 payloads. Ordinary Update controls install 0.3.1. Immediately before actual fixed
 exec, the guard observes old GUI/native PID absence, the closed source descriptor
@@ -494,7 +518,8 @@ from 38 to 39; sampled CLI identities disappear after close. This demonstrates
 a small transient resource margin, without proving the earlier failure's cause
 or absence of all leaks. [Issue #37](https://github.com/juferdinand/OpenWhisper/issues/37)
 retains the earlier failure separately; no product fix or physical-device
-coverage is claimed.
+coverage is claimed. Follow-up runs pass 18/18 in both package forms; #37 remains
+a diagnostic/resource-margin follow-up, not a reproduced basic CLI blocker.
 
 The reviewed Linux launch supervisor is now connected to Stable Debian's fixed
 `/opt/openwhisper/openwhisper-launch`, its desktop/autostart paths and the native
@@ -582,7 +607,7 @@ Both original owned Mac jobs in
 pass Dev and stable ZIP/signature checks and normal original exits. API head is
 `340dee3f`; the actual thin package producer is synthetic PR merge
 `bcf527b8b1f51d5705a9b92b5cc664b2e77786b3`. The universal constructor now
-uses exactly pinned official `@electron/universal` with common V2 metadata,
+uses exactly pinned official `@app/universal` with common V2 metadata,
 both locked Koffi variants and architecture-indexed original receipts. It
 retains thin inputs, checks common bytes and both native slices, captures final
 native hashes after signing and verifies the ZIP roundtrip. Portable fixture

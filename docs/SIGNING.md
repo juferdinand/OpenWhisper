@@ -1,119 +1,56 @@
 # Release signing
 
-The macOS and Linux release identities are separate.
+OpenWhisper has separate macOS and Linux signing identities. The current public version is 0.2.5;
+Electron 0.3.0 release signing and update acceptance remain in progress. Consult
+[current implementation status](ELECTRON-STATUS.md) for the exact evidence and open gates.
 
-## Current decision
+## macOS certificate
 
-As of 2026-10-05, OpenWhisper uses a persistent, self-signed code-signing certificate for its
-initial public releases. This keeps early open-source releases independent of a paid Apple
-Developer Program membership while the project is being developed and tested.
+Public macOS releases use the persistent project self-signed certificate. They are **not signed
+with an Apple Developer ID certificate and are not notarized**. macOS may show a first-launch
+warning. Obtain the app from the official release page and follow
+[Apple's instructions](https://support.apple.com/102445) only if you decide to allow it; do not
+disable Gatekeeper globally.
 
-Apple Developer ID signing and notarization remain a future option. This is a deliberate initial
-distribution choice, not a claim that self-signing is equivalent to Apple's verification.
+The legacy updater checks the expected repository, version, asset name, bundle identity, and
+signature continuity against the running app's designated requirement before replacement. The
+Electron replacement preserves the existing identity and strict signature policy; its packaged
+upgrade and native 0.2.5 transition still require completed acceptance. A signature or checksum
+does not establish that software is free of vulnerabilities or that a distribution channel is
+uncompromised.
 
-## What users can expect
+On macOS, `app/scripts/create-dev-cert.sh` creates a local development certificate when the
+expected certificate is absent. Keep the persistent release identity for signing continuity;
+never replace or rotate it with the development certificate. Maintainers may upload one
+already-exported identity with
+`app/scripts/export-dev-cert.sh owner/repo /path/to/identity.p12`. Never export all keychain
+identities.
 
-- Releases are signed with the same project identity. The current in-app updater verifies a
-  downloaded app against the running app's designated code-signing requirement.
-- The certificate is not issued by Apple. The releases are not notarized by Apple, and macOS
-  may block the first launch because it cannot verify the developer through Developer ID.
-- Users can review the source and release origin and follow
-  [Apple's instructions for opening an app](https://support.apple.com/102445) if they choose to allow it.
-- A signature checks integrity and signing continuity; it does not establish that software is
-  free of bugs or malicious behavior. The included `SHA256SUMS` also permits download integrity checks.
-- CI development packages use ad-hoc signing and have no configured in-app updater.
-  Public release packages use the persistent project certificate.
-- The primary download is a DMG with the signed app and an Applications shortcut. The release
-  workflow also signs the DMG and verifies its contents after mounting it read-only. This improves
-  installation convenience; it does not establish Apple trust or remove first-launch warnings.
+## Linux update key
 
-## Risks and limits
+The public 0.2.5 Linux packages use a persistent Minisign/Ed25519 key. Their updater requires a
+version-bound signature and checks the repository, asset, package identity, and version. The
+immutable [0.2.5 source](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4)
+preserves the original public-key configuration and updater. The Electron replacement retains
+the existing Linux update key and validation policy; signed-package and transition acceptance
+remain pending.
 
-- **Initial trust:** a self-signed certificate does not give users an Apple-verified developer
-  identity. Obtain the first app from the project's official release page and assess its origin.
-- **No notarization scan:** these releases have not been submitted to Apple's notarization
-  service for its checks for known malicious software. An exception for this app should not
-  involve globally disabling Gatekeeper or other macOS protections.
-- **Private-key compromise:** someone with the private key can sign altered applications with
-  the project's identity. Signing continuity alone cannot detect misuse of that same key.
-  Repository and workflow access also need to remain restricted to trusted maintainers.
-- **Lost or replaced keys:** losing the signing identity can break the existing updater's trust
-  continuity. Keep a protected backup and plan any identity change before publication.
-- **Checksums are not an independent trust source:** an attacker who replaces both the ZIP and
-  its checksum on a compromised distribution channel can make them agree. The checksum is useful
-  for integrity checking, but does not substitute for verifying the release's origin.
+The encrypted Linux private key and password are configured only in the authorized release
+workflow. Preserve the embedded public key and reject missing or mismatched signed versions.
+Never print, commit, upload, or casually replace either signing identity. Losing or rotating a key
+can break updater continuity and requires a reviewed transition or manual installation.
 
-Apple explains [Gatekeeper and notarization](https://support.apple.com/102445) and
-[protecting signing identities](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/Procedures/Procedures.html).
+## Release workflow protections
 
-## Implemented protections
+- General test and build jobs use read-only repository permissions and receive no signing keys.
+  Owner-only candidate jobs receive the existing signing keys only after source-bound admission,
+  sign same-run artifacts for private CI audit, and do not publish releases.
+- Release signing uses the existing identities, with no ad-hoc fallback for public packages.
+- Secret material is imported only for the signing job and removed during cleanup. Local backup
+  material belongs in the ignored `.local/` directory with restrictive permissions.
+- Release publication follows source/version admission, package verification, and checksums.
+  Manual release publication and any replacement of the installed application require their
+  separate approval and acceptance gates.
 
-- Release URLs must match the configured GitHub repository, version tag, and exact macOS asset name.
-  The signed bundle must have the expected app identifier and release version, newer than the installed version.
-- Archives are extracted into fresh private directories using macOS bsdtar with its default path
-  traversal protections. The expected app directory is required; symlinks leaving it are rejected.
-  Invalid archives and rejected apps are removed. Tests exercise traversal and symlink attacks.
-- The updater validates the downloaded app's code signature against the running app's designated
-  requirement before starting replacement, including nested code and all architectures.
-- The replacement script is part of the signed app bundle. Paths are passed as arguments, never
-  interpolated into shell source, and production command lookup uses a fixed system `PATH`.
-  Regression tests cover shell metacharacters in app names and restoration after a failed replacement.
-- Release dependencies are downloaded fresh and checked against the pinned SHA-256 checksum.
-- GitHub Actions are pinned to full commit IDs. Ordinary CI has read-only repository permissions
-  and does not receive signing secrets. The release workflow is dispatched manually from `main`.
-- Signing material is imported after the test step and removed from the temporary keychain when
-  the release job ends. Release signing has no ad-hoc fallback.
-
-These measures reduce specific risks; they are not a complete security audit or a guarantee against compromise.
-See [SECURITY.md](../SECURITY.md) for automated checks, repository protections, reporting, and review limits.
-
-## Maintaining the release identity
-
-The release workflow imports the signing identity from the encrypted repository secrets
-`SIGNING_CERT_P12` and `SIGNING_CERT_PASSWORD`. It must not silently fall back to ad-hoc signing.
-The initial encrypted PKCS#12 backup and its password are stored locally under the ignored
-`.local/release-signing/` directory with restricted permissions. Neither belongs in Git,
-workflow logs, release assets, issues, or pull requests.
-
-Keep the certificate and private key for subsequent releases. Do not replace the repository
-secrets with a newly generated development certificate when setting up another Mac.
-The local `create-dev-cert.sh` helper creates a separate development identity; matching the
-certificate's display name does not make it the same signing identity.
-
-## Moving to Apple Developer ID
-
-When the project chooses to fund an Apple Developer Program membership:
-
-1. Obtain a **Developer ID Application** certificate through the project's Apple developer account.
-2. Add the signing and notarization steps required by Apple to the release pipeline and verify
-   the resulting bundle on macOS before distribution.
-3. Plan the updater transition. The current self-signed app's signature requirement will reject
-   a binary signed with a different identity. Use a compatible migration release or document
-   the need for a manual installation; do not just overwrite the signing secrets.
-4. Update the README, release notes, and this document to describe the new signing status.
-
-Apple documents [membership fees](https://developer.apple.com/programs/enroll/) and
-[Developer ID certificates](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/).
-
-## Linux update signatures
-
-Starting with 0.2.1, Linux releases use a persistent Minisign/Ed25519 identity managed by Tauri.
-The public key is embedded in `linux/src-tauri/tauri.conf.json`. The encrypted private key and
-password are configured as `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
-in GitHub Actions. Protected local backups are under the ignored `.local/linux-update-signing/`.
-Never commit, print, upload as an artifact, or casually replace these secrets.
-
-`prepare-linux-update.py` signs the final AppImage and Debian assets with `--app-version`, verifies
-each package against the embedded public key and exact version, and writes `latest.json`.
-`requireSignedVersion` is mandatory: the updater rejects signatures without a signed version and
-rejects an older signed payload presented as a newer release. Source, tag, filename, package identity,
-and increasing version checks are additional constraints, not replacements for signature verification.
-Regression tests exercise modified packages, foreign keys, malformed signatures, missing signed
-versions, and version replay. Ordinary CI does not receive the release key or enable installation.
-
-AppImage installation replaces the file in place using Tauri's installer. Debian installation checks
-package metadata, then asks the system authentication agent to run `dpkg`; OpenWhisper does not
-collect administrator passwords. Both paths restart after successful installation. A signature verifies
-origin relative to the embedded key and integrity, not the absence of vulnerabilities. The first download
-still depends on trusting the official release source. Losing or changing this key requires an explicit
-updater migration or manual installation; preserve it across releases.
+These are concrete signing and workflow controls, not an independent security audit. See
+[the security policy](../SECURITY.md) and the immutable [0.2.5 Linux signing source](https://github.com/juferdinand/OpenWhisper/blob/d69b43bf6e7017c61089e117e79af34f57f297c4/linux/src-tauri/tauri.conf.json).

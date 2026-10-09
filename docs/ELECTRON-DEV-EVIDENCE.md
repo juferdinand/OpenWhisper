@@ -460,7 +460,7 @@ dispatched. These thin ad-hoc packages remain distinct from universal and
 persistent publisher acceptance.
 
 The independently reviewed universal constructor uses exactly pinned official
-`@electron/universal` 3.0.6. Only fresh copies receive the common V2 descriptor,
+`@app/universal` 3.0.6. Only fresh copies receive the common V2 descriptor,
 locked Koffi union and architecture-indexed original receipts. The merger has
 two literal native skip paths, no broad wildcard, forced replacement or ASAR
 shim. Common resources, internal links, original snapshots and both Mach-O
@@ -1590,7 +1590,7 @@ fixture failures from a platform-inapplicable sandbox metric and one source-loss
 with a blind button click across the automatic Stop/Retry transition. The final
 fixture follows actual button intent and kernel sandbox evidence without changing production.
 No physical microphone, running installation, hotkey, target-app paste, GPU, macOS recording
-or signed package is tested here. See the [owned UI procedure](../electron/tests/owned-dev-recording/README.md)
+or signed package is tested here. See the [owned UI procedure](../app/tests/owned-dev-recording/README.md)
 and [Dev commands](ELECTRON-DEVELOPMENT.md#linux-cpu-recording-dev-build).
 
 This records the isolated P2/P5 implementation committed on 2026-10-08 at
@@ -1666,7 +1666,7 @@ A valid explicit edit replaces only that optional profile and clears the warning
 sending a request or changing ordinary preferences. No user model server was used.
 
 Reproduce using [development commands](ELECTRON-DEVELOPMENT.md) and the
-[owned utility procedure](../electron/tests/owned-speech/README.md). Exact source/compiled
+[owned utility procedure](../app/tests/owned-speech/README.md). Exact source/compiled
 hashes, package inventories, container/image configuration, command logs and visible EN/DE
 screenshots are retained in the local `p2-owned-speech/run-4` and `p5-owned-ui/run-4` packets.
 These local packets are not GitHub Actions artifacts. No real microphone, running installation

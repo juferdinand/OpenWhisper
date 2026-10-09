@@ -34,8 +34,8 @@ jobs:
           node-version: "24.21.0"
           cache: npm
           cache-dependency-path: |
-            electron/package-lock.json
-            shared/ui/package-lock.json
+            app/package-lock.json
+            app/ui/package-lock.json
       - name: Install pinned Electron Linux build dependencies
         run: |
           sudo apt-get update
@@ -44,26 +44,26 @@ jobs:
             squashfs-tools zstd libfuse2 curl jq
       - name: Install locked workspace dependencies
         run: |
-          npm ci --prefix shared/ui
-          npm ci --prefix electron
+          npm ci --prefix app/ui
+          npm ci --prefix app
       - name: Verify committed release source and versions
-        working-directory: electron
+        working-directory: app
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         run: node --import tsx scripts/verify-release-source.ts --version "$RELEASE_VERSION" --commit "$GITHUB_SHA"
       - name: Install pinned Electron runtime
-        working-directory: electron
+        working-directory: app
         run: npm run setup
       - name: Build the stable Linux application with portable CPU recording
-        working-directory: electron
+        working-directory: app
         run: npm run build -- --stable --recording
       - name: Confirm build preserved the committed source tree
         run: test -z "$(git status --porcelain)"
       - name: Run focused release verifier tests
-        working-directory: electron
-        run: node --import tsx --test tests/finalize-linux-release.test.ts tests/linux-update-signature.test.ts tests/verify-release-source.test.ts
+        working-directory: app
+        run: node --import tsx --test tests/build/finalize-linux-release.test.ts tests/update/linux/linux-update-signature.test.ts tests/build/verify-release-source.test.ts
       - name: Fetch the checksum-pinned AppImage tool and runtime
-        working-directory: electron
+        working-directory: app
         run: |
           set -euo pipefail
           tools="$RUNNER_TEMP/openwhisper-electron-appimage-tools"
@@ -86,7 +86,7 @@ jobs:
           IFS= read -r extractor_version < "$RUNNER_TEMP/openwhisper-electron-unsquashfs.txt"
           [[ "$extractor_version" == "unsquashfs version "[0-9]* ]]
       - name: Construct canonical unsigned Linux release payloads
-        working-directory: electron
+        working-directory: app
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
           RELEASE_VERSION: ${{ inputs.version }}
@@ -97,7 +97,7 @@ jobs:
           tools="$RUNNER_TEMP/openwhisper-electron-appimage-tools"
           node --import tsx scripts/package-linux-release.ts --output "$output" --tools "$tools" --root "$PWD"
       - name: Sign and version-verify both Linux assets
-        working-directory: electron
+        working-directory: app
         env:
           RELEASE_VERSION: ${{ inputs.version }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
