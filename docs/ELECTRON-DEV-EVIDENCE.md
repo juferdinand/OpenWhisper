@@ -57,7 +57,7 @@ private stages disappear. The idle container's separate teardown exits137 after
 the test closes normally. Application wiring, privileged installation,
 post-native-cleanup restart and rollback are separate gates.
 
-Combined source checks pass strict typing, normal app/shared-UI build and
+At `294a8955`, combined source checks pass strict typing, normal app/shared-UI build and
 1177 unit tests in 17.62 seconds, with 34 explicit native/opt-in skips and zero
 failures. The skipped optional Debian asset cases are covered separately by the
 eight-case actual embedded-Node run above. New source and harness each received
@@ -95,6 +95,22 @@ retaining the30ms timer, production code and separate real-expiry cases. Explici
 dispatch-before-abort, one close and inactive-owner assertions remain. Fourteen
 focused cases pass in239ms; the original failure is retained, and no CI retry or
 production timing fix is claimed. The original ARM job passes separately.
+
+The next original Intel job113644871892 in
+[CI 37876077067](https://github.com/juferdinand/OpenWhisper/actions/runs/37876077067)
+passes that unit phase, then fails the separate production-retirement fixture's
+`early`/`bind` assertion. Its retained original artifact reports no native error:
+both snapshots are original running records after Electron's channel exit.
+Clean/nonzero/kill cases pass, and final same-owner full reap, close-read receipts
+and helper/guard exits succeed. API head is `294a8955`; actual producer is merge
+`cc4d1b69`. One original categorical artifact is read, without a runtime retry.
+
+The reviewed correction affects three existing test files: early admission is
+false with no challenge/pending request/nonces, independently of initial kernel
+level. That real level stays recorded; the same owner must still become reaped
+and settle reads before PASS. Twenty-one focused portable cases and typing pass.
+No delay, rebind, native guard, production behavior or deadline changes. Matching
+actual Mac CI and universal construction remain pending.
 
 ## Historical Mac ZIP acceptance and installed-launch source increment
 

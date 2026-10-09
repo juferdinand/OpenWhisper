@@ -49,7 +49,7 @@ export const caseSchema = z.strictObject({ name: modeSchema, admitted: z.boolean
   reservationRefused: z.literal(true), fullReapConfirmed: z.literal(true), closeReadReceiptConfirmed: z.literal(true),
   helperExitObserved: z.literal(true), exitCode: z.number().int(), elapsedMs: z.number().nonnegative().max(20000) }).superRefine((item, context) => {
     const early = item.name === "early";
-    if (early ? item.admitted || item.firstNonceConfirmed || item.secondNonceConfirmed || item.sameBirthRunningConfirmed || item.initialLevel === "running" :
+    if (early ? item.admitted || item.firstNonceConfirmed || item.secondNonceConfirmed || item.sameBirthRunningConfirmed :
       !item.admitted || !item.firstNonceConfirmed || !item.secondNonceConfirmed || !item.sameBirthRunningConfirmed || item.initialLevel !== "running")
       context.addIssue({ code: "custom", message: "Invalid admission evidence." });
   });

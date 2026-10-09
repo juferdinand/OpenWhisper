@@ -55,7 +55,7 @@ Electron 44.7.0 / Node 24.21.0 with actual `dpkg-deb`; install effects remain
 synthetic. No privileged install or restart took place. Application wiring,
 post-native-cleanup restart and rollback remain open.
 
-This combined source increment passes strict typing, the normal app/shared-UI
+At `294a8955`, the combined source passes strict typing, the normal app/shared-UI
 build and 1177 unit tests in 17.62 seconds, with zero failures and 34 explicit
 native/opt-in skips. The separate eight-case embedded Debian check above has no
 skips. Independent source reviews pass for both new consumers and the harness.
@@ -79,6 +79,15 @@ scheduling exceeds its unrelated 30-ms monotonic setup budget. That one logical
 ordering test now uses the existing injected clock; fourteen focused cases pass.
 Production deadlines and separate expiry tests are unchanged. The original ARM
 job passes; the next original CI run must confirm the corrected Intel case.
+
+That next Intel run passes the unit phase, then exposes a separate owned native
+fixture assumption: its early channel-exit case requires the kernel process to
+have stopped already. Retained native snapshots still report running; subsequent
+same-owner full reap and cleanup succeed. The reviewed three-file test correction
+keeps early admission false while preserving the actual kernel level and every
+mandatory full-reap/close receipt. Twenty-one focused tests and typing pass;
+production code and deadlines stay unchanged. Universal jobs still await both
+successful original thin jobs.
 
 Earlier package checkpoints follow with their original producers and scopes.
 

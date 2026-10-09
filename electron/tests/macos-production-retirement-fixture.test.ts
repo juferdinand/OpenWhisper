@@ -36,12 +36,13 @@ test("actual categorical native guard refusal is distinct from fuse loader and g
   assert.throws(() => guardSchema.parse({ context: "worker", result: "TEARDOWN_FAILED", kernelTargetProvided: true, nodeVersion: "24.21.0", architecture: "arm64" }));
   assert.throws(() => abiSchema.parse({ version: 1, role: "production", napiVersion: 8, mainOnly: true, zombieLookupArgument: 0, probeOnly: false }));
 });
-test("early exit cannot be relabeled admitted and disposal cannot substitute for full kernel reap", () => {
+test("early channel exit refuses admission without substituting for full kernel reap", () => {
   const early = { name: "early", admitted: false, initialLevel: "reaped", firstNonceConfirmed: false, secondNonceConfirmed: false,
     sameBirthRunningConfirmed: false, reservationRefused: true, fullReapConfirmed: true, closeReadReceiptConfirmed: true, helperExitObserved: true, exitCode: 0, elapsedMs: 1 };
-  caseSchema.parse(early);
-  for (const patch of [{ admitted: true }, { firstNonceConfirmed: true }, { secondNonceConfirmed: true }, { initialLevel: "running" },
-    { fullReapConfirmed: false }, { closeReadReceiptConfirmed: false }, { elapsedMs: 20001 }]) assert.throws(() => caseSchema.parse({ ...early, ...patch }));
+  for (const initialLevel of ["running", "non-running", "reaped"]) caseSchema.parse({ ...early, initialLevel });
+  for (const patch of [{ admitted: true }, { firstNonceConfirmed: true }, { secondNonceConfirmed: true }, { sameBirthRunningConfirmed: true },
+    { helperExitObserved: false }, { fullReapConfirmed: false }, { closeReadReceiptConfirmed: false }, { elapsedMs: 20001 }])
+    assert.throws(() => caseSchema.parse({ ...early, ...patch }));
 });
 test("the original helper challenge rejects old nonce frames unknown fields and changed PID epoch or nonce", () => {
   const epoch = "7dfc2166-7c3d-4272-8011-0268d6fd86dd", nonce = "fb249cbc-c53c-4108-b844-69d712ca90f5", other = "878b7420-92cb-4b89-8814-a56353ce03cf";

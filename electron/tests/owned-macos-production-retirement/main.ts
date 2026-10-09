@@ -168,7 +168,7 @@ async function run(root: string, distribution: string, expected: string): Promis
       await record("spawn"); const child = spawnOwned(name);
       const pid = await bounded(child.spawned, until); await bounded(child.ready, until);
       refuseCreate(pid, uid, 0); refuseCreate(pid, 0, process.pid); refuseCreate(pid, uid + 1, process.pid);
-      let firstNonceConfirmed = false, secondNonceConfirmed = false, sameBirthRunningConfirmed = false;
+      let firstNonceConfirmed = false, secondNonceConfirmed = false, sameBirthRunningConfirmed = false, admitted = false;
       if (name === "early") await bounded(child.exit, until);
       else { await record("first-challenge"); await challenge(child, until); firstNonceConfirmed = true; }
       const attempt: BindAttempt = { child, owner: undefined, snapshots: null, nativeError: null }; bindAttempt = attempt;
@@ -196,8 +196,12 @@ async function run(root: string, distribution: string, expected: string): Promis
         await record("second-challenge"); await challenge(child, until); secondNonceConfirmed = true;
         await record("observe"); const current = await bounded(owner.observe(signal), until);
         assert.equal(current.level, "running"); assert.deepEqual(current.identity, initial.identity);
-        assert.equal(child.invalid, false); assert.equal(child.exited, false); sameBirthRunningConfirmed = true;
-      } else { assert.equal(initial.canAdmit, false); assert.notEqual(initial.level, "running"); }
+        assert.equal(child.invalid, false); assert.equal(child.exited, false); sameBirthRunningConfirmed = true; admitted = true;
+      } else {
+        // Channel exit refuses admission without asserting kernel retirement.
+        // The original native owner below must still prove full reap and close.
+        assert.equal(child.exited, true); assert.equal(child.pending, undefined); assert.equal(child.nonces.size, 0);
+      }
       await record("reservation"); refuseCreate(pid, uid, process.pid);
       await record("request-exit");
       if (!child.exited) { if (name === "kill") child.utility.kill(); else child.utility.postMessage({ version: 1, type: "fixture-exit" }); }
@@ -205,7 +209,7 @@ async function run(root: string, distribution: string, expected: string): Promis
       await record("close-read"); await bounded(owner.settleReads(), until); assert.equal(owner.current.level, "reaped");
       await record("helper-exit"); const exitCode = await bounded(child.exit, until); assert.equal(child.invalid, false);
       if (name === "nonzero") assert.equal(exitCode, 17); else if (name !== "kill") assert.equal(exitCode, 0);
-      cases.push(caseSchema.parse({ name, admitted: initial.canAdmit, initialLevel: initial.level, firstNonceConfirmed, secondNonceConfirmed,
+      cases.push(caseSchema.parse({ name, admitted, initialLevel: initial.level, firstNonceConfirmed, secondNonceConfirmed,
         sameBirthRunningConfirmed, reservationRefused: true, fullReapConfirmed: true, closeReadReceiptConfirmed: true, helperExitObserved: true,
         exitCode, elapsedMs: performance.now() - start }));
       await writeFile(join(root, "cases.json"), JSON.stringify(cases), { mode: 0o600 });
