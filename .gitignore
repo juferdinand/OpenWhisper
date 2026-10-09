@@ -30,13 +30,13 @@ Package.resolved
 
 __pycache__/
 
-/shared/ui/node_modules/
+/shared/ui/node_modules
 /shared/ui/dist/
 /shared/ui/test-results/
 /shared/ui/playwright-report/
 
 # Electron development outputs and private profiles
-/electron/node_modules/
+/electron/node_modules
 /electron/dist/
 /electron/test-results/
 /electron/.profiles/
