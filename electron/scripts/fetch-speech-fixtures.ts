@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
+import { digestSchema, pinnedNativeSource } from "./native-dependencies.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const modelHash = "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21";
@@ -69,7 +71,18 @@ export async function fetchSpeechFixtures(): Promise<void> {
       await rename(temporary, model);
     } finally { await rm(temporary, { force: true }); }
   }
-  const wav = await readFile(join(root, "vendor/whisper.cpp/samples/jfk.wav"));
+  const source = join(root, "vendor/whisper.cpp"), sample = join(source, "samples/jfk.wav");
+  let wav: Buffer;
+  try { wav = await readFile(sample); }
+  catch (error: unknown) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    // Package consumers have no native build. Prepare only its existing pinned public source fixture.
+    const pin = z.strictObject({ repository: z.literal("ggml-org/whisper.cpp"), tag: z.literal("b5130"),
+      revision: z.string().regex(/^[a-f0-9]{40}$/u), sha256: digestSchema }).parse(
+      JSON.parse(await readFile(join(root, "native/whisper-source.json"), "utf8")) as unknown);
+    await pinnedNativeSource(`https://codeload.github.com/${pin.repository}/tar.gz/${pin.revision}`, pin.sha256, source);
+    wav = await readFile(sample);
+  }
   await writeFile(join(destination, "jfk.f32"), publicFixtureSamples(wav), { mode: 0o600 });
   console.log("Checksum-pinned public speech fixtures are ready; no capture device was opened.");
 }

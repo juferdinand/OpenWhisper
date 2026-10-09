@@ -18,10 +18,45 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | macOS dictation | Actual Intel/Apple Silicon Dev packages pass sandbox, signed utilities, CPU recognition of public audio, shortcut setup/removal and original Quit. Normal stable packages pass migration, edited-state restart and clean exits at b892d86 | Physical microphone/TCC, actual target insertion and device changes; Metal selection remains open |
 | Linux desktop integration | Owned stock KDE 5.27 native Wayland F8, binding Quit/crash recovery and paste into separate Wayland/XWayland editors pass. Genuine X11 shortcuts and all five no-display CLI commands pass, including installed stable autostart enable/disable and generated-target restart | Expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
-| Packaging and updates | Unchanged supervised Debian and AppImage pass all 18 runtime checks; the owned X11 rendering budget is corrected. Inactive consumers authenticate downloads and preserve the AppImage predecessor through handoff. Both Mac thin packages pass; the universal `otool` filename failure has a source fix | Confirm universal Mac construction/runtime; connect installation/restart/rollback, installed Debian audit, persistent publisher continuity, authenticated Dev replacement, DMG and release signing; retain earlier resource failures separately |
+| Packaging and updates | Unchanged supervised Debian and AppImage pass all 18 runtime checks; the owned X11 rendering budget is corrected. Inactive consumers authenticate downloads and preserve the AppImage predecessor through handoff. Both Mac thin packages and universal construction pass | Confirm universal Mac runtime; connect installation/restart/rollback, installed Debian audit, persistent publisher continuity, authenticated Dev replacement, DMG and release signing; retain earlier resource failures separately |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 ## Current package checkpoint
+
+Both thin Mac jobs and universal construction in
+[CI 37886541728](https://github.com/juferdinand/OpenWhisper/actions/runs/37886541728)
+pass at actual synthetic producer `7ae341fb`, distinct from API head `bd1b1b75`.
+The actual literal-filename regression passes on ARM and Intel (1.06 and 5.58
+seconds), followed by original Dev Quit and stable restart/Quit. The constructor
+retains all source, native, minimum-OS, signing and ZIP gates. Both universal
+consumers pass their preceding checksum/extract/producer checks, then stop before
+app launch because the public `jfk.wav` fixture is absent. The enclosing Actions
+artifact digest is not the unprinted inner ZIP SHA; no native runtime success
+is inferred from that failure.
+
+Fixture preparation now obtains the existing pinned speech source only when
+the sample is missing, without a compiler or app build. One independently
+reviewed cold private preparation passes in 1.30 seconds with exact model/WAV/
+Float32 checksums, original normal process closure and no native build outputs.
+Actual universal app startup still requires the next normal CI.
+
+The inactive Debian installed-target audit now authenticates the original
+download, reads a bounded inventory through the maintained typed archive
+library, and compares fixed physical installed files, ownership, modes and
+package status. Its private closure retains the authenticated version and
+source; it accepts no replacement root or manifest from the GUI. Independent
+review fixes mutable-input capture and categorical tool errors. Thirteen
+portable cases pass. One explicit Ubuntu 22.04 container case authenticates
+original signed 0.2.5 bytes and refuses its 61 MB native launcher at the
+bounded Electron-script inventory limit. That case does not prove a current
+signed Electron inventory or a root-owned installed success. Installation,
+main/UI activation and restart remain unconnected. Both packagers retain
+the pinned library dependency closure and required license notice.
+
+This source checkpoint passes strict typing, the normal application/shared-UI
+build, and 1,230 tests in 18.55 seconds: zero failures and 42 explicit native/
+opt-in skips (1,272 total). Earlier check counts below belong to their stated
+historical checkpoints.
 
 The unchanged clean `2ce4a228` supervised AppImage now passes all 18 runtime
 checks in 64.59 seconds. Its permanent image, extracted resources and original

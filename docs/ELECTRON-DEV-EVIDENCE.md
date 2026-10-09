@@ -1,5 +1,54 @@
 # Electron development evidence
 
+## Universal constructor and independent fixture preparation
+
+Original [CI 37886541728](https://github.com/juferdinand/OpenWhisper/actions/runs/37886541728)
+uses actual synthetic package producer `7ae341fb` (API head `bd1b1b75`). Both
+thin jobs pass the real Darwin filename regression and their Dev/Stable package
+checks. Universal construction passes its strict source/native/minimum-OS/
+signing/ZIP gates. Both same-ZIP consumers pass checksum/extract/producer checks
+but fail before app launch at missing `vendor/whisper.cpp/samples/jfk.wav`.
+The enclosing artifact digest and inner ZIP SHA remain different observations;
+the latter was not printed or retrieved. Universal runtime is unexecuted.
+
+The reviewed fixture fallback reuses the existing checksum-pinned source archive
+without compiling the app. One cold private Linux preparation with no vendor
+source passes in 1.30 seconds. Its original process exits 0 and disappears;
+exact model/WAV/Float32 digests, copied inputs and no native-build/temp outputs
+pass. The model came from the existing owned fixture cache; no model download,
+devices or app runtime were involved. Actual Darwin startup remains pending.
+
+## Inactive Debian installed-target audit
+
+The new boundary freshly authenticates the original private download before
+fixed package metadata and bounded tar inventory inspection. The maintained
+typed parser owns archive decoding; installed files use physical `original-fs`
+under Electron. The returned closure checks fixed root-owned paths, exact
+file/mode/hash inventory and package status. No caller-supplied manifest/root,
+installation, execution or update activation is admitted. Independent review
+finds and fixes mutable-input capture and raw tool-error leakage; original
+findings are retained separately.
+
+Thirteen portable cases pass, including archive refusals, original pending
+read/iterator settlement and physical file mutation checks. Ownership policy
+uses explicitly synthetic root metadata. The first explicit signed-source
+case on the Arch host correctly returns `TOOL_FAILED` because `dpkg-deb` is
+absent. In the owned Ubuntu 22.04 container, the old 0.2.5 package authenticates
+but its 61,257,608-byte native launcher exceeds the 1 MiB bounded literal-script
+inventory. The initial test expected the wrong category; only its prerequisite,
+name and exact expectation are corrected. The corrected case passes in 1.79
+seconds, with normal container exit/removal and unchanged signed inputs.
+This is source authentication and an early bounded legacy-layout refusal,
+not complete current inventory, actual Electron ASAR execution or an installed
+root-owned positive. Those checks remain required before activation.
+
+Exact `tar` 7.5.22 and its runtime closure are integrity-pinned. Linux packaging
+byte-compares all six package licenses and refuses a missing required notice;
+the corresponding Mac notice has source review and existing suite coverage.
+The combined source checkpoint passes typing, normal application/shared-UI
+build and 1,230 tests in 18.55 seconds: 1,272 total, zero failures, 42 explicit
+native/opt-in skips. The signed old-source case is a separate opt-in result.
+
 ## Supervised AppImage and literal Mac helper filenames
 
 The unchanged clean `2ce4a228` AppImage passes all 18 ordinary runtime assertions

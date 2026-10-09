@@ -128,6 +128,37 @@ test("preview refuses a missing noble license before creating package output", {
   } finally { await rm(input.base, { recursive: true, force: true }); }
 });
 
+test("archive dependency closure ships its original licenses and refuses a missing required notice", { skip: !supportedHost }, async () => {
+  const input = await fixture();
+  const names = ["tar", "@isaacs/fs-minipass", "chownr", "minipass", "minizlib", "yallist"];
+  try {
+    const metadata = JSON.parse(input.metadata) as { dependencies: Record<string, string> };
+    const lock = JSON.parse(await readFile(join(input.root, "package-lock.json"), "utf8")) as { packages: Record<string, { version: string }> };
+    metadata.dependencies["tar"] = "7.5.22";
+    for (const name of names) {
+      const source = new URL(`../node_modules/${name}/`, import.meta.url);
+      const dependency = JSON.parse(await readFile(new URL("package.json", source), "utf8")) as { name: string; version: string };
+      assert.equal(dependency.name, name);
+      lock.packages[`node_modules/${name}`] = { version: dependency.version };
+      await mkdir(join(input.root, "node_modules", name, ".."), { recursive: true });
+      await cp(source, join(input.root, "node_modules", name), { recursive: true });
+    }
+    await input.write("package.json", JSON.stringify(metadata));
+    await input.write("package-lock.json", JSON.stringify(lock));
+    const result = await packageLinuxPreview({ root: input.root, output: input.output, directoryOnly: true });
+    const license = await readFile(new URL("../node_modules/tar/LICENSE.md", import.meta.url));
+    assert.deepEqual(await readFile(join(result.directory, "notices/tar-LICENSE.md")), license);
+    for (const name of names) {
+      const licenseName = ["@isaacs/fs-minipass", "minizlib"].includes(name) ? "LICENSE" : "LICENSE.md";
+      assert.deepEqual(await readFile(join(result.directory, "resources/app/node_modules", name, licenseName)),
+        await readFile(new URL(`../node_modules/${name}/${licenseName}`, import.meta.url)));
+    }
+    await rm(join(input.root, "node_modules/tar/LICENSE.md"));
+    await assert.rejects(packageLinuxPreview({ root: input.root, output: join(input.base, "missing-notice"), directoryOnly: true }));
+    await assert.rejects(lstat(join(input.base, "missing-notice")), { code: "ENOENT" });
+  } finally { await rm(input.base, { recursive: true, force: true }); }
+});
+
 test("preview refuses source overlap, wrong locked dependency, unsafe symlinks and version mismatch before staging", { skip: !supportedHost }, async () => {
   const input = await fixture();
   try {
