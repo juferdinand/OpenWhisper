@@ -1,12 +1,19 @@
 import { spawn } from "node:child_process";
+import * as nodeFs from "node:fs";
 import type { BigIntStats } from "node:fs";
-import { lstat, mkdtemp, readdir, realpath, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { isAbsolute, join, resolve } from "node:path";
 import { buildIdentitySchema } from "../contracts/build-identity.js";
 import { validateMacBundleMetadata } from "../main/build-selection.js";
 import { verifyMacosUpdateSignature, MacosUpdateSignatureError } from "./macos-update-signature.js";
 import { isNewerUpdateVersion } from "./update-policy.js";
 import { assertPrivateUpdateDirectory, type OwnedUpdateDownload } from "./update-staging.js";
+
+// Bundle checks and removal operate on physical files, including Electron's ASAR archives.
+// https://www.electronjs.org/docs/latest/tutorial/asar-archives#treating-an-asar-archive-as-a-normal-file
+const physicalFs = process.versions["electron"]
+  ? createRequire(import.meta.url)("original-fs") as typeof nodeFs : nodeFs;
+const { lstat, mkdtemp, readdir, realpath, rm } = physicalFs.promises;
 
 type Failure = "INVALID_INPUT" | "UNSUPPORTED_HOST" | "INVALID_ARCHIVE" | "INVALID_BUNDLE" | "EXTRACTION_FAILED" | "CLEANUP_FAILED";
 type CleanupPhase = "PRIVATE_STAGE" | "CHILD_IDENTITY" | "REMOVE_TREE";

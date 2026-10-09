@@ -1,5 +1,66 @@
 # Electron development evidence
 
+## Physical Mac archive filesystem and targeted AppImage diagnosis
+
+Original ARM job113626633516 in
+[CI37870309345](https://github.com/juferdinand/OpenWhisper/actions/runs/37870309345)
+identifies the positive ZIP fixture cleanup failure as
+`real-package:CLEANUP_FAILED:REMOVE_TREE:ENOTEMPTY`. Its actual producer is PR
+merge `697d7f98b656ac311429b59125aab9ced5a2b0d1`, distinct from API head6994e42.
+The exact remaining Mac entry is not observed in that log.
+
+One separate immutable Dev9 Electron44.7.0/Node24.21.0 embedded-Node probe
+reproduces the filesystem mechanism: `original-fs` sees the 110862-byte0644
+`default_app.asar` as a regular file; patched `fs` sees a virtual0755 directory
+with eight members. One patched recursive removal fails with `ENOTEMPTY` and
+the physical archive is the exact remaining entry. One built-in `original-fs`
+removal succeeds; no global `process.noAsar` switch or retry is used. The probe
+exits naturally0 in103.4ms with empty stderr, original PID absent, all1263 source/
+copied/returned package files and fixture pins unchanged. Namespace cleanup is
+separate: its sleeping container terminates137 after the probe closes normally,
+then the container is removed. This embedded Linux result is not a Mac browser
+acceptance claim. The reviewed consumer now uses the documented
+[physical filesystem API](https://www.electronjs.org/docs/latest/tutorial/asar-archives#treating-an-asar-archive-as-a-normal-file)
+for bundle inspection and cleanup; its actual Mac ZIP smoke remains pending.
+
+The first owned AppImage case fails before readiness in7.96s total. Its targeted
+startup-only diagnostic identifies a125-byte AF_UNIX SingletonSocket path below
+the unnecessarily long owned TMPDIR; actual launcherPID51 exits127 and Electron
+PID54 is reported in Chromium's fatal message. No model/capture action occurs.
+The harness uses a fresh short0700 same-user canonical `/tmp/ow-ai-` base; the
+image and launcher remain unchanged. Arbitrary long caller TMPDIR remains a
+documented production limitation, without claiming a fix to the launcher.
+
+The next full case records actual launcher/runtime/main identity, exact extracted
+resources and successful secondary activation with primary-resource survival,
+then fails the old font-cache assertion before dictation. Its exact mismatching
+numeric mode was not retained. The reviewed harness accepts only safe0600/0644
+regular owned cache files under the unchanged private-directory/name guards and
+records bounded metadata before assertions; no contents are logged. This is
+consistent with the launcher's restrictive umask, without assuming an unobserved
+mode. All original failures and namespace/server closure receipts are retained.
+Startup-only results have a separate schema and never claim dictation acceptance.
+
+The corrected full AppImage runtime passes all15 checks in64.389 seconds against
+the unchanged119441912-byte image and exact protected launcher. App producer
+remains clean `b892d861`; the separate corrected harness is not relabeled as the
+application source. All five actual no-display CLI command kinds and absent-owner
+refusal pass, with strict replies and retired original processes. Native X11
+setup/hold/cancel, real TinyCPU recognition, private clipboard/history, retained
+WAV Retry/Discard and edited-state restart pass. Secondary activation and each
+CLI invocation retire only their extraction while primary resources survive.
+Original launcher/runtime/main chains51/53/54 and1826/1828/1829 close normally0
+with no signal/forced termination; all observed descendants are absent and the
+shared temp base is empty. Exact image/launcher/reference inputs remain equal,
+private servers close and namespace removal passes. Nineteen bounded cache
+receipts now observe0600 regular same-user files withnlink1; the previous failed
+mode remains unknown. This is offline owned Xvfb/nativeX11/private Pulse evidence,
+without FUSE/host devices/physical microphone/GPU/automatic paste/login claims.
+AppImage admission/autostart/updater remains unavailable. One current default
+suite passes1153 tests in17.88 seconds, zero failures,28 explicit skips; strict
+typing passes. Mac physical-FS source and every harness increment have separate
+independent review; actual Mac ZIP execution still requires matching CI.
+
 ## Reviewed original-file staging, update download and Mac archive consumer
 
 The shared stage borrows or retains the exclusively created original descriptor,

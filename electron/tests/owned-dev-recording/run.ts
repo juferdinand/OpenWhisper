@@ -29,7 +29,8 @@ const installPackage = packaged && args[9] === "--install-package";
 const stablePackage = packaged && args[9] === "--stable-package";
 const installedDebian = stablePackage && args[10] === "--debian-package";
 const appImage = stablePackage && args[10] === "--appimage-bundle";
-if (args.length !== (installedDebian || appImage ? 12 : packaged ? installPackage || stablePackage ? 10 : 9 : copiedNode ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
+const appImageStartupOnly = appImage && args[12] === "--appimage-startup-only";
+if (args.length !== (appImageStartupOnly ? 13 : installedDebian || appImage ? 12 : packaged ? installPackage || stablePackage ? 10 : 9 : copiedNode ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
     || process.platform !== "linux" || process.arch !== "x64" || process.getuid?.() === 0) throw new Error("INVALID_EXECUTION");
 const output = absolute.parse(args[1]), planning = absolute.parse(args[3]), fixtures = absolute.parse(args[5]);
 const packageDirectory = packaged ? absolute.parse(args[8]) : undefined;
@@ -354,13 +355,16 @@ try {
     "--output", "/tmp/owned-desktop", "--timeout", "180", "--", "/payload/node", "/payload/driver.mjs"]
     : nativeX11 ? ["OPENWHISPER_NATIVE_X11=1", ...(packaged ? ["OPENWHISPER_PACKAGE_DIRECTORY=/payload/package"] : []),
       ...(installPackage ? ["OPENWHISPER_INSTALL_PACKAGE=1"] : []), ...(stablePackage ? ["OPENWHISPER_STABLE_PACKAGE=1"] : []),
-      ...(installedDebian ? ["OPENWHISPER_INSTALLED_DEBIAN=1"] : []), ...(appImage ? ["OPENWHISPER_APPIMAGE=1"] : []), "/payload/node", "/payload/driver.mjs"]
+      ...(installedDebian ? ["OPENWHISPER_INSTALLED_DEBIAN=1"] : []), ...(appImage ? ["OPENWHISPER_APPIMAGE=1"] : []), ...(appImageStartupOnly ? ["OPENWHISPER_APPIMAGE_STARTUP_ONLY=1"] : []), "/payload/node", "/payload/driver.mjs"]
     : ["/opt/node/bin/node", "/payload/driver.mjs"];
   const observed = await docker(["exec", "--user", "1000:1000", container, "/usr/bin/env", "-i", "PATH=/opt/node/bin:/usr/bin:/bin", "LANG=C.UTF-8",
     "OPENWHISPER_OWNED_DEV_RECORDING=1", ...command], stockKde ? 240_000 : 210_000);
   if (stockKde) await required(["cp", `${container}:/tmp/owned-desktop`, join(output, "owned-desktop")]);
   await required(["cp", `${container}:/evidence/.`, output]); assert.equal(observed.code, 0); assert.equal(observed.closureObserved, true);
-  (kdeLifecycle ? z.object({ status: z.literal("PASS"), activeBindingQuit: z.literal(true), crashRecovery: z.literal(true),
+  (appImageStartupOnly ? z.object({ status: z.literal("PASS"), classification: z.literal("APPIMAGE_STARTUP_DIAGNOSTIC_ONLY"),
+    actualOwnerVerified: z.literal(true), initialUiVerified: z.literal(true), originalNormalQuit: z.literal(true),
+    allObservedPidsAbsent: z.literal(true), temporaryEmpty: z.literal(true), recordingOrInferenceStarted: z.literal(false),
+    autostartAdmission: z.literal("UNAVAILABLE"), updateAuthority: z.literal(false) }) : kdeLifecycle ? z.object({ status: z.literal("PASS"), activeBindingQuit: z.literal(true), crashRecovery: z.literal(true),
     originalApplicationCloses: z.array(z.object({ closed: z.literal(true) })).length(3) })
     : kdeOverlay || kdeWaylandOverlay ? z.object({ status: z.literal("PASS"), defaultHidden: z.literal(true), idlePreferenceVisibility: z.literal(true),
       focusRetained: z.literal(true), preferenceMutationRefused: z.literal(true), overlaySandbox: z.literal(true),

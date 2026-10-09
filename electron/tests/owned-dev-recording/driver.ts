@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, readlink, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -27,6 +27,7 @@ const packaged = process.env.OPENWHISPER_PACKAGE_DIRECTORY === "/payload/package
 const stablePackage = process.env.OPENWHISPER_STABLE_PACKAGE === "1";
 const installedDebian = process.env.OPENWHISPER_INSTALLED_DEBIAN === "1";
 const appImage = process.env.OPENWHISPER_APPIMAGE === "1";
+const appImageStartupOnly = process.env.OPENWHISPER_APPIMAGE_STARTUP_ONLY === "1";
 const sourcePackageRoot = packaged ? "/payload/package/resources/app" : join(payload, "app"), evidence = "/evidence";
 const sourceExecutable = packaged ? `/payload/package/${stablePackage ? "openwhisper" : "openwhisper-dev"}` : join(sourcePackageRoot, "node_modules/electron/dist/electron");
 let packageRoot = installedDebian ? "/opt/openwhisper/resources/app" : sourcePackageRoot;
@@ -44,6 +45,9 @@ const checks: string[] = [];
 let stage = "guard", status = "FAIL", application: ElectronApplication | undefined, page: Page | undefined;
 let failure: { name: string; location: string | null } | undefined;
 let appCloseObserved = false, appOriginalClose: Promise<void> | undefined;
+let startupStderr = Buffer.alloc(0), startupStderrBytes = 0, startupRetentionEnabled = false;
+let startupPhase: "launch" | "context-evaluation" | "runtime-owner" | "resource-identity" | "initial-ui" = "launch";
+let startupIds: { launcherPid: number | null; mainPid: number | null; runtimePid: number | null } = { launcherPid: null, mainPid: null, runtimePid: null };
 const appOwners: { original: ChildProcess; closed: Promise<void>; closeObserved: boolean; termination: "quit" | "crash" | null;
   quitEvents: ("before-quit" | "will-quit")[]; image?: { mainPid: number; runtimePid: number; temporary: string;
     processes: Map<number, ImageProcess>; resources: Record<string, string> } | undefined }[] = [];
@@ -143,6 +147,7 @@ async function main(): Promise<void> {
     assert.equal(installedDebian, true); assert.equal(stablePackage && packaged && nativeX11, true); assert.equal(installPackage, false);
     await assertInstalledPackage();
   }
+  if (process.env.OPENWHISPER_APPIMAGE_STARTUP_ONLY !== undefined) assert.equal(appImageStartupOnly && appImage, true);
   if (process.env.OPENWHISPER_APPIMAGE !== undefined) assert.equal(appImage && stablePackage && nativeX11 && !installedDebian && !installPackage, true);
   assert.ok((await lstat("/.dockerenv")).isFile());
   for (const device of ["/dev/snd", "/dev/input", "/dev/uinput", "/dev/dri", ...(appImage ? ["/dev/fuse"] : [])]) await assert.rejects(lstat(device), { code: "ENOENT" });
@@ -172,10 +177,13 @@ async function main(): Promise<void> {
   };
   if (installedDebian) { env.XDG_CONFIG_DIRS = join(home, "system-config"); await mkdir(env.XDG_CONFIG_DIRS, { mode: 0o700 }); }
   const permanentImage = join(home, ".local/lib/whisperfree/OpenWhisper.AppImage"), imageLauncher = join(dirname(permanentImage), "openwhisper-launch");
-  const imageTemporary = join(root, "appimage-temporary"), imageAdapter = join(root, "appimage-playwright");
+  const imageTemporary = appImage ? await mkdtemp("/tmp/ow-ai-") : join(root, "appimage-temporary"), imageAdapter = join(root, "appimage-playwright");
   let secondaryResourcesSurvived = false;
   if (appImage) {
-    await mkdir(dirname(permanentImage), { recursive: true, mode: 0o700 }); await mkdir(imageTemporary, { mode: 0o700 });
+    await mkdir(dirname(permanentImage), { recursive: true, mode: 0o700 }); await chmod(imageTemporary, 0o700);
+    assert.match(imageTemporary, /^\/tmp\/ow-ai-[A-Za-z0-9]+$/u); assert.equal(await realpath(imageTemporary), imageTemporary);
+    const temporary = await lstat(imageTemporary); assert.ok(temporary.isDirectory() && !temporary.isSymbolicLink());
+    assert.equal(temporary.uid, 1000); assert.equal(temporary.mode & 0o7777, 0o700);
     for (const [source, target, expected] of [
       ["OpenWhisper.AppImage", permanentImage, "5307c99c5d8f603fbf8ed937d8688dc24181509163cdfc365552dd9bd5eb5069"],
       ["openwhisper-launch", imageLauncher, "ea17d105cc470ba5bc23d9e503b2e344b7b78ac2772655a8700d582d84a57fe1"],
@@ -447,6 +455,7 @@ async function main(): Promise<void> {
   await checkpoint("launch-normal-application");
   const launchApplication = async () => {
   appCloseObserved = false;
+  startupRetentionEnabled = appImage && stage === "launch-normal-application"; startupPhase = "launch";
   const startupWatch = setTimeout(() => {
     // Capture only owned process/resource metadata when bootstrap stalls, never argv or content.
     void Promise.all([execute("/bin/ps", ["-eo", "pid,ppid,comm,stat"], { env, timeout: 5000, maxBuffer: 65_536 }),
@@ -467,9 +476,14 @@ async function main(): Promise<void> {
   original.stdout?.on("data", (bytes: Buffer) => { diagnostics.stdoutBytes += bytes.length; });
   owner.closed = new Promise<void>((accept) => original.once("close", () => { owner.closeObserved = true; appCloseObserved = true; accept(); }));
   appOwners.push(owner); appOriginalClose = owner.closed;
+  if (startupRetentionEnabled) startupIds.launcherPid = original.pid ?? null;
   let diagnosticLine = "", diagnosticOverflow = false;
   original.stderr?.on("data", (bytes: Buffer) => {
     diagnostics.stderrBytes += bytes.length;
+    if (startupRetentionEnabled) {
+      startupStderrBytes += bytes.length;
+      if (startupStderr.length < 16 * 1024) startupStderr = Buffer.concat([startupStderr, bytes.subarray(0, 16 * 1024 - startupStderr.length)]);
+    }
     for (const character of bytes.toString("utf8")) {
       if (character === "\n") {
         const quitEvent = !diagnosticOverflow ? /^OpenWhisper owned quit event: (before-quit|will-quit)\r?$/u.exec(diagnosticLine)?.[1] : undefined;
@@ -497,9 +511,11 @@ async function main(): Promise<void> {
     }
   });
   if (appImage) {
+    startupPhase = "context-evaluation";
     const actual = await application.evaluate(({ app }) => ({ mainPid: process.pid, runtimePid: process.ppid, appPath: app.getAppPath(),
       executable: process.execPath, appImage: process.env["APPIMAGE"], appDir: process.env["APPDIR"], temporary: process.env["TMPDIR"],
       noCleanup: process.env["NO_CLEANUP"] }));
+    startupIds = { launcherPid: original.pid ?? null, mainPid: actual.mainPid, runtimePid: actual.runtimePid };
     assert.equal(actual.appImage, permanentImage); assert.equal(actual.noCleanup, undefined); assert.ok(actual.temporary && actual.appDir);
     assert.equal(dirname(actual.temporary), imageTemporary); assert.match(basename(actual.temporary), /^openwhisper-appimage\.[A-Za-z0-9]+$/u);
     assert.equal(dirname(actual.appDir), actual.temporary); assert.match(basename(actual.appDir), /^appimage_extracted_[a-f0-9]{32}$/u);
@@ -507,10 +523,12 @@ async function main(): Promise<void> {
     assert.equal(temporary.uid, 1000); assert.equal(temporary.mode & 0o7777, 0o700);
     executable = join(actual.appDir, "usr/lib/openwhisper/openwhisper"); packageRoot = join(dirname(executable), "resources/app");
     assert.equal(actual.appPath, packageRoot); assert.equal(actual.executable, executable);
+    startupPhase = "runtime-owner";
     assert.equal(await readlink(`/proc/${actual.runtimePid}/exe`), permanentImage);
     const runtime = await lstat(`/proc/${actual.runtimePid}`); assert.equal(runtime.uid, 1000);
     const runningImage = await stat(`/proc/${actual.runtimePid}/exe`), permanent = await lstat(permanentImage);
     assert.equal(runningImage.dev, permanent.dev); assert.equal(runningImage.ino, permanent.ino); assert.equal(runningImage.size, permanent.size);
+    startupPhase = "resource-identity";
     const resources: Record<string, string> = {};
     for (const relative of ["dist/main/application-build.js", "dist/main/development-recording-build.js", "dist/workers/capture-entry.js",
       "dist/workers/platform-entry.js", "dist/native/capture/openwhisper_capture.node", "dist/native/speech/cpu/openwhisper_speech.node",
@@ -529,6 +547,7 @@ async function main(): Promise<void> {
     app.on("before-quit", () => console.error("OpenWhisper owned quit event: before-quit"));
     app.on("will-quit", () => console.error("OpenWhisper owned quit event: will-quit"));
   });
+  startupPhase = "initial-ui";
   page = await application.firstWindow();
   await expect(page.locator(".sidebar-brand strong")).toHaveText(stablePackage ? "OpenWhisper" : "OpenWhisper Dev");
   assert.equal(page.url(), "app://openwhisper/index.html");
@@ -540,10 +559,25 @@ async function main(): Promise<void> {
     assert.equal(actual.argv.some((argument) => argument === "--dev" || argument.startsWith("--dev-profile")), false);
     await writeFile(join(evidence, "stable-application.json"), JSON.stringify({ ...actual, argv: undefined }), { mode: 0o600 });
   }
+  startupRetentionEnabled = false; startupStderr = Buffer.alloc(0);
   return { application, page };
   };
   await launchApplication();
   assert.ok(application && page);
+  if (appImageStartupOnly) {
+    await checkpoint("appimage-startup-only-normal-quit");
+    const owner = appOwners.at(-1)!; assert.ok(owner.image); owner.termination = "quit";
+    await observeImageProcesses(owner.original.pid!, owner.image.processes);
+    const closing = application.close().then(() => owner.closed); void closing.catch(() => {});
+    let timer: NodeJS.Timeout | undefined;
+    try { await Promise.race([closing, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("OWNED_APP_CLOSE_TIMEOUT")), 10_000); })]); }
+    finally { if (timer) clearTimeout(timer); }
+    await assertImageClosed(owner); application = undefined; page = undefined;
+    await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", classification: "APPIMAGE_STARTUP_DIAGNOSTIC_ONLY",
+      actualOwnerVerified: true, initialUiVerified: true, originalNormalQuit: true, allObservedPidsAbsent: true,
+      temporaryEmpty: true, recordingOrInferenceStarted: false, autostartAdmission: "UNAVAILABLE", updateAuthority: false }), { mode: 0o600 });
+    status = "PASS"; return;
+  }
   if (packaged) {
     const actual = await application.evaluate(({ app }) => ({ path: app.getAppPath(), packaged: app.isPackaged, executable: process.execPath }));
     await writeFile(join(evidence, "packaged-application.json"), JSON.stringify(actual), { mode: 0o600 });
@@ -605,6 +639,7 @@ async function main(): Promise<void> {
     "ELECTRON_RUN_AS_NODE", "ELECTRON_OVERRIDE_DIST_PATH", "ELECTRON_NO_ASAR"]) delete controlEnvironment[key];
   const commandRecords: { command: ControlCommand; pid: number; seconds: number; exitCode: 0 | 1; closed: true;
     status: string | null; elapsed: string | null; recoveryAvailable: boolean | null }[] = [];
+  let fontCacheObservation = 0;
   const assertControlStorage = async () => {
     for (const path of controlRoots.slice(0, 3)) await assert.rejects(lstat(path), { code: "ENOENT" });
     const cachePath = controlRoots[3]!;
@@ -618,10 +653,15 @@ async function main(): Promise<void> {
     const fontsPath = join(cachePath, "fontconfig"), fonts = await lstat(fontsPath);
     assert.ok(fonts.isDirectory() && !fonts.isSymbolicLink()); assert.equal(fonts.uid, 1000); assert.equal(fonts.mode & 0o7777, 0o755);
     const names = await readdir(fontsPath); assert.ok(names.length <= 16);
+    const files = [];
     for (const name of names) {
       assert.match(name, /^(?:CACHEDIR\.TAG|[a-f0-9]{32}-le64\.cache-11)$/u);
       const file = await lstat(join(fontsPath, name));
-      assert.ok(file.isFile() && !file.isSymbolicLink()); assert.equal(file.uid, 1000); assert.equal(file.mode & 0o7777, 0o644);
+      files.push({ name, regular: file.isFile(), symlink: file.isSymbolicLink(), uid: file.uid, mode: file.mode & 0o7777, nlink: file.nlink });
+    }
+    await writeFile(join(evidence, `control-fontcache-${fontCacheObservation++}.json`), JSON.stringify({ files }), { mode: 0o600, flag: "wx" });
+    for (const file of files) {
+      assert.ok(file.regular && !file.symlink); assert.equal(file.uid, 1000); assert.ok(file.mode === 0o600 || file.mode === 0o644);
     }
     return { protectedProfileAbsent: true, nativeFontCache: "OWNED_FONTCONFIG", fileCount: names.length } as const;
   };
@@ -1707,6 +1747,16 @@ async function main(): Promise<void> {
   status = "PASS";
 }
 try { await main(); } catch (error: unknown) {
+  if (appImage && stage === "launch-normal-application" && startupRetentionEnabled) {
+    startupRetentionEnabled = false;
+    await writeFile(join(evidence, "startup-system.stderr"), startupStderr, { mode: 0o600, flag: "wx" });
+    const code = error instanceof Error && "code" in error && typeof error.code === "string"
+      && ["ENOENT", "EACCES", "EPERM", "EINVAL", "EIO", "ESRCH", "ERR_ASSERTION"].includes(error.code) ? error.code : "FAILED";
+    await writeFile(join(evidence, "startup-system-error.json"), JSON.stringify({ phase: startupPhase, code, ids: startupIds,
+      stderr: { bytes: startupStderrBytes, storedBytes: startupStderr.length, truncated: startupStderrBytes > startupStderr.length },
+      message: error instanceof Error ? error.message.slice(0, 2048) : "UNKNOWN", recordingOrInferenceStarted: false }), { mode: 0o600, flag: "wx" });
+    startupStderr = Buffer.alloc(0);
+  }
   // Installation precedes model/profile creation and capture; retain only its bounded metadata error.
   if (stage === "install-fresh-owned-package" && error instanceof Error && "stderr" in error && typeof error.stderr === "string") {
     await writeFile(join(evidence, "installer-failure.txt"), error.stderr.slice(-8192), { mode: 0o600 });
