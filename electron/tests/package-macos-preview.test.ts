@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cp, lstat, mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, readFile, readlink, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -334,4 +334,20 @@ test("unsigned Intel runtime signs Crashpad, dylibs and ShipIt before enclosing 
   }
   assert.deepEqual(input, original);
   assert.equal(new Set(signing).size, input.length);
+});
+
+test("Mac preview stages framework links through a node_modules ancestor alias and still rejects unsafe roots", async () => {
+  const input = await fixture();
+  try {
+    const dependencies = join(input.base, "runner/electron/node_modules"), nodeModules = join(input.root, "node_modules");
+    await mkdir(dirname(dependencies), { recursive: true }); await rename(nodeModules, dependencies); await symlink(dependencies, nodeModules, "dir");
+    const result = await stageMacPreview({ root: input.root, output: input.output, architecture: "arm64" });
+    assert.equal(await readlink(join(result.directory, "Contents/Frameworks/Electron Framework.framework/Versions/Current")), "A");
+
+    await rm(input.output, { recursive: true });
+    const runtime = join(input.root, input.runtime), backup = `${runtime}.original`;
+    await rename(runtime, backup); await symlink("Electron.app.original", runtime, "dir");
+    await assert.rejects(stageMacPreview({ root: input.root, output: input.output, architecture: "arm64" }), /Unsafe package input symlink/u);
+    await assert.rejects(lstat(input.output), { code: "ENOENT" });
+  } finally { await rm(input.base, { recursive: true, force: true }); }
 });

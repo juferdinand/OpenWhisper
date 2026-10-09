@@ -85,11 +85,13 @@ async function digest(path: string): Promise<{ bytes: number; sha256: string }> 
 }
 /** Framework links must remain relative and inside the copied runtime; application inputs have no links. */
 async function files(root: string, links = false): Promise<string[]> {
-  const result: string[] = [];
+  const result: string[] = [], rootStat = await lstat(root);
+  if (rootStat.isSymbolicLink()) throw new Error("Unsafe package input symlink.");
+  const canonicalRoot = await realpath(root);
   const visit = async (path: string): Promise<void> => {
     const value = await lstat(path);
     if (value.isSymbolicLink()) {
-      if (!links || isAbsolute(await readlink(path)) || !inside(root, await realpath(path))) throw new Error("Unsafe package input symlink.");
+      if (!links || isAbsolute(await readlink(path)) || !inside(canonicalRoot, await realpath(path))) throw new Error("Unsafe package input symlink.");
     } else if (value.isDirectory()) {
       for (const name of await readdir(path)) await visit(join(path, name));
     } else if (value.isFile()) result.push(path);
