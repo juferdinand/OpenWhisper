@@ -4,7 +4,7 @@ import { z } from "zod";
 import { developmentArtifactSchema } from "../services/development/development-artifact.js";
 import { controlStatusSchema, ControlCaptureLeaseError, type ControlCaptureLease, type ControlCapturePort, type ControlStatus } from "../core/recording/control.js";
 import { boundPlatformFrame, platformCaptureRequestSchema, platformCaptureReplySchema,
-  type PlatformCaptureRequest, type PlatformCaptureReply } from "../workers/platform-protocol.js";
+  type PlatformCaptureRequest, type PlatformCaptureReply } from "../workers/platform/platform-protocol.js";
 import { createUtilityPlatformChannelFactory, PlatformChannelError, type PlatformChannel } from "./platform-channel.js";
 import { linuxApplicationIdSchema, type LinuxApplicationId, type PortalShortcutState } from "../platforms/linux/shared/portal-shortcuts.js";
 import type { PortalPasteState } from "../platforms/linux/shared/portal-paste.js";

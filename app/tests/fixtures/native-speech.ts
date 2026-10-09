@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { loadNativeSpeech } from "../../src/workers/native-speech.js";
+import { loadNativeSpeech } from "../../src/workers/speech/native-speech.js";
 
 const [binding, model, audio] = process.argv.slice(2);
 if (!binding || !model || !audio) throw new Error("Explicit owned speech fixtures are required.");

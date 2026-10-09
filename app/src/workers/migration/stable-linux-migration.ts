@@ -4,10 +4,10 @@ import { lstat, mkdir, open, readdir, type FileHandle } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { z } from "zod";
-import { MAX_UI_REQUEST_BYTES, MAX_USER_TEXT_BYTES, preferencesSchema } from "../contracts/ui/state.js";
-import { convertLegacyLinuxData, convertLegacyLinuxRecoveryNames } from "../services/migration/legacy-linux-data.js";
-import { prepareStableProfileStorage, validateStableProfile, type StableProfile } from "../services/settings/stable-profile.js";
-import { StableMigrationError as StableLinuxMigrationError } from "../contracts/migration/stable-migration.js";
+import { MAX_UI_REQUEST_BYTES, MAX_USER_TEXT_BYTES, preferencesSchema } from "../../contracts/ui/state.js";
+import { convertLegacyLinuxData, convertLegacyLinuxRecoveryNames } from "../../services/migration/legacy-linux-data.js";
+import { prepareStableProfileStorage, validateStableProfile, type StableProfile } from "../../services/settings/stable-profile.js";
+import { StableMigrationError as StableLinuxMigrationError } from "../../contracts/migration/stable-migration.js";
 import { fail, optional, safeFile, safeDirectory, sourceFile, unchanged, directoryUnchanged, stillAbsent,
   same, sameDirectory, sha256, jsonSource, writeFile, jsonBytes, syncDirectory, type Source, type JsonSource } from "./migration-files.js";
 

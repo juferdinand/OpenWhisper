@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { setImmediate } from "node:timers/promises";
 import { test } from "node:test";
 import type { PreparedAudio, WorkContext } from "../../src/core/recording/recording.js";
-import { LinuxSpeechGate } from "../../src/workers/speech-gate.js";
+import { LinuxSpeechGate } from "../../src/workers/speech/speech-gate.js";
 
 function context(signal = new AbortController().signal): WorkContext {
   return { generation: 7, attempt: 3, signal };

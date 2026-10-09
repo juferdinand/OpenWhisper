@@ -1,8 +1,8 @@
 import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
-import { recordingRequestSchema } from "../core/recording/recording.js";
-import { preferencesSchema } from "../contracts/ui/state.js";
-import { speechModelSchema, speechVocabularySchema } from "./native-speech.js";
+import { recordingRequestSchema } from "../../core/recording/recording.js";
+import { preferencesSchema } from "../../contracts/ui/state.js";
+import { speechModelSchema, speechVocabularySchema } from "../speech/native-speech.js";
 
 const sequence = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const absolute = z.string().min(1).max(4096).refine((path) => isAbsolute(path) && resolve(path) === path && !path.includes("\0"));

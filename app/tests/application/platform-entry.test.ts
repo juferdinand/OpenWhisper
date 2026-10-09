@@ -7,7 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import { build } from "esbuild";
-import { platformReplySchema, type PlatformRequest } from "../../src/workers/platform-protocol.js";
+import { platformReplySchema, type PlatformRequest } from "../../src/workers/platform/platform-protocol.js";
 import { parseBusValues } from "../../src/platforms/linux/shared/bus-values.js";
 import { fixtureKey, type PlatformEntryFixture } from "../fixtures/platform-entry-bus.js";
 

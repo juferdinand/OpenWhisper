@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { setImmediate } from "node:timers/promises";
 import { test } from "node:test";
 import { RecordingCoordinator, recordingRequestSchema } from "../../src/core/recording/recording.js";
-import { LinuxSpeechGate } from "../../src/workers/speech-gate.js";
+import { LinuxSpeechGate } from "../../src/workers/speech/speech-gate.js";
 import type {
   CaptureCallbacks, CapturedHandle, CaptureFinalization, CaptureSession, ControlReply,
   DeliveryIdentity, DeliveryReceipt, Ownership, PreparedAudio, RecordingOptions, RecordingRequest,

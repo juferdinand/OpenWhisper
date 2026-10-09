@@ -1,11 +1,11 @@
 import { z } from "zod";
 import type { DeliveryBoundary, DeliveryIdentity, DeliveryReceipt, WorkContext } from "../core/recording/recording.js";
 import type { RecordingInferenceClient, RecordingSpeechFactory } from "../services/speech/recording-speech.js";
-import type { SpeechModel } from "../workers/native-speech.js";
+import type { SpeechModel } from "../workers/speech/native-speech.js";
 import { deliveryIdentitySchema, deliveryReceiptSchema, recordingEffectReplySchema,
   recordingEffectRequestSchema, RecordingEffectError, safeRecordingEffectError,
   type RecordingEffectFailureCode, type RecordingEffectReply, type RecordingEffectRequest,
-} from "../workers/recording-effects-protocol.js";
+} from "../workers/recording/recording-effects-protocol.js";
 
 type OperationRequest = Exclude<RecordingEffectRequest, { command: "cancel" }>;
 type InferenceClient = RecordingInferenceClient;

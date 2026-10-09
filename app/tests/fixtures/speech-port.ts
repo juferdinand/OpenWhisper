@@ -1,6 +1,6 @@
 import { setImmediate as immediate } from "node:timers/promises";
 import type { OriginalSpeechPort } from "../../src/services/speech/speech-transport.js";
-import { speechChallengeRequestSchema } from "../../src/workers/speech-control.js";
+import { speechChallengeRequestSchema } from "../../src/workers/speech/speech-control.js";
 
 /** Pure callbacks only: no child, native code, signal, or OS observation. */
 export class InertSpeechPort implements OriginalSpeechPort {

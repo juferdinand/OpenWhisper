@@ -1,7 +1,7 @@
 import type { CaptureBoundary, CaptureCallbacks, CaptureFinalization, CaptureSession, CapturedHandle,
   PreparedAudio, WorkContext } from "../../core/recording/recording.js";
-import { checkedCaptureSelection, type CaptureSelection, type NativeCapture, type NativeCaptureSession } from "../../workers/native-capture.js";
-import type { CaptureMetadata } from "../../workers/native-capture.js";
+import { checkedCaptureSelection, type CaptureSelection, type NativeCapture, type NativeCaptureSession } from "../../workers/recording/native-capture.js";
+import type { CaptureMetadata } from "../../workers/recording/native-capture.js";
 
 export interface NativeCapturedHandle extends CapturedHandle { readonly owner: symbol }
 export interface OwnedCaptureSession extends CaptureSession<NativeCapturedHandle> {

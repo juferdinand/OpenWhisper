@@ -3,9 +3,9 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { connectFixtureSpeechChannel, type FixtureSpeechProcess } from "../fixtures/speech-bootstrap-channel.js";
-import { createSpeechBootstrap } from "../../src/workers/speech-bootstrap.js";
+import { createSpeechBootstrap } from "../../src/workers/speech/speech-bootstrap.js";
 import { SpeechClient, SpeechWorkerError } from "../../src/services/speech/speech-client.js";
-import { speechChallengeRequestSchema } from "../../src/workers/speech-control.js";
+import { speechChallengeRequestSchema } from "../../src/workers/speech/speech-control.js";
 
 type Fault = "none" | "wrong-nonce" | "wrong-epoch" | "wrong-pid" | "extra" | "duplicate" | "ordinary" | "hold";
 class InertProcess implements FixtureSpeechProcess {

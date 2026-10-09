@@ -21,9 +21,10 @@ is the historical reference for those native hosts.
 | `app/src/core/{recording,speech,models,text}/` | Platform-neutral recording, speech, model, and text logic |
 | `app/src/services/{recording,speech,models,settings,update}/` | Feature services for recording, speech, models, settings/history, and updates |
 | `app/src/platforms/linux/{kde,x11,shared}/` | Linux desktop adapters for KDE, X11, and common Linux integration |
-| `app/src/workers/` | Isolated speech work and process supervision |
+| `app/src/workers/{recording,speech,migration,platform}/` | Worker implementation by feature; six stable entry files remain at the worker root |
 | `app/ui/` | Electron-only renderer, English/German locales, icon, and Inter font |
-| `app/data/` | Model catalog, local-processing schemas, and multilingual test vectors |
+| `app/data/` | Production model catalog |
+| `app/tests/fixtures/{text,local-processing}/` | Multilingual text rules and local-model endpoint/profile/response regression cases |
 | `app/native/` | Pinned speech engine and focused capture/desktop bindings |
 
 The renderer communicates only through the schema-validated Electron preload contract. Keep
@@ -34,6 +35,32 @@ are separate from stable storage; no Dev data is imported automatically.
 The `shared` Linux platform area contains common Linux integration code; it does not hold a second
 renderer or duplicate shared UI. GNOME and wlroots use these services according to detected
 capabilities, with usable controls and clipboard fallback when desktop features are unavailable.
+
+GPU selection belongs to speech: `services/speech/` owns backend resources, context lifetime and
+window fallback; `workers/speech/` owns the isolated inference protocol. Vulkan/shaderc/header
+pins in `app/native/` and `scripts/native-dependencies.ts` are build inputs, not another feature.
+
+## Reuse and interface decisions
+
+The application already uses Zod for runtime contracts, `tar` for archives, Koffi for focused FFI,
+and Noble hashes. Universal packaging and compilation reuse `@electron/universal` and esbuild.
+New dependencies should remove a demonstrated maintenance burden while preserving capabilities.
+
+- Use narrow interfaces for interchangeable process/platform effects, and schema-derived types
+  for validated data. This follows the [TypeScript object model](https://www.typescriptlang.org/docs/handbook/2/objects.html)
+  and the [Google guide's preference for object interfaces](https://google.github.io/styleguide/tsguide.html#prefer-interfaces-over-type-literal-aliases);
+  it does not require a class or a file for every type.
+- [Electron globalShortcut](https://www.electronjs.org/docs/latest/api/global-shortcut) is a candidate
+  for ordinary toggle shortcuts. Its activation callback does not provide our complete hold/release
+  and mouse contract. Prove identity, consent/conflict and restart behavior on the pinned Electron
+  version before retiring specialized adapters.
+- [dbus-native](https://github.com/sidorares/dbus-native#unix-file-descriptor-passing) is a transport
+  candidate, but its documented built-in FD transport is Bun-specific. Our Node/Electron portal
+  integration uses Unix FDs; require a demonstrated Node-compatible ownership/cleanup path before
+  replacing GIO. Type declarations alone do not establish this capability.
+- [Electron autoUpdater](https://www.electronjs.org/docs/latest/api/auto-updater) has no built-in Linux
+  support. It is not a replacement for the current package/signature/rollback policy. Any future
+  library change must retain existing update identities and strict archive/source checks.
 
 ## Runtime boundaries
 

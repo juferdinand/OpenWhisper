@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { speechEntryGraphSchema } from "../../src/services/speech/speech-entry-graph.js";
-import { speechModelSchema } from "../../src/workers/native-speech.js";
+import { speechModelSchema } from "../../src/workers/speech/native-speech.js";
 import { fileInventorySchema, shaSchema, mainIdentitySchema, eventSchema,
   IMAGE, SECCOMP_SHA256, ELECTRON_SHA256, NODE_SHA256, CPU_SHA256, CPU_BUILD_MANIFEST_SHA256,
   MODEL_SHA256, PCM_SHA256, cpuCatalog } from "../owned-supervisor/contract.js";

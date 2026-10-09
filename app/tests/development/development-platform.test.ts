@@ -4,7 +4,7 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { DevelopmentPlatformCaptureBridge } from "../../src/main/development-platform-host.js";
 import { PlatformCaptureClient, platformCaptureRequestSchema, platformCaptureReplySchema,
-  type PlatformCaptureRequest } from "../../src/workers/platform-protocol.js";
+  type PlatformCaptureRequest } from "../../src/workers/platform/platform-protocol.js";
 import type { ControlCaptureLease, ControlStatus } from "../../src/core/recording/control.js";
 import { createRecordingControlPort } from "../../src/main/recording-control.js";
 import { ShortcutRecording } from "../../src/core/recording/shortcut.js";

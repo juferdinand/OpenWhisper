@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { app, utilityProcess } from "electron";
 import { createFixtureSpeechChannelFactory } from "../fixtures/speech-bootstrap-channel.js";
 import { SpeechClient, SpeechWorkerError } from "../../src/services/speech/speech-client.js";
-import type { SpeechModel } from "../../src/workers/native-speech.js";
+import type { SpeechModel } from "../../src/workers/speech/native-speech.js";
 
 const pause = async (milliseconds: number): Promise<void> => {
   await new Promise<void>((accept) => { setTimeout(accept, milliseconds); });

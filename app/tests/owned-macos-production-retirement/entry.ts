@@ -1,4 +1,4 @@
-import { speechChallengeReplySchema, speechChallengeRequestSchema } from "../../src/workers/speech-control.js";
+import { speechChallengeReplySchema, speechChallengeRequestSchema } from "../../src/workers/speech/speech-control.js";
 import { exitRequestSchema, modeSchema } from "./contracts.js";
 import { z } from "zod";
 

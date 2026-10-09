@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import {
   speechReadySchema, speechReplySchema, speechRequestSchema,
   type SpeechReply, type SpeechRequest,
-} from "../../workers/speech-protocol.js";
-import type { SpeechModel } from "../../workers/native-speech.js";
+} from "../../workers/speech/speech-protocol.js";
+import type { SpeechModel } from "../../workers/speech/native-speech.js";
 
 export interface SpeechChannel {
   send(message: SpeechRequest): void;

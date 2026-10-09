@@ -4,10 +4,10 @@ import { setImmediate as turn } from "node:timers/promises";
 import test from "node:test";
 import { NativeCaptureBoundary } from "../../../src/services/recording/capture.js";
 import type { DeliveryIdentity } from "../../../src/core/recording/recording.js";
-import { MacCaptureRuntime, type MacCaptureRuntimeEffects } from "../../../src/workers/macos-capture-runtime.js";
+import { MacCaptureRuntime, type MacCaptureRuntimeEffects } from "../../../src/workers/recording/macos-capture-runtime.js";
 import { macRecordingHostReplySchema, macRecordingHostRequestSchema,
-  type MacRecordingConfiguration, type MacRecordingHostReply, type MacRecordingHostRequest } from "../../../src/workers/macos-recording-host-protocol.js";
-import type { CaptureMetadata, NativeCaptureSession } from "../../../src/workers/native-capture.js";
+  type MacRecordingConfiguration, type MacRecordingHostReply, type MacRecordingHostRequest } from "../../../src/workers/recording/macos-recording-host-protocol.js";
+import type { CaptureMetadata, NativeCaptureSession } from "../../../src/workers/recording/native-capture.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

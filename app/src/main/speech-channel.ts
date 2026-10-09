@@ -5,7 +5,7 @@ import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SpeechWorkerError } from "../services/speech/speech-client.js";
 import type { SpeechChannel, SpeechChannelFactory } from "../services/speech/speech-client.js";
-import { speechRequestSchema } from "../workers/speech-protocol.js";
+import { speechRequestSchema } from "../workers/speech/speech-protocol.js";
 
 const distribution = dirname(dirname(fileURLToPath(import.meta.url)));
 const TERMINATION_DEADLINE_MS = 8000;

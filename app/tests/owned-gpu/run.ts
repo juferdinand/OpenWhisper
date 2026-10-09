@@ -95,7 +95,7 @@ try {
   const sources: Record<string, string> = {};
   for (const path of ["tests/owned-gpu/run.ts", "tests/owned-gpu/probe.ts", "tests/owned-gpu/contract.ts", "tests/owned-gpu/acceptance.test.ts",
     "tests/owned-gpu/build-probe.ts", "tests/fixtures/speech-bootstrap-channel.ts",
-    "src/workers/speech-bootstrap.ts", "src/workers/speech-control.ts", "src/workers/speech-entry.ts", "src/workers/speech-protocol.ts", "src/services/speech/speech-client.ts", "tests/fixtures/parakeet-model.ts", "tests/owned-gpu/Dockerfile", "tests/owned-gpu/LoaderAbsent.Dockerfile"]) {
+    "src/workers/speech/speech-bootstrap.ts", "src/workers/speech/speech-control.ts", "src/workers/speech-entry.ts", "src/workers/speech/speech-protocol.ts", "src/services/speech/speech-client.ts", "tests/fixtures/parakeet-model.ts", "tests/owned-gpu/Dockerfile", "tests/owned-gpu/LoaderAbsent.Dockerfile"]) {
     sources[path] = await fileSha256(join(root, path));
     const destination = join(output, "frozen-source", path);
     await mkdir(dirname(destination), { recursive: true, mode: 0o700 });

@@ -11,7 +11,7 @@ import { createLinuxSpeechBindings } from "../../src/main/linux-speech-host.js";
 import { prepareSpeechResources } from "../../src/services/speech/speech-resources.js";
 import { prepareSpeechEntryGraph } from "../../src/services/speech/speech-entry-graph.js";
 import { createLinuxProcfsReadProvider, parseLinuxProcStat, parseLinuxProcStatus } from "../../src/services/platform-lifecycle/process-retirement.js";
-import { recordingEffectRequestSchema } from "../../src/workers/recording-effects-protocol.js";
+import { recordingEffectRequestSchema } from "../../src/workers/recording/recording-effects-protocol.js";
 import type { DeliveryBoundary } from "../../src/core/recording/recording.js";
 import { prepareEnvironment } from "./bootstrap.js";
 import { observeBindings } from "./observe.js";

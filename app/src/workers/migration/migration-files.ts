@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { constants, lstatSync, type BigIntStats } from "node:fs";
 import { lstat, open, type FileHandle } from "node:fs/promises";
-import { MAX_UI_REQUEST_BYTES } from "../contracts/ui/state.js";
-import { StableMigrationError } from "../contracts/migration/stable-migration.js";
+import { MAX_UI_REQUEST_BYTES } from "../../contracts/ui/state.js";
+import { StableMigrationError } from "../../contracts/migration/stable-migration.js";
 
 export interface Source { readonly path: string; readonly stats: BigIntStats }
 export interface ByteSource { readonly source: Source | undefined; readonly bytes: Buffer | undefined }

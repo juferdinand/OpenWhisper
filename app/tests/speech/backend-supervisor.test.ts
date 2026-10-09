@@ -8,7 +8,7 @@ import { initializeBackendSupervisor, type BackendBindings, type BackendEffects,
   type RetirementBoundary } from "../../src/services/speech/backend-supervisor.js";
 import { SpeechWorkerError, type SpeechChannel, type SpeechFailureCode } from "../../src/services/speech/speech-client.js";
 import type { ResourceBackend } from "../../src/services/speech/speech-resources.js";
-import type { SpeechRequest } from "../../src/workers/speech-protocol.js";
+import type { SpeechRequest } from "../../src/workers/speech/speech-protocol.js";
 
 const failure = (code: SpeechFailureCode) => (error: unknown): boolean => error instanceof SpeechWorkerError && error.code === code;
 const invalidInput = (error: unknown): boolean => error instanceof Error && "code" in error && error.code === "INVALID_INPUT";

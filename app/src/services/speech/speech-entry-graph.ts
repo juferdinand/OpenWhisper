@@ -5,8 +5,8 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import { SpeechWorkerError } from "./speech-client.js";
 
-export const SPEECH_ENTRY_FILES = Object.freeze(["package.json", "dist/workers/speech-entry.js", "dist/workers/speech-bootstrap.js",
-  "dist/workers/speech-control.js", "dist/workers/speech-protocol.js", "dist/workers/native-speech.js", "dist/contracts/speech/speech.js"]);
+export const SPEECH_ENTRY_FILES = Object.freeze(["package.json", "dist/workers/speech-entry.js", "dist/workers/speech/speech-bootstrap.js",
+  "dist/workers/speech/speech-control.js", "dist/workers/speech/speech-protocol.js", "dist/workers/speech/native-speech.js", "dist/contracts/speech/speech.js"]);
 const pathSchema = z.string().max(512).refine((path) => SPEECH_ENTRY_FILES.includes(path) ||
   /^node_modules\/zod\/(?:[A-Za-z0-9_-]+\/)*(?:[A-Za-z0-9_-]+\.(?:js|cjs|mjs)|package\.json)$/u.test(path));
 export const speechEntryGraphSchema = z.strictObject({ version: z.literal(1), zodVersion: z.literal("4.6.5"),

@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { RecordingCoordinator, type CaptureBoundary, type ControlReply, type DeliveryBoundary,
-  type RecordingSnapshot, type WorkContext } from "../core/recording/recording.js";
-import { AdaptiveSpeechBoundary, createUtilitySpeechEffects } from "../services/speech/adaptive-speech.js";
-import type { NativeCapturedHandle } from "../services/recording/capture.js";
-import type { SpeechClient } from "../services/speech/speech-client.js";
+  type RecordingSnapshot, type WorkContext } from "../../core/recording/recording.js";
+import { AdaptiveSpeechBoundary, createUtilitySpeechEffects } from "../../services/speech/adaptive-speech.js";
+import type { NativeCapturedHandle } from "../../services/recording/capture.js";
+import type { SpeechClient } from "../../services/speech/speech-client.js";
 import { macRecordingHostReplySchema, macRecordingHostRequestSchema,
   type MacRecordingConfiguration, type MacRecordingHostReply, type MacRecordingHostRequest } from "./macos-recording-host-protocol.js";
 

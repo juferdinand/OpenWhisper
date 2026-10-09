@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { mock, test } from "node:test";
 import type { LibraryHandle } from "koffi";
-import { assertLegacyMacosHostStopped, MacosMigrationAdmissionError, readLegacyMacosPreferencesSnapshot } from "../../src/workers/macos-migration-admission.js";
+import { assertLegacyMacosHostStopped, MacosMigrationAdmissionError, readLegacyMacosPreferencesSnapshot } from "../../src/workers/migration/macos-migration-admission.js";
 import { StableMigrationError } from "../../src/contracts/migration/stable-migration.js";
-import { MAX_LEGACY_PLIST_BYTES } from "../../src/workers/macos-legacy-plist.js";
+import { MAX_LEGACY_PLIST_BYTES } from "../../src/workers/migration/macos-legacy-plist.js";
 
 const ffi = createRequire(import.meta.url)("koffi") as typeof import("koffi");
 const fixturePrototype = ffi.proto("void *AdmissionFixture(void)").proto; assert.ok(fixturePrototype);

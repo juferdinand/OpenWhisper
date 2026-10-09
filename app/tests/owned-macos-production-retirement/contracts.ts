@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
 import { z } from "zod";
-import { speechChallengeReplySchema } from "../../src/workers/speech-control.js";
+import { speechChallengeReplySchema } from "../../src/workers/speech/speech-control.js";
 
 export const digest = z.string().regex(/^[a-f0-9]{64}$/u);
 export const abiSchema = z.strictObject({ version: z.literal(1), role: z.literal("production"), napiVersion: z.literal(8),
@@ -10,9 +10,9 @@ export const sourceNames = Object.freeze(["tests/owned-macos-production-retireme
   "tests/owned-macos-production-retirement/build-fixture.ts", "tests/owned-macos-production-retirement/input.ts",
   "tests/owned-macos-production-retirement/main.ts", "tests/owned-macos-production-retirement/entry.ts", "tests/owned-macos-production-retirement/guard.ts",
   "tests/owned-macos-production-retirement/lifetime.ts",
-  "src/services/platforms/macos/macos-retirement-boundary.ts", "src/services/platforms/macos/macos-process-retirement.ts", "src/workers/speech-control.ts"]);
+  "src/services/platforms/macos/macos-retirement-boundary.ts", "src/services/platforms/macos/macos-process-retirement.ts", "src/workers/speech/speech-control.ts"]);
 export const payloadNames = Object.freeze(["main.mjs", "entry.mjs", "guard.mjs"]);
-export const distributionNames = Object.freeze(["services/platforms/macos/macos-retirement-boundary.js", "services/platforms/macos/macos-process-retirement.js", "workers/speech-control.js"]);
+export const distributionNames = Object.freeze(["services/platforms/macos/macos-retirement-boundary.js", "services/platforms/macos/macos-process-retirement.js", "workers/speech/speech-control.js"]);
 const hashes = z.record(z.string().min(1).max(4096), digest);
 const headers = z.strictObject({ version: z.literal("24.21.0"), napiVersion: z.literal(8),
   sha256: z.literal("57c6bee2e30bbbee5bd51d6cc343eb992e174b56a2a1d0eab7a7510771c20ea2"),
@@ -21,7 +21,7 @@ const license = z.strictObject({ version: z.literal("24.21.0"), source: z.litera
   sha256: z.literal("5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace"), scope: z.string() });
 export const buildSourceNames = Object.freeze(["native/macos-retirement/CMakeLists.txt", "native/macos-retirement/retirement.cpp",
   "scripts/build-macos-retirement.ts", "scripts/build-macos-retirement-production.ts", "scripts/native-dependencies.ts", "native/node-headers.json",
-  "native/macos-retirement/node-header-license.json", "native/macos-retirement/NODE-HEADERS-LICENSE",
+  "native/node-header-license.json", "native/NODE-HEADERS-LICENSE",
   ...["node_api.h", "node_api_types.h", "js_native_api.h", "js_native_api_types.h"].map((name) => `vendor/node-headers/include/node/${name}`)]);
 export const buildManifestSchema = z.strictObject({ version: z.literal(1), platform: z.literal("darwin"), architecture: z.enum(["arm64", "x86_64"]),
   minimumOS: z.literal("14.0"), napiVersion: z.literal(8), role: z.literal("production"), target: z.literal("openwhisper_macos_retirement"),

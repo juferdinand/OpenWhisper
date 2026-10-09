@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import type { WorkContext } from "../../src/core/recording/recording.js";
-import { WorkerRecordingEffects, type RecordingEffectPort } from "../../src/workers/recording-effects.js";
-import type { RecordingEffectReply, RecordingEffectRequest } from "../../src/workers/recording-effects-protocol.js";
+import { WorkerRecordingEffects, type RecordingEffectPort } from "../../src/workers/recording/recording-effects.js";
+import type { RecordingEffectReply, RecordingEffectRequest } from "../../src/workers/recording/recording-effects-protocol.js";
 
 class OwnedPort implements RecordingEffectPort {
   readonly sent: RecordingEffectRequest[] = [];

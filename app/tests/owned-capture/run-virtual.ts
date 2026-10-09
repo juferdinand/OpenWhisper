@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import { captureMetadataSchema, loadNativeCapture } from "../../src/workers/native-capture.js";
+import { captureMetadataSchema, loadNativeCapture } from "../../src/workers/recording/native-capture.js";
 
 const execute = promisify(execFile);
 const binding = process.argv[2], output = process.argv[3], fixturePath = process.argv[4];

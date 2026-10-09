@@ -8,7 +8,7 @@ import { MAX_WINDOW_SAMPLES, SAMPLE_RATE, planSpeechWindow, selectSpeechWindow, 
 import { AdaptiveSpeechBoundary, AdaptiveSpeechError, createUtilitySpeechEffects, processRawSpeechParts,
   type AdaptiveSpeechEffects, type SpeechProgress } from "../../src/services/speech/adaptive-speech.js";
 import { SpeechClient, SpeechWorkerError, type SpeechChannel } from "../../src/services/speech/speech-client.js";
-import type { SpeechRequest } from "../../src/workers/speech-protocol.js";
+import type { SpeechRequest } from "../../src/workers/speech/speech-protocol.js";
 
 type Infer = AdaptiveSpeechEffects["infer"]["transcribeWindow"];
 function code(expected: string): (error: unknown) => boolean {
@@ -389,7 +389,7 @@ test("runtime-validated shared processing fixtures pass through the utility proc
     vocabulary: z.strictObject({ terms: z.string(), cases: z.array(textCase) }),
     snippets: z.strictObject({ snippets: z.array(z.strictObject({ trigger: z.string(), expansion: z.string(), enabled: z.boolean() })),
       cases: z.array(textCase) }) });
-  const unknown: unknown = JSON.parse(await readFile(new URL("../../data/test-vectors.json", import.meta.url), "utf8"));
+  const unknown: unknown = JSON.parse(await readFile(new URL("../fixtures/text/vectors.json", import.meta.url), "utf8"));
   const vectors = schema.parse(unknown);
   for (const family of ["whisper", "parakeet"] as const) {
     const f = fixture(0, { family });

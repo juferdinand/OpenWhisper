@@ -9,11 +9,11 @@ import type { PreparedAudio, RecoveryBoundary, RecoveryToken, WorkContext } from
 import { AdaptiveSpeechBoundary, createUtilitySpeechEffects } from "../../src/services/speech/adaptive-speech.js";
 import { NativeCaptureBoundary } from "../../src/services/recording/capture.js";
 import type { NativeCapturedHandle } from "../../src/services/recording/capture.js";
-import { loadNativeCapture } from "../../src/workers/native-capture.js";
-import type { NativeCaptureSession } from "../../src/workers/native-capture.js";
-import { WorkerRecordingEffects } from "../../src/workers/recording-effects.js";
-import { PrivateAudioRecovery } from "../../src/workers/recovery.js";
-import { LinuxSpeechGate } from "../../src/workers/speech-gate.js";
+import { loadNativeCapture } from "../../src/workers/recording/native-capture.js";
+import type { NativeCaptureSession } from "../../src/workers/recording/native-capture.js";
+import { WorkerRecordingEffects } from "../../src/workers/recording/recording-effects.js";
+import { PrivateAudioRecovery } from "../../src/workers/recording/recovery.js";
+import { LinuxSpeechGate } from "../../src/workers/speech/speech-gate.js";
 import { EXPANSION, RECOVERY, SAMPLE_COUNT, modeSchema, phaseSchema, readySchema, workerResultSchema, runSchema } from "./contracts.js";
 
 const epoch = z.string().uuid().parse(process.argv[2]);

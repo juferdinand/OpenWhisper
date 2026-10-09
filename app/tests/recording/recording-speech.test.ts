@@ -8,8 +8,8 @@ import type { BackendLease, BackendSpeechJob, BackendSupervisor } from "../../sr
 import { ModelInventory, type ModelLease } from "../../src/services/models/model-inventory.js";
 import { prepareDevelopmentProfile, resolveDevelopmentProfile } from "../../src/services/settings/profiles.js";
 import { createInventoryRecordingSpeechFactory } from "../../src/services/speech/recording-speech.js";
-import { RecordingEffectError } from "../../src/workers/recording-effects-protocol.js";
-import type { SpeechModel } from "../../src/workers/native-speech.js";
+import { RecordingEffectError } from "../../src/workers/recording/recording-effects-protocol.js";
+import type { SpeechModel } from "../../src/workers/speech/native-speech.js";
 
 const catalog: unknown = JSON.parse(await readFile(new URL("../../data/models.json", import.meta.url), "utf8"));
 const signal = () => new AbortController().signal;

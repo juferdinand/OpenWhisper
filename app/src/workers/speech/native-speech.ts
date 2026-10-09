@@ -1,8 +1,8 @@
 import { createRequire } from "node:module";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { speechLanguageSchema } from "../contracts/speech/speech.js";
-export { speechLanguageSchema } from "../contracts/speech/speech.js";
+import { speechLanguageSchema } from "../../contracts/speech/speech.js";
+export { speechLanguageSchema } from "../../contracts/speech/speech.js";
 
 export const SAMPLE_RATE = 16_000;
 export const MAX_WINDOW_SAMPLES = 30 * SAMPLE_RATE;

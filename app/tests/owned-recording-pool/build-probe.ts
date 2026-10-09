@@ -15,9 +15,9 @@ const absoluteDirectorySchema = z.string().min(1).max(4096)
 const buildInputsSchema = z.strictObject({ artifactsRoot: absoluteDirectorySchema, fixtures: absoluteDirectorySchema });
 export type OwnedRecordingPoolBuildInputs = z.infer<typeof buildInputsSchema>;
 export const FIXED_PRODUCTION_IMPORTS = Object.freeze(["main/linux-speech-host.js", "services/speech/backend-supervisor.js", "services/models/model-inventory.js",
-  "services/settings/profiles.js", "services/speech/speech-resources.js", "services/speech/speech-entry-graph.js", "services/platform-lifecycle/process-retirement.js", "workers/speech-protocol.js", "workers/native-speech.js", "main/recording-effects.js", "services/speech/recording-speech.js", "core/recording/recording.js",
-  "services/speech/adaptive-speech.js", "services/recording/capture.js", "workers/native-capture.js", "workers/recording-effects.js",
-  "workers/recording-effects-protocol.js", "workers/recovery.js", "workers/speech-gate.js"]);
+  "services/settings/profiles.js", "services/speech/speech-resources.js", "services/speech/speech-entry-graph.js", "services/platform-lifecycle/process-retirement.js", "workers/speech/speech-protocol.js", "workers/speech/native-speech.js", "main/recording-effects.js", "services/speech/recording-speech.js", "core/recording/recording.js",
+  "services/speech/adaptive-speech.js", "services/recording/capture.js", "workers/recording/native-capture.js", "workers/recording/recording-effects.js",
+  "workers/recording/recording-effects-protocol.js", "workers/recording/recovery.js", "workers/speech/speech-gate.js"]);
 export function externalProductionImport(path: string, importer: string): string | undefined {
   const resolved = resolve(dirname(importer), path);
   const name = FIXED_PRODUCTION_IMPORTS.find((candidate) => resolved === join(root, "src", candidate));
@@ -85,7 +85,7 @@ export async function buildOwnedRecordingPool(directory: string, inputs: OwnedRe
     assert.deepEqual(await describe(original, maximum), expected);
     assert.deepEqual(await describe(join(payload, "licenses", name), maximum), expected);
   }
-  const nodeLicense = join(root, "native/macos-retirement/NODE-HEADERS-LICENSE");
+  const nodeLicense = join(root, "native/NODE-HEADERS-LICENSE");
   assert.equal((await describe(nodeLicense, 4 * 1024 * 1024)).sha256, "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace");
   await cp(nodeLicense, join(payload, "licenses/NODE-HEADERS-LICENSE"), { errorOnExist: true, force: false });
   const nativeRoot = join(artifactsRoot, "p6-proposal/gpu-build-1/cpu");

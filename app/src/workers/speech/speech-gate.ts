@@ -1,5 +1,5 @@
 import { setImmediate } from "node:timers/promises";
-import type { PreparedAudio, SpeechDisposition, SpeechGate, WorkContext } from "../core/recording/recording.js";
+import type { PreparedAudio, SpeechDisposition, SpeechGate, WorkContext } from "../../core/recording/recording.js";
 
 const minimumSamples = 3200;
 const minimumMeanSquare = 0.00000025;

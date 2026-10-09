@@ -42,7 +42,7 @@ node --import tsx scripts/build-macos-capture.ts
 The build fixes architecture and macOS minimum version 14.0, verifies Mach-O
 metadata, and retains compiler/SDK/source/artifact provenance. It uses the same
 checksum-pinned Node headers as the other native addons, ARC, Foundation and
-AVFoundation. The full Node v24.21.0 license snapshot is preserved verbatim, with
-its source and digest; those are compile-time headers, not an embedded Node
+AVFoundation. The shared `../NODE-HEADERS-LICENSE` snapshot is preserved verbatim,
+with its source and digest in `../node-header-license.json`; those are compile-time headers, not an embedded Node
 runtime. Build success is separate from actual native load, converter tests,
 macOS 14 runtime and physical permission/device acceptance.

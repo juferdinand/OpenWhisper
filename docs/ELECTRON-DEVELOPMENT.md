@@ -80,7 +80,7 @@ On stock KDE 5.27, its dock role passes actual pointer Cancel/Stop and foregroun
 editor keyboard delivery without refocusing. That role stacks below active
 fullscreen and keep-above windows; those cases and other compositors remain
 open, so the prototype is not enabled by default. See the
-[exact owned evidence](ELECTRON-DEV-EVIDENCE.md).
+[exact owned evidence](https://github.com/juferdinand/OpenWhisper/blob/122d68e4e029dbfebb8b9157ac53ab316687ebb8/docs/ELECTRON-DEV-EVIDENCE.md).
 
 ## Linux CPU recording Dev build
 
@@ -169,7 +169,7 @@ Dev permissions and bindings must not use the stable application's identity.
 Automated evidence includes a synthetic frontend on a real private D-Bus, virtual
 audio and normal UI. Stock KDE 5.27 regular-key control is also checked through
 actual virtual key edges in nested KWin. Specialized KDE/X11, GNOME and remaining
-replacement gates still need validation; see [the evidence](ELECTRON-DEV-EVIDENCE.md).
+replacement gates still need validation; see [the evidence](https://github.com/juferdinand/OpenWhisper/blob/122d68e4e029dbfebb8b9157ac53ab316687ebb8/docs/ELECTRON-DEV-EVIDENCE.md).
 
 ## Linux Dev package preview
 
@@ -193,7 +193,7 @@ package whose native ELF requirements are at most GLIBC2.34/GLIBCXX3.4.29. Its
 actual executable passes the owned X11 dictation/recovery case with its captured
 inputs intact. A newer host build may require newer libraries; the package metadata
 declares the inspected floor. Host installation, AppImage, updates and release
-acceptance remain separate checks. See the [exact evidence](ELECTRON-DEV-EVIDENCE.md).
+acceptance remain separate checks. See the [exact evidence](https://github.com/juferdinand/OpenWhisper/blob/122d68e4e029dbfebb8b9157ac53ab316687ebb8/docs/ELECTRON-DEV-EVIDENCE.md).
 
 ## Linux stable validation package
 
@@ -225,7 +225,7 @@ remains 58169b3a8cc167e7538f434e02f95fe437f46d68+modified. This is a validation 
 with no installer, release/update channel or changes to current installations.
 Mac archival migration and the native empty-domain compiled worker pass ARM/Intel CI;
 autostart, stable command control, updater and release continuity remain pending.
-The [evidence](ELECTRON-DEV-EVIDENCE.md) retains the first
+The [evidence](https://github.com/juferdinand/OpenWhisper/blob/122d68e4e029dbfebb8b9157ac53ab316687ebb8/docs/ELECTRON-DEV-EVIDENCE.md) retains the first
 failed saved-WAV startup attempt and the corrected package result.
 
 ## Mac stable validation package
@@ -300,7 +300,7 @@ and the inventory digest describe the selected local bytes; they do not authenti
 an unsigned Linux package. Archive downloads, replacing an existing Dev version,
 stable installation/update transitions and Mac stable-data migration remain separate work. The owned Mac and
 Linux package runners exercise the installed payload; see the current
-[evidence](ELECTRON-DEV-EVIDENCE.md) for actual pass or pending results.
+[evidence](https://github.com/juferdinand/OpenWhisper/blob/122d68e4e029dbfebb8b9157ac53ab316687ebb8/docs/ELECTRON-DEV-EVIDENCE.md) for actual pass or pending results.
 
 ## macOS CPU recording Dev build
 
@@ -348,7 +348,7 @@ The same smoke passes real recognition of checksum-pinned public audio with Tiny
 through the signed CPU speech helper on both architectures in CI37842623817.
 This does not replace physical microphone/device acceptance.
 These artifacts are Dev previews; universal/release signing and stable updates
-remain separate work. See the [evidence](ELECTRON-DEV-EVIDENCE.md).
+remain separate work. See the [evidence](https://github.com/juferdinand/OpenWhisper/blob/122d68e4e029dbfebb8b9157ac53ab316687ebb8/docs/ELECTRON-DEV-EVIDENCE.md).
 
 ## Automated checks
 
@@ -391,7 +391,7 @@ and unchanged synthetic stable settings/models/history/recovery/autostart files.
 These historical checks cover P1 only. Later recording, platform and package checks,
 including the owned Linux stable bootstrap above, have their own retained scope.
 The later checks and exact candidate provenance are in the
-[development evidence record](ELECTRON-DEV-EVIDENCE.md).
+[development evidence record](https://github.com/juferdinand/OpenWhisper/blob/122d68e4e029dbfebb8b9157ac53ab316687ebb8/docs/ELECTRON-DEV-EVIDENCE.md).
 
 ## CPU speech and lifecycle work
 

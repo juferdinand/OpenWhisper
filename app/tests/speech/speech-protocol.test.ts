@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import { executeSpeechRequest, speechReplySchema, speechRequestSchema } from "../../src/workers/speech-protocol.js";
-import type { NativeSpeech } from "../../src/workers/native-speech.js";
+import { executeSpeechRequest, speechReplySchema, speechRequestSchema } from "../../src/workers/speech/speech-protocol.js";
+import type { NativeSpeech } from "../../src/workers/speech/native-speech.js";
 
 test("speech protocol validates both directions and contains private native failures", () => {
   const id = randomUUID();

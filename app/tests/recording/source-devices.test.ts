@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { captureSourcesSchema, CaptureSourceError, loadNativeCaptureSources, nativeCaptureSourcesFromAddon, PulseSourceDevices } from "../../src/workers/source-devices.js";
+import { captureSourcesSchema, CaptureSourceError, loadNativeCaptureSources, nativeCaptureSourcesFromAddon, PulseSourceDevices } from "../../src/workers/recording/source-devices.js";
 
 const first = { id: "owned.first.monitor", name: "Owned first", isDefault: false };
 const second = { id: "owned.second.monitor", name: "Owned second", isDefault: true };

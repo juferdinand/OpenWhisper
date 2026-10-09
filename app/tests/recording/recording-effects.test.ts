@@ -6,7 +6,7 @@ import type { DeliveryReceipt, WorkContext } from "../../src/core/recording/reco
 import { DeliveryReceiptCache, MainRecordingEffects } from "../../src/main/recording-effects.js";
 import { SpeechWorkerError } from "../../src/services/speech/speech-client.js";
 import { recordingEffectRequestSchema, recordingEffectReplySchema,
-  safeRecordingEffectError } from "../../src/workers/recording-effects-protocol.js";
+  safeRecordingEffectError } from "../../src/workers/recording/recording-effects-protocol.js";
 
 const envelope = { version: 1, epoch: randomUUID(), id: randomUUID(), generation: 3, attempt: 2 };
 const inference = { ...envelope, command: "infer", model: { path: "/owned/model.bin", family: "whisper", gpu: false },

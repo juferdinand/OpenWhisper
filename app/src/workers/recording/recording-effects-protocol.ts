@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { speechLanguageSchema, speechModelSchema, speechTextSchema,
-  speechVocabularySchema, speechWindowSchema } from "./native-speech.js";
+  speechVocabularySchema, speechWindowSchema } from "../speech/native-speech.js";
 
 const generation = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const ownership = { generation, attempt: generation };

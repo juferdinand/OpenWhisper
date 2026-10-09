@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { lstat, realpath } from "node:fs/promises";
 import { SpeechWorkerError, type SpeechChannel, type SpeechChannelFactory } from "../../src/services/speech/speech-client.js";
-import { speechChallengeReplySchema, speechChallengeRequestSchema } from "../../src/workers/speech-control.js";
-import { speechReadySchema, speechRequestSchema } from "../../src/workers/speech-protocol.js";
+import { speechChallengeReplySchema, speechChallengeRequestSchema } from "../../src/workers/speech/speech-control.js";
+import { speechReadySchema, speechRequestSchema } from "../../src/workers/speech/speech-protocol.js";
 
 const ENTRY = "/owned-app/dist/workers/speech-entry.js";
 const BINDING = "/owned-app/dist/native/openwhisper_speech.node";
