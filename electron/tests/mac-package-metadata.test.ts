@@ -136,7 +136,7 @@ test("owned publisher commands and keychain output reject ambiguous or unbounded
 });
 function publisherListing(entries: readonly { path: string; kind?: string; bytes?: number }[]) {
   return `Archive:  /owned/original.zip\nZip file size: 123 bytes, number of entries: ${entries.length}\n` + entries.map((entry) =>
-    `${entry.kind ?? '-'}rwxr-xr-x  2.1 unx ${entry.bytes ?? 1} bx stor 20261007.220837 ${entry.path}\n`).join('') +
+    `${entry.kind ?? '-'}rwxr-xr-x  2.1 unx ${entry.bytes ?? 1} bx 1 stor 20261007.220837 ${entry.path}\n`).join('') +
     `${entries.length} files, 1 bytes uncompressed, 1 bytes compressed:  0.0%\n`;
 }
 test("fixed ZIP tool listing admits internal framework links and rejects escape and link-write entries", () => {
@@ -149,7 +149,24 @@ test("fixed ZIP tool listing admits internal framework links and rejects escape 
     [{ path: "OpenWhisper.app/control\rname" }]]) assert.throws(() => parseMacPublisherZipListing(publisherListing(entries), 123));
   assert.throws(() => parseMacPublisherZipListing(publisherListing([{ path }]), 124));
   assert.throws(() => parseMacPublisherZipListing(publisherListing([{ path }]).replace(' bx ', ' Bx '), 123));
+  assert.throws(() => parseMacPublisherZipListing(publisherListing([{ path }]).replace(' bx ', ' bz '), 123));
+  for (const compressedBytes of ['', '-1', '1.5', 'unknown', '9007199254740992']) {
+    assert.throws(() => parseMacPublisherZipListing(publisherListing([{ path }]).replace(' bx 1 stor ', ` bx ${compressedBytes} stor `), 123));
+  }
   assert.throws(() => parseMacPublisherZipListing(publisherListing([{ path }]).replace('number of entries: 1', 'number of entries: 2'), 123));
+});
+test("original ARM ZIP listing rows admit compressed sizes and both Info-ZIP extra-field indicators", () => {
+  // Rows from the immutable same-run ARM archive; no archive contents are executed.
+  const listing = `Archive:  /owned/original.zip\nZip file size: 138095968 bytes, number of entries: 3\n` +
+    `drwxr-xr-x  2.1 unx        0 bx        0 stor 20261009.105214 OpenWhisper.app/\n` +
+    `-rw-r--r--  2.1 unx   481746 bX   100464 defN 20261009.105221 OpenWhisper.app/Contents/_CodeSignature/CodeResources\n` +
+    `lrwxr-xr-x  2.1 unx       35 b-       35 stor 20261009.085214 OpenWhisper.app/Contents/Frameworks/Electron Framework.framework/Electron Framework\n` +
+    `3 files, 481781 bytes uncompressed, 100499 bytes compressed:  79.1%\n`;
+  assert.deepEqual(parseMacPublisherZipListing(listing, 138095968), [
+    { name: "OpenWhisper.app", kind: "directory", bytes: 0 },
+    { name: "OpenWhisper.app/Contents/_CodeSignature/CodeResources", kind: "file", bytes: 481746 },
+    { name: "OpenWhisper.app/Contents/Frameworks/Electron Framework.framework/Electron Framework", kind: "link", bytes: 35 },
+  ]);
 });
 test("persistent completion requires measured self and ZIP acceptance, old publisher negatives and successful cleanup", () => {
   const oracle = { status: "PASS", originalRequirement: "ACCEPTED", validSameIdDifferentPublisher: "REJECTED" };

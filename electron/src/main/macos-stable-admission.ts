@@ -59,7 +59,7 @@ export function verifyMacApplicationBundle(identity: BuildIdentity, version: str
   const bundle = resolve(executable, "../../..");
   const signatureStarted = performance.now();
   const signature = spawnSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle],
-    { encoding: "utf8", shell: false, timeout: 10_000, maxBuffer: 1024 * 1024 });
+    { encoding: "utf8", shell: false, timeout: 15_000, maxBuffer: 1024 * 1024 });
   const signatureFailure = macBundleToolFailure("signature", signature, performance.now() - signatureStarted);
   if (signatureFailure) throw signatureFailure;
   const metadataStarted = performance.now();

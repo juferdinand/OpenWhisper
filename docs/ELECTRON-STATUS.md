@@ -18,14 +18,14 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | macOS dictation | Actual Intel/Apple Silicon thin Dev/Stable and same-ZIP Universal Stable packages pass sandbox, signed utilities, public-audio CPU recognition, shortcut setup/removal, migration, edited-state restart and clean exits at 5bfd71b1 | Physical microphone/TCC, actual target insertion, device changes and Metal selection remain open |
 | Linux desktop integration | Owned stock KDE 5.27 native Wayland F8, binding Quit/crash recovery and paste into separate Wayland/XWayland editors pass. Genuine X11 shortcuts and all five no-display CLI commands pass, including installed stable autostart enable/disable and generated-target restart | Expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Live LM Studio/Ollama trials and remaining provider/workflow scope are deferred to #11, outside 0.3.0; ordinary dictation remains independent |
-| Packaging and updates | Ordinary Debian/AppImage checks pass. Debian's actual packaged check/error/Quit path and fresh signed installed audit pass, including retained-snapshot mutation refusal. AppImage supervisor wiring and explicit current-signature repair are source-reviewed. Mac Update controls, persistent-build admission and installation handoff are connected in source. Earlier ordinary Mac Universal checks pass | Genuine signed upgrade/restart and actual AppImage migration, actual persistent Mac publisher/installation/relaunch, authenticated Dev replacement, DMG/release signing; confirm the Mac shortcut and physical-temp fixture corrections in CI |
+| Packaging and updates | Ordinary Debian/AppImage checks pass. Debian's actual packaged check/error/Quit path and fresh signed installed audit pass, including retained-snapshot mutation refusal. Canonical CI AppImage construction passes. Mac thin packages pass on Intel and ARM; earlier ordinary Mac Universal checks pass. Update controls and installation handoff are connected in source | Genuine signed upgrade/restart and actual AppImage migration, actual persistent Mac publisher/installation/relaunch, authenticated Dev replacement, DMG/release signing; confirm the corrected ZIP admission and bounded Mac signature deadline in CI |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 ## Current package checkpoint
 
 The combined source increment passes strict typing, the normal application/shared
-UI build and 1,288 tests: 1,334 total, zero failures and 46 explicit native/opt-in
-skips in 18.49 seconds. The generated standalone Linux candidate driver imports and
+UI build and 1,289 tests: 1,335 total, zero failures and 46 explicit native/opt-in
+skips in 18.51 seconds. The generated standalone Linux candidate driver imports and
 retains its explicit Debian/AppImage argument checks without executing acceptance.
 Independent source reviews pass.
 
@@ -67,8 +67,10 @@ The next canonical CI path also wraps that same completed Stable directory in an
 AppImage, using checksum-checked appimagetool/runtime inputs without another native
 build. Its separate receipt binds the fixed image, launcher and construction
 provenance before the existing owner-only signer. Both embedded and native
-verifiers require the exact signed version. Actual construction, timing and
-signature results remain pending; this path performs no AppImage launch or upgrade.
+verifiers require the exact signed version. Actual construction and passive
+extraction pass in CI 37907145876 at producer `d47e8d76`; the dependent signature
+job is still running at this checkpoint. Construction performs no AppImage launch
+or upgrade.
 
 AppImage now connects to the existing V2 parent channel and shared Update controls.
 Structural admission can provision only the missing fixed launcher after checking
@@ -117,7 +119,9 @@ runtime acceptance. The next candidate explicitly configures updates; owned smok
 checks actual main/UI admission, then disables automatic metadata checks through
 ordinary preferences. Startup might already have made its normal metadata request;
 the harness neither initiates an installation nor claims network absence.
-This is a prepared CI path, not a persistent-publisher or installation result.
+The first actual invocation stops in original ZIP listing admission, before
+extraction or credentials. Its format correction and remaining results are below;
+this is not yet a persistent-publisher or installation result.
 
 All five relevant Mac jobs in
 [normal CI 37892162932](https://github.com/juferdinand/OpenWhisper/actions/runs/37892162932)
@@ -168,6 +172,45 @@ banner and records the status. Constructor, extraction and signature failures
 remain mandatory failures. Actual AppImage construction/signatures and the
 corrected ARM fixture still require the next normal CI result. Persistent and
 Universal Mac dependent jobs are skipped in this run.
+
+The following [CI 37907145876](https://github.com/juferdinand/OpenWhisper/actions/runs/37907145876),
+actual synthetic producer `d47e8d765207e5c056a27f0b57bea9d1c011a06b`
+(API head `cc38463a`), passes both thin Mac jobs, Universal construction, Intel
+Universal runtime, Ubuntu Electron/AppImage construction and legacy Linux.
+The original ARM thin log confirms the corrected retirement case, Dev original
+Quit and Stable edited-state restart/Quit. CPU inference is confirmed in Dev;
+the thin Stable harness does not run that block. These results confirm the
+previous fixture corrections, without establishing persistent publisher or
+upgrade acceptance.
+
+The persistent publisher stops before credentials because its `zipinfo -T -l`
+parser omitted the compressed-size column and rejected the original valid `bX`
+extra-field flag. The reviewed correction requires a safe numeric compressed
+size and the closed `[bt][xX-]` flag grammar. Eleven focused checks pass, including
+original directory/file/framework-link rows and malformed size/flag negatives.
+Passive parsing of all 2,324 original entries passes: 1,888 files, 422 directories
+and 14 framework links. Source, path, extraction and signing guards remain intact.
+The next actual publisher job must confirm the corrected path.
+
+Universal ARM starts the normal app but strict bundle signature verification
+exceeds its ten-second deadline: SIGTERM at 10,090 ms. The same bundle's preceding
+15-second harness preflight passes under a different HOME/TMPDIR. The production
+deadline is aligned to 15 seconds, with strict/deep checks, bounded output and
+closed failure behavior unchanged. Independent source review passes; the cause
+of the delay and sufficiency of the new budget remain unproven until actual CI.
+No invalid signature or later metadata/login failure is inferred.
+
+Two genuinely distinct private host-local Stable Debian packages, 0.3.0 at
+`cc38463a` and version-only child 0.3.1 at `8275e9bf`, are also constructed with
+the existing builders in the same owned worktree. Both version/source identities
+are verified; tracked native inputs and cached native output manifests remain
+unchanged, and the second build reports no native work. Five original commands
+succeed in approximately 15 seconds, including restoration of the original
+branch/head and ordinary Dev build. This removes the need for another native
+reuse API. These unsigned packages require host glibc 2.43 and cannot establish
+Ubuntu 22.04 compatibility, signing, runtime acceptance or a genuine upgrade.
+The installed app, protected LiveDev, remote branches and public releases are
+untouched by this private construction.
 
 ### Preceding Universal failure and reviewed correction
 

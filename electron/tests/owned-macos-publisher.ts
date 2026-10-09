@@ -54,9 +54,10 @@ export function parseMacPublisherZipListing(output: string, archiveBytes: number
   assert.match(lines.pop()!, /^\d+ files?, \d+ bytes uncompressed, \d+ bytes compressed:[ \t]+-?\d+(?:\.\d+)?%$/u);
   const entries: ZipEntry[] = [], names = new Set<string>(); let expanded = 0;
   for (const line of lines) {
-    const match = /^([dl-])[rwxstST-]{9}[ \t]+\d+\.\d+[ \t]+[A-Za-z0-9]{3}[ \t]+(\d+)[ \t]+[bt][x-][ \t]+[A-Za-z0-9]{4}[ \t]+\d{8}\.\d{6}[ \t]+(.+)$/u.exec(line);
-    assert.ok(match?.[1] && match[2] && match[3]);
-    const name = match[3].endsWith("/") ? match[3].slice(0, -1) : match[3], parts = name.split("/");
+    const match = /^([dl-])[rwxstST-]{9}[ \t]+\d+\.\d+[ \t]+[A-Za-z0-9]{3}[ \t]+(\d+)[ \t]+[bt][xX-][ \t]+(\d+)[ \t]+[A-Za-z0-9]{4}[ \t]+\d{8}\.\d{6}[ \t]+(.+)$/u.exec(line);
+    assert.ok(match?.[1] && match[2] && match[3] && match[4]);
+    const compressedBytes = Number(match[3]); assert.ok(Number.isSafeInteger(compressedBytes) && compressedBytes >= 0);
+    const name = match[4].endsWith("/") ? match[4].slice(0, -1) : match[4], parts = name.split("/");
     assert.ok(name.length <= 1024 && !/[\\\u0000-\u001f\u007f]/u.test(name) && parts.every((part) => part && part !== "." && part !== ".."));
     assert.ok(parts[0] === "OpenWhisper.app" || (parts[0] === "__MACOSX" && (parts.length === 1 || parts[1] === "OpenWhisper.app" ||
       (parts.length === 2 && parts[1] === "._OpenWhisper.app"))));
