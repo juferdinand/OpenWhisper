@@ -16,7 +16,7 @@ import { isNewerUpdateVersion, parseUpdateVersion } from "../src/services/update
 const artifact = "OpenWhisper-Linux-amd64.deb", directory = "OpenWhisper-Linux-x64";
 const physicalFs = process.versions["electron"] ? createRequire(import.meta.url)("original-fs") as typeof nodeFs : nodeFs;
 const { constants, createReadStream } = physicalFs;
-const { lstat, mkdir, open, readFile, readdir, realpath, rm, writeFile } = physicalFs.promises;
+const { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, writeFile } = physicalFs.promises;
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/u), commitSchema = z.string().regex(/^[a-f0-9]{40}$/u);
 const fileSchema = z.strictObject({ bytes: z.number().int().nonnegative().max(1024 ** 3), sha256: hashSchema });
 const receiptSchema = z.strictObject({ version: z.literal(1), classification: z.literal("CANONICAL_STABLE_VALIDATION_ONLY"),
@@ -32,7 +32,7 @@ function absolute(value: string | undefined): string {
   assert.ok(value && isAbsolute(value) && resolve(value) === value && !value.includes("\0")); return value;
 }
 export function parseOwnedSignedDebianArguments(args: readonly string[]) {
-  const mode = z.enum(["capture", "admit", "verify", "embedded-verify", "audit", "audit-mismatch"]).parse(args[0]);
+  const mode = z.enum(["capture", "admit", "verify", "embedded-verify", "audit", "audit-mismatch", "audit-mutation"]).parse(args[0]);
   const toolsRequired = mode === "admit" || mode === "verify";
   assert.equal(args.length, mode === "capture" ? 3 : toolsRequired ? 7 : 5);
   assert.equal(args[1], "--candidate");
@@ -140,7 +140,7 @@ async function admittedTools(root: string) {
     .parse(JSON.parse(await bounded(join(root, "tauri.conf.json"))) as unknown);
   assert.equal(observed.modes["verify-update"], 0o755); return observed;
 }
-async function embedded(candidate: string, mode: "embedded-verify" | "audit" | "audit-mismatch") {
+async function embedded(candidate: string, mode: "embedded-verify" | "audit" | "audit-mismatch" | "audit-mutation") {
   const receipt = await admittedCandidate(candidate, false);
   const installed = mode !== "embedded-verify";
   assert.equal(process.versions["electron"], "44.7.0"); assert.match(process.versions.node, /^24\./u);
@@ -154,6 +154,7 @@ async function embedded(candidate: string, mode: "embedded-verify" | "audit" | "
   const stage = join(evidence!, "stage"); await mkdir(stage, { mode: 0o700 });
   const file = await open(join(stage, artifact), constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   let download: Awaited<ReturnType<typeof staging.retainOwnedUpdateDownload>> | undefined;
+  let finalGuard: (() => void) | undefined, mismatch: ((error: unknown) => boolean) | undefined;
   try {
     const source = await open(join(candidate, artifact), constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
@@ -178,9 +179,32 @@ async function embedded(candidate: string, mode: "embedded-verify" | "audit" | "
     } else {
       phase = "installed-physical-audit";
       const service = require(join(root, "dist/services/linux-debian-installed.js")) as typeof import("../src/services/linux-debian-installed.js");
+      await service.assertCanonicalInstalledDebianVersion(receipt.sourceVersion);
       const audit = await service.prepareDebianInstalledAudit({ download, signature, expectedVersion: receipt.sourceVersion });
-      if (mode === "audit") await audit.assertInstalled();
-      else await assert.rejects(audit.assertInstalled(), (error: unknown) => error instanceof service.DebianInstalledAuditError && error.code === "INSTALLED_MISMATCH");
+      mismatch = (error: unknown) => error instanceof service.DebianInstalledAuditError && error.code === "INSTALLED_MISMATCH";
+      finalGuard = audit.assertForExec;
+      assert.throws(finalGuard, mismatch);
+      if (mode === "audit-mismatch") {
+        await assert.rejects(audit.assertInstalled(), mismatch); assert.throws(finalGuard, mismatch);
+      } else {
+        await audit.assertInstalled(); finalGuard();
+        if (mode === "audit-mutation") {
+          phase = "installed-original-snapshot-mutation";
+          await writeReceipt(join(evidence!, "mutation-ready.partial"), { ready: true, scope: "OWNED_FIXED_NOTICE_MUTATION_ONLY" });
+          await rename(join(evidence!, "mutation-ready.partial"), join(evidence!, "mutation-ready.json"));
+          const marker = join(evidence!, "mutation-complete"), deadline = performance.now() + 15_000;
+          for (;;) {
+            assert.ok(performance.now() < deadline);
+            const present = await lstat(marker).then(() => true, (error: unknown) => {
+              assert.ok(error instanceof Error && "code" in error && error.code === "ENOENT"); return false;
+            });
+            if (present) { assert.equal(await bounded(marker, 8), "MUTATED\n"); break; }
+            await new Promise<void>((accept) => setTimeout(accept, 50));
+          }
+          assert.throws(finalGuard, mismatch);
+          await assert.rejects(audit.assertInstalled(), mismatch); assert.throws(finalGuard, mismatch);
+        }
+      }
     }
     await download.assertUnchanged(); assert.equal((await file.stat()).size, download.bytes);
     assert.deepEqual(await hash(join(candidate, `${artifact}.sig`)), signatureBefore);
@@ -188,10 +212,14 @@ async function embedded(candidate: string, mode: "embedded-verify" | "audit" | "
     if (download) await download.cleanup();
     else { await file.close(); await rm(stage, { recursive: true }); }
   }
+  // The final installed observation deliberately survives original source descriptor cleanup.
+  if (finalGuard) { assert.ok(mismatch); if (mode === "audit") finalGuard(); else assert.throws(finalGuard, mismatch); }
   await assert.rejects(lstat(stage), { code: "ENOENT" }); await admittedCandidate(candidate, false);
   return { source: receipt.source, version: receipt.sourceVersion, archive: receipt.files[artifact], signature: signatureBefore,
     runtime: { electron: process.versions["electron"], node: process.versions.node }, uid: process.getuid?.(), originalSourceClosed: true,
-    stageAbsent: true, installed: installed ? mode === "audit" ? "ACCEPTED" : "INSTALLED_MISMATCH" : "NOT_TESTED" };
+    stageAbsent: true, finalGuardAfterSourceClose: installed ? mode === "audit" ? "ACCEPTED" : "REFUSED" : "NOT_TESTED",
+    installed: installed ? mode === "audit" ? "ACCEPTED" : "INSTALLED_MISMATCH" : "NOT_TESTED",
+    sameSnapshotMutation: mode === "audit-mutation" ? "REFUSED" : "NOT_TESTED" };
 }
 async function main() {
   assert.ok(process.platform === "linux" && process.arch === "x64" && process.getuid?.());
@@ -208,7 +236,7 @@ async function main() {
         ...await inventory(args.candidate, [artifact, directory]) });
       await writeReceipt(join(args.candidate, "candidate-receipt.json"), receipt); await admittedCandidate(args.candidate, true); return;
     }
-    if (args.mode === "embedded-verify" || args.mode === "audit" || args.mode === "audit-mismatch") details = await embedded(args.candidate, args.mode);
+    if (args.mode === "embedded-verify" || args.mode === "audit" || args.mode === "audit-mismatch" || args.mode === "audit-mutation") details = await embedded(args.candidate, args.mode);
     else {
       const candidate = await admittedCandidate(args.candidate, true); assert.ok(args.tools); const tools = await admittedTools(args.tools);
       phase = "canonical-debian-metadata";

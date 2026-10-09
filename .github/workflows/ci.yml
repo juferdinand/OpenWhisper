@@ -483,7 +483,19 @@ jobs:
               cd /owned-evidence
               runuser -u tester -- env ELECTRON_RUN_AS_NODE=1 /opt/openwhisper/openwhisper /driver.mjs audit \
                 --candidate /candidate --evidence /owned-evidence/positive
+              runuser -u tester -- env ELECTRON_RUN_AS_NODE=1 /opt/openwhisper/openwhisper /driver.mjs audit-mutation \
+                --candidate /candidate --evidence /owned-evidence/retained-mutation &
+              audit_pid=$!
+              mutation_deadline=$((SECONDS + 15))
+              while ! test -f /owned-evidence/retained-mutation/mutation-ready.json; do
+                kill -0 "$audit_pid"
+                test "$SECONDS" -lt "$mutation_deadline"
+                sleep 0.05
+              done
               printf "%s\\n" "Owned audit mismatch fixture" >> /opt/openwhisper/notices/README.txt
+              printf "MUTATED\\n" > /owned-evidence/retained-mutation/mutation-complete.partial
+              mv /owned-evidence/retained-mutation/mutation-complete.partial /owned-evidence/retained-mutation/mutation-complete
+              wait "$audit_pid"
               runuser -u tester -- env ELECTRON_RUN_AS_NODE=1 /opt/openwhisper/openwhisper /driver.mjs audit-mismatch \
                 --candidate /candidate --evidence /owned-evidence/mismatch
             ')"

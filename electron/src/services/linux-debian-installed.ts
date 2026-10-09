@@ -7,7 +7,7 @@ import { dirname, join, posix } from "node:path";
 import { Parser, type ReadEntry } from "tar";
 import { z } from "zod";
 import { parseApplicationBuildModule } from "../contracts/build-identity.js";
-import { linuxSupervisorLauncher } from "../cli/linux-supervisor-bootstrap.js";
+import { linuxSupervisorLauncher } from "../cli/linux-supervisor.js";
 import { developmentRecordingDescriptorSchema } from "../main/development-recording-descriptor.js";
 import { validateDebianUpdateMetadata } from "./linux-debian-update.js";
 import { verifyOwnedLinuxUpdateFile } from "./linux-update-file.js";
@@ -152,9 +152,10 @@ export async function inspectDebianDataTar(source: AsyncIterable<Uint8Array>, si
 const same = (a: BigIntStats, b: BigIntStats): boolean => a.dev === b.dev && a.ino === b.ino && a.uid === b.uid && a.gid === b.gid &&
   a.mode === b.mode && a.nlink === b.nlink && a.size === b.size && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
 /** Pure ownership policy; synthetic metadata tests do not establish an actual root-owned installation. */
-export function validateDebianInstalledMetadata(value: BigIntStats, expected: DebianInventoryEntry): void {
+export function validateDebianInstalledMetadata(value: BigIntStats, expected: DebianInventoryEntry, original?: BigIntStats): void {
   if (value.uid !== 0n || value.gid !== 0n || value.isSymbolicLink() || (value.mode & 0o7777n) !== BigInt(expected.mode) ||
-      (expected.type === "directory" ? !value.isDirectory() : !value.isFile() || value.nlink !== 1n || value.size !== BigInt(expected.bytes))) fail("INSTALLED_MISMATCH");
+      (expected.type === "directory" ? !value.isDirectory() : !value.isFile() || value.nlink !== 1n || value.size !== BigInt(expected.bytes)) ||
+      (original !== undefined && !same(original, value))) fail("INSTALLED_MISMATCH");
 }
 /** Borrowed byte comparison only; a caller-supplied hash is not publisher authentication. Never closes the caller's handle. */
 export async function inspectDebianFileBytes(file: { stat(options: { bigint: true }): Promise<BigIntStats>;
@@ -223,6 +224,14 @@ async function textOutput(source: AsyncIterable<Uint8Array>): Promise<string> {
   for await (const chunk of source) { bytes += chunk.length; if (bytes > 4096) fail("LIMIT_EXCEEDED"); parts.push(Buffer.from(chunk)); }
   try { return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(parts)); } catch { return fail("TOOL_FAILED"); }
 }
+/** Current installed package admission only; this query does not authenticate an update candidate. */
+export async function assertCanonicalInstalledDebianVersion(version: string): Promise<void> {
+  try { parseUpdateVersion(version); } catch { return fail("INVALID_INPUT"); }
+  if (process.platform !== "linux" || process.arch !== "x64" || !process.getuid?.()) fail("INVALID_INPUT");
+  const status = await tool("/usr/bin/dpkg-query", ["--admindir=/var/lib/dpkg", "--no-pager",
+    "--showformat=${Package}\\n${Version}\\n${Architecture}\\n${Status}\\n", "--show", "io-github-whisperfree"], textOutput);
+  if (status !== `io-github-whisperfree\n${version}\namd64\ninstall ok installed\n`) fail("INSTALLED_MISMATCH");
+}
 function validateLayout(inventory: DebianDataInventory, version: string): void {
   const entries = new Map(inventory.entries.map((entry) => [entry.path, entry]));
   const text = (path: string): string => entries.get(path)?.text ?? fail("INVALID_LAYOUT");
@@ -254,7 +263,12 @@ function validateLayout(inventory: DebianDataInventory, version: string): void {
 
 /** Inactive host boundary. Only this freshly authenticated original package creates an installed-audit closure. */
 export async function prepareDebianInstalledAudit(input: { readonly download: OwnedUpdateDownload; readonly signature: unknown;
-  readonly expectedVersion: string; readonly signal?: AbortSignal }): Promise<Readonly<{ assertInstalled(signal?: AbortSignal): Promise<void> }>> {
+  readonly expectedVersion: string; readonly signal?: AbortSignal }): Promise<Readonly<{
+    assertInstalled(signal?: AbortSignal): Promise<void>;
+    /** Synchronous metadata observation only, after a successful full audit. No root/same-UID adversary or CAS claim.
+     * Independent of the original download FD; call immediately before fixed exec, after download cleanup. */
+    assertForExec(): void;
+  }>> {
   const { download, signature, expectedVersion, signal: preparationSignal } = input;
   if (process.platform !== "linux" || process.arch !== "x64" || !process.getuid?.() || download.artifactName !== "OpenWhisper-Linux-amd64.deb") fail("INVALID_INPUT");
   parseUpdateVersion(expectedVersion); check(preparationSignal, Infinity);
@@ -268,14 +282,20 @@ export async function prepareDebianInstalledAudit(input: { readonly download: Ow
     (source) => inspectDebianDataTar(source, preparationSignal), preparationSignal, download.file.fd);
   await download.assertUnchanged(); await observed.assertUnchanged();
   try { validateLayout(inventory, expectedVersion); } catch { fail("INVALID_LAYOUT"); }
+  let auditGeneration = 0, auditing = false;
+  let execSnapshot: { observations: ReadonlyMap<string, BigIntStats>; ancestors: ReadonlyMap<string, BigIntStats>; status: BigIntStats } | undefined;
   const assertInstalled = async (signal?: AbortSignal): Promise<void> => {
+    const generation = ++auditGeneration; execSnapshot = undefined;
+    if (auditing) fail("INSTALLED_MISMATCH"); auditing = true;
     const deadline = performance.now() + DEBIAN_AUDIT_LIMITS.milliseconds;
     try {
       check(signal, deadline); await download.assertUnchanged(); await observed.assertUnchanged();
+      const observations = new Map<string, BigIntStats>(), ancestors = await rootAncestry("/var/lib/dpkg");
+      const database = await lstat("/var/lib/dpkg/status", { bigint: true });
+      validateDebianInstalledMetadata(database, { path: "/var/lib/dpkg/status", type: "file", mode: 0o644, bytes: Number(database.size) });
       const status = await tool("/usr/bin/dpkg-query", ["--admindir=/var/lib/dpkg", "--no-pager",
         "--showformat=${Package}\\n${Version}\\n${Architecture}\\n${Status}\\n", "--show", "io-github-whisperfree"], textOutput, signal);
       if (status !== `io-github-whisperfree\n${expectedVersion}\namd64\ninstall ok installed\n`) fail("INSTALLED_MISMATCH");
-      const observations = new Map<string, BigIntStats>(), ancestors = new Map<string, BigIntStats>();
       for (const entry of inventory.entries) {
         check(signal, deadline); if (!entry.path) continue;
         const path = join("/", entry.path);
@@ -301,9 +321,37 @@ export async function prepareDebianInstalledAudit(input: { readonly download: Ow
         }
       }
       expected.delete("/opt/openwhisper"); if (expected.size) fail("INSTALLED_MISMATCH");
-      for (const [path, before] of observations) { check(signal, deadline); if (!same(before, await lstat(path, { bigint: true }))) fail("INSTALLED_MISMATCH"); }
+      for (const [path, before] of observations) {
+        check(signal, deadline); const current = await lstat(path, { bigint: true });
+        if (!same(before, current)) fail("INSTALLED_MISMATCH"); observations.set(path, current);
+      }
+      const currentDatabase = await lstat("/var/lib/dpkg/status", { bigint: true });
+      if (!same(database, currentDatabase)) fail("INSTALLED_MISMATCH");
       await assertAncestors(ancestors); await observed.assertUnchanged(); await download.assertUnchanged(); check(signal, deadline);
-    } catch (error: unknown) { if (error instanceof DebianInstalledAuditError) throw error; fail("INSTALLED_MISMATCH"); }
+      if (generation !== auditGeneration) fail("INSTALLED_MISMATCH");
+      // Every original file close above has settled before this private snapshot becomes usable.
+      execSnapshot = { observations, ancestors, status: currentDatabase };
+    } catch (error: unknown) { execSnapshot = undefined; if (error instanceof DebianInstalledAuditError) throw error; fail("INSTALLED_MISMATCH"); }
+    finally { auditing = false; }
   };
-  return Object.freeze({ assertInstalled });
+  const assertForExec = (): void => {
+    const snapshot = execSnapshot;
+    if (!snapshot) fail("INSTALLED_MISMATCH");
+    try {
+      for (const entry of inventory.entries) {
+        if (!entry.path) continue;
+        const path = join("/", entry.path), before = snapshot.observations.get(path);
+        if (!before) fail("INSTALLED_MISMATCH");
+        validateDebianInstalledMetadata(physicalFs.lstatSync(path, { bigint: true }), entry, before);
+      }
+      for (const [path, before] of snapshot.ancestors) {
+        const current = physicalFs.lstatSync(path, { bigint: true });
+        if (current.dev !== before.dev || current.ino !== before.ino || current.mode !== before.mode ||
+            current.uid !== before.uid || current.gid !== before.gid) fail("INSTALLED_MISMATCH");
+      }
+      // Conservative refusal of concurrent package-state changes; no DB hash or package-manager CAS.
+      if (!same(snapshot.status, physicalFs.lstatSync("/var/lib/dpkg/status", { bigint: true }))) fail("INSTALLED_MISMATCH");
+    } catch { execSnapshot = undefined; fail("INSTALLED_MISMATCH"); }
+  };
+  return Object.freeze({ assertInstalled, assertForExec });
 }

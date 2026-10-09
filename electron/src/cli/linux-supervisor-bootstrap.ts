@@ -7,10 +7,72 @@ import { APPLICATION_BUILD } from "../main/application-build.js";
 import { selectApplicationBuild } from "../main/build-selection.js";
 import { admitLinuxInstalledLaunch, type LinuxInstalledLaunch } from "../main/linux-installed-launch.js";
 import { LinuxRestartError } from "../main/linux-restart.js";
-import { bypassLinuxControl, execLinuxGui, runLinuxSupervisor, type LinuxSupervisorEffects } from "./linux-supervisor.js";
+import { readUpdateFeed } from "../services/update-feed.js";
+import { downloadUpdateCandidate, UpdateDownloadError } from "../services/update-download.js";
+import { prepareDebianUpdate, type PreparedDebianUpdate } from "../services/linux-debian-update.js";
+import { assertCanonicalInstalledDebianVersion, prepareDebianInstalledAudit } from "../services/linux-debian-installed.js";
+import { resolveStableProfile, validateStableProfile } from "../services/stable-profile.js";
+import type { LinuxUpdateCandidate } from "../services/update-policy.js";
+import type { OwnedUpdateDownload } from "../services/update-staging.js";
+import { bypassLinuxControl, execLinuxGui, runLinuxSupervisor, type LinuxSupervisorEffects, type LinuxSupervisorUpdates } from "./linux-supervisor.js";
+export { linuxSupervisorLauncher } from "./linux-supervisor.js";
 
-interface BootstrapContext { readonly version: string; readonly launch: LinuxInstalledLaunch | undefined }
+interface BootstrapContext { readonly version: string; readonly launch: LinuxInstalledLaunch | undefined; readonly updates?: LinuxSupervisorUpdates }
 type PrepareBootstrap = (argv: readonly string[]) => Promise<BootstrapContext>;
+
+/** All executable/source authority stays in this parent, never in a GUI frame or preference. */
+function debianUpdates(currentVersion: string): LinuxSupervisorUpdates {
+  const profile = resolveStableProfile({ platform: "linux", home: homedir(),
+    ...(process.env.XDG_CONFIG_HOME ? { configHome: process.env.XDG_CONFIG_HOME } : {}),
+    ...(process.env.XDG_DATA_HOME ? { dataHome: process.env.XDG_DATA_HOME } : {}),
+    ...(process.env.XDG_CACHE_HOME ? { cacheHome: process.env.XDG_CACHE_HOME } : {}) });
+  let candidate: LinuxUpdateCandidate | undefined, download: Readonly<OwnedUpdateDownload> | undefined;
+  let prepared: Readonly<PreparedDebianUpdate> | undefined, audit: Awaited<ReturnType<typeof prepareDebianInstalledAudit>> | undefined;
+  let failedCleanup: (() => Promise<void>) | undefined, installationStarted = false;
+  const discardPrepared = async (): Promise<void> => {
+    // A failed privileged transaction may have changed the installed tree. Keep its source for explicit recovery.
+    if (installationStarted) return;
+    await failedCleanup?.(); failedCleanup = undefined;
+    await download?.cleanup(); download = undefined; prepared = undefined; audit = undefined;
+  };
+  return Object.freeze({
+    async action(kind: "check" | "install", signal: AbortSignal) {
+      if (installationStarted) throw new LinuxRestartError("INVALID_REQUEST");
+      validateStableProfile(profile);
+      const active = (): void => { if (signal.aborted) throw new LinuxRestartError("INVALID_REQUEST"); };
+      active();
+      if (kind === "check") {
+        await discardPrepared(); candidate = undefined;
+        const result = await readUpdateFeed({ package: "deb", currentVersion, signal }); active();
+        if (!result) return { status: "idle" } as const;
+        if (result.package !== "deb") throw new LinuxRestartError("INVALID_REQUEST");
+        candidate = result; return { status: "available", updateVersion: result.version } as const;
+      }
+      const selected = candidate;
+      if (!selected || download || prepared || failedCleanup) throw new LinuxRestartError("INVALID_REQUEST");
+      try {
+        download = await downloadUpdateCandidate({ candidate: selected, currentVersion, cacheDirectory: profile.paths.cache, signal }); active();
+        prepared = await prepareDebianUpdate({ download, signature: selected.signature, currentVersion, expectedVersion: selected.version }); active();
+        audit = await prepareDebianInstalledAudit({ download, signature: selected.signature, expectedVersion: selected.version, signal }); active();
+        return { status: "prepared", updateVersion: selected.version } as const;
+      } catch (error: unknown) {
+        if (error instanceof UpdateDownloadError) failedCleanup = error.cleanup;
+        await discardPrepared(); throw error;
+      }
+    },
+    async installPrepared(version: string) {
+      if (installationStarted || !candidate || !download || !prepared || !audit ||
+          version !== candidate.version || version !== prepared.version) throw new LinuxRestartError("INVALID_REQUEST");
+      installationStarted = true;
+      await prepared.install();
+      await audit.assertInstalled();
+      await download.assertUnchanged();
+      // All long hashing, original child joins and staged source closure finish before the synchronous final exec check.
+      await download.cleanup(); download = undefined;
+      return Object.freeze({ assertForExec: audit.assertForExec });
+    }, discardPrepared,
+  });
+}
 
 /** Fixed stable entry only. The parent never imports Electron main, migrates a profile or opens audio. */
 async function preparePackagedSupervisor(argv: readonly string[]): Promise<BootstrapContext> {
@@ -29,10 +91,17 @@ async function preparePackagedSupervisor(argv: readonly string[]): Promise<Boots
   if (identity.kind !== "stable") throw new LinuxRestartError("UNAVAILABLE");
   const launch = await admitLinuxInstalledLaunch({ build: identity, packaged: true, executable, appPath, resourcesPath,
     home: homedir(), environment: process.env, pid: process.pid });
-  return Object.freeze({ version, launch });
+  let updates: LinuxSupervisorUpdates | undefined;
+  if (launch?.kind === "debian") {
+    // Stable preview packages retain ~dev dpkg versions and must not acquire the release update capability.
+    try { await assertCanonicalInstalledDebianVersion(version); updates = debianUpdates(version); }
+    catch { /* Optional update admission must not prevent ordinary dictation. */ }
+  }
+  // AppImage update activation also needs signed current-image and successor-signature continuity.
+  return Object.freeze({ version, launch, ...(updates ? { updates } : {}) });
 }
 
-/** The seams are host-owned tests, never IPC or user preferences. Installation authority remains disabled. */
+/** The seams are host-owned tests, never IPC or user preferences. Unadmitted launches keep their ordinary V1 path. */
 export async function bootstrapLinuxSupervisor(argv: readonly string[], prepare: PrepareBootstrap = preparePackagedSupervisor,
   effects?: LinuxSupervisorEffects): Promise<number> {
   if (bypassLinuxControl(argv, effects)) throw new LinuxRestartError("EXEC_FAILED");
@@ -40,16 +109,8 @@ export async function bootstrapLinuxSupervisor(argv: readonly string[], prepare:
   // A downloaded image can still run normally. An unadmitted location has no permanent restart target.
   if (!context.launch) return execLinuxGui(argv, effects);
   return runLinuxSupervisor({ launch: context.launch, currentVersion: context.version, argv,
+    ...(context.updates ? { updates: context.updates } : {}),
     revalidateReplacement: async () => { throw new LinuxRestartError("REVALIDATION_FAILED"); } }, effects);
-}
-
-/** Exact shell entries for packaged Stable only; quotes preserve each original application argument. */
-export function linuxSupervisorLauncher(kind: "debian" | "appimage"): string {
-  const environment = ["unset NODE_OPTIONS NODE_PATH NODE_V8_COVERAGE ELECTRON_NO_ASAR", "ELECTRON_RUN_AS_NODE=1", "export ELECTRON_RUN_AS_NODE"];
-  if (kind === "debian") return ["#!/bin/sh", "set -eu", ...environment,
-    'exec /opt/openwhisper/openwhisper /opt/openwhisper/resources/app/dist/cli/linux-supervisor-bootstrap.js "$@"', ""].join("\n");
-  return ["#!/bin/sh", "set -eu", ...environment, 'bundle=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)',
-    'exec "$bundle/usr/lib/openwhisper/openwhisper" "$bundle/usr/lib/openwhisper/resources/app/dist/cli/linux-supervisor-bootstrap.js" "$@"', ""].join("\n");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

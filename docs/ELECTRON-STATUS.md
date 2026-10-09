@@ -23,6 +23,17 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 
 ## Current package checkpoint
 
+The next source increment connects Debian updates directly to the existing
+parent supervisor, V2 channel and shared Update controls. Only a canonical
+installed Debian version admits the capability. The parent owns the fixed
+feed, authenticated original download, installer and installed audit. Original
+GUI/native cleanup, retirement acknowledgment and clean duplex/process closure
+precede installation; authorization and full hashing have a separate long phase.
+A synchronous physical metadata check immediately precedes fixed-target exec.
+AppImage keeps its ordinary V1 path until current-image signature and successor
+signature continuity are implemented. These changes still require packaged
+V2/UI and actual signed upgrade evidence; source ordering tests are distinct.
+
 The next normal Linux CI exports a fresh canonical Stable validation package
 and the already-built, locked signer/verifier tools from the same source.
 An owner-only dependent job admits those inputs before accessing the existing

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { duplexPair } from "node:stream";
 import { test } from "node:test";
 import { createLinuxUpdateParentChannel, createLinuxUpdateGuiChannel, LINUX_UPDATE_CHANNEL_FRAME_BYTES,
-  type LinuxUpdateResponse } from "../src/main/linux-update-channel.js";
+  LINUX_UPDATE_PROTOCOL, openLinuxUpdateGuiChannel, type LinuxUpdateResponse } from "../src/main/linux-update-channel.js";
+import { LINUX_RESTART_NONCE, LINUX_RESTART_VERSION } from "../src/main/linux-restart.js";
 const binding = { currentVersion: "0.3.0", nonce: "a".repeat(64) };
 const turn = (): Promise<void> => new Promise((accept) => setImmediate(accept));
 const frame = (fields: Record<string, unknown>) => Buffer.from(`${JSON.stringify({ version: 2, ...binding, ...fields })}\n`);
@@ -90,4 +91,49 @@ test("original close settles an unread outgoing write without starting its actio
   assert.equal(calls, 0); assert.ok(a.writableLength > 0);
   await parent.close(); await assert.rejects(parent.retirement, { code: "CHANNEL_FAILED", message: "CHANNEL_FAILED" });
   assert.equal(calls, 0); b.destroy();
+});
+
+test("prepared publication callback waits for the original terminal write and can initiate retirement", async () => {
+  const [a, b] = duplexPair({ highWaterMark: 1 }), release = gate();
+  let preparing = false, published = 0, retiring: Promise<void> | undefined;
+  const parent = createLinuxUpdateParentChannel(a, binding, async () => {
+    await release.promise; return { status: "prepared", updateVersion: "0.3.1" };
+  }, () => { published++; retiring = parent.requestRetirement(); void retiring.catch(() => {}); });
+  const gui = createLinuxUpdateGuiChannel(b, binding, (response) => {
+    if (response.type === "state" && response.state.status === "preparing") { preparing = true; b.pause(); }
+    if (response.type === "retire") void gui.acknowledgeRetired().catch(() => {});
+  });
+  try {
+    await gui.request("install"); await until(() => preparing); release.accept();
+    await until(() => a.writableLength > 0); assert.equal(published, 0);
+    b.resume(); assert.deepEqual(await parent.retirement, { updateVersion: "0.3.1" });
+    await retiring; await gui.closed; assert.equal(published, 1);
+  } finally { release.accept(); await Promise.all([parent.close(), gui.close()]); }
+});
+
+test("GUI closed waits for both original directions and rejects a partial response", async () => {
+  const [a, b] = duplexPair(); a.resume();
+  const gui = createLinuxUpdateGuiChannel(b, binding, () => {});
+  let closed = false; void gui.closed.then(() => { closed = true; });
+  gui.quit(); await until(() => a.readableEnded); assert.equal(closed, false);
+  a.end(); await gui.closed; assert.equal(closed, true);
+  const [c, d] = duplexPair(), malformed = createLinuxUpdateGuiChannel(d, binding, () => {});
+  c.end(frame({ type: "state", state: { status: "idle" } }).subarray(0, -1));
+  await assert.rejects(malformed.closed, { code: "CHANNEL_FAILED", message: "CHANNEL_FAILED" }); c.destroy();
+});
+
+test("inherited GUI opener preserves absent V2 hints and consumes invalid V2 without adopting fd3", () => {
+  const keys = [LINUX_UPDATE_PROTOCOL, LINUX_RESTART_NONCE, LINUX_RESTART_VERSION], saved = keys.map(key => process.env[key]);
+  try {
+    delete process.env[LINUX_UPDATE_PROTOCOL]; process.env[LINUX_RESTART_NONCE] = binding.nonce; process.env[LINUX_RESTART_VERSION] = binding.currentVersion;
+    assert.equal(openLinuxUpdateGuiChannel(binding.currentVersion, () => {}), undefined);
+    assert.equal(process.env[LINUX_RESTART_NONCE], binding.nonce); assert.equal(process.env[LINUX_RESTART_VERSION], binding.currentVersion);
+    for (const hints of [{ protocol: "1", nonce: binding.nonce, version: binding.currentVersion },
+      { protocol: "2", nonce: "PRIVATE INVALID VALUE", version: binding.currentVersion },
+      { protocol: "2", nonce: binding.nonce, version: "0.2.5" }]) {
+      process.env[LINUX_UPDATE_PROTOCOL] = hints.protocol; process.env[LINUX_RESTART_NONCE] = hints.nonce; process.env[LINUX_RESTART_VERSION] = hints.version;
+      assert.throws(() => openLinuxUpdateGuiChannel(binding.currentVersion, () => {}), { code: "CHANNEL_FAILED", message: "CHANNEL_FAILED" });
+      assert.ok(keys.every(key => process.env[key] === undefined));
+    }
+  } finally { keys.forEach((key, index) => { const value = saved[index]; if (value === undefined) delete process.env[key]; else process.env[key] = value; }); }
 });

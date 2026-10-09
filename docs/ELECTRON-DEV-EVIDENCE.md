@@ -1,5 +1,48 @@
 # Electron development evidence
 
+## Debian update activation source
+
+The existing bootstrap/supervisor, V2 channel, main handlers and installed audit
+now form one direct Debian update path. A canonical installed package version
+admits V2; unsigned development-version previews keep V1. The parent retains
+fixed feed/candidate/download/installer authority. GUI commands contain no paths,
+URLs, signatures or executables. The shared Update controls reserve installation
+against recording, recovery, downloads and setup; checking permits dictation.
+Automatic checks retain the existing opt-in 10-second/24-hour cadence.
+
+Prepared-state publication must settle before retirement is requested. Main
+joins original native owners, acknowledges retirement and joins clean original
+duplex closure before normal Quit. The parent requires original GUI close0
+before installation. Polkit, full authentication/audit and staged-source cleanup
+remain outside the five-second final metadata/exec fence. A failed optional
+connection does not trap ordinary Quit. AppImage retains V1 pending separate
+signed current-image and successor-signature continuity.
+
+The final physical metadata observation is available only after a successful
+full audit and original temporary-file closure; a failed or overlapping audit
+invalidates it. It remains usable after original download cleanup. This is
+an immediate metadata check, not root-adversary protection or package-manager
+compare-and-swap. Concurrent dpkg status changes conservatively refuse exec.
+The prepared owned CI fixture retains the same audit across a root-owned
+notice mutation, with atomic private readiness/completion markers and the
+original child join. Actual packaged execution of that fixture is pending.
+
+All 18 focused supervisor/bootstrap cases pass. Three V2 composition cases
+separately pass in 226 ms after removing a real five-second fixture wait:
+original retirement/closure ordering, a simulated 60-second authorization,
+crash/missing acknowledgment, final refusal and final deadline. These use inert
+host effects; they do not perform a signed update, installer or actual exec.
+
+The completed increment passes strict typing, the complete portable suite
+(1,246 passed, 43 explicitly skipped, zero failures; 18.5 seconds), the normal
+application/shared-UI build, generated standalone-driver bundling/import and
+workflow YAML/shell parsing. The compiled installed-audit module also loads
+synchronously through Node `require`, the boundary used by the owned driver.
+Its pure launcher dependency now comes from the supervisor module rather than
+the executable bootstrap with top-level await. An older local compiled graph
+refused that load with `ERR_REQUIRE_ASYNC_MODULE`; this import check proves the
+corrected module graph, without starting the app or performing an installed audit.
+
 ## Prepared signed Linux candidate acceptance
 
 Normal Linux CI now has a prepared path for a fresh canonical Stable validation

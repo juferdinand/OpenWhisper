@@ -1,7 +1,11 @@
 import { Duplex } from "node:stream";
+import { fstatSync, readlinkSync } from "node:fs";
+import { Socket } from "node:net";
 import { z } from "zod";
 import { isNewerUpdateVersion, parseUpdateVersion } from "../services/update-policy.js";
+import { LINUX_RESTART_NONCE, LINUX_RESTART_VERSION } from "./linux-restart.js";
 
+export const LINUX_UPDATE_PROTOCOL = "OPENWHISPER_UPDATE_PROTOCOL";
 export const LINUX_UPDATE_CHANNEL_FRAME_BYTES = 1024;
 const canonicalVersion = z.string().max(62).refine((value) => { try { parseUpdateVersion(value); return true; } catch { return false; } });
 const bindingSchema = z.strictObject({ currentVersion: canonicalVersion, nonce: z.string().regex(/^[a-f0-9]{64}$/u) });
@@ -91,7 +95,8 @@ export interface LinuxUpdateParentChannel {
   close(): Promise<void>;
 }
 export function createLinuxUpdateParentChannel(pipe: Duplex, binding: LinuxUpdateChannelBinding,
-  action: (kind: "check" | "install", signal: AbortSignal) => Promise<LinuxUpdatePublicState>): LinuxUpdateParentChannel {
+  action: (kind: "check" | "install", signal: AbortSignal) => Promise<LinuxUpdatePublicState>,
+  onPreparedPublished?: () => void): LinuxUpdateParentChannel {
   let pending: Promise<void> | undefined, cancellation: AbortController | undefined, cancelled = false;
   const accepted = new Set<Promise<void>>();
   let state: LinuxUpdatePublicState = { status: "idle" }, retireVersion: string | undefined, retired = false;
@@ -123,6 +128,7 @@ export function createLinuxUpdateParentChannel(pipe: Duplex, binding: LinuxUpdat
       // The original action has settled. A GUI callback may immediately send its next command.
       if (pending === operation) { pending = undefined; cancellation = undefined; }
       await wire.send({ version: 2, ...wire.binding, type: "state", state });
+      if (result.status === "prepared" && wire.valid()) onPreparedPublished?.();
     });
     pending = operation; accepted.add(operation);
     void operation.catch(() => { wire.poison(); }).finally(() => {
@@ -151,6 +157,8 @@ export function createLinuxUpdateParentChannel(pipe: Duplex, binding: LinuxUpdat
 
 export interface LinuxUpdateGuiChannel {
   request(kind: "check" | "install" | "cancel"): Promise<void>;
+  /** Requires original readable EOF, writable completion and close; poisoning rejects. */
+  readonly closed: Promise<void>;
   /** Caller must finish original native cleanup before this acknowledgment; original GUI close is still required. */
   acknowledgeRetired(): Promise<void>;
   quit(): void;
@@ -177,7 +185,10 @@ export function createLinuxUpdateGuiChannel(pipe: Duplex, binding: LinuxUpdateCh
     }
     receive(response);
   }, () => {});
+  const closed = wire.closure.then(() => { if (!wire.cleanClosed()) return failure("CHANNEL_FAILED"); });
+  void closed.catch(() => {});
   return Object.freeze({
+    closed,
     async request(kind: "check" | "install" | "cancel"): Promise<void> {
       if (!["check", "install", "cancel"].includes(kind) || retireVersion || (kind === "cancel" ? !pending || cancelled : pending)) return failure("INVALID_STATE");
       if (kind === "cancel") cancelled = true; else pending = kind;
@@ -188,4 +199,23 @@ export function createLinuxUpdateGuiChannel(pipe: Duplex, binding: LinuxUpdateCh
       await wire.send({ version: 2, ...wire.binding, type: "retired" }); wire.end();
     }, quit: wire.end, close: wire.close,
   });
+}
+
+/** Adopts only the fixed inherited V2 descriptor. Missing V2 leaves the V1 writer hints untouched. */
+export function openLinuxUpdateGuiChannel(currentVersion: string,
+  receive: (response: LinuxUpdateResponse) => void): LinuxUpdateGuiChannel | undefined {
+  const protocol = process.env[LINUX_UPDATE_PROTOCOL];
+  if (protocol === undefined) return undefined;
+  const nonce = process.env[LINUX_RESTART_NONCE], capturedVersion = process.env[LINUX_RESTART_VERSION];
+  delete process.env[LINUX_UPDATE_PROTOCOL]; delete process.env[LINUX_RESTART_NONCE]; delete process.env[LINUX_RESTART_VERSION];
+  try {
+    const uid = process.getuid?.();
+    if (protocol !== "2" || process.platform !== "linux" || uid === undefined || uid === 0 || capturedVersion !== currentVersion) return failure("CHANNEL_FAILED");
+    const binding = bindingSchema.parse({ currentVersion, nonce });
+    const descriptor = fstatSync(3, { bigint: true });
+    const anonymous = readlinkSync("/proc/self/fd/3");
+    if ((!descriptor.isSocket() && !descriptor.isFIFO()) || descriptor.uid !== BigInt(uid) ||
+        anonymous !== `${descriptor.isSocket() ? "socket" : "pipe"}:[${descriptor.ino}]`) return failure("CHANNEL_FAILED");
+    return createLinuxUpdateGuiChannel(new Socket({ fd: 3, readable: true, writable: true }), binding, receive);
+  } catch { return failure("CHANNEL_FAILED"); }
 }

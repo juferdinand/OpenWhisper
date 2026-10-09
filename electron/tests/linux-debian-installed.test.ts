@@ -7,7 +7,7 @@ import { isAbsolute, join } from "node:path";
 import { test } from "node:test";
 import { Header, Pax, type HeaderData } from "tar";
 import { DebianInstalledAuditError, DEBIAN_AUDIT_LIMITS, inspectDebianDataTar, inspectDebianFileBytes,
-  prepareDebianInstalledAudit, validateDebianInstalledMetadata } from "../src/services/linux-debian-installed.js";
+  assertCanonicalInstalledDebianVersion, prepareDebianInstalledAudit, validateDebianInstalledMetadata } from "../src/services/linux-debian-installed.js";
 import { LinuxUpdateSignatureError } from "../src/services/linux-update-signature.js";
 import { retainOwnedUpdateDownload } from "../src/services/update-staging.js";
 import { parseOwnedSignedDebianArguments } from "./owned-signed-debian.js";
@@ -18,7 +18,7 @@ test("Owned signed Debian roles require exact argument selectors and canonical a
     assert.deepEqual(parseOwnedSignedDebianArguments([mode, "--candidate", "/owned/candidate", "--tools", "/owned/tools", "--evidence", "/owned/evidence"]),
       { mode, candidate: "/owned/candidate", tools: "/owned/tools", evidence: "/owned/evidence" });
   }
-  for (const mode of ["embedded-verify", "audit", "audit-mismatch"]) {
+  for (const mode of ["embedded-verify", "audit", "audit-mismatch", "audit-mutation"]) {
     assert.equal(parseOwnedSignedDebianArguments([mode, "--candidate", "/owned/candidate", "--evidence", "/owned/evidence"]).mode, mode);
   }
   for (const args of [["other", "--candidate", "/owned/candidate"], ["capture", "--candidate", "relative"],
@@ -32,6 +32,13 @@ test("Owned signed Debian roles require exact argument selectors and canonical a
 
 const failure = (code: DebianInstalledAuditError["code"]) => (error: unknown): boolean =>
   error instanceof DebianInstalledAuditError && error.code === code && error.message === code;
+
+test("Current Debian admission refuses preview and noncanonical versions before invoking system tools", async () => {
+  for (const version of ["0.3.0~dev.abcd", "v0.3.0", "0.3", "0.03.0", "18446744073709551616.0.0", "0.3.0\n"]) {
+    await assert.rejects(assertCanonicalInstalledDebianVersion(version), failure("INVALID_INPUT"));
+  }
+});
+
 const digest = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 function member(path: string, body = Buffer.alloc(0), values: HeaderData = {}): Buffer {
   const header = new Header({ path, type: "File", mode: 0o644, uid: 0, gid: 0, size: body.length, ...values });
@@ -177,6 +184,16 @@ test("Root ownership policy uses labeled synthetic stats; owned user files never
     for (const changes of [{ uid: 1000n }, { gid: 1000n }, { nlink: 2n }, { mode: 0o100666n }, { size: actual.size + 1n }]) {
       assert.throws(() => validateDebianInstalledMetadata(synthetic(changes), expected), failure("INSTALLED_MISMATCH"));
     }
+    // Final observations compare identity/timestamps, even when the same length and permissions remain.
+    const original = synthetic({}); validateDebianInstalledMetadata(synthetic({}), expected, original);
+    for (const changes of [{ dev: actual.dev + 1n }, { ino: actual.ino + 1n },
+      { mtimeNs: actual.mtimeNs + 1n }, { ctimeNs: actual.ctimeNs + 1n }]) {
+      assert.throws(() => validateDebianInstalledMetadata(synthetic(changes), expected, original), failure("INSTALLED_MISMATCH"));
+    }
+    const directory = synthetic({ mode: 0o40755n }), expectedDirectory = { path: "opt/openwhisper", type: "directory" as const, mode: 0o755, bytes: 0 };
+    validateDebianInstalledMetadata(directory, expectedDirectory, directory);
+    assert.throws(() => validateDebianInstalledMetadata(synthetic({ mode: 0o40755n, size: actual.size + 1n }),
+      expectedDirectory, directory), failure("INSTALLED_MISMATCH"));
     if (process.getuid?.() !== 0) assert.throws(() => validateDebianInstalledMetadata(actual, expected), failure("INSTALLED_MISMATCH"));
   } finally { await f.cleanup(); }
 });

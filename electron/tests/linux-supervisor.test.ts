@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { PassThrough } from "node:stream";
+import { duplexPair, PassThrough } from "node:stream";
 import { test } from "node:test";
-import { bypassLinuxControl, execLinuxGui, runLinuxSupervisor, type LinuxSupervisorEffects } from "../src/cli/linux-supervisor.js";
+import { bypassLinuxControl, execLinuxGui, runLinuxSupervisor, type LinuxSupervisorEffects, type LinuxSupervisorUpdates } from "../src/cli/linux-supervisor.js";
 import { LINUX_RESTART_NONCE, LINUX_RESTART_VERSION } from "../src/main/linux-restart.js";
+import { createLinuxUpdateGuiChannel, LINUX_UPDATE_PROTOCOL } from "../src/main/linux-update-channel.js";
 import type { LinuxInstalledLaunch } from "../src/main/linux-installed-launch.js";
 
 const launch: LinuxInstalledLaunch = { kind: "debian", executable: "/opt/openwhisper/openwhisper", arguments: [] };
@@ -148,4 +149,85 @@ test("replacement synchronous work is inside the absolute callback deadline", as
   } }, input.effects);
   void original.catch(() => {}); input.pipe.end(input.receipt()); await turn(); input.pipe.destroy(); input.acceptClose({ code: 0, signal: null });
   await assert.rejects(original, { code: "REVALIDATION_FAILED" }); assert.deepEqual(input.calls, ["spawn", "revalidate"]);
+});
+
+// Inert original-channel composition: no feed, download, installer, process or executable is substituted into production.
+function updateFixture(install: LinuxSupervisorUpdates["installPrepared"]) {
+  const input = fixture(), [parent, peer] = duplexPair(); let retired = false;
+  const effects: LinuxSupervisorEffects = { ...input.effects,
+    launch(argv, env) { return { ...input.effects.launch(argv, env), pipe: parent }; } };
+  const original = runLinuxSupervisor({ launch, currentVersion: "0.3.0", argv: ["literal value"],
+    revalidateReplacement: async () => { assert.fail("V2 must not invoke the historical V1 validator."); },
+    updates: {
+      async action(kind) { input.calls.push(kind); return kind === "check"
+        ? { status: "available", updateVersion: "0.3.1" } : { status: "prepared", updateVersion: "0.3.1" }; },
+      installPrepared: install,
+      async discardPrepared() { input.calls.push("discard"); },
+    } }, effects);
+  void original.catch(() => {});
+  const gui = createLinuxUpdateGuiChannel(peer, { currentVersion: "0.3.0", nonce: input.environment()![LINUX_RESTART_NONCE]! }, (response) => {
+    if (response.type === "retire") { retired = true; input.calls.push("retire"); }
+  });
+  const prepare = async (): Promise<void> => {
+    await gui.request("install");
+    for (let turnCount = 0; turnCount < 100 && !retired; turnCount++) await turn();
+    assert.equal(retired, true); assert.equal(input.environment()![LINUX_UPDATE_PROTOCOL], "2");
+  };
+  const cleanup = async (): Promise<void> => {
+    await gui.close(); input.acceptClose({ code: 0, signal: null }); await original.catch(() => {});
+  };
+  return { ...input, original, gui, prepare, cleanup };
+}
+
+test("V2 install waits for original retired duplex and GUI close; long authorization stays outside the final fence", async (t) => {
+  let now = 0, release!: () => void, installing = false;
+  t.mock.method(performance, "now", () => now); t.mock.timers.enable({ apis: ["setTimeout"] });
+  const held = new Promise<void>((accept) => { release = accept; });
+  const input = updateFixture(async (version) => {
+    assert.equal(version, "0.3.1"); installing = true; input.calls.push("install"); await held;
+    return { assertForExec() { input.calls.push("final-check"); } };
+  });
+  try {
+    await input.prepare(); assert.equal(installing, false);
+    await input.gui.acknowledgeRetired(); await input.gui.closed; await turn(); assert.equal(installing, false);
+    input.acceptClose({ code: 0, signal: null }); await turn(); assert.equal(installing, true);
+    now += 60_000; t.mock.timers.tick(60_000); await turn();
+    assert.equal(input.calls.includes("exec"), false); release();
+    await assert.rejects(input.original, { code: "EXEC_FAILED" });
+    assert.deepEqual(input.calls, ["spawn", "install", "retire", "install", "final-check", "exec", "discard"]);
+    assert.equal(input.replacement()?.executable, "/opt/openwhisper/openwhisper-launch");
+    assert.equal(input.replacement()?.environment[LINUX_UPDATE_PROTOCOL], undefined);
+  } finally { release(); await input.cleanup(); }
+});
+
+test("V2 crash or missing original retirement never starts the privileged installer", async () => {
+  for (const crash of [true, false]) {
+    let installations = 0;
+    const input = updateFixture(async () => { installations++; return { assertForExec() {} }; });
+    try {
+      await input.prepare();
+      if (crash) { await input.gui.acknowledgeRetired(); await input.gui.closed; }
+      else { input.gui.quit(); await input.gui.closed; }
+      input.acceptClose({ code: crash ? 3 : 0, signal: null });
+      if (crash) assert.equal(await input.original, 3);
+      else await assert.rejects(input.original, { code: "CHANNEL_FAILED" });
+      assert.equal(installations, 0); assert.equal(input.calls.includes("exec"), false);
+      assert.equal(input.calls.at(-1), "discard");
+    } finally { await input.cleanup(); }
+  }
+});
+
+test("V2 final synchronous refusal or deadline prevents fixed exec after the long phase", async (t) => {
+  let now = 0; t.mock.method(performance, "now", () => now);
+  for (const timeout of [false, true]) {
+    const input = updateFixture(async () => ({ assertForExec() {
+      if (timeout) now += 5000; else throw new Error("Owned installed identity changed.");
+    } }));
+    try {
+      await input.prepare(); await input.gui.acknowledgeRetired(); await input.gui.closed;
+      input.acceptClose({ code: 0, signal: null });
+      await assert.rejects(input.original, { code: "REVALIDATION_FAILED" });
+      assert.equal(input.calls.includes("exec"), false);
+    } finally { await input.cleanup(); }
+  }
 });

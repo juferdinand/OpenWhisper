@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
   appStateSchema, modelSchema, preferencesSchema, validateEvent, MAX_USER_TEXT_BYTES, MAX_UI_REQUEST_BYTES,
-  type AppState, type EventName, type EventPayload,
+  type AppState, type EventName, type EventPayload, type UpdateState,
 } from "../contracts/ui.js";
 import { PreferenceStore } from "../services/preferences.js";
 import type { HostProfile } from "../services/host-profile.js";
@@ -51,6 +51,8 @@ import { MacosPaste } from "./macos-paste.js";
 import { MacosAutostart } from "./macos-autostart.js";
 import { LinuxAutostart } from "../services/linux-autostart.js";
 import { admitLinuxInstalledLaunch } from "./linux-installed-launch.js";
+import { openLinuxUpdateGuiChannel, LINUX_UPDATE_PROTOCOL, type LinuxUpdateGuiChannel, type LinuxUpdateResponse } from "./linux-update-channel.js";
+import { LINUX_RESTART_NONCE, LINUX_RESTART_VERSION } from "./linux-restart.js";
 import { createRequire } from "node:module";
 import { routeControlStartup } from "./control-startup.js";
 import { createControlAdapter } from "../platforms/linux/shared/control-adapter.js";
@@ -188,6 +190,12 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let recordingControl = false, cancelRequested = false;
   let recordingOperation: Promise<unknown> | undefined;
   let shutdownInProgress = false, shutdownComplete = false;
+  let shutdownTask: Promise<void> | undefined;
+  let updateReserved: "check" | "install" | undefined;
+  let updateChannel: LinuxUpdateGuiChannel | undefined;
+  let autoCheckTimer: ReturnType<typeof setTimeout> | undefined;
+  let updates: UpdateState = { configured: false, status: "idle", version: null, progress: 0, error: null,
+    package: identity.kind === "stable" ? process.platform === "darwin" ? "macos" : "deb" : "development" };
   let overlay: BrowserWindow | undefined, overlayReady = false;
   let waylandOverlay: WaylandRecordingOverlay | undefined;
   let tray: Tray | undefined, trayKey = "";
@@ -201,6 +209,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     z.array(z.string().max(MAX_USER_TEXT_BYTES)).max(20), [], 8 * 1024 * 1024, { invalidContent: "preserve-and-default" });
   let notify = (): void => {};
   let autostart: LinuxAutostart | MacosAutostart | undefined;
+  let updateAdmitted = false;
   let loginFact: { readonly requested: boolean; readonly pending?: boolean } | undefined;
   let loginRefresh = 0;
   const refreshLogin = async (): Promise<void> => {
@@ -215,6 +224,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         const launch = await admitLinuxInstalledLaunch({ build: identity, packaged: app.isPackaged, home: homedir(), pid: process.pid,
           executable: await realpath(process.execPath), appPath: await realpath(app.getAppPath()),
           resourcesPath: await realpath(process.resourcesPath), environment: process.env });
+        updateAdmitted = launch?.kind === "debian";
         if (launch) autostart = await LinuxAutostart.open({ appId: profile.appId,
           configHome: dirname(profile.roots.config),
           configDirs: (process.env["XDG_CONFIG_DIRS"] || "/etc/xdg").split(":").filter(Boolean),
@@ -223,6 +233,20 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       }
     } catch { /* Keep persisted requests intact when installation or OS facts are unavailable. */ }
     await refreshLogin();
+  }
+  if (updateAdmitted) {
+    try { updateChannel = openLinuxUpdateGuiChannel(version, receiveUpdate); }
+    catch { updates = { ...updates, status: "error", error: "Update services are unavailable in this installation." }; }
+    updates = { ...updates, configured: updateChannel !== undefined };
+    const disconnected = (): void => {
+      updates = { ...updates, configured: false, status: "error", error: "The update connection ended unexpectedly." };
+      updateReserved = undefined; notify();
+    };
+    void updateChannel?.closed.then(() => { if (!shutdownInProgress) disconnected(); }, disconnected);
+  }
+  // Unadmitted packages must not forward a parent's V2 hints to their workers.
+  if (process.env[LINUX_UPDATE_PROTOCOL] !== undefined) {
+    delete process.env[LINUX_UPDATE_PROTOCOL]; delete process.env[LINUX_RESTART_NONCE]; delete process.env[LINUX_RESTART_VERSION];
   }
   const downloads = await ModelDownloads.open(profile, inventory, { progress: (value) => {
     downloadProgress = value.total > 0 ? Math.min(1, value.received / value.total) : 0; notify();
@@ -295,7 +319,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     de: localeSchema.parse(JSON.parse(await readFile(join(distribution, "resources/locales/de.json"), "utf8")) as unknown),
   };
   const state = (): AppState => appStateSchema.parse({
-    updates: { configured: false, status: "idle", version: null, progress: 0, error: null, package: identity.kind === "stable" ? platform === "macos" ? "macos" : "deb" : "development" },
+    updates,
     launch_at_login_available: !!autostart && loginFact !== undefined,
     platform,
     ...(platform === "macos" ? { macos: {
@@ -329,7 +353,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     elapsed: Math.min(Number.MAX_SAFE_INTEGER, Math.floor(recording.elapsedMs / 1000)), level: recording.level,
     model_directory: profile.paths.models,
     ...(identity.kind === "development" ? { profile: "development", development_build: `${build.commit.slice(0, 12)}${build.modified ? "+modified" : ""}` } : {}),
-    recording_available: !!host && (macRecording ? microphoneAllowed || recording.busy : !!audioServer || recording.busy) &&
+    recording_available: updateReserved !== "install" && !!host && (macRecording ? microphoneAllowed || recording.busy : !!audioServer || recording.busy) &&
       (recording.busy || installed.some((item) => item.model.id === preferences.snapshot().model)),
     local_processing: processingProfile.snapshot(),
     local_processing_invalid_profile: processingProfile.invalidContent,
@@ -428,7 +452,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     notify();
   };
   const withRecordingControl = <T>(operation: () => Promise<T>, duringShutdown = false): Promise<T> => {
-    if (recordingControl || (shutdownInProgress && !duringShutdown)) return Promise.reject(new Error("Recording control is busy."));
+    if (recordingControl || (!duringShutdown && (shutdownInProgress || updateReserved === "install"))) return Promise.reject(new Error("Recording control is busy."));
     // Reserve before the first await so configuration and request changes cannot overlap.
     recordingControl = true; cancelRequested = false;
     const task = Promise.resolve().then(operation).finally(() => {
@@ -523,11 +547,11 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         capture: createRecordingControlPort({ owner: host, snapshot: () => recording, configure: configureRecording,
           serialize: withRecordingControl,
           cleanupSerialize: <T>(operation: () => Promise<T>) => withRecordingControl(operation, true),
-          available: () => !shutdownInProgress && !keyCapture && !!audioServer && installed.some((item) => item.model.id === preferences.snapshot().model) }),
+          available: () => !shutdownInProgress && updateReserved !== "install" && !keyCapture && !!audioServer && installed.some((item) => item.model.id === preferences.snapshot().model) }),
       }, new AbortController().signal);
     } catch { message = "Desktop command control is not available. Window recording remains usable."; }
   }
-  const shortcutAction = (command: "enable" | "configure" | "clear" | "cancel"): Promise<void> => action(async () => {
+  const shortcutAction = (command: "enable" | "configure" | "clear" | "cancel"): Promise<void> => recordingAction(async () => {
     if (macShortcut) {
       if (shutdownInProgress || (recording.busy || recording.recoveryAvailable) && command !== "cancel") throw new Error("Shortcut setup is unavailable.");
       if (command === "enable") {
@@ -577,10 +601,60 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       if (preferences.snapshot().hold_to_record && modifierOnly(result.key)) {
         message = "Modifier-only triggers use toggle mode. Use a regular key or mouse button for push to talk."; notify(); return;
       }
-      void action(async () => { await platformHost?.bindKey(result.key, preferences.snapshot().hold_to_record); });
+      void recordingAction(async () => { await platformHost?.bindKey(result.key, preferences.snapshot().hold_to_record); });
     } else { notify(); }
   });
   window.on("blur", () => { macShortcut?.focusLost(); if (keyCapture) { keyCapture = undefined; contents.setIgnoreMenuShortcuts(false); notify(); } });
+  function finishShutdown(retiring: boolean): Promise<void> {
+    if (shutdownTask) return retiring ? Promise.reject(new Error("Shutdown already started.")) : shutdownTask;
+    shutdownInProgress = true; cancelRequested = true; processing.close(); downloadAbort?.abort();
+    clearTimeout(autoCheckTimer); autoCheckTimer = undefined;
+    keyCapture = undefined; contents.setIgnoreMenuShortcuts(false);
+    shutdownTask = (async () => { await recordingOperation?.catch(() => {}); await downloading; await downloads.finalize();
+      await macShortcut?.close(); macPaste?.close(); await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); await waylandOverlay?.close();
+      if (updateChannel) {
+        if (retiring) { await updateChannel.acknowledgeRetired(); await updateChannel.closed; }
+        else {
+          updateChannel.quit();
+          // A failed optional updater must not trap ordinary Quit. Original closure still must settle.
+          await updateChannel.closed.catch(() => {});
+        }
+      }
+      shutdownComplete = true; tray?.destroy(); tray = undefined;
+      overlay?.destroy(); app.quit();
+    })().catch(async (error: unknown) => {
+      await updateChannel?.close();
+      // Preserve uncertain owners and the private recovery files for explicit review.
+      shutdownInProgress = false; shutdownTask = undefined;
+      message = "Recording cleanup could not finish. Recording data and uncertain processes are kept."; notify(); throw error;
+    });
+    return shutdownTask;
+  }
+  function receiveUpdate(response: LinuxUpdateResponse): void {
+    if (response.type === "retire") {
+      if (updateReserved !== "install" || shutdownInProgress) { void updateChannel?.close(); return; }
+      void finishShutdown(true).catch(() => {}); return;
+    }
+    const value = response.state;
+    updates = { ...updates, error: null, progress: 0,
+      status: value.status === "idle" ? "current" : value.status === "checking" ? "checking"
+        : value.status === "available" ? "available" : value.status === "failed" ? "error" : "installing",
+      version: "updateVersion" in value ? value.updateVersion : null,
+      ...(value.status === "failed" ? { error: value.code === "CANCELLED" ? "The update was cancelled." : "The update could not be completed." } : {}) };
+    if (!["checking", "preparing", "prepared"].includes(value.status)) updateReserved = undefined;
+    notify();
+  }
+  const requestUpdate = async (kind: "check" | "install"): Promise<void> => {
+    if (!updateChannel || !updates.configured || updateReserved || shutdownInProgress) throw new Error("Update services are unavailable or busy.");
+    if (kind === "install" && (updates.status !== "available" || recordingControl || recording.busy || recording.recoveryAvailable || downloading ||
+        keyCapture || shortcut.configuring || pasteState.configuring || macShortcut?.state().configuring || !preferences.snapshot().setup_completed)) {
+      throw new Error("Finish the current recording, download or setup before installing an update.");
+    }
+    // A request resolves after its write, not its terminal response. Keep the reservation until that response or retirement.
+    updateReserved = kind; updates = { ...updates, status: kind === "check" ? "checking" : "installing", error: null, progress: 0 }; notify();
+    try { await updateChannel.request(kind); }
+    catch { await updateChannel.close(); throw new Error("The update connection failed."); }
+  };
   app.on("before-quit", (event) => {
     if (shutdownComplete) return;
     event.preventDefault();
@@ -588,23 +662,16 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     if (macRecording && recording.recoveryAvailable) {
       message = "Retry or discard the stopped recording before quitting. Its audio is kept in memory."; showSettings(); notify(); return;
     }
-    shutdownInProgress = true; cancelRequested = true; processing.close(); downloadAbort?.abort();
-    keyCapture = undefined; contents.setIgnoreMenuShortcuts(false);
-    void (async () => { await recordingOperation?.catch(() => {}); await downloading; await downloads.finalize();
-      await macShortcut?.close(); macPaste?.close(); await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); await waylandOverlay?.close(); })().then(() => {
-      shutdownComplete = true; tray?.destroy(); tray = undefined;
-      overlay?.destroy(); app.quit();
-    }, () => {
-      // Preserve uncertain owners and the private recovery files for explicit review.
-      shutdownInProgress = false; message = "Recording cleanup could not finish. Recording data and uncertain processes are kept."; notify();
-    });
+    void finishShutdown(false).catch(() => {});
   });
   const dispatcher = createUiDispatcher({
     windows: [{ webContentsId: contents.id, role: "main" }, ...(overlay ? [{ webContentsId: overlay.webContents.id, role: "overlay" as const }] : [])],
     handlers: {
       get_state: () => state(),
+      check_updates: () => requestUpdate("check"),
+      install_update: () => requestUpdate("install"),
       save_preferences: ({ changes }) => withRecordingControl(async () => {
-        if (changes.auto_check_updates === true) throw new Error("Update services are not configured in this build.");
+        if (changes.auto_check_updates === true && !updates.configured) throw new Error("Update services are not configured in this build.");
         if (changes.launch_at_login !== undefined && (!autostart || !loginFact)) throw new Error("Login services are unavailable in this installation.");
         if (changes.model && !catalog.models.some((model) => model.id === changes.model) && !installed.some((item) => item.model.id === changes.model)) {
           throw new Error("Unknown catalog model.");
@@ -641,20 +708,20 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         emit("state", current);
         return current;
       }),
-      complete_setup: async () => {
+      complete_setup: () => withRecordingControl(async () => {
         await preferences.completeSetup();
         emit("state", state());
-      },
+      }),
       open_login_settings: () => {
         if (!(autostart instanceof MacosAutostart)) throw new Error("Login settings are unavailable in this installation.");
         autostart.openSettings();
       },
-      save_local_processing: async ({ changes }) => {
+      save_local_processing: ({ changes }) => withRecordingControl(async () => {
         await processingProfile.update((current) => applyLocalProcessingProfilePatch(current, changes));
         const current = state();
         emit("state", current);
         return current;
-      },
+      }),
       preview_local_processing: async (input) => {
         try { return { ok: true, text: await processing.preview(input, processingProfile.snapshot()) }; }
         catch (error: unknown) {
@@ -667,7 +734,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       desktop_shortcut: () => shortcutAction("configure"),
       clear_shortcut: () => shortcutAction("clear"),
       cancel_shortcut: () => shortcutAction("cancel"),
-      enable_paste: () => action(async () => {
+      enable_paste: () => recordingAction(async () => {
         if (macPaste) {
           accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(true);
           if (!accessibilityAllowed) await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility");
@@ -675,7 +742,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         }
         if (!platformHost) throw new Error("Keyboard permission unavailable."); await platformHost.pastePermission("enable");
       }),
-      disable_paste: () => action(async () => {
+      disable_paste: () => recordingAction(async () => {
         if (macPaste) { await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"); return; }
         if (!platformHost) throw new Error("Keyboard permission unavailable."); await platformHost.pastePermission("clear");
       }),
@@ -710,6 +777,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         await inventory.remove(id); await refreshModels();
       }),
       download_model: ({ id }) => {
+        if (shutdownInProgress || updateReserved === "install") throw new Error("An update is being prepared.");
         if (downloading) throw new Error("A model download is already running.");
         if (id === preferences.snapshot().model && (recordingControl || recording.busy || recording.recoveryAvailable)) {
           throw new Error("Finish or discard the current recording before replacing its model.");
@@ -792,6 +860,14 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       if (!loadingOverlay.isDestroyed()) loadingOverlay.destroy();
       if (overlay === loadingOverlay) overlay = undefined;
     }
+  }
+  if (updateChannel) {
+    const autoCheck = (): void => {
+      if (shutdownInProgress) return;
+      if (updates.configured && preferences.snapshot().auto_check_updates && !updateReserved) void requestUpdate("check").catch(() => {});
+      autoCheckTimer = setTimeout(autoCheck, 24 * 60 * 60 * 1000);
+    };
+    autoCheckTimer = setTimeout(autoCheck, 10_000);
   }
   notify();
 }
