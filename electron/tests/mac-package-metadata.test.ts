@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
 import { SPEECH_ENTRY_FILES } from "../src/services/speech-entry-graph.js";
 import { classifyMacPublisherFixtureResult, parseMacPackageSmokeArguments, validateMacPackageUpdateConfiguration, validateUniversalMacPackageMetadata } from "./fixtures/mac-package-metadata.js";
-import { parseMacPublisherIdentity, parseMacPublisherKeychains, parseMacPublisherZipListing, parseOwnedMacPublisherArguments,
+import { MacPublisherIdentityError, parseMacPublisherIdentity, parseMacPublisherKeychains, parseMacPublisherZipListing, parseOwnedMacPublisherArguments,
   validateMacPublisherCompletion } from "./owned-macos-publisher.js";
 const artifact = { bytes: 123, sha256: "a".repeat(64) };
 function descriptor(architecture: "arm64" | "x64") {
@@ -129,10 +129,31 @@ test("owned publisher commands and keychain output reject ambiguous or unbounded
   for (const value of ['', '/unquoted\n', '"relative"\n', '"/owned/../elsewhere"\n', '"/owned"\n"/owned"\n', '"/owned\u0000key"\n']) {
     assert.throws(() => parseMacPublisherKeychains(value));
   }
-  const identity = "A".repeat(40), valid = `  1) ${identity} "WhisperFree Dev"\n     1 valid identities found\n`;
-  assert.equal(parseMacPublisherIdentity(valid), identity);
-  for (const value of ['', '     0 valid identities found\n', valid.replace('1 valid', '2 valid'), valid + valid,
-    valid.replace(identity, "A".repeat(39)), valid.replace('WhisperFree Dev', 'unexpected\nline')]) assert.throws(() => parseMacPublisherIdentity(value));
+});
+test("owned publisher selects one matching self-signed identity without granting publisher authority", () => {
+  // Grammar follows Apple's SecurityTool identity_find.c; these are synthetic parser inputs.
+  const identity = "A".repeat(40), row = `  1) ${identity} "WhisperFree Dev"`;
+  const listing = (matchingRow: string, validRows: string, matchingCount = 1, validCount = 0) =>
+    `\nPolicy: Code Signing\n  Matching identities\n${matchingRow}\n     ${matchingCount} identities found\n\n  Valid identities only\n${validRows}     ${validCount} valid identities found\n`;
+  const selfSigned = listing(`${row} (CSSMERR_TP_NOT_TRUSTED)`, "");
+  const trusted = listing(row, `${row}\n`, 1, 1);
+  assert.equal(parseMacPublisherIdentity(selfSigned), identity);
+  assert.equal(parseMacPublisherIdentity(trusted), identity);
+  for (const value of ['', '     0 valid identities found\n', selfSigned + selfSigned, selfSigned.slice(0, -1), "x".repeat(65537),
+    selfSigned.replace("  Matching identities", " Matching identities"), selfSigned.replace("  Valid identities only", " Valid identities only"),
+    selfSigned.replace(identity, "A".repeat(39)), selfSigned.replace('WhisperFree Dev', 'unexpected\nline'),
+    listing(`${row} (CSSMERR_TP_CERT_EXPIRED)`, ""), listing(`${row} (PRIVATE_ERROR)`, ""), listing(row, ""),
+    listing(`${row} (CSSMERR_TP_NOT_TRUSTED)`, `${row}\n`, 1, 1), listing(row, `${row} (CSSMERR_TP_NOT_TRUSTED)\n`, 1, 1),
+    listing(row, `${row.replace(identity, "B".repeat(40))}\n`, 1, 1), listing(row, `${row.replace('WhisperFree Dev', 'Other')}\n`, 1, 1),
+    listing(`${row}\n${row}`, "", 2), listing(row, `${row}\n${row}\n`, 1, 2), listing(row, `${row}\n`, 1, 0)]) {
+    assert.throws(() => parseMacPublisherIdentity(value), MacPublisherIdentityError);
+  }
+  assert.throws(() => parseMacPublisherIdentity(listing(`${row} (PRIVATE_ERROR)`, "")), (error: unknown) => {
+    assert.ok(error instanceof MacPublisherIdentityError);
+    assert.deepEqual({ category: error.category, matchingIdentities: error.matchingIdentities, validIdentities: error.validIdentities },
+      { category: "IDENTITY_TRUST_REFUSED", matchingIdentities: "one", validIdentities: "zero" });
+    assert.ok(!JSON.stringify(error).includes('PRIVATE_ERROR') && !error.message.includes('WhisperFree Dev')); return true;
+  });
 });
 function publisherListing(entries: readonly { path: string; kind?: string; bytes?: number }[]) {
   return `Archive:  /owned/original.zip\nZip file size: 123 bytes, number of entries: ${entries.length}\n` + entries.map((entry) =>

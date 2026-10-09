@@ -34,11 +34,38 @@ export function parseMacPublisherKeychains(output: string): readonly string[] {
   });
   assert.equal(new Set(paths).size, paths.length); return paths;
 }
+type IdentityCount = "unobserved" | "zero" | "one" | "multiple";
+export class MacPublisherIdentityError extends Error {
+  constructor(readonly category: "OUTPUT_FORMAT" | "IDENTITY_CARDINALITY" | "IDENTITY_TRUST_REFUSED" | "IDENTITY_FINGERPRINT_MISMATCH",
+    readonly matchingIdentities: IdentityCount = "unobserved", readonly validIdentities: IdentityCount = "unobserved") { super(category); }
+}
 export function parseMacPublisherIdentity(output: string): string {
-  assert.ok(output.length <= 64 * 1024 && output.endsWith("\n"));
-  const lines = output.trimEnd().split("\n"); assert.equal(lines.length, 2);
-  const match = /^[ \t]*1\)[ \t]+([a-fA-F0-9]{40})[ \t]+"[\x20-\x21\x23-\x7e]+"[ \t]*$/u.exec(lines[0]!);
-  assert.ok(match?.[1]); assert.match(lines[1]!, /^[ \t]*1 valid identities found[ \t]*$/u); return match[1];
+  if (output.length > 64 * 1024 || !output.endsWith("\n")) throw new MacPublisherIdentityError("OUTPUT_FORMAT");
+  const lines = output.slice(0, -1).split("\n"), section = lines.indexOf("  Valid identities only");
+  if (lines[0] !== "" || lines[1] !== "Policy: Code Signing" || lines[2] !== "  Matching identities" ||
+    section < 5 || lines[section - 1] !== "") throw new MacPublisherIdentityError("OUTPUT_FORMAT");
+  const matching = /^[ \t]*(0|[1-9]\d{0,2}) identities found[ \t]*$/u.exec(lines[section - 2]!);
+  const valid = /^[ \t]*(0|[1-9]\d{0,2}) valid identities found[ \t]*$/u.exec(lines.at(-1)!);
+  if (!matching?.[1] || !valid?.[1]) throw new MacPublisherIdentityError("OUTPUT_FORMAT");
+  const count = (value: string): IdentityCount => Number(value) === 0 ? "zero" : Number(value) === 1 ? "one" : "multiple";
+  const fail = (category: MacPublisherIdentityError["category"]): never => {
+    throw new MacPublisherIdentityError(category, count(matching[1]!), count(valid[1]!));
+  };
+  const matchingRows = lines.slice(3, section - 2), validRows = lines.slice(section + 1, -1);
+  if (Number(matching[1]) !== 1 || Number(valid[1]) > 1 || matchingRows.length !== 1 || validRows.length !== Number(valid[1])) fail("IDENTITY_CARDINALITY");
+  const row = /^[ \t]*1\)[ \t]+([a-fA-F0-9]{40})[ \t]+("[\x20-\x21\x23-\x7e]+")(?: \(([^\r\n]*)\))?[ \t]*$/u;
+  const identity = row.exec(matchingRows[0]!);
+  if (!identity?.[1]) return fail("OUTPUT_FORMAT");
+  // Self-signing does not establish Apple trust. Actual signing and old-publisher checks follow selection.
+  if (validRows.length === 0) {
+    if (identity[3] !== "CSSMERR_TP_NOT_TRUSTED") fail("IDENTITY_TRUST_REFUSED");
+  } else {
+    const accepted = row.exec(validRows[0]!);
+    if (!accepted?.[1]) return fail("OUTPUT_FORMAT");
+    if (identity[3] !== undefined || accepted[3] !== undefined) fail("IDENTITY_TRUST_REFUSED");
+    if (accepted[1] !== identity[1] || accepted[2] !== identity[2]) fail("IDENTITY_FINGERPRINT_MISMATCH");
+  }
+  return identity[1];
 }
 type ZipEntry = { name: string; kind: "file" | "directory" | "link"; bytes: number };
 function frameworkLink(name: string): boolean {
@@ -217,8 +244,10 @@ async function main() {
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { await main(); }
-  catch {
-    const failure = { status: "FAIL", phase, category: "OWNED_MAC_PUBLISHER_REFUSED", children };
+  catch (error: unknown) {
+    const identity = error instanceof MacPublisherIdentityError ? { identityFailure: error.category,
+      matchingIdentities: error.matchingIdentities, validIdentities: error.validIdentities } : {};
+    const failure = { status: "FAIL", phase, category: "OWNED_MAC_PUBLISHER_REFUSED", children, ...identity };
     if (evidence) await receipt(`${phase}-failure.json`, failure).catch(() => {});
     console.error(JSON.stringify(failure)); process.exitCode = 1;
   }

@@ -528,7 +528,7 @@ jobs:
           previous=()
           while IFS= read -r path; do previous+=("$path"); done < "$private/previous-keychains"
           /usr/bin/security list-keychains -d user -s "$keychain" "${previous[@]}" >/dev/null 2>&1
-          if ! SIGN_IDENTITY="$(LC_ALL=C /usr/bin/security find-identity -v -p codesigning "$keychain" 2>/dev/null | node --import tsx tests/owned-macos-publisher.ts keychain-identity)"; then
+          if ! SIGN_IDENTITY="$(LC_ALL=C /usr/bin/security find-identity -p codesigning "$keychain" 2>/dev/null | node --import tsx tests/owned-macos-publisher.ts keychain-identity)"; then
             printf '%s\n' '::error::Persistent Mac validation requires exactly one usable imported signing identity.'
             exit 1
           fi

@@ -18,16 +18,15 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | macOS dictation | Actual Intel/Apple Silicon thin Dev/Stable and same-ZIP Universal Stable packages pass sandbox, signed utilities, public-audio CPU recognition, shortcut setup/removal, migration, edited-state restart and clean exits at 5bfd71b1 | Physical microphone/TCC, actual target insertion, device changes and Metal selection remain open |
 | Linux desktop integration | Owned stock KDE 5.27 native Wayland F8, binding Quit/crash recovery and paste into separate Wayland/XWayland editors pass. Genuine X11 shortcuts and all five no-display CLI commands pass, including installed stable autostart enable/disable and generated-target restart | Expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Live LM Studio/Ollama trials and remaining provider/workflow scope are deferred to #11, outside 0.3.0; ordinary dictation remains independent |
-| Packaging and updates | Ordinary Debian/AppImage checks pass. Debian's actual packaged check/error/Quit path and fresh signed installed audit pass, including retained-snapshot mutation refusal. Canonical CI AppImage construction passes. Mac thin packages pass on Intel and ARM; earlier ordinary Mac Universal checks pass. Update controls and installation handoff are connected in source | Genuine signed upgrade/restart and actual AppImage migration, actual persistent Mac publisher/installation/relaunch, authenticated Dev replacement, DMG/release signing; confirm the corrected ZIP admission and bounded Mac signature deadline in CI |
+| Packaging and updates | A genuine signed Electron Debian 0.3.0→private 0.3.1 GUI upgrade passes with real installation, same-PID restart and preserved preferences in an offline owned container. Signed installed mutation guards and canonical AppImage construction pass. Both Mac thin and Universal runtime jobs pass on Intel and ARM | Production HTTPS/Polkit composition, native 0.2.5 transition, AppImage upgrade/migration, persistent Mac publisher/installation/relaunch, authenticated Dev replacement and signed release packages |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 ## Current package checkpoint
 
-The combined source increment passes strict typing, the normal application/shared
-UI build and 1,289 tests: 1,335 total, zero failures and 46 explicit native/opt-in
-skips in 18.51 seconds. The generated standalone Linux candidate driver imports and
-retains its explicit Debian/AppImage argument checks without executing acceptance.
-Independent source reviews pass.
+The current source increment passes strict typing, the normal application/shared
+UI build and 1,291 tests: 1,337 total, zero failures and 46 explicit native/opt-in
+skips in 17.87 seconds. Independent source reviews pass. The genuine signed
+Debian upgrade and latest Mac results are recorded below.
 
 Debian updates connect directly to the existing
 parent supervisor, V2 channel and shared Update controls. Only a canonical
@@ -59,9 +58,10 @@ The later original signed job in
 producer `a70819eb`, passes the actual installed positive, fresh mismatch and
 same-retained-snapshot mutation refusal under packaged Electron. Original source
 closure and staging removal complete before the final guard: accepted for the
-unchanged installation and refused after mutation. The original container exits0
+unchanged installation and refused after mutation. The original container exits 0
 and is removed. This supersedes the earlier audit failure without assigning its
-unlogged cause. A genuinely newer signed upgrade and same-PID exec remain open.
+unlogged cause. The later genuine Debian upgrade below establishes same-PID exec
+within its explicitly offline, owned installation scope.
 
 The next canonical CI path also wraps that same completed Stable directory in an
 AppImage, using checksum-checked appimagetool/runtime inputs without another native
@@ -69,7 +69,8 @@ build. Its separate receipt binds the fixed image, launcher and construction
 provenance before the existing owner-only signer. Both embedded and native
 verifiers require the exact signed version. Actual construction and passive
 extraction pass in CI 37907145876 at producer `d47e8d76`; the dependent signature
-job is still running at this checkpoint. Construction performs no AppImage launch
+job subsequently passes existing-key signing and exact/wrong-version verification
+for both Linux formats, plus Debian installation/audit. Construction performs no AppImage launch
 or upgrade.
 
 AppImage now connects to the existing V2 parent channel and shared Update controls.
@@ -211,6 +212,48 @@ reuse API. These unsigned packages require host glibc 2.43 and cannot establish
 Ubuntu 22.04 compatibility, signing, runtime acceptance or a genuine upgrade.
 The installed app, protected LiveDev, remote branches and public releases are
 untouched by this private construction.
+
+### Signed Debian upgrade and current Mac result
+
+[CI 37910264039](https://github.com/juferdinand/OpenWhisper/actions/runs/37910264039),
+actual synthetic producer `9e689c1a` (API head `d5f3e23a`), passes both thin Mac
+jobs, Universal construction and both ordinary Universal runtime jobs. ARM now
+completes the production signature check and reaches `restarted-original-quit`
+with the 15-second budget. This confirms this invocation; it does not identify
+the earlier delay's cause. Persistent publisher ZIP admission and the pinned
+original 0.2.5 designated-requirement admission pass, but keychain identity
+selection stops before successor signing. The reviewed correction reads matching
+Code Signing identities rather than only identities trusted by Apple's default
+policy. It admits exactly one matching identity and only the explicit
+`CSSMERR_TP_NOT_TRUSTED` exception for a self-signed certificate; all actual
+signing, original-publisher and package verification gates remain mandatory.
+Actual persistent publisher success still requires the next normal CI result.
+
+Fresh Ubuntu 22.04 packages use genuine versioned sources: 0.3.0 at `16bb0af5`
+and its private version-only 0.3.1 child `8433def6`. The second version reuses
+unchanged native inputs/artifacts. Both canonical Debian archives are signed
+with the existing key; the existing native verifier accepts their exact version
+and rejects a wrong version. Neither private version is tagged or published.
+
+The [owned Debian upgrade runner](../electron/tests/owned-debian-upgrade/README.md)
+installs the older package and drives the ordinary shared **Check now** and
+**Download & install** controls. The packaged production verifier prepares the
+actual newer signed archive. Original GUI/native PIDs are absent before real
+`dpkg --install`; installed audit, original source closure and final metadata
+guard precede real fixed-target `process.execve`. The original supervisor retains
+both PID and kernel start time. The successor confirms its actual 0.3.1 version,
+source identity and unchanged edited preferences, then quits normally. All
+observed descendants and fixture services close; the stopped container has PID 0
+and is removed. Frozen package and payload inventories remain unchanged.
+
+This is an actual Electron-to-Electron upgrade in an owned, network-disabled
+container. The feed/download are local fixtures and the installer runs as root
+only inside that namespace. It does not prove production HTTPS, Polkit consent,
+native 0.2.5 migration, AppImage upgrades or physical desktop coverage. The first
+attempt stopped before installation at the retirement/installer boundary with
+an unlogged underlying cause. After bounded kernel-PID absence observation and
+prompt harness failure reporting were added, the second attempt passes using
+the same immutable package pair. Production retirement requirements are unchanged.
 
 ### Preceding Universal failure and reviewed correction
 
