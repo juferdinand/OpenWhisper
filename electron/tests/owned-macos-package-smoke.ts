@@ -161,7 +161,22 @@ try {
   if (packageMetadata.updateConfigured) {
     stage = "owned-update-preference";
     const before = await state();
-    assert.equal(before.updates.configured, true); assert.equal(before.macos?.updates_configured, true);
+    updateConfiguration = { configured: before.updates.configured, macosConfigured: before.macos?.updates_configured,
+      status: before.updates.status, version: before.version };
+    if (!before.updates.configured || before.macos?.updates_configured !== true) {
+      const observation = await application.evaluate(({ app }) => {
+        const modules = process.getBuiltinModule("module"), path = process.getBuiltinModule("path");
+        if (!modules || !path) throw new Error("Owned updater admission diagnostics are unavailable.");
+        const appPath = app.getAppPath(), packagedRequire = modules.createRequire(path.join(appPath, "package.json"));
+        const admissionModule = packagedRequire(path.join(appPath, "dist/main/macos-update-admission.js")) as {
+          getLastMacosUpdateAdmissionObservation(): unknown;
+        };
+        return admissionModule.getLastMacosUpdateAdmissionObservation() ?? { stage: "not-attempted", outcome: "unknown" };
+      });
+      updateConfiguration = { ...updateConfiguration as object, admission: observation };
+    }
+    assert.equal(before.updates.configured, true, `Owned updater admission was refused: ${JSON.stringify(updateConfiguration)}`);
+    assert.equal(before.macos?.updates_configured, true, `Owned updater state disagrees with its admission: ${JSON.stringify(updateConfiguration)}`);
     automaticUpdatePreferencePatch = { originalAutoCheckRequested: before.preferences.auto_check_updates,
       originalUpdateStatus: before.updates.status, requestedPatch: { auto_check_updates: false },
       networkAbsence: "NOT_ASSERTED; ordinary startup may already have made an authorized read-only metadata request",

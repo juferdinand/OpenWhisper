@@ -24,8 +24,8 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 ## Current package checkpoint
 
 The current source increment passes strict typing, the normal application/shared
-UI build and 1,291 tests: 1,337 total, zero failures and 46 explicit native/opt-in
-skips in 17.87 seconds. Independent source reviews pass. The genuine signed
+UI build and 1,293 tests: 1,339 total, zero failures and 46 explicit native/opt-in
+skips in 19.02 seconds. Independent source reviews pass. The genuine signed
 Debian upgrade and latest Mac results are recorded below.
 
 Debian updates connect directly to the existing
@@ -228,6 +228,18 @@ policy. It admits exactly one matching identity and only the explicit
 `CSSMERR_TP_NOT_TRUSTED` exception for a self-signed certificate; all actual
 signing, original-publisher and package verification gates remain mandatory.
 Actual persistent publisher success still requires the next normal CI result.
+
+The following [CI 37914080106](https://github.com/juferdinand/OpenWhisper/actions/runs/37914080106)
+passes that identity correction, actual Universal signing with the existing
+identity, the original publisher requirement and signing-material cleanup.
+Runtime then stops at `owned-update-preference`: the running app does not expose
+the configured update capability, before its self/ZIP checks. The original
+admission reason was not recorded. The separate production publisher check still
+had a ten-second budget; it is now aligned to the existing 15-second strict bundle
+check. This is a possible cause, not an established diagnosis. The module retains
+one frozen, content-free observation of the original admission attempt, which the
+owned smoke reads without repeating security checks. Strict signing requirements
+are unchanged; signed installation/relaunch remains open.
 
 Fresh Ubuntu 22.04 packages use genuine versioned sources: 0.3.0 at `16bb0af5`
 and its private version-only 0.3.1 child `8433def6`. The second version reuses

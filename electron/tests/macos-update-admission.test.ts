@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { admitMacosUpdates, macosUpdatePublisherArguments } from "../src/main/macos-update-admission.js";
+import { admitMacosUpdates, getLastMacosUpdateAdmissionObservation, macosUpdatePublisherArguments } from "../src/main/macos-update-admission.js";
 import { buildIdentitySchema } from "../src/contracts/build-identity.js";
 
 const stable = buildIdentitySchema.parse({ version: 1, kind: "stable", appId: "io.github.whisperfree", productName: "OpenWhisper" });
@@ -8,6 +8,9 @@ const development = buildIdentitySchema.parse({ version: 1, kind: "development",
 const fingerprint = "0123456789abcdef0123456789abcdef01234567";
 const policy = { version: 1, repository: "juferdinand/OpenWhisper", certificateFingerprint: fingerprint };
 const bundle = "/Applications/OpenWhisper.app", executable = `${bundle}/Contents/MacOS/OpenWhisper`;
+test("admission observation is absent before the first explicit attempt", () => {
+  assert.equal(getLastMacosUpdateAdmissionObservation(), undefined);
+});
 function fixture() {
   const calls: string[] = [];
   const input = { policy: policy as unknown, identity: stable, packaged: true, currentVersion: "0.3.0", executable };
@@ -23,9 +26,26 @@ test("Mac update capability requires the fixed compiled publisher and actual run
   assert.deepEqual(result, { repository: "juferdinand/OpenWhisper", bundle, executable });
   assert.ok(Object.isFrozen(result));
   assert.deepEqual(value.calls, ["parent:/Applications", `publisher:${bundle}:${fingerprint}`, `self:${bundle}`]);
+  assert.deepEqual(getLastMacosUpdateAdmissionObservation(), { stage: "complete", outcome: "accepted" });
+  assert.ok(Object.isFrozen(getLastMacosUpdateAdmissionObservation()));
   assert.deepEqual(macosUpdatePublisherArguments(bundle, fingerprint), ["--verify", "--deep", "--strict", "--all-architectures",
     "--test-requirement", `certificate leaf = H\"${fingerprint}\"`, bundle]);
   assert.throws(() => macosUpdatePublisherArguments(bundle, "-"));
+});
+test("original admission refusal is frozen and content-free until another explicit attempt", () => {
+  const value = fixture();
+  value.effects.verifyPublisher = () => { throw new Error(`${bundle} ${fingerprint} private tool output`); };
+  assert.equal(admitMacosUpdates(value.input, value.effects), undefined);
+  const refusal = getLastMacosUpdateAdmissionObservation();
+  assert.deepEqual(refusal, { stage: "publisher", outcome: "refused", reason: "UNAVAILABLE" });
+  assert.ok(Object.isFrozen(refusal));
+  assert.equal(JSON.stringify(refusal).includes(bundle), false);
+  assert.equal(JSON.stringify(refusal).includes(fingerprint), false);
+  assert.equal(JSON.stringify(refusal).includes("private tool output"), false);
+
+  const next = fixture();
+  assert.deepEqual(admitMacosUpdates(next.input, next.effects), { repository: "juferdinand/OpenWhisper", bundle, executable });
+  assert.deepEqual(getLastMacosUpdateAdmissionObservation(), { stage: "complete", outcome: "accepted" });
 });
 test("ordinary, Dev and ad-hoc build inputs never acquire the Mac update capability", () => {
   for (const changes of [{ policy: null }, { policy: { ...policy, repository: "other/OpenWhisper" } },
