@@ -49,7 +49,7 @@ export const caseSchema = z.strictObject({ name: modeSchema, admitted: z.boolean
   reservationRefused: z.literal(true), fullReapConfirmed: z.literal(true), closeReadReceiptConfirmed: z.literal(true),
   helperExitObserved: z.literal(true), exitCode: z.number().int(), elapsedMs: z.number().nonnegative().max(20000) }).superRefine((item, context) => {
     const early = item.name === "early";
-    if (early ? item.admitted || item.firstNonceConfirmed || item.secondNonceConfirmed || item.sameBirthRunningConfirmed :
+    if (early ? item.admitted || item.firstNonceConfirmed || item.secondNonceConfirmed || item.sameBirthRunningConfirmed || item.initialLevel !== "reaped" :
       !item.admitted || !item.firstNonceConfirmed || !item.secondNonceConfirmed || !item.sameBirthRunningConfirmed || item.initialLevel !== "running")
       context.addIssue({ code: "custom", message: "Invalid admission evidence." });
   });
@@ -60,7 +60,7 @@ export const resultSchema = z.strictObject({ fixture: z.literal("macos-productio
   inputSha256: digest, bindingSha256: digest, rendererCreated: z.literal(false), audioOperations: z.literal(0), permissionOperations: z.literal(0),
   productionFactoryWired: z.literal(false), signedHelperLoadingVerified: z.literal(false), deterministicZombieVerified: z.literal(false) });
 export type FixtureResult = z.infer<typeof resultSchema>;
-export type Stage = "ready" | "verify-input" | "load" | "guards" | "spawn" | "first-challenge" | "bind" | "second-challenge" |
+export type Stage = "ready" | "verify-input" | "load" | "guards" | "spawn" | "wait-absence" | "first-challenge" | "bind" | "second-challenge" |
   "observe" | "reservation" | "request-exit" | "wait-reap" | "close-read" | "helper-exit" | "complete" | "cleanup";
 
 /** One absolute fixture deadline; late effects remain owned by their callers. */
@@ -73,6 +73,21 @@ export async function bounded<T>(effect: Promise<T>, until: number): Promise<T> 
     })]);
     if (performance.now() >= until) throw new Error("FIXTURE_DEADLINE"); return result;
   } finally { if (timer) clearTimeout(timer); }
+}
+
+/** Establish only this fixture's absent-at-bind precondition; native reap/close still must succeed. */
+export async function waitForOriginalProcessAbsence(pid: number, until: number,
+  probe: (pid: number) => void = (original) => { process.kill(original, 0); }): Promise<void> {
+  for (;;) {
+    if (performance.now() >= until) throw new Error("FIXTURE_DEADLINE");
+    try { probe(pid); }
+    catch (error: unknown) {
+      if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
+      if (performance.now() >= until) throw new Error("FIXTURE_DEADLINE");
+      return;
+    }
+    await bounded(new Promise<void>((accept) => { setTimeout(accept, 5); }), until);
+  }
 }
 export function nativeGuardCode(error: unknown): "TEARDOWN_FAILED" | "LOAD_REFUSED" {
   return error instanceof Error && "code" in error && error.code === "TEARDOWN_FAILED" ? "TEARDOWN_FAILED" : "LOAD_REFUSED";

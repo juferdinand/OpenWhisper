@@ -24,8 +24,8 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 ## Current package checkpoint
 
 The combined source increment passes strict typing, the normal application/shared
-UI build and 1,286 tests: 1,332 total, zero failures and 46 explicit native/opt-in
-skips in 18.48 seconds. The generated standalone Linux candidate driver imports and
+UI build and 1,288 tests: 1,334 total, zero failures and 46 explicit native/opt-in
+skips in 18.49 seconds. The generated standalone Linux candidate driver imports and
 retains its explicit Debian/AppImage argument checks without executing acceptance.
 Independent source reviews pass.
 
@@ -151,6 +151,23 @@ parent fixtures and five Mac transaction fixtures pass temporary aliases into
 physical-ancestry admission. Their reviewed correction canonicalizes only the
 owned temporary roots with `realpath`; production safety rules remain unchanged.
 This failure supplies no runtime result for the preceding shortcut correction.
+
+The next [CI 37906049896](https://github.com/juferdinand/OpenWhisper/actions/runs/37906049896),
+actual synthetic producer `ddbff5cd` (API head `2f3a4fb1`), passes the Mac default
+unit suite and the Intel owned native/package job. ARM stops in the production
+retirement fixture's early-exit case: the helper exit is observed while both
+native snapshots still contain process records. The fixture now waits for its
+original PID to become absent within the same case deadline, then independently
+requires native reap and close confirmation. Production retirement rules are
+unchanged; the exact record-state rejection cause was not retained.
+
+The same run's Ubuntu candidate job stops before AppImage construction at an
+informational extractor-version command. `unsquashfs -version` can print its
+valid banner and return 1; the correction accepts only status 0/1 with the expected
+banner and records the status. Constructor, extraction and signature failures
+remain mandatory failures. Actual AppImage construction/signatures and the
+corrected ARM fixture still require the next normal CI result. Persistent and
+Universal Mac dependent jobs are skipped in this run.
 
 ### Preceding Universal failure and reviewed correction
 

@@ -98,7 +98,12 @@ jobs:
             printf '%s  %s\n' "$digest" "$tools/$filename" | sha256sum --check --status
             chmod 755 "$tools/$filename"
           done
-          unsquashfs -version > "$RUNNER_TEMP/openwhisper-appimage-extractor.txt"
+          extractor_status=0
+          unsquashfs -version > "$RUNNER_TEMP/openwhisper-appimage-extractor.txt" 2>&1 || extractor_status=$?
+          test "$extractor_status" -eq 0 || test "$extractor_status" -eq 1
+          IFS= read -r extractor_version < "$RUNNER_TEMP/openwhisper-appimage-extractor.txt"
+          [[ "$extractor_version" == "unsquashfs version "[0-9]* ]]
+          printf 'versionExitCode=%s\n' "$extractor_status" >> "$RUNNER_TEMP/openwhisper-appimage-extractor.txt"
           sha256sum "$(command -v unsquashfs)" >> "$RUNNER_TEMP/openwhisper-appimage-extractor.txt"
           node --import tsx scripts/package-linux-appimage.ts \
             --directory "$RUNNER_TEMP/openwhisper-linux-canonical/OpenWhisper-Linux-x64" \

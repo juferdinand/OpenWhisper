@@ -6,7 +6,7 @@ import { performance } from "node:perf_hooks";
 import test from "node:test";
 import { macRetirementBuildLayout, validateMacProductionCompileCommands } from "../scripts/build-macos-retirement.js";
 import { abiSchema, bounded, buildManifestSchema, buildSourceNames, caseSchema, distributionNames, exportNames, guardSchema,
-  inputSchema, nativeGuardCode, payloadNames, sourceNames, validateOriginalChallenge } from "./owned-macos-production-retirement/contracts.js";
+  inputSchema, nativeGuardCode, payloadNames, sourceNames, validateOriginalChallenge, waitForOriginalProcessAbsence } from "./owned-macos-production-retirement/contracts.js";
 import type { FixtureInput } from "./owned-macos-production-retirement/contracts.js";
 import { captureDescriptor, freezeInput, sha256, verifyInput } from "./owned-macos-production-retirement/input.js";
 import { buildMacProductionRetirementFixture } from "./owned-macos-production-retirement/build-fixture.js";
@@ -36,13 +36,35 @@ test("actual categorical native guard refusal is distinct from fuse loader and g
   assert.throws(() => guardSchema.parse({ context: "worker", result: "TEARDOWN_FAILED", kernelTargetProvided: true, nodeVersion: "24.21.0", architecture: "arm64" }));
   assert.throws(() => abiSchema.parse({ version: 1, role: "production", napiVersion: 8, mainOnly: true, zombieLookupArgument: 0, probeOnly: false }));
 });
-test("early channel exit refuses admission without substituting for full kernel reap", () => {
+test("early absent-at-bind fixture requires original native reap and cannot substitute channel exit", () => {
   const early = { name: "early", admitted: false, initialLevel: "reaped", firstNonceConfirmed: false, secondNonceConfirmed: false,
     sameBirthRunningConfirmed: false, reservationRefused: true, fullReapConfirmed: true, closeReadReceiptConfirmed: true, helperExitObserved: true, exitCode: 0, elapsedMs: 1 };
-  for (const initialLevel of ["running", "non-running", "reaped"]) caseSchema.parse({ ...early, initialLevel });
+  caseSchema.parse(early);
+  for (const initialLevel of ["running", "non-running"]) assert.throws(() => caseSchema.parse({ ...early, initialLevel }));
   for (const patch of [{ admitted: true }, { firstNonceConfirmed: true }, { secondNonceConfirmed: true }, { sameBirthRunningConfirmed: true },
     { helperExitObserved: false }, { fullReapConfirmed: false }, { closeReadReceiptConfirmed: false }, { elapsedMs: 20001 }])
     assert.throws(() => caseSchema.parse({ ...early, ...patch }));
+});
+test("early fixture waits through live PID observations and accepts only original ESRCH", async () => {
+  let calls = 0;
+  await waitForOriginalProcessAbsence(42, performance.now() + 3000, (pid) => {
+    assert.equal(pid, 42); if (++calls === 3) throw Object.assign(new Error("inert absence"), { code: "ESRCH" });
+  });
+  assert.equal(calls, 3);
+  const foreign = Object.assign(new Error("inert inaccessible original"), { code: "EPERM" });
+  await assert.rejects(waitForOriginalProcessAbsence(42, performance.now() + 3000, () => { throw foreign; }), (error) => error === foreign);
+});
+test("early fixture absence cannot exceed the original monotonic deadline or accept a late ESRCH", async () => {
+  let calls = 0;
+  await assert.rejects(waitForOriginalProcessAbsence(42, performance.now() - 1, () => { calls++; })); assert.equal(calls, 0);
+  const until = performance.now() + 30;
+  await assert.rejects(waitForOriginalProcessAbsence(42, until, () => {
+    calls++;
+    const cell = new Int32Array(new SharedArrayBuffer(4));
+    while (performance.now() < until) Atomics.wait(cell, 0, 0, Math.max(1, until - performance.now()));
+    throw Object.assign(new Error("inert late absence"), { code: "ESRCH" });
+  }));
+  assert.equal(calls, 1);
 });
 test("the original helper challenge rejects old nonce frames unknown fields and changed PID epoch or nonce", () => {
   const epoch = "7dfc2166-7c3d-4272-8011-0268d6fd86dd", nonce = "fb249cbc-c53c-4108-b844-69d712ca90f5", other = "878b7420-92cb-4b89-8814-a56353ce03cf";

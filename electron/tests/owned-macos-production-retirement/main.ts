@@ -14,7 +14,7 @@ import { z } from "zod";
 import { captureMacKernelRetirementNative, MacKernelRetirementBoundary } from "../../src/services/macos-retirement-boundary.js";
 import { MacRetirementError, macProcessSnapshotSchema } from "../../src/services/macos-process-retirement.js";
 import { speechChallengeReplySchema, speechChallengeRequestSchema } from "../../src/workers/speech-control.js";
-import { abiSchema, bounded, caseSchema, exportNames, guardSchema, nativeGuardCode, resultSchema, validateOriginalChallenge } from "./contracts.js";
+import { abiSchema, bounded, caseSchema, exportNames, guardSchema, nativeGuardCode, resultSchema, validateOriginalChallenge, waitForOriginalProcessAbsence } from "./contracts.js";
 import type { FixtureResult, Stage } from "./contracts.js";
 import { verifyInput } from "./input.js";
 import { OriginalClosure } from "./lifetime.js";
@@ -169,7 +169,12 @@ async function run(root: string, distribution: string, expected: string): Promis
       const pid = await bounded(child.spawned, until); await bounded(child.ready, until);
       refuseCreate(pid, uid, 0); refuseCreate(pid, 0, process.pid); refuseCreate(pid, uid + 1, process.pid);
       let firstNonceConfirmed = false, secondNonceConfirmed = false, sameBirthRunningConfirmed = false, admitted = false;
-      if (name === "early") await bounded(child.exit, until);
+      if (name === "early") {
+        await bounded(child.exit, until);
+        // Utility exit precedes kernel reap on some schedules. Match the probe fixture's
+        // explicit absent-at-bind precondition without treating this as native proof.
+        await record("wait-absence"); await waitForOriginalProcessAbsence(pid, until);
+      }
       else { await record("first-challenge"); await challenge(child, until); firstNonceConfirmed = true; }
       const attempt: BindAttempt = { child, owner: undefined, snapshots: null, nativeError: null }; bindAttempt = attempt;
       await record("bind");
@@ -198,7 +203,8 @@ async function run(root: string, distribution: string, expected: string): Promis
         assert.equal(current.level, "running"); assert.deepEqual(current.identity, initial.identity);
         assert.equal(child.invalid, false); assert.equal(child.exited, false); sameBirthRunningConfirmed = true; admitted = true;
       } else {
-        // Channel exit refuses admission without asserting kernel retirement.
+        // PID absence only prepared the fixture; this original native bind must confirm it.
+        assert.equal(initial.canAdmit, false); assert.equal(initial.level, "reaped");
         // The original native owner below must still prove full reap and close.
         assert.equal(child.exited, true); assert.equal(child.pending, undefined); assert.equal(child.nonces.size, 0);
       }
