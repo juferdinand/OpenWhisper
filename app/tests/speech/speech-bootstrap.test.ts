@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import { createSpeechBootstrap, SpeechBootstrapError } from "../../src/workers/speech-bootstrap.js";
+import { createSpeechBootstrap, SpeechBootstrapError } from "../../src/workers/speech/speech-bootstrap.js";
 import { MAX_SPEECH_CHALLENGES, speechBootstrapArgumentsSchema, speechChallengeReplySchema,
-  speechChallengeRequestSchema } from "../../src/workers/speech-control.js";
-import { speechReplySchema } from "../../src/workers/speech-protocol.js";
-import type { NativeSpeech } from "../../src/workers/native-speech.js";
+  speechChallengeRequestSchema } from "../../src/workers/speech/speech-control.js";
+import { speechReplySchema } from "../../src/workers/speech/speech-protocol.js";
+import type { NativeSpeech } from "../../src/workers/speech/native-speech.js";
 
 function fixture() {
   const epoch = randomUUID(), binding = "/owned-app/dist/native/openwhisper_speech.node", pid = 123;

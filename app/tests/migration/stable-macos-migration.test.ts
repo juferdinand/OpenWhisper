@@ -7,8 +7,8 @@ import { StableMigrationError } from "../../src/contracts/migration/stable-migra
 import { resolveStableProfile, type StableProfile } from "../../src/services/settings/stable-profile.js";
 import { PreferenceStore } from "../../src/services/settings/preferences.js";
 import { ModelInventory } from "../../src/services/models/model-inventory.js";
-import { decodeLegacyMacosPlist, type DecodedLegacyMacosPlist } from "../../src/workers/macos-legacy-plist.js";
-import { migrateStableMacosProfile, type MacosMigrationAccess } from "../../src/workers/stable-macos-migration.js";
+import { decodeLegacyMacosPlist, type DecodedLegacyMacosPlist } from "../../src/workers/migration/macos-legacy-plist.js";
+import { migrateStableMacosProfile, type MacosMigrationAccess } from "../../src/workers/migration/stable-macos-migration.js";
 
 const context = { systemLanguage: "de-DE", loginStatus: "requires-approval", defaults: { recommendedModel: "tiny", appleSilicon: false, launchAtLogin: true } };
 const ownedPlist = `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>

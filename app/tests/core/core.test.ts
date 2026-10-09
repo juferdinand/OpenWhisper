@@ -17,7 +17,7 @@ const vectorsSchema = z.strictObject({
     cases: z.array(textCase),
   }),
 });
-const rawVectors: unknown = JSON.parse(await readFile(new URL("../../data/test-vectors.json", import.meta.url), "utf8"));
+const rawVectors: unknown = JSON.parse(await readFile(new URL("../fixtures/text/vectors.json", import.meta.url), "utf8"));
 const vectors = vectorsSchema.parse(rawVectors);
 const rawCatalog: unknown = JSON.parse(await readFile(new URL("../../data/models.json", import.meta.url), "utf8"));
 const catalog = new ModelCatalog(rawCatalog);

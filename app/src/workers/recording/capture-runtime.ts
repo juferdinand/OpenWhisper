@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { RecordingCoordinator, type CaptureBoundary, type ControlReply, type DeliveryBoundary,
-  type RecordingSnapshot, type RecoveryBoundary, type WorkContext } from "../core/recording/recording.js";
-import { AdaptiveSpeechBoundary, createUtilitySpeechEffects } from "../services/speech/adaptive-speech.js";
-import type { NativeCapturedHandle } from "../services/recording/capture.js";
-import type { SpeechClient } from "../services/speech/speech-client.js";
-import { LinuxSpeechGate } from "./speech-gate.js";
+  type RecordingSnapshot, type RecoveryBoundary, type WorkContext } from "../../core/recording/recording.js";
+import { AdaptiveSpeechBoundary, createUtilitySpeechEffects } from "../../services/speech/adaptive-speech.js";
+import type { NativeCapturedHandle } from "../../services/recording/capture.js";
+import type { SpeechClient } from "../../services/speech/speech-client.js";
+import { LinuxSpeechGate } from "../speech/speech-gate.js";
 import { recordingHostReplySchema, recordingHostRequestSchema,
   type RecordingConfiguration, type RecordingEnumeration, type RecordingHostReply,
   type RecordingHostRequest, type RecordingSource } from "./recording-host-protocol.js";
@@ -20,7 +20,7 @@ export interface CaptureRuntimeEffects {
   /** Original recording RPC cleanup; cancellation never forgets a late confirmed delivery. */
   close(): Promise<void>;
 }
-export class CaptureRuntimeError extends Error {
+class CaptureRuntimeError extends Error {
   constructor(readonly code: "INVALID_FRAME" | "TEARDOWN_FAILED" | "CLOSED") { super(`Recording host: ${code}.`); }
 }
 type Action = Exclude<RecordingHostRequest, RecordingConfiguration | RecordingEnumeration>;

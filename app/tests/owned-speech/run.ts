@@ -88,7 +88,7 @@ const policy = z.strictObject({
 
 let result = "FAIL";
 try {
-  for (const path of ["dist/main/index.js", "dist/preload/index.cjs", "dist/main/speech-channel.js", "dist/workers/speech-entry.js",
+  for (const path of ["dist/main/index.js", "dist/preload/index.cjs", "dist/workers/speech-entry.js",
     "dist/services/speech/speech-client.js", "dist/native/openwhisper_speech.node", "node_modules/electron/dist/electron"]) {
     await access(join(packageRoot, path));
   }
@@ -101,8 +101,8 @@ try {
   await writeFile(join(output, "frozen-dist.json"), JSON.stringify(distBefore, null, 2), { mode: 0o600 });
   const bootstrapSources: Record<string, string> = {};
   for (const path of ["tests/fixtures/speech-bootstrap-channel.ts", "tests/owned-speech/probe.ts", "tests/owned-speech/build-probe.ts",
-    "src/workers/speech-bootstrap.ts", "src/workers/speech-control.ts", "src/workers/speech-entry.ts", "src/workers/speech-protocol.ts",
-    "src/services/speech/speech-client.ts", "src/workers/native-speech.ts"]) {
+    "src/workers/speech/speech-bootstrap.ts", "src/workers/speech/speech-control.ts", "src/workers/speech-entry.ts", "src/workers/speech/speech-protocol.ts",
+    "src/services/speech/speech-client.ts", "src/workers/speech/native-speech.ts"]) {
     bootstrapSources[path] = await sha(join(packageRoot, path));
     const destination = join(output, "frozen-source", path);
     await mkdir(dirname(destination), { recursive: true, mode: 0o700 });

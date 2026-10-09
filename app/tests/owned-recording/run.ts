@@ -135,11 +135,11 @@ try {
   const sources: Record<string, string> = {};
   for (const path of ["tests/owned-recording/run.ts", "tests/owned-recording/build-probe.ts", "tests/owned-recording/entry.ts",
     "tests/owned-recording/probe.ts", "tests/owned-recording/contracts.ts", "tests/owned-recording.test.ts",
-    "src/main/recording-effects.ts", "src/workers/recording-effects.ts", "src/workers/recording-effects-protocol.ts",
+    "src/main/recording-effects.ts", "src/workers/recording/recording-effects.ts", "src/workers/recording/recording-effects-protocol.ts",
     "tests/fixtures/speech-bootstrap-channel.ts", "src/services/speech/speech-client.ts", "src/services/speech/adaptive-speech.ts", "src/services/recording/capture.ts",
     "src/core/recording/recording.ts", "src/core/speech/windows.ts", "src/core/text/transcript-cleaner.ts", "src/core/text/vocabulary-corrector.ts", "src/core/text/snippet-expander.ts",
-    "src/workers/native-capture.ts", "src/workers/recovery.ts", "src/workers/speech-gate.ts", "src/workers/speech-entry.ts", "src/workers/speech-bootstrap.ts", "src/workers/speech-control.ts",
-    "src/workers/speech-protocol.ts", "src/workers/native-speech.ts", "native/whisper-source.json", "native/node-headers.json"]) {
+    "src/workers/recording/native-capture.ts", "src/workers/recording/recovery.ts", "src/workers/speech/speech-gate.ts", "src/workers/speech-entry.ts", "src/workers/speech/speech-bootstrap.ts", "src/workers/speech/speech-control.ts",
+    "src/workers/speech/speech-protocol.ts", "src/workers/speech/native-speech.ts", "native/whisper-source.json", "native/node-headers.json"]) {
     sources[path] = await sha(join(packageRoot, path));
     const destination = join(output, "frozen-source", path);
     await mkdir(dirname(destination), { recursive: true, mode: 0o700 });

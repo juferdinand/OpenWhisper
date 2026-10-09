@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { bindPlatformChild, PlatformChannelError, type PlatformChild } from "../../src/main/platform-channel.js";
-import { boundPlatformFrame, platformRequestSchema, type PlatformRequest } from "../../src/workers/platform-protocol.js";
+import { boundPlatformFrame, platformRequestSchema, type PlatformRequest } from "../../src/workers/platform/platform-protocol.js";
 
 class Child extends EventEmitter implements PlatformChild {
   sent: PlatformRequest[] = []; kills = 0; confirmExit = true;

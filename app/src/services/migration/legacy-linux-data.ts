@@ -5,7 +5,7 @@ import {
 } from "../../contracts/ui/state.js";
 import { kdeKeySchema } from "../../platforms/linux/kde/keyboard.js";
 
-export class LegacyLinuxDataError extends Error {
+class LegacyLinuxDataError extends Error {
   constructor(readonly code: "INVALID_DATA" | "INVALID_RECOVERY_NAMES") {
     super(code); this.name = "LegacyLinuxDataError";
   }

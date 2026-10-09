@@ -9,7 +9,7 @@ export const developmentArtifactSchema = z.strictObject({
   sha256: z.string().regex(/^[a-f0-9]{64}$/u),
 }).readonly();
 export type DevelopmentArtifact = z.infer<typeof developmentArtifactSchema>;
-export class DevelopmentArtifactError extends Error {
+class DevelopmentArtifactError extends Error {
   constructor(readonly code: "INTEGRITY_FAILED" | "TEARDOWN_FAILED") { super(code); }
 }
 const failedClosures = new Map<string, FileHandle>();

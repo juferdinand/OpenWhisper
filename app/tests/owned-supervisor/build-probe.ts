@@ -13,7 +13,7 @@ const source = dirname(fileURLToPath(import.meta.url)), root = resolve(source, "
 const planning = "/home/juferdinand/Schreibtisch/WhisperFree/.local/planning/electron-migration";
 const publicFixtures = resolve(root, ".local/speech-fixtures");
 export const FIXED_PRODUCTION_IMPORTS = Object.freeze(["main/linux-speech-host.js", "services/speech/backend-supervisor.js", "services/models/model-inventory.js",
-  "services/settings/profiles.js", "services/speech/speech-resources.js", "services/speech/speech-entry-graph.js", "services/platform-lifecycle/process-retirement.js", "workers/speech-protocol.js", "workers/native-speech.js"]);
+  "services/settings/profiles.js", "services/speech/speech-resources.js", "services/speech/speech-entry-graph.js", "services/platform-lifecycle/process-retirement.js", "workers/speech/speech-protocol.js", "workers/speech/native-speech.js"]);
 export function externalProductionImport(path: string, importer: string): string | undefined {
   const resolved = resolve(dirname(importer), path);
   const name = FIXED_PRODUCTION_IMPORTS.find((candidate) => resolved === join(root, "src", candidate));

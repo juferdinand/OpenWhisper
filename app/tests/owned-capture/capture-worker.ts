@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
-import { loadNativeCapture, type NativeCaptureSession } from "../../src/workers/native-capture.js";
+import { loadNativeCapture, type NativeCaptureSession } from "../../src/workers/recording/native-capture.js";
 import { z } from "zod";
 
 const binding = process.argv[2], source = process.argv[3], server = process.argv[4];

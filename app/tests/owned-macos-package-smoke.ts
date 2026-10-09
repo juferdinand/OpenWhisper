@@ -9,7 +9,7 @@ import { appStateSchema, preferencesSchema, snippetSchema } from "../src/contrac
 import { buildIdentitySchema, parseApplicationBuildModule } from "../src/contracts/application/build-identity.js";
 import { validateMacBundleMetadata } from "../src/main/build-selection.js";
 import { legacyMacosMigrationContextSchema } from "../src/services/migration/legacy-macos-data.js";
-import { decodedLegacyMacosPlistSchema } from "../src/workers/macos-legacy-plist.js";
+import { decodedLegacyMacosPlistSchema } from "../src/workers/migration/macos-legacy-plist.js";
 import { pinnedRuntimeEnvironment } from "../scripts/runtime.js";
 import { macUpdateZip } from "./fixtures/mac-update-zip.js";
 import { classifyMacPublisherFixtureResult, parseMacPackageSmokeArguments, validateMacPackageUpdateConfiguration, validateUniversalMacPackageMetadata } from "./fixtures/mac-package-metadata.js";
@@ -518,11 +518,11 @@ try {
         const build = packagedRequire(path.join(root, "dist/main/development-recording-build.js")) as { DEVELOPMENT_RECORDING_BUILD: unknown };
         const schema = packagedRequire(path.join(root, "dist/main/development-recording-descriptor.js")) as typeof import("../src/main/development-recording-descriptor.js");
         const artifacts = packagedRequire(path.join(root, "dist/services/development/development-artifact.js")) as typeof import("../src/services/development/development-artifact.js");
-        const recording = packagedRequire(path.join(root, "dist/workers/macos-recording-host-protocol.js")) as typeof import("../src/workers/macos-recording-host-protocol.js");
+        const recording = packagedRequire(path.join(root, "dist/workers/recording/macos-recording-host-protocol.js")) as typeof import("../src/workers/recording/macos-recording-host-protocol.js");
         const resources = packagedRequire(path.join(root, "dist/services/speech/speech-resources.js")) as typeof import("../src/services/speech/speech-resources.js");
         const graph = packagedRequire(path.join(root, "dist/services/speech/speech-entry-graph.js")) as typeof import("../src/services/speech/speech-entry-graph.js");
-        const control = packagedRequire(path.join(root, "dist/workers/speech-control.js")) as typeof import("../src/workers/speech-control.js");
-        const protocol = packagedRequire(path.join(root, "dist/workers/speech-protocol.js")) as typeof import("../src/workers/speech-protocol.js");
+        const control = packagedRequire(path.join(root, "dist/workers/speech/speech-control.js")) as typeof import("../src/workers/speech/speech-control.js");
+        const protocol = packagedRequire(path.join(root, "dist/workers/speech/speech-protocol.js")) as typeof import("../src/workers/speech/speech-protocol.js");
         const mac = packagedRequire(path.join(root, "dist/main/macos-speech-host.js")) as typeof import("../src/main/macos-speech-host.js");
         const descriptor = schema.selectDevelopmentRecordingDescriptor(build.DEVELOPMENT_RECORDING_BUILD, { platform: "darwin", architecture: process.arch });
         requireCondition(descriptor.platform === "darwin" && descriptor.architecture === process.arch, "descriptor platform/architecture");

@@ -28,9 +28,9 @@ async function retainMetadata(directory: string, project: string, binding: strin
   await cp(join(project, "dist/native/macos-capture-notices/build-manifest.json"), join(evidence, "build-manifest.json"));
   const require = createRequire(import.meta.url);
   const hashes: Record<string, string> = {};
-  for (const name of ["src/workers/native-macos-capture.ts", "tests/owned-macos-capture.test.ts", "tests/owned-macos-capture/contracts.ts",
+  for (const name of ["src/workers/recording/native-macos-capture.ts", "tests/owned-macos-capture.test.ts", "tests/owned-macos-capture/contracts.ts",
     "tests/owned-macos-capture/build-probe.ts", "tests/owned-macos-capture/main.ts", "tests/owned-macos-capture/entry.ts", "tests/owned-macos-capture/probe.ts",
-    "dist/workers/native-macos-capture.js", "dist/workers/native-capture.js"]) {
+    "dist/workers/recording/native-macos-capture.js", "dist/workers/recording/native-capture.js"]) {
     hashes[name] = createHash("sha256").update(await readFile(join(project, name))).digest("hex");
   }
   await writeFile(join(evidence, "run-manifest.json"), JSON.stringify({ bindingSha256: createHash("sha256").update(await readFile(binding)).digest("hex"),

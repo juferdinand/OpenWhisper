@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { endianness } from "node:os";
 import type { LibraryHandle } from "koffi";
-import { StableMigrationError } from "../contracts/migration/stable-migration.js";
+import { StableMigrationError } from "../../contracts/migration/stable-migration.js";
 import { decodeLegacyMacosPlist, MAX_LEGACY_PLIST_BYTES, type DecodedLegacyMacosPlist } from "./macos-legacy-plist.js";
 
 export class MacosMigrationAdmissionError extends Error {

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { loadNativeMacCapture } from "../../src/workers/native-macos-capture.js";
-import type { MacCaptureSession } from "../../src/workers/native-macos-capture.js";
+import { loadNativeMacCapture } from "../../src/workers/recording/native-macos-capture.js";
+import type { MacCaptureSession } from "../../src/workers/recording/native-macos-capture.js";
 import { caseSchema, resultSchema } from "./contracts.js";
 import type { CaptureCase, CaptureResult } from "./contracts.js";
 

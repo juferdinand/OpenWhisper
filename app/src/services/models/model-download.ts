@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import { constants, type BigIntStats } from "node:fs";
 import { lstat, mkdtemp, open, rmdir, unlink, type FileHandle } from "node:fs/promises";
 import { isIP } from "node:net";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { z } from "zod";
+import { rootFirstPathAncestry } from "../filesystem/path-ancestry.js";
 import { modelDownloadURL, type CatalogModel } from "../../core/models/catalog.js";
 import { MAX_MODEL_BYTES, ModelInventory, ModelInventoryError, type ImportedModel, type ModelPublicationReceipt } from "./model-inventory.js";
 import { prepareHostProfile, type HostProfile } from "../settings/host-profile.js";
@@ -22,7 +23,7 @@ export interface DownloadedCatalogModel {
   /** A committed model and an unretired private staging obligation are distinct. */
   readonly cleanupPending: boolean;
 }
-export interface ModelDownloadProgress { readonly received: number; readonly total: number }
+interface ModelDownloadProgress { readonly received: number; readonly total: number }
 export interface ModelDownloadIO {
   write(file: FileHandle, bytes: Uint8Array): Promise<void>;
   sync(file: FileHandle): Promise<void>;
@@ -88,11 +89,9 @@ export function parseModelDownloadMetadata(input: DownloadHeaders): Readonly<{ b
 }
 async function directory(path: string, expected?: Inode): Promise<Inode> {
   const uid = process.getuid?.(); if (uid === undefined) fail("UNSAFE_STAGING");
-  const ancestors: string[] = [];
-  for (let cursor = path;; cursor = dirname(cursor)) { ancestors.push(cursor); if (dirname(cursor) === cursor) break; }
   let result: Inode | undefined;
   try {
-    for (const name of ancestors.reverse()) {
+    for (const name of rootFirstPathAncestry(path)) {
       const stats = await lstat(name, { bigint: true }), mode = stats.mode & 0o7777n;
       if (!stats.isDirectory() || stats.isSymbolicLink()) fail("UNSAFE_STAGING");
       if (name === path) {

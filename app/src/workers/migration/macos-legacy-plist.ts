@@ -25,7 +25,7 @@ export const nativePlistValueSchema = z.strictObject({
   path: z.array(z.union([z.string().max(MAX_LEGACY_PLIST_BYTES), z.int().min(0).max(maximumNodes)])).min(1).max(maximumDepth).readonly(),
   value: nativeProjectionSchema.readonly(),
 }).readonly();
-export type NativePlistValue = z.infer<typeof nativePlistValueSchema>;
+type NativePlistValue = z.infer<typeof nativePlistValueSchema>;
 type NativeProjection = z.infer<typeof nativeProjectionSchema>;
 export interface DecodedLegacyMacosPlist {
   readonly plist: Record<string, PlistJsonValue>;

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { NativeCaptureBoundary } from "../../src/services/recording/capture.js";
 import { captureMetadataSchema, checkedCaptureSelection, loadNativeCapture,
-  type CaptureMetadata, type NativeCaptureSession } from "../../src/workers/native-capture.js";
-import { captureReplySchema, captureRequestSchema } from "../../src/workers/capture-protocol.js";
+  type CaptureMetadata, type NativeCaptureSession } from "../../src/workers/recording/native-capture.js";
+import { captureReplySchema, captureRequestSchema } from "../../src/workers/recording/capture-protocol.js";
 
 const initial: CaptureMetadata = { generation: 1, running: false, streamClosed: false, finalSamplesFenced: false,
   failed: false, frameCount: "0", sequence: "0", sampleRate: 48000, channels: 1, level: 0 };

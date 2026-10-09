@@ -12,8 +12,8 @@ import type { DevelopmentProfile } from "../../src/services/settings/profiles.js
 import { prepareSpeechResources } from "../../src/services/speech/speech-resources.js";
 import { prepareSpeechEntryGraph } from "../../src/services/speech/speech-entry-graph.js";
 import { createLinuxProcfsReadProvider, parseLinuxProcStat, parseLinuxProcStatus } from "../../src/services/platform-lifecycle/process-retirement.js";
-import { speechRequestSchema } from "../../src/workers/speech-protocol.js";
-import { speechWindowSchema } from "../../src/workers/native-speech.js";
+import { speechRequestSchema } from "../../src/workers/speech/speech-protocol.js";
+import { speechWindowSchema } from "../../src/workers/speech/native-speech.js";
 import { boundedJson, describe } from "./files.js";
 import { cpuCatalog, inputSchema, mainIdentitySchema, jobResultSchema, validateResult, MODEL_SHA256, PCM_SHA256, type Event } from "./contract.js";
 

@@ -1,7 +1,7 @@
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 
-export const APP_ORIGIN = "app://openwhisper";
+const APP_ORIGIN = "app://openwhisper";
 export const MAIN_URL = `${APP_ORIGIN}/index.html`;
 export const OVERLAY_URL = `${MAIN_URL}?overlay=1`;
 export const CONTENT_SECURITY_POLICY = [

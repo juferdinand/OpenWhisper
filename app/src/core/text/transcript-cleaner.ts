@@ -8,5 +8,3 @@ export function cleanTranscript(raw: string): string {
     .replace(/\p{White_Space}+/gu, " ").replace(/^ +| +$/gu, "");
   return /^[\p{Punctuation}\p{White_Space}]*$/u.test(text) ? "" : text;
 }
-
-export const TranscriptCleaner = Object.freeze({ clean: cleanTranscript });

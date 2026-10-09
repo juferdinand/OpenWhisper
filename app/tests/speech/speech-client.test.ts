@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { SpeechClient, SpeechWorkerError, type SpeechChannel } from "../../src/services/speech/speech-client.js";
-import type { SpeechRequest } from "../../src/workers/speech-protocol.js";
+import type { SpeechRequest } from "../../src/workers/speech/speech-protocol.js";
 
 class OwnedChannel implements SpeechChannel {
   message: ((value: unknown) => void) | undefined;

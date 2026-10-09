@@ -1,3 +1,2 @@
-# Preserve these upstream Node.js license files verbatim; each has upstream space-before-tab indentation.
-app/native/macos-capture/NODE-HEADERS-LICENSE -whitespace
-app/native/macos-retirement/NODE-HEADERS-LICENSE -whitespace
+# Preserve this upstream Node.js license verbatim, including its space-before-tab indentation.
+app/native/NODE-HEADERS-LICENSE -whitespace

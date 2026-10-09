@@ -4,7 +4,7 @@ import { kdeRecordingSurfaceNamespace } from "../kde/recording-surface.js";
 import { HEIGHT, WIDTH, surfaceHostMessageSchema, surfaceReplySchema,
   type SurfaceRegion, type SurfaceReply } from "../../../contracts/platforms/wayland-surface.js";
 
-export type SurfacePointer = Extract<SurfaceReply, { type: "pointer" }>;
+type SurfacePointer = Extract<SurfaceReply, { type: "pointer" }>;
 type FailureStage = Extract<SurfaceReply, { type: "failed" }>["stage"];
 export interface SurfaceNative {
   applyFrame(png: Uint8Array, regions: SurfaceRegion[]): void;
@@ -103,7 +103,7 @@ function loadKoffi(): Koffi {
   return value as Koffi;
 }
 
-export function createNativeSurface(emitPointer: Parameters<SurfaceNativeFactory>[0]): SurfaceNative | null {
+function createNativeSurface(emitPointer: Parameters<SurfaceNativeFactory>[0]): SurfaceNative | null {
   let closePartial: (() => void) | undefined;
   try {
     const ffi = loadKoffi();

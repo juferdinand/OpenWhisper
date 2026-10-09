@@ -40,8 +40,8 @@ deterministic zombie driver, real PID reuse, macOS 14 runtime, signed package lo
 and production architecture/admission are separate gates. No existing factory or
 workflow is modified by this source slice.
 
-`NODE-HEADERS-LICENSE` is the complete upstream Node 24.21.0 notice snapshot, retained
-verbatim with its hash in `node-header-license.json`. The build manifest records
+`../NODE-HEADERS-LICENSE` is the shared complete upstream Node 24.21.0 notice snapshot, retained
+verbatim with its hash in `../node-header-license.json`. The build manifest records
 before/after input hashes, SDK/compiler, Mach-O architecture/minOS and addon hash.
 
 ## Separate production source role

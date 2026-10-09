@@ -10,10 +10,10 @@ import { _electron, expect, type ElectronApplication, type Page } from "@playwri
 import { z } from "zod";
 import { prepareDevelopmentProfile, resolveDevelopmentProfile } from "../../src/services/settings/profiles.js";
 import { resolveStableProfile } from "../../src/services/settings/stable-profile.js";
-import { recoveryWavHeader } from "../../src/workers/recovery.js";
+import { recoveryWavHeader } from "../../src/workers/recording/recovery.js";
 import { validateCommandOutput } from "../../src/contracts/ui/state.js";
 import type { DesktopBridge } from "../../src/contracts/ui/bridge.js";
-import { recordingHostErrorSchema } from "../../src/workers/recording-host-protocol.js";
+import { recordingHostErrorSchema } from "../../src/workers/recording/recording-host-protocol.js";
 import { kdeJournalSchema } from "../../src/platforms/linux/kde/keyboard.js";
 import { parseApplicationBuildModule } from "../../src/contracts/application/build-identity.js";
 import { parseControlStatus, type ControlWireStatus } from "../../src/platforms/linux/shared/control-status.js";

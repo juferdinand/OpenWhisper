@@ -8,8 +8,8 @@ import { MAX_UI_REQUEST_BYTES } from "../../src/contracts/ui/state.js";
 import { resolveStableProfile, type StableProfile } from "../../src/services/settings/stable-profile.js";
 import { PreferenceStore } from "../../src/services/settings/preferences.js";
 import { ModelInventory } from "../../src/services/models/model-inventory.js";
-import { migrateStableLinuxProfile, StableLinuxMigrationError } from "../../src/workers/stable-linux-migration.js";
-import { recoveryWavHeader } from "../../src/workers/recovery.js";
+import { migrateStableLinuxProfile, StableLinuxMigrationError } from "../../src/workers/migration/stable-linux-migration.js";
+import { recoveryWavHeader } from "../../src/workers/recording/recovery.js";
 
 async function fixture(run: (profile: StableProfile, root: string) => Promise<void>): Promise<void> {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "openwhisper-stable-migration-")), home = join(root, "home");

@@ -35,8 +35,8 @@ async function docker(args: string[], timeout = 90000): Promise<string> {
 }
 const inputs = ["package.json", "native/node-headers.json", "native/capture/miniaudio-source.json", "native/capture/CMakeLists.txt",
   "native/capture/capture.cpp", "native/capture/miniaudio.c", "native/capture/README.md", "native/capture/.gitignore", "native/capture/notices/miniaudio-LICENSE",
-  "native/capture/notices/miniaudio-header-LICENSE", "scripts/build-capture.ts", "src/workers/native-capture.ts",
-  "src/workers/capture-protocol.ts", "src/services/recording/capture.ts", "tests/recording/capture.test.ts", "tests/owned-capture/run-virtual.ts",
+  "native/capture/notices/miniaudio-header-LICENSE", "scripts/build-capture.ts", "src/workers/recording/native-capture.ts",
+  "src/workers/recording/capture-protocol.ts", "src/services/recording/capture.ts", "tests/recording/capture.test.ts", "tests/owned-capture/run-virtual.ts",
   "tests/owned-capture/capture-worker.ts", "tests/owned-capture/Dockerfile", "tests/owned-capture/run.ts", "scripts/fetch-speech-fixtures.ts"];
 for (const path of inputs) manifest[path] = createHash("sha256").update(await readFile(join(root, path))).digest("hex");
 const publicSpeech = publicFixtureSamples(await readFile(join(root, "vendor/whisper.cpp/samples/jfk.wav")));

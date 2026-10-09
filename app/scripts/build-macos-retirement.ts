@@ -32,14 +32,14 @@ async function buildMacRetirement(production: boolean): Promise<void> {
   if (process.platform !== "darwin" || !["arm64", "x64"].includes(process.arch)) throw new Error(production ?
     "The production retirement build requires an Apple runner." : "The retirement probe build requires an Apple runner.");
   const headers = headersSchema.parse(JSON.parse(await readFile(join(root, "native/node-headers.json"), "utf8")));
-  const license = licenseSchema.parse(JSON.parse(await readFile(join(root, "native/macos-retirement/node-header-license.json"), "utf8")));
-  if (await fileSha256(join(root, "native/macos-retirement/NODE-HEADERS-LICENSE")) !== license.sha256) throw new Error("Pinned header license did not match.");
+  const license = licenseSchema.parse(JSON.parse(await readFile(join(root, "native/node-header-license.json"), "utf8")));
+  if (await fileSha256(join(root, "native/NODE-HEADERS-LICENSE")) !== license.sha256) throw new Error("Pinned header license did not match.");
   const node = join(root, "vendor/node-headers");
   await pinnedNativeSource(`https://nodejs.org/download/release/v${headers.version}/node-v${headers.version}-headers.tar.gz`, headers.sha256, node);
   const layout = macRetirementBuildLayout(production);
   const inputs = ["native/macos-retirement/CMakeLists.txt", "native/macos-retirement/retirement.cpp", "scripts/build-macos-retirement.ts",
     ...(production ? ["scripts/build-macos-retirement-production.ts"] : []),
-    "scripts/native-dependencies.ts", "native/node-headers.json", "native/macos-retirement/node-header-license.json", "native/macos-retirement/NODE-HEADERS-LICENSE",
+    "scripts/native-dependencies.ts", "native/node-headers.json", "native/node-header-license.json", "native/NODE-HEADERS-LICENSE",
     ...["node_api.h", "node_api_types.h", "js_native_api.h", "js_native_api_types.h"].map((name) => `vendor/node-headers/include/node/${name}`)];
   const sourceHashes: Record<string, string> = {};
   for (const name of inputs) sourceHashes[name] = await fileSha256(join(root, name));
@@ -72,8 +72,8 @@ async function buildMacRetirement(production: boolean): Promise<void> {
   await cp(binding, join(root, "dist/native", `${layout.target}.node`));
   await cp(join(output, "build-manifest.json"), join(destination, "build-manifest.json"));
   await cp(join(root, "../LICENSE"), join(destination, "PROJECT-LICENSE"));
-  await cp(join(root, "native/macos-retirement/NODE-HEADERS-LICENSE"), join(destination, "NODE-HEADERS-LICENSE"));
-  await cp(join(root, "native/macos-retirement/node-header-license.json"), join(destination, "node-header-license.json"));
+  await cp(join(root, "native/NODE-HEADERS-LICENSE"), join(destination, "NODE-HEADERS-LICENSE"));
+  await cp(join(root, "native/node-header-license.json"), join(destination, "node-header-license.json"));
 }
 export async function buildMacRetirementProbe(): Promise<void> { await buildMacRetirement(false); }
 export async function buildMacRetirementProduction(): Promise<void> { await buildMacRetirement(true); }

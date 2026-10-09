@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { DeliveryBoundary, WorkContext } from "../core/recording/recording.js";
-import { SpeechWorkerError, type SpeechClient } from "../services/speech/speech-client.js";
-import { MAX_WINDOW_SAMPLES, speechWindowSchema } from "./native-speech.js";
+import type { DeliveryBoundary, WorkContext } from "../../core/recording/recording.js";
+import { SpeechWorkerError, type SpeechClient } from "../../services/speech/speech-client.js";
+import { MAX_WINDOW_SAMPLES, speechWindowSchema } from "../speech/native-speech.js";
 import { RecordingEffectError, recordingEffectReplySchema, recordingEffectRequestSchema, safeRecordingEffectError,
   type RecordingEffectReply, type RecordingEffectRequest } from "./recording-effects-protocol.js";
 

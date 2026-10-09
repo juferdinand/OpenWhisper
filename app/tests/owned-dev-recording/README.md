@@ -208,7 +208,7 @@ KGlobalAccel key availability and original D-Bus owner loss, observes all three
 original main closes and finishes with Quit while the recovered binding is active.
 This mode skips recognition/clipboard and labels its result accordingly. It
 retains source/payload hashes, sandbox/resource and exact namespace cleanup checks.
-See [the retained evidence](../../../docs/ELECTRON-DEV-EVIDENCE.md).
+See [the retained evidence](https://github.com/juferdinand/OpenWhisper/blob/122d68e4e029dbfebb8b9157ac53ab316687ebb8/docs/ELECTRON-DEV-EVIDENCE.md).
 
 During platform development, run `npm run test:platform` for portal,
 delivery receipt, preference and platform-channel regressions. Add the directly

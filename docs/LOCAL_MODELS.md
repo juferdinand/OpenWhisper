@@ -55,9 +55,10 @@ Oversized content is rejected rather than shortened. These preview bounds do not
 recording duration. Replies must contain a completed assistant text response; truncated
 answers, tool calls, refusals and unexpected control characters are rejected.
 
-The [profile schema](../app/data/local-processing.schema.json) and
-[endpoint/profile/response vectors](../app/data/local-processing-vectors.json) retain PR17's
-contract. Runtime schemas additionally validate UTF-8 bytes. Optional preferences live in
+The runtime profile contract and defaults are defined by the Zod schemas in
+`app/src/contracts/speech/local-processing.ts`. Shared endpoint, profile and response regression
+vectors live under `app/tests/fixtures/local-processing/`; runtime schemas also validate UTF-8
+bytes. Optional preferences live in
 the Dev profile's `config/settings/local-processing.json` with mode `0600`, outside ordinary
 preferences. Invalid saved content is preserved while disabled defaults are used in memory;
 only an explicit valid edit replaces that file. Unsafe filesystem paths still fail closed.

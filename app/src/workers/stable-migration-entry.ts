@@ -1,8 +1,8 @@
 import { isMainThread, parentPort, workerData } from "node:worker_threads";
 import { stableMigrationReplySchema, StableMigrationError } from "../contracts/migration/stable-migration.js";
 import { resolveStableProfile, stableProfileInputSchema, stableMacosMigrationRequestSchema } from "../services/settings/stable-profile.js";
-import { migrateStableLinuxProfile, StableLinuxMigrationError } from "./stable-linux-migration.js";
-import { migrateStableMacosProfile } from "./stable-macos-migration.js";
+import { migrateStableLinuxProfile, StableLinuxMigrationError } from "./migration/stable-linux-migration.js";
+import { migrateStableMacosProfile } from "./migration/stable-macos-migration.js";
 
 if (isMainThread || !parentPort) throw new Error("Stable migration requires its owned worker.");
 try {

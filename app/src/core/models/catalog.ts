@@ -9,9 +9,9 @@ const repository = z.string().max(1024).refine(
   (value) => value === "" || /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(value),
   { message: "Model repositories must name an owner and repository" },
 );
-export const catalogModelSchema = modelSchema.extend({ file: filename, repository }).readonly();
+const catalogModelSchema = modelSchema.extend({ file: filename, repository }).readonly();
 export type CatalogModel = z.infer<typeof catalogModelSchema>;
-export const hardwareTierSchema = z.enum(["strong", "weak", "cpuOnly"]);
+const hardwareTierSchema = z.enum(["strong", "weak", "cpuOnly"]);
 export type HardwareTier = z.infer<typeof hardwareTierSchema>;
 const pickSchema = z.strictObject({ parakeet: z.string().min(1).max(1024), whisper: z.string().min(1).max(1024) }).readonly();
 export const catalogSchema = z.strictObject({
@@ -27,7 +27,7 @@ export const catalogSchema = z.strictObject({
 export type Catalog = z.infer<typeof catalogSchema>;
 
 export function parseModelCatalog(input: unknown): Catalog { return catalogSchema.parse(input); }
-export function modelById(catalog: Catalog, id: string): CatalogModel | undefined {
+function modelById(catalog: Catalog, id: string): CatalogModel | undefined {
   return catalog.models.find((model) => model.id === id);
 }
 export function recommendationsFor(catalog: Catalog, tier: HardwareTier, language: string): CatalogModel[] {

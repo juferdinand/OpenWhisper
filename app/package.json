@@ -12,6 +12,8 @@
     "preflight": "tsx scripts/preflight.ts",
     "set-version": "tsx scripts/set-version.ts",
     "typecheck": "tsc --noEmit",
+    "lint": "oxlint --type-aware --deny-warnings --report-unused-disable-directives src scripts tests ui/src",
+    "check:unused": "knip",
     "test": "tsx --test tests/*.test.ts tests/core/*.test.ts tests/application/*.test.ts tests/build/*.test.ts tests/contracts/*.test.ts tests/development/*.test.ts tests/migration/*.test.ts tests/models/*.test.ts tests/recording/*.test.ts tests/settings/*.test.ts tests/speech/*.test.ts tests/update/common/*.test.ts tests/update/linux/*.test.ts tests/update/macos/*.test.ts tests/platforms/linux/*.test.ts tests/platforms/macos/*.test.ts tests/owned-retirement/*.test.ts tests/owned-bus-async/*.test.ts tests/owned-supervisor-fallback/*.test.ts",
     "test:platform": "tsx --test tests/platforms/linux/*.test.ts tests/platforms/macos/*.test.ts tests/recording/clipboard-output.test.ts tests/recording/delivery-receipts.test.ts tests/settings/preferences.test.ts",
     "build": "tsx scripts/build.ts",
@@ -31,6 +33,9 @@
     "@types/node": "24.19.1",
     "electron": "44.7.0",
     "esbuild": "0.28.2",
+    "knip": "6.41.0",
+    "oxlint": "1.87.0",
+    "oxlint-tsgolint": "7.0.2003",
     "tsx": "4.23.15",
     "typescript": "7.0.2",
     "yaml": "2.9.1"

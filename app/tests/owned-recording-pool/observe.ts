@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { backendIdentitySchema, backendObservationSchema, backendChallengeSchema,
   type BackendBindings, type ProvisionalBackendOwner, type RetirementBoundary } from "../../src/services/speech/backend-supervisor.js";
-import { speechRequestSchema } from "../../src/workers/speech-protocol.js";
+import { speechRequestSchema } from "../../src/workers/speech/speech-protocol.js";
 import type { SpeechChannel } from "../../src/services/speech/speech-client.js";
 import type { Event } from "../owned-supervisor/contract.js";
 

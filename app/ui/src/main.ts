@@ -1,11 +1,13 @@
 import { invoke, listen } from "./bridge";
-import { setLocale, t, type UILanguage } from "./i18n";
+import { setLocale, t } from "./i18n";
+import { escapeHtml as esc } from "./escape-html";
 import "./style.css";
 import { mountProcessingPreview } from "./local-processing";
 import type { LocalProcessingProfilePatch } from "../../src/contracts/speech/local-processing.js";
 
 import {
   preferencePatchSchema,
+  isCurrentRecordingTelemetry,
   validateCommandName,
   validateCommandInput,
   type AppState as State,
@@ -33,14 +35,6 @@ const overlay =
     .__OPENWHISPER_OVERLAY__ === true;
 document.documentElement.classList.toggle("overlay", overlay);
 app.innerHTML = '<div id="notice" role="alert" hidden></div>';
-const esc = (text: string) =>
-  text.replace(
-    /[&<>"']/g,
-    (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-        c
-      ]!,
-  );
 const option = (value: string, label: string, selected: string) =>
   `<option value="${esc(value)}" ${value === selected ? "selected" : ""}>${esc(label)}</option>`;
 const tabs: [Tab, string, string][] = [
@@ -118,28 +112,39 @@ async function command(
     return false;
   }
 }
+function enqueueWrite<T>(
+  queue: Promise<void>,
+  operation: () => Promise<T>,
+): { result: Promise<T>; next: Promise<void> } {
+  const result = queue.then(operation);
+  return { result, next: result.then(() => {}) };
+}
+async function recoverState(): Promise<boolean> {
+  try {
+    state = await invoke("get_state");
+    return true;
+  } catch {
+    return false;
+  }
+}
 // Send only the edited fields. Serializing writes also keeps delayed host replies in order.
 async function savePreferences(changes: PreferencePatch): Promise<boolean> {
   pendingPreferences++;
-  const saved = preferenceQueue.then(async () => {
+  const saved = enqueueWrite(preferenceQueue, async () => {
     try {
       state = await invoke("save_preferences", { changes });
       return true;
     } catch (error) {
       notice(String(error));
-      try {
-        state = await invoke("get_state");
-      } catch {
-        /* Keep the last confirmed state. */
-      }
+      await recoverState();
       return false;
     } finally {
       pendingPreferences--;
       if (!pendingPreferences) render();
     }
   });
-  preferenceQueue = saved.then(() => {});
-  return saved;
+  preferenceQueue = saved.next;
+  return saved.result;
 }
 async function preference(name: string, value: unknown) {
   return savePreferences(preferencePatchSchema.parse({ [name]: value }));
@@ -147,24 +152,19 @@ async function preference(name: string, value: unknown) {
 async function saveProcessingProfile(
   changes: LocalProcessingProfilePatch,
 ): Promise<boolean> {
-  const saved = processingQueue.then(async () => {
+  const saved = enqueueWrite(processingQueue, async () => {
     try {
       state = await invoke("save_local_processing", { changes });
       render();
       return true;
     } catch {
       notice("Invalid text processing profile");
-      try {
-        state = await invoke("get_state");
-        render();
-      } catch {
-        /* Retain the last confirmed state. */
-      }
+      if (await recoverState()) render();
       return false;
     }
   });
-  processingQueue = saved.then(() => {});
-  return saved;
+  processingQueue = saved.next;
+  return saved.result;
 }
 function syncProcessingPreview() {
   const root = document.querySelector<HTMLElement>("#processing-preview");
@@ -718,11 +718,13 @@ function render() {
     };
     document
       .querySelector("#save-vocabulary")!
-      .addEventListener("click", async () => {
-        if (await savePreferences({ vocabulary: vocabulary.value })) {
-          dirty = false;
-          render();
-        }
+      .addEventListener("click", () => {
+        void (async () => {
+          if (await savePreferences({ vocabulary: vocabulary.value })) {
+            dirty = false;
+            render();
+          }
+        })();
       });
   } else if (tab === "models") {
     const modelRow = (m: Model) => {
@@ -1094,6 +1096,7 @@ function snippetRow(s?: Snippet) {
 
 async function start() {
   try {
+    let receivedStateEvent = false;
     await listen("navigate", (event) => {
       if (tabs.some(([id]) => id === event.payload)) {
         tab = event.payload;
@@ -1103,10 +1106,21 @@ async function start() {
       }
     });
     await listen("state", (event) => {
+      receivedStateEvent = true;
       state = event.payload;
       render();
     });
-    state = await invoke("get_state");
+    await listen("recording_telemetry", (event) => {
+      if (!state || !isCurrentRecordingTelemetry(state, event.payload)) return;
+      state = {
+        ...state,
+        elapsed: event.payload.elapsed,
+        level: event.payload.level,
+      };
+      recordControl();
+    });
+    const initialState = await invoke("get_state");
+    if (!receivedStateEvent) state = initialState;
     if (!state.preferences.setup_completed) tab = "setup";
     else if (state.initial_tab && tabs.some(([id]) => id === state.initial_tab))
       tab = state.initial_tab === "setup" ? "general" : state.initial_tab;

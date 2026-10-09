@@ -4,17 +4,17 @@ import { z } from "zod";
 import { developmentArtifactSchema } from "../services/development/development-artifact.js";
 import { controlStatusSchema, ControlCaptureLeaseError, type ControlCaptureLease, type ControlCapturePort, type ControlStatus } from "../core/recording/control.js";
 import { boundPlatformFrame, platformCaptureRequestSchema, platformCaptureReplySchema,
-  type PlatformCaptureRequest, type PlatformCaptureReply } from "../workers/platform-protocol.js";
+  type PlatformCaptureRequest, type PlatformCaptureReply } from "../workers/platform/platform-protocol.js";
 import { createUtilityPlatformChannelFactory, PlatformChannelError, type PlatformChannel } from "./platform-channel.js";
 import { linuxApplicationIdSchema, type LinuxApplicationId, type PortalShortcutState } from "../platforms/linux/shared/portal-shortcuts.js";
 import type { PortalPasteState } from "../platforms/linux/shared/portal-paste.js";
 import { serializeControlStatus } from "../platforms/linux/shared/control-status.js";
 
-export const developmentPlatformHostDescriptorSchema = z.strictObject({
+const developmentPlatformHostDescriptorSchema = z.strictObject({
   root: z.string().min(1).refine((path) => isAbsolute(path) && resolve(path) === path && !path.includes("\0")),
   entry: developmentArtifactSchema, bus: developmentArtifactSchema,
 }).readonly();
-export type DevelopmentPlatformDescriptor = z.infer<typeof developmentPlatformHostDescriptorSchema>;
+type DevelopmentPlatformDescriptor = z.infer<typeof developmentPlatformHostDescriptorSchema>;
 type StartOwner = { readonly id: string; readonly controller: AbortController; readonly completion: Promise<PlatformCaptureReply> };
 
 /** Main owns original capture leases. An opaque worker token can never select a later GUI owner. */

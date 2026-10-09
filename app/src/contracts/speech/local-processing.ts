@@ -83,7 +83,6 @@ export const previewLocalProcessingInputSchema = z.strictObject({
 });
 export type PreviewLocalProcessingInput = z.infer<typeof previewLocalProcessingInputSchema>;
 export const cancelLocalProcessingInputSchema = z.strictObject({ requestId });
-export type CancelLocalProcessingInput = z.infer<typeof cancelLocalProcessingInputSchema>;
 export const localProcessingOutputSchema = utf8(MAX_LOCAL_PROCESSING_RESPONSE_BYTES)
   .refine((value) => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(value))
   .transform(trimWhitespace)

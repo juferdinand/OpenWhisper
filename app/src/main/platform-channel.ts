@@ -6,7 +6,7 @@ import { z } from "zod";
 import { boundPlatformFrame, platformReadySchema, platformReplySchema, platformRequestSchema, platformShortcutEventSchema,
   platformPasteEventSchema, platformFailureEventSchema,
   platformCaptureRequestSchema, platformCaptureReplySchema, type PlatformCaptureRequest, type PlatformCaptureReply,
-  type PlatformReply, type PlatformRequest } from "../workers/platform-protocol.js";
+  type PlatformReply, type PlatformRequest } from "../workers/platform/platform-protocol.js";
 import { verifyDevelopmentPlatformEntry, verifyDevelopmentLinuxBusArtifact, type DevelopmentArtifact } from "../services/development/development-artifact.js";
 import { prepareLinuxSpeechRetirement, type LinuxSpeechRetirementAllocation } from "../services/speech/linux-speech-retirement.js";
 import type { RetirementBoundary } from "../services/speech/backend-supervisor.js";

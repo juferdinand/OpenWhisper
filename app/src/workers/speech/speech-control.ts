@@ -12,7 +12,6 @@ export const speechChallengeRequestSchema = z.strictObject({
 export const speechChallengeReplySchema = z.strictObject({
   version: z.literal(1), epoch: z.string().uuid(), nonce: z.string().uuid(), pid: z.number().int().positive(),
 });
-export type SpeechChallengeRequest = z.infer<typeof speechChallengeRequestSchema>;
 export type SpeechChallengeReply = z.infer<typeof speechChallengeReplySchema>;
 
 /** A finite private control budget; ordinary work never expands nonce storage. */

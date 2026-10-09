@@ -5,27 +5,22 @@ import { z } from "zod";
 import type { CaptureBoundary, CaptureFinalization, PreparedAudio, WorkContext } from "../core/recording/recording.js";
 import { NativeCaptureBoundary, type NativeCapturedHandle, type OwnedCaptureSession } from "../services/recording/capture.js";
 import { verifyDevelopmentCaptureArtifact } from "../services/development/development-artifact.js";
-import { CaptureRuntime } from "./capture-runtime.js";
-import { loadNativeCapture } from "./native-capture.js";
-import { developmentCaptureDescriptorSchema, type RecordingConfiguration } from "./recording-host-protocol.js";
-import { WorkerRecordingEffects } from "./recording-effects.js";
-import { PrivateAudioRecovery } from "./recovery.js";
-import { loadNativeCaptureSources, PulseSourceDevices } from "./source-devices.js";
+import { CaptureRuntime } from "./recording/capture-runtime.js";
+import { workerParentPort } from "./worker-port.js";
+import { loadNativeCapture } from "./recording/native-capture.js";
+import { developmentCaptureDescriptorSchema, type RecordingConfiguration } from "./recording/recording-host-protocol.js";
+import { WorkerRecordingEffects } from "./recording/recording-effects.js";
+import { PrivateAudioRecovery } from "./recording/recovery.js";
+import { loadNativeCaptureSources, PulseSourceDevices } from "./recording/source-devices.js";
 
 // Main supplies only an epoch. Native destinations originate in this fixed entry, never argv or IPC paths.
 const epoch = (() => { try { return z.tuple([z.uuid()]).parse(process.argv.slice(2))[0]; }
   catch { throw new Error("Recording owner unavailable."); } })();
-const uid = process.getuid?.(), parent: unknown = Reflect.get(process, "parentPort");
+const uid = process.getuid?.();
 if (process.platform !== "linux" || process.type !== "utility" || uid === undefined || uid === 0 ||
-  (process.arch !== "x64" && process.arch !== "arm64") || typeof parent !== "object" || parent === null) {
-  throw new Error("Recording owner unavailable.");
-}
-const method = (name: "on" | "postMessage"): ((...args: unknown[]) => unknown) => {
-  const value: unknown = Reflect.get(parent, name);
-  if (typeof value !== "function") throw new Error("Recording owner unavailable.");
-  return (...args) => Reflect.apply(value, parent, args);
-};
-const subscribe = method("on"), post = method("postMessage");
+  (process.arch !== "x64" && process.arch !== "arm64")) throw new Error("Recording owner unavailable.");
+const parent = workerParentPort("Recording owner unavailable.");
+const subscribe = parent.on, post = parent.postMessage;
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const replies = new Set<(input: unknown) => void>(), exits = new Set<() => void>();
 const rpc = new WorkerRecordingEffects({ send: (request) => { post(request); },

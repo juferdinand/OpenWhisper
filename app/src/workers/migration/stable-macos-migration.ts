@@ -4,10 +4,10 @@ import { lstat, mkdir, open, type FileHandle } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename, join, relative, sep } from "node:path";
 import { z } from "zod";
-import { MAX_UI_REQUEST_BYTES, MAX_USER_TEXT_BYTES, preferencesSchema } from "../contracts/ui/state.js";
-import { StableMigrationError } from "../contracts/migration/stable-migration.js";
-import { convertLegacyMacosData, legacyMacosMigrationContextSchema } from "../services/migration/legacy-macos-data.js";
-import { prepareStableProfileStorage, validateStableProfile, type StableProfile } from "../services/settings/stable-profile.js";
+import { MAX_UI_REQUEST_BYTES, MAX_USER_TEXT_BYTES, preferencesSchema } from "../../contracts/ui/state.js";
+import { StableMigrationError } from "../../contracts/migration/stable-migration.js";
+import { convertLegacyMacosData, legacyMacosMigrationContextSchema } from "../../services/migration/legacy-macos-data.js";
+import { prepareStableProfileStorage, validateStableProfile, type StableProfile } from "../../services/settings/stable-profile.js";
 import { decodedLegacyMacosPlistSchema, decodeLegacyMacosPlist, type DecodedLegacyMacosPlist } from "./macos-legacy-plist.js";
 import { assertLegacyMacosHostStopped, readLegacyMacosPreferencesSnapshot } from "./macos-migration-admission.js";
 import { fail, byteSource, jsonSource, optional, safeDirectory, sameDirectory, directoryUnchanged,

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { MAX_UI_REQUEST_BYTES, MAX_USER_TEXT_BYTES, preferencesSchema, snippetSchema, type Preferences } from "../../contracts/ui/state.js";
 
-export class LegacyMacosDataError extends Error {
+class LegacyMacosDataError extends Error {
   constructor() { super("INVALID_DATA"); this.name = "LegacyMacosDataError"; }
 }
 
@@ -29,8 +29,7 @@ const inputSchema = z.strictObject({
   // MacHardware.isAppleSilicon and SMAppService requested/pending login state.
   defaults: z.strictObject({ recommendedModel: preferencesSchema.shape.model, appleSilicon: z.boolean(), launchAtLogin: z.boolean() }),
 });
-export const legacyMacosContextSchema = inputSchema.pick({ systemLanguage: true, defaults: true });
-export type LegacyMacosContext = z.infer<typeof legacyMacosContextSchema>;
+const legacyMacosContextSchema = inputSchema.pick({ systemLanguage: true, defaults: true });
 export const legacyMacosMigrationContextSchema = legacyMacosContextSchema.extend({
   loginStatus: z.enum(["enabled", "requires-approval", "not-registered", "not-found"]),
 }).refine((context) => context.defaults.launchAtLogin === (context.loginStatus === "enabled" || context.loginStatus === "requires-approval"));

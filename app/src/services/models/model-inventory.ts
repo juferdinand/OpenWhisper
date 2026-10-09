@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants, type BigIntStats } from "node:fs";
 import { link, lstat, open, opendir, rename, unlink, type FileHandle } from "node:fs/promises";
-import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
+import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
+import { rootFirstPathAncestry } from "../filesystem/path-ancestry.js";
 import { detectModelFamily, parseModelCatalog, type Catalog, type CatalogModel } from "../../core/models/catalog.js";
 import { prepareHostProfile, type HostProfile } from "../settings/host-profile.js";
 
@@ -99,11 +100,9 @@ function directoryMode(mode: bigint, legacyModels: boolean): boolean {
 async function directoryIdentity(path: string, expected?: DirectoryIdentity, legacyModels = false): Promise<DirectoryIdentity> {
   const uid = process.getuid?.();
   if (uid === undefined || !isAbsolute(path) || resolve(path) !== path || path.includes("\0")) throw new ModelInventoryError("UNSAFE_DIRECTORY");
-  const ancestors: string[] = [];
-  for (let cursor = path;; cursor = dirname(cursor)) { ancestors.push(cursor); if (dirname(cursor) === cursor) break; }
   let found: DirectoryIdentity | undefined;
   try {
-    for (const ancestor of ancestors.reverse()) {
+    for (const ancestor of rootFirstPathAncestry(path)) {
       const stats = await lstat(ancestor, { bigint: true }), mode = stats.mode & 0o7777n;
       if (!stats.isDirectory() || stats.isSymbolicLink()) throw new Error();
       if (ancestor === path) {

@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { preferencesSchema } from "../contracts/ui/state.js";
-import { recordingRequestSchema } from "../core/recording/recording.js";
+import { preferencesSchema } from "../../contracts/ui/state.js";
+import { recordingRequestSchema } from "../../core/recording/recording.js";
 import { developmentCaptureDescriptorSchema, recordingHostReplySchema } from "./recording-host-protocol.js";
-import { speechModelSchema, speechVocabularySchema } from "./native-speech.js";
+import { speechModelSchema, speechVocabularySchema } from "../speech/native-speech.js";
 
 const request = { version: z.literal(1), channel: z.literal("recording-host"), epoch: z.uuid(), id: z.uuid() };
 /** The normal Mac owner has one default AVFoundation source. No native path, TCC request or disk recovery is configurable. */

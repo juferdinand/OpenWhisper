@@ -42,7 +42,7 @@ export class Commands {
     const timer = setTimeout(() => { expired = true; halt(); }, bound);
     let code = 1;
     try {
-      code = await new Promise<number>((accept, reject) => {
+      code = await new Promise<number>((accept, _reject) => {
         child.once("error", () => accept(1)); child.once("close", (value) => accept(expired || overflow ? 1 : value ?? 1));
       });
     } finally {

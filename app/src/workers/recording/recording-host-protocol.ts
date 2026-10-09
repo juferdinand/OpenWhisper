@@ -1,8 +1,8 @@
 import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
-import { recordingRequestSchema } from "../core/recording/recording.js";
-import { preferencesSchema } from "../contracts/ui/state.js";
-import { speechModelSchema, speechVocabularySchema } from "./native-speech.js";
+import { recordingRequestSchema } from "../../core/recording/recording.js";
+import { preferencesSchema } from "../../contracts/ui/state.js";
+import { speechModelSchema, speechVocabularySchema } from "../speech/native-speech.js";
 
 const sequence = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const absolute = z.string().min(1).max(4096).refine((path) => isAbsolute(path) && resolve(path) === path && !path.includes("\0"));
@@ -25,7 +25,7 @@ export const recordingHostRequestSchema = z.discriminatedUnion("command", [
   ...(["start", "stop", "cancel", "retry", "discard", "status", "close"] as const)
     .map((command) => z.strictObject({ ...request, command: z.literal(command) })),
 ]);
-export const recordingSourceSchema = z.strictObject({ id: z.string().regex(/^[A-Za-z0-9_.:-]{1,255}$/u),
+const recordingSourceSchema = z.strictObject({ id: z.string().regex(/^[A-Za-z0-9_.:-]{1,255}$/u),
   name: z.string().max(1024).refine((value) => !value.includes("\0")), isDefault: z.boolean() }).readonly();
 export const recordingSnapshotSchema = z.strictObject({
   phase: z.enum(["idle", "starting", "recording", "stopping", "transcribing", "restoring", "discarding", "done", "error"]),

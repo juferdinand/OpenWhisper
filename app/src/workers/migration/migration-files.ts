@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { constants, lstatSync, type BigIntStats } from "node:fs";
 import { lstat, open, type FileHandle } from "node:fs/promises";
-import { MAX_UI_REQUEST_BYTES } from "../contracts/ui/state.js";
-import { StableMigrationError } from "../contracts/migration/stable-migration.js";
+import { MAX_UI_REQUEST_BYTES } from "../../contracts/ui/state.js";
+import { StableMigrationError } from "../../contracts/migration/stable-migration.js";
 
 export interface Source { readonly path: string; readonly stats: BigIntStats }
 export interface ByteSource { readonly source: Source | undefined; readonly bytes: Buffer | undefined }
@@ -12,7 +12,7 @@ export const same = (a: BigIntStats, b: BigIntStats): boolean => a.dev === b.dev
   a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs && a.mode === b.mode && a.uid === b.uid && a.nlink === b.nlink;
 export const sameDirectory = (a: BigIntStats, b: BigIntStats): boolean => a.isDirectory() && b.isDirectory() && a.dev === b.dev && a.ino === b.ino;
 export const sha256 = (bytes: Buffer): string => createHash("sha256").update(bytes).digest("hex");
-export function missing(error: unknown): boolean { return error instanceof Error && "code" in error && error.code === "ENOENT"; }
+function missing(error: unknown): boolean { return error instanceof Error && "code" in error && error.code === "ENOENT"; }
 export async function optional(path: string): Promise<BigIntStats | undefined> {
   try { return await lstat(path, { bigint: true }); } catch (error: unknown) { if (missing(error)) return undefined; throw error; }
 }

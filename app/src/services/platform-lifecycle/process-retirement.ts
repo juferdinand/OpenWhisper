@@ -7,7 +7,7 @@ import { z } from "zod";
 export const PROCFS_MAGIC = 0x9fa0n;
 export const MAX_PROC_STAT_BYTES = 4096;
 export const MAX_PROC_STATUS_BYTES = 65536;
-export const MAX_RETIREMENT_DEADLINE_MS = 8000;
+const MAX_RETIREMENT_DEADLINE_MS = 8000;
 const pidSchema = z.number().int().positive().max(0x7fff_ffff);
 const launchSchema = z.strictObject({ pid: pidSchema, uid: z.number().int().nonnegative().max(0xffff_fffe),
   parentPid: pidSchema, epoch: z.string().uuid() }).readonly();
@@ -23,7 +23,7 @@ export class ProcessRetirementError extends Error {
   readonly code = "TEARDOWN_FAILED";
   constructor() { super("Process retirement: TEARDOWN_FAILED."); this.name = "ProcessRetirementError"; }
 }
-export interface LinuxProcessIdentity {
+interface LinuxProcessIdentity {
   readonly pid: number; readonly uid: number; readonly parentPid: number; readonly startTicks: bigint; readonly epoch: string;
 }
 export interface RetirementObservation { readonly level: ProcessRetirementLevel }
@@ -42,7 +42,7 @@ export interface ProcessRetirementReadProvider {
   readonly now?: () => number;
 }
 /** Fixed-path host effects, exposed for inert filesystem tests. Never supplied by IPC. */
-export interface LinuxProcFile {
+interface LinuxProcFile {
   stat(options: Readonly<{ bigint: true }>): Promise<BigIntStats>;
   read(buffer: Buffer, offset: number, length: number, position: null): Promise<Readonly<{ bytesRead: number }>>;
   close(): Promise<void>;

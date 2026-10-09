@@ -48,7 +48,6 @@ export const developmentProfileSchema = z.strictObject({
   }).readonly(),
 }).readonly();
 
-export type DevelopmentProfileOptions = z.input<typeof developmentProfileInputSchema>;
 export type DevelopmentProfile = z.output<typeof developmentProfileSchema>;
 
 interface ProfileContext {

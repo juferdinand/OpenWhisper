@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { RecordingCoordinator } from "../../src/core/recording/recording.js";
 import type { CapturedHandle, PreparedAudio, RecoveryToken, WorkContext } from "../../src/core/recording/recording.js";
-import { PrivateAudioRecovery, RecoveryError, recoveryWavHeader } from "../../src/workers/recovery.js";
+import { PrivateAudioRecovery, RecoveryError, recoveryWavHeader } from "../../src/workers/recording/recovery.js";
 
 function context(attempt = 1): WorkContext { return { generation: 1, attempt, signal: new AbortController().signal }; }
 function audio(ctx: WorkContext = context()): PreparedAudio {

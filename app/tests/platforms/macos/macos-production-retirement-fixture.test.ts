@@ -157,7 +157,7 @@ test("source-only bundles contain actual compiled adapter imports without starti
     for (const name of payloadNames) assert.ok((await readFile(join(root, name))).byteLength > 0);
     const main = await readFile(join(root, "main.mjs"), "utf8");
     assert.match(main, /dist\/services\/platforms\/macos\/macos-retirement-boundary\.js/u);
-    assert.match(main, /dist\/workers\/speech-control\.js/u);
+    assert.match(main, /dist\/workers\/speech\/speech-control\.js/u);
     assert.match(main, /void run\(/u);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

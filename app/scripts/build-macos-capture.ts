@@ -17,13 +17,13 @@ const licenseSchema = z.strictObject({ version: z.literal("24.21.0"),
 export async function buildMacCapture(): Promise<void> {
   if (process.platform !== "darwin" || !["arm64", "x64"].includes(process.arch)) throw new Error("The macOS capture build requires an Apple runner.");
   const headers = headersSchema.parse(JSON.parse(await readFile(join(root, "native/node-headers.json"), "utf8")));
-  const license = licenseSchema.parse(JSON.parse(await readFile(join(root, "native/macos-capture/node-header-license.json"), "utf8")));
-  if (await fileSha256(join(root, "native/macos-capture/NODE-HEADERS-LICENSE")) !== license.sha256) throw new Error("Pinned header license snapshot did not match.");
+  const license = licenseSchema.parse(JSON.parse(await readFile(join(root, "native/node-header-license.json"), "utf8")));
+  if (await fileSha256(join(root, "native/NODE-HEADERS-LICENSE")) !== license.sha256) throw new Error("Pinned header license snapshot did not match.");
   const node = join(root, "vendor/node-headers");
   await pinnedNativeSource(`https://nodejs.org/download/release/v${headers.version}/node-v${headers.version}-headers.tar.gz`, headers.sha256, node);
   const inputs = ["native/macos-capture/CMakeLists.txt", "native/macos-capture/capture.mm", "native/macos-capture/reference.mm",
-    "scripts/build-macos-capture.ts", "scripts/native-dependencies.ts", "native/node-headers.json", "native/macos-capture/node-header-license.json",
-    "native/macos-capture/NODE-HEADERS-LICENSE", ...["node_api.h", "node_api_types.h", "js_native_api.h", "js_native_api_types.h"]
+    "scripts/build-macos-capture.ts", "scripts/native-dependencies.ts", "native/node-headers.json", "native/node-header-license.json",
+    "native/NODE-HEADERS-LICENSE", ...["node_api.h", "node_api_types.h", "js_native_api.h", "js_native_api_types.h"]
       .map((name) => `vendor/node-headers/include/node/${name}`)];
   const sourceHashes: Record<string, string> = {};
   for (const name of inputs) sourceHashes[name] = await fileSha256(join(root, name));
@@ -52,7 +52,7 @@ export async function buildMacCapture(): Promise<void> {
   await cp(binding, join(root, "dist/native/openwhisper_macos_capture.node"));
   await cp(join(output, "build-manifest.json"), join(destination, "build-manifest.json"));
   await cp(join(root, "../LICENSE"), join(destination, "PROJECT-LICENSE"));
-  await cp(join(root, "native/macos-capture/NODE-HEADERS-LICENSE"), join(destination, "NODE-HEADERS-LICENSE"));
-  await cp(join(root, "native/macos-capture/node-header-license.json"), join(destination, "node-header-license.json"));
+  await cp(join(root, "native/NODE-HEADERS-LICENSE"), join(destination, "NODE-HEADERS-LICENSE"));
+  await cp(join(root, "native/node-header-license.json"), join(destination, "node-header-license.json"));
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await buildMacCapture();

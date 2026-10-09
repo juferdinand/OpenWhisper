@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { catalog, CPU_SHA256, VULKAN_SHA256, ELECTRON_SHA256, LOADER, PROFILE_IMAGES, resultSchema, validateResult, validateRuntimeDerivative,
   preflightSchema, eventSchema, inputSchema, classifyCommandCompletion, waitForOriginalCommandClose, candidateSchema, mainDiagnosticSchema, serializeCandidate, serializeMainDiagnostic, boundedDiagnosticJson, MAX_METADATA_BYTES, failureMetadata, DiagnosticError, type Result, type Event, type Profile } from "./contract.js";
 import { SpeechClient, type SpeechChannel } from "../../src/services/speech/speech-client.js";
-import { speechRequestSchema } from "../../src/workers/speech-protocol.js";
+import { speechRequestSchema } from "../../src/workers/speech/speech-protocol.js";
 import { summarizeVulkanOutput, classifyMainRetirement } from "./verify-main.js";
 import { externalProductionImport } from "./build-probe.js";
 import { parseExecutionArguments, validateConfiguration } from "./run.js";

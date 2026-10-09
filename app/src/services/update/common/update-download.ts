@@ -2,6 +2,7 @@ import { constants, type BigIntStats } from "node:fs";
 import { lstat, mkdtemp, open, rmdir, unlink, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { createUpdateDownloadTransport, MODEL_DOWNLOAD_CHUNK_BYTES, type DownloadHeaders, type ModelDownloadTransport } from "../../models/model-download-transport.js";
+import { parseRawHTTPHeaders, RawHTTPHeadersError } from "../../http/raw-http-headers.js";
 import { projectLinuxUpdateFeed, projectMacosUpdateRelease, type LinuxUpdateCandidate, type MacosUpdateCandidate } from "./update-policy.js";
 import { assertPrivateUpdateDirectory, MAX_UPDATE_STAGE_BYTES, retainOwnedUpdateDownload, type OwnedUpdateDownload, type UpdateArtifactName } from "./update-staging.js";
 
@@ -52,19 +53,15 @@ function milliseconds(value: number | undefined, maximum: number): number {
   return result;
 }
 function headers(input: DownloadHeaders): Map<string, string> {
-  if (!Number.isInteger(input.status) || input.status < 100 || input.status > 599 || input.raw.length % 2) return fail("METADATA_FAILED");
-  const result = new Map<string, string>(); let size = 0;
-  for (let index = 0; index < input.raw.length; index += 2) {
-    const key = input.raw[index], value = input.raw[index + 1];
-    if (typeof key !== "string" || typeof value !== "string" || !/^[a-z0-9-]+$/iu.test(key) || /[\u0000-\u001f\u007f]/u.test(value)) return fail("METADATA_FAILED");
-    size += Buffer.byteLength(key) + Buffer.byteLength(value); if (size > 16 * 1024) return fail("METADATA_FAILED");
-    const name = key.toLowerCase();
-    if (result.has(name) && ["location", "content-length", "content-encoding", "transfer-encoding"].includes(name)) return fail("METADATA_FAILED");
-    result.set(name, value);
+  if (!Number.isInteger(input.status) || input.status < 100 || input.status > 599) return fail("METADATA_FAILED");
+  try {
+    return parseRawHTTPHeaders(input.raw, { maximumBytes: 16 * 1024,
+      rejectDuplicates: ["location", "content-length", "content-encoding", "transfer-encoding"],
+      requireIdentityEncoding: true, strictStrings: true });
+  } catch (error: unknown) {
+    if (error instanceof RawHTTPHeadersError) return fail("METADATA_FAILED");
+    throw error;
   }
-  const encoding = result.get("content-encoding");
-  if (encoding !== undefined && encoding.toLowerCase() !== "identity") return fail("METADATA_FAILED");
-  return result;
 }
 function redirect(location: string | undefined, previous: URL, initial: string): URL {
   if (!location || location.length > 8192 || /[\\\s\u0000-\u001f\u007f]/u.test(location)) return fail("REDIRECT_FAILED");

@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { recoveryWavHeader } from "../src/workers/recovery.js";
+import { recoveryWavHeader } from "../src/workers/recording/recovery.js";
 
 // Exercise the compiled production worker and consumers after the normal build.
 const require = createRequire(import.meta.url);
@@ -16,7 +16,7 @@ const appRoot = await realpath(args[1] ?? fileURLToPath(new URL("..", import.met
 const { initializeStableLinuxProfile, initializeStableMacosProfile } = require(join(appRoot, "dist/main/stable-profile-startup.js")) as typeof import("../src/main/stable-profile-startup.js");
 const { PreferenceStore } = require(join(appRoot, "dist/services/settings/preferences.js")) as typeof import("../src/services/settings/preferences.js");
 const { ModelInventory } = require(join(appRoot, "dist/services/models/model-inventory.js")) as typeof import("../src/services/models/model-inventory.js");
-const { PrivateAudioRecovery } = require(join(appRoot, "dist/workers/recovery.js")) as typeof import("../src/workers/recovery.js");
+const { PrivateAudioRecovery } = require(join(appRoot, "dist/workers/recording/recovery.js")) as typeof import("../src/workers/recording/recovery.js");
 const root = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-compiled-stable-startup-"))), home = join(root, "home");
 await mkdir(home, { mode: 0o700 });
 try {

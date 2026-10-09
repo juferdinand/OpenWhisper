@@ -182,7 +182,7 @@ async function admit(temp: string, workspace: string) {
   await receipt("admission.json", { status: "PASS", actualCheckoutProducer: producer, apiHead, sourceVersion: stage.input.arm64.version,
     architectures: ["arm64", "x64"], children, scope: "Same-run original thin signatures, receipts, native bytes and clean stable source; no publisher claim" });
 }
-async function oracle(temp: string, workspace: string) {
+async function oracle(_temp: string, _workspace: string) {
   const release = z.object({ id: z.literal(pin.release), tag_name: z.literal(pin.tag), draft: z.literal(false), prerelease: z.literal(false),
     assets: z.array(z.object({ id: z.number(), name: z.string(), size: z.number(), digest: z.string().nullable() })) }).parse(await json(join(evidence!, "old-release-api.json")));
   z.object({ ref: z.literal("refs/tags/v0.2.5"), object: z.object({ sha: z.literal(pin.commit), type: z.literal("commit") }) }).parse(await json(join(evidence!, "old-tag-api.json")));

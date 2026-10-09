@@ -6,29 +6,18 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { verifyDevelopmentLinuxBusArtifact } from "../services/development/development-artifact.js";
 import type { PortalShortcutState } from "../platforms/linux/shared/portal-shortcuts.js";
+import { workerParentPort } from "./worker-port.js";
 import { DesktopShortcuts } from "../platforms/linux/shared/desktop-shortcuts.js";
 import { kdeJournalSchema } from "../platforms/linux/kde/keyboard.js";
 import { PrivateStateStore } from "../services/settings/private-state.js";
 import { PortalPaste, type PortalPasteState } from "../platforms/linux/shared/portal-paste.js";
 import { boundPlatformFrame, platformRequestSchema, platformCaptureReplySchema, PlatformCaptureClient,
-  type PlatformReply, type PlatformRequest, type PlatformCaptureRequest } from "./platform-protocol.js";
+  type PlatformCaptureRequest, type PlatformReply, type PlatformRequest } from "./platform/platform-protocol.js";
 
-interface ParentPort {
-  on(event: "message", listener: (event: { data: unknown }) => void): unknown;
-  postMessage(value: PlatformReply | PlatformCaptureRequest | { version: 1; type: "ready" } |
-    { version: 1; type: "shortcuts"; state: PortalShortcutState } | { version: 1; type: "paste-state"; state: PortalPasteState } |
-    { version: 1; type: "failure"; code: "TEARDOWN_FAILED" }): void;
-}
-const nativePort: unknown = Reflect.get(process, "parentPort");
-if (process.platform !== "linux" || typeof nativePort !== "object" || nativePort === null) throw new Error("Platform owner unavailable.");
-const owner = nativePort;
-function portMethod(name: "on" | "postMessage"): (...args: unknown[]) => unknown {
-  const callable: unknown = Reflect.get(owner, name);
-  if (typeof callable !== "function") throw new Error("Platform owner unavailable.");
-  return (...args) => { const output: unknown = Reflect.apply(callable, owner, args); return output; };
-}
-const subscribe = portMethod("on"), send = portMethod("postMessage");
-const port: ParentPort = { on: (event, listener) => subscribe(event, listener), postMessage: (value) => { send(value); } };
+if (process.platform !== "linux") throw new Error("Platform owner unavailable.");
+const port = workerParentPort<PlatformReply | PlatformCaptureRequest | { version: 1; type: "ready" } |
+  { version: 1; type: "shortcuts"; state: PortalShortcutState } | { version: 1; type: "paste-state"; state: PortalPasteState } |
+  { version: 1; type: "failure"; code: "TEARDOWN_FAILED" }>("Platform owner unavailable.");
 const unavailable: ControlCapturePort = { status: () => "unavailable",
   wireStatus: () => ({ status: "idle", elapsed: 0n, recovery_available: false }),
   start: async () => { throw new Error("Capture unavailable."); } };

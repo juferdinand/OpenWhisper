@@ -4,25 +4,20 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { NativeCaptureBoundary, type OwnedCaptureSession } from "../services/recording/capture.js";
 import { verifyDevelopmentMacCaptureArtifact } from "../services/development/development-artifact.js";
-import { MacCaptureRuntime, MacCaptureRuntimeError } from "./macos-capture-runtime.js";
-import { loadNativeMacCapture } from "./native-macos-capture.js";
-import { developmentCaptureDescriptorSchema } from "./recording-host-protocol.js";
-import { WorkerRecordingEffects } from "./recording-effects.js";
+import { MacCaptureRuntime, MacCaptureRuntimeError } from "./recording/macos-capture-runtime.js";
+import { workerParentPort } from "./worker-port.js";
+import { loadNativeMacCapture } from "./recording/native-macos-capture.js";
+import { developmentCaptureDescriptorSchema } from "./recording/recording-host-protocol.js";
+import { WorkerRecordingEffects } from "./recording/recording-effects.js";
 
 // The trusted main supplies only the epoch. Native paths and hardware selection are fixed here.
 const epoch = (() => { try { return z.tuple([z.uuid()]).parse(process.argv.slice(2))[0]; }
   catch { throw new Error("Recording owner unavailable."); } })();
-const uid = process.getuid?.(), parent: unknown = Reflect.get(process, "parentPort");
+const uid = process.getuid?.();
 if (process.platform !== "darwin" || process.type !== "utility" || uid === undefined || uid === 0 ||
-  (process.arch !== "x64" && process.arch !== "arm64") || typeof parent !== "object" || parent === null) {
-  throw new Error("Recording owner unavailable.");
-}
-const method = (name: "on" | "postMessage"): ((...args: unknown[]) => unknown) => {
-  const value: unknown = Reflect.get(parent, name);
-  if (typeof value !== "function") throw new Error("Recording owner unavailable.");
-  return (...args) => Reflect.apply(value, parent, args);
-};
-const subscribe = method("on"), post = method("postMessage");
+  (process.arch !== "x64" && process.arch !== "arm64")) throw new Error("Recording owner unavailable.");
+const parent = workerParentPort("Recording owner unavailable.");
+const subscribe = parent.on, post = parent.postMessage;
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const replies = new Set<(input: unknown) => void>(), exits = new Set<() => void>();
 const rpc = new WorkerRecordingEffects({ send: (request) => { post(request); },

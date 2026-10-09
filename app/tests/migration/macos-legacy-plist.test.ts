@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 import { decodeLegacyMacosPlist, decodedLegacyMacosPlistSchema, nativePlistValueSchema,
-  LegacyMacosPlistError, MAX_LEGACY_PLIST_BYTES, type DecodedLegacyMacosPlist, type PlistJsonValue } from "../../src/workers/macos-legacy-plist.js";
+  LegacyMacosPlistError, MAX_LEGACY_PLIST_BYTES, type DecodedLegacyMacosPlist, type PlistJsonValue } from "../../src/workers/migration/macos-legacy-plist.js";
 
 const execute = promisify(execFile);
 const xml = (body: string): Buffer => Buffer.from(`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0">${body}</plist>`);

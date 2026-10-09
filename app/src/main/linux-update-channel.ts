@@ -11,19 +11,19 @@ const canonicalVersion = z.string().max(62).refine((value) => { try { parseUpdat
 const bindingSchema = z.strictObject({ currentVersion: canonicalVersion, nonce: z.string().regex(/^[a-f0-9]{64}$/u) });
 export type LinuxUpdateChannelBinding = z.infer<typeof bindingSchema>;
 const envelope = { version: z.literal(2), ...bindingSchema.shape };
-export const linuxUpdateCommandSchema = z.strictObject({ ...envelope, type: z.enum(["check", "install", "cancel", "retired"]) });
-export const linuxUpdatePublicStateSchema = z.discriminatedUnion("status", [
+const linuxUpdateCommandSchema = z.strictObject({ ...envelope, type: z.enum(["check", "install", "cancel", "retired"]) });
+const linuxUpdatePublicStateSchema = z.discriminatedUnion("status", [
   z.strictObject({ status: z.enum(["idle", "checking", "preparing"]) }),
   z.strictObject({ status: z.enum(["available", "prepared"]), updateVersion: canonicalVersion }),
   z.strictObject({ status: z.literal("failed"), code: z.enum(["UNAVAILABLE", "CANCELLED", "FAILED"]) }),
 ]);
 export type LinuxUpdatePublicState = z.infer<typeof linuxUpdatePublicStateSchema>;
-export const linuxUpdateResponseSchema = z.discriminatedUnion("type", [
+const linuxUpdateResponseSchema = z.discriminatedUnion("type", [
   z.strictObject({ ...envelope, type: z.literal("state"), state: linuxUpdatePublicStateSchema }),
   z.strictObject({ ...envelope, type: z.literal("retire"), updateVersion: canonicalVersion }),
 ]);
 export type LinuxUpdateResponse = z.infer<typeof linuxUpdateResponseSchema>;
-export class LinuxUpdateChannelError extends Error {
+class LinuxUpdateChannelError extends Error {
   constructor(readonly code: "INVALID_FRAME" | "INVALID_STATE" | "CHANNEL_FAILED") { super(code); this.name = "LinuxUpdateChannelError"; }
 }
 const failure = (code: LinuxUpdateChannelError["code"]): never => { throw new LinuxUpdateChannelError(code); };

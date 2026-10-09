@@ -4,10 +4,10 @@ import { setImmediate as turn } from "node:timers/promises";
 import test from "node:test";
 import type { PreparedAudio, RecoveryToken } from "../../src/core/recording/recording.js";
 import { NativeCaptureBoundary } from "../../src/services/recording/capture.js";
-import { CaptureRuntime, type CaptureRuntimeEffects } from "../../src/workers/capture-runtime.js";
-import type { CaptureMetadata, NativeCaptureSession } from "../../src/workers/native-capture.js";
+import { CaptureRuntime, type CaptureRuntimeEffects } from "../../src/workers/recording/capture-runtime.js";
+import type { CaptureMetadata, NativeCaptureSession } from "../../src/workers/recording/native-capture.js";
 import { recordingHostReplySchema, recordingHostRequestSchema,
-  type RecordingConfiguration, type RecordingHostReply, type RecordingHostRequest } from "../../src/workers/recording-host-protocol.js";
+  type RecordingConfiguration, type RecordingHostReply, type RecordingHostRequest } from "../../src/workers/recording/recording-host-protocol.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

@@ -1,8 +1,8 @@
 import { performance } from "node:perf_hooks";
 import { z } from "zod";
 import { SpeechWorkerError, type SpeechChannel } from "./speech-client.js";
-import { speechChallengeReplySchema, speechChallengeRequestSchema, MAX_SPEECH_CHALLENGES } from "../../workers/speech-control.js";
-import { speechReadySchema, speechReplySchema, speechRequestSchema } from "../../workers/speech-protocol.js";
+import { speechChallengeReplySchema, speechChallengeRequestSchema, MAX_SPEECH_CHALLENGES } from "../../workers/speech/speech-control.js";
+import { speechReadySchema, speechReplySchema, speechRequestSchema } from "../../workers/speech/speech-protocol.js";
 
 /** Host-only original child port. Never constructed from IPC or a worker frame. */
 export interface OriginalSpeechPort {

@@ -6,7 +6,7 @@ import { app, utilityProcess } from "electron";
 import { z } from "zod";
 import { createFixtureSpeechChannelFactory } from "./speech-bootstrap-channel.js";
 import { SpeechClient, SpeechWorkerError, type SpeechChannelFactory } from "../../src/services/speech/speech-client.js";
-import type { SpeechModel } from "../../src/workers/native-speech.js";
+import type { SpeechModel } from "../../src/workers/speech/native-speech.js";
 import { PARAKEET_FIXTURE } from "./parakeet-model.js";
 
 const digest = (text: string): string => createHash("sha256").update(text).digest("hex");

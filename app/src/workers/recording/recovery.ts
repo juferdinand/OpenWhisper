@@ -4,7 +4,7 @@ import { lstat, open, readdir, rename, unlink, type FileHandle } from "node:fs/p
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type {
   Ownership, PreparedAudio, RecoveryBoundary, RecoverySaved, RecoveryToken, WorkContext,
-} from "../core/recording/recording.js";
+} from "../../core/recording/recording.js";
 
 const identifier = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const blockSamples = 4096;

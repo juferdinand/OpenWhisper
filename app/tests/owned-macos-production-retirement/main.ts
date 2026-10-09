@@ -13,7 +13,7 @@ import { Worker } from "node:worker_threads";
 import { z } from "zod";
 import { captureMacKernelRetirementNative, MacKernelRetirementBoundary } from "../../src/services/platforms/macos/macos-retirement-boundary.js";
 import { MacRetirementError, macProcessSnapshotSchema } from "../../src/services/platforms/macos/macos-process-retirement.js";
-import { speechChallengeReplySchema, speechChallengeRequestSchema } from "../../src/workers/speech-control.js";
+import { speechChallengeReplySchema, speechChallengeRequestSchema } from "../../src/workers/speech/speech-control.js";
 import { abiSchema, bounded, caseSchema, exportNames, guardSchema, nativeGuardCode, resultSchema, validateOriginalChallenge, waitForOriginalProcessAbsence } from "./contracts.js";
 import type { FixtureResult, Stage } from "./contracts.js";
 import { verifyInput } from "./input.js";

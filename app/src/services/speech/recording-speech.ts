@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { preferencesSchema } from "../../contracts/ui/state.js";
-import { speechModelSchema, type SpeechModel } from "../../workers/native-speech.js";
-import { RecordingEffectError, safeRecordingEffectError } from "../../workers/recording-effects-protocol.js";
+import { speechModelSchema, type SpeechModel } from "../../workers/speech/native-speech.js";
+import { RecordingEffectError, safeRecordingEffectError } from "../../workers/recording/recording-effects-protocol.js";
 import type { BackendSpeechJob, BackendSupervisor } from "./backend-supervisor.js";
 import { ModelInventoryError, type ModelInventory, type ModelLease } from "../models/model-inventory.js";
 import type { SpeechClient } from "./speech-client.js";

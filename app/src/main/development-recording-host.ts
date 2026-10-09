@@ -13,13 +13,13 @@ import { prepareSpeechEntryGraph } from "../services/speech/speech-entry-graph.j
 import { verifyDevelopmentCaptureArtifact, verifyDevelopmentCaptureEntry,
   verifyDevelopmentMacCaptureArtifact, verifyDevelopmentMacCaptureEntry } from "../services/development/development-artifact.js";
 import { recordingHostErrorSchema, recordingHostReplySchema, recordingHostRequestSchema,
-  type RecordingHostReply, type RecordingHostRequest, type RecordingSource } from "../workers/recording-host-protocol.js";
-import { recordingEffectRequestSchema } from "../workers/recording-effects-protocol.js";
+  type RecordingHostReply, type RecordingHostRequest, type RecordingSource } from "../workers/recording/recording-host-protocol.js";
+import { recordingEffectRequestSchema } from "../workers/recording/recording-effects-protocol.js";
 import { createLinuxSpeechBindings, speechEnvironment } from "./linux-speech-host.js";
 import type { DevelopmentRecordingDescriptor } from "./development-recording-descriptor.js";
 import { DeliveryReceiptCache, MainRecordingEffects } from "./recording-effects.js";
 import type { DeliveryBoundary } from "../core/recording/recording.js";
-import { macRecordingHostRequestSchema } from "../workers/macos-recording-host-protocol.js";
+import { macRecordingHostRequestSchema } from "../workers/recording/macos-recording-host-protocol.js";
 import { createMacChildRetirementAllocator, createMacSpeechBindings, macSpeechEnvironment, type MacChildRetirementAllocation } from "./macos-speech-host.js";
 
 type SnapshotReply = Extract<RecordingHostReply, { kind: "snapshot" }>;

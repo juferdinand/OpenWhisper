@@ -3,7 +3,6 @@ import { EventEmitter } from "node:events";
 import type { ClientRequest, IncomingMessage } from "node:http";
 import type { Agent, AgentOptions, RequestOptions } from "node:https";
 import { globalAgent } from "node:https";
-import type { Socket } from "node:net";
 import { Readable } from "node:stream";
 import test from "node:test";
 import { createModelDownloadTransport, createUpdateDownloadTransport, createUpdateFeedTransport, MODEL_DOWNLOAD_CHUNK_BYTES, ModelDownloadTransportError, type ModelDownloadHTTPSIO } from "../../src/services/models/model-download-transport.js";

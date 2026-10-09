@@ -1,7 +1,7 @@
 import type {} from "electron";
-import { loadNativeSpeech } from "./native-speech.js";
-import { createSpeechBootstrap } from "./speech-bootstrap.js";
-import { speechBootstrapArgumentsSchema } from "./speech-control.js";
+import { loadNativeSpeech } from "./speech/native-speech.js";
+import { createSpeechBootstrap } from "./speech/speech-bootstrap.js";
+import { speechBootstrapArgumentsSchema } from "./speech/speech-control.js";
 
 const args = speechBootstrapArgumentsSchema.safeParse(process.argv.slice(2));
 if (!args.success || (!process.parentPort && !process.send)) process.exit(1);

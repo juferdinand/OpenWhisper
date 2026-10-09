@@ -45,7 +45,11 @@ the app requires no account or subscription.
   driven shared fallbacks.
 - `app/ui/` is the Electron-only renderer. Preserve its layout, icons, Inter font, English/German
   switch, and stable interactive controls.
-- `app/data/` contains the model catalog, schemas, and multilingual test vectors.
+- `app/data/` contains the production model catalog. Test-only local-processing and multilingual
+  vectors belong under `app/tests/fixtures/`; runtime contracts live in `app/src/contracts/`.
+- Group worker implementation modules under `app/src/workers/{recording,speech,migration,platform}/`.
+  Keep the six top-level worker entries and their emitted paths stable; update integrity graphs
+  and every package consumer together when a supporting module moves.
 - `app/native/` contains checksum-pinned native speech and focused platform bindings. Prefer the
   existing Electron/Node APIs or typed adapters before adding native code.
 - The obsolete `macos/` and `linux/` hosts are removed from this replacement branch. Their
@@ -53,6 +57,21 @@ the app requires no account or subscription.
   Exact updater and desktop reference inputs used by current tests live in
   `app/tests/fixtures/legacy-linux/`, with their hashes and provenance.
 - `VERSION` is the project version. Keep it, Electron and UI manifests, and lockfiles aligned.
+
+## Code quality
+
+- Group modules by cohesive behavior and keep platform dependencies out of the core. Prefer small
+  interfaces at real process/platform boundaries; retain schema-derived types and discriminated unions.
+- Share demonstrated common behavior through composition. Avoid static utility classes, speculative
+  base classes, empty adapters and files that merely forward calls without defining a boundary.
+- Keep one authoritative runtime schema. Test fixtures describe independent expected behavior;
+  do not maintain another handwritten schema just to compare it with the first.
+- Prefer existing APIs and maintained libraries when they satisfy the required capabilities. Verify
+  the pinned version, types, ownership and failure behavior before replacing a tested adapter.
+- Tests should cover user behavior, failures and trust boundaries. File count and LOC are review
+  signals, not deletion targets; preserve meaningful regressions and exact historical fixtures.
+- Keep durable instructions in the README-linked guides. Link chronological evidence to immutable
+  history instead of extending active documentation with another execution diary.
 
 ## Development commands
 
@@ -65,6 +84,8 @@ npm run setup --prefix app
 npm run dev --prefix app
 npm run preflight --prefix app
 npm run typecheck --prefix app
+npm run lint --prefix app
+npm run check:unused --prefix app
 npm test --prefix app
 npm run build --prefix app
 npm run build --prefix app/ui && npm run test:ui --prefix app/ui
@@ -74,7 +95,9 @@ make mac                           # Build candidate only; does not install
 
 For a renderer change, run `npm run build && npm run test:ui` in `app/ui/`. For an application
 change, run the focused tests, `npm run typecheck`, and the appropriate build. `npm run preflight`
-checks workflow syntax and shell, strict typing, formatting, and whitespace before a push.
+checks workflow syntax and shell, both TypeScript projects, typed Oxlint rules, unused code and
+dependencies with Knip, formatting, and whitespace before a push. Keep worker entries explicit
+and document individual runtime/system-tool exceptions in `app/knip.jsonc`.
 
 ## Behavior and safety constraints
 

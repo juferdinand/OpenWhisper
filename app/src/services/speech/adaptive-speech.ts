@@ -8,7 +8,7 @@ import { MAX_WINDOW_SAMPLES, MIN_WINDOW_SAMPLES, SAMPLE_RATE, planSpeechWindow, 
 } from "../../core/speech/windows.js";
 import { processTranscript } from "../../core/text/snippet-expander.js";
 import { SpeechWorkerError, type SpeechClient } from "./speech-client.js";
-import { speechModelSchema, speechTextSchema, speechVocabularySchema, speechWindowSchema } from "../../workers/native-speech.js";
+import { speechModelSchema, speechTextSchema, speechVocabularySchema, speechWindowSchema } from "../../workers/speech/native-speech.js";
 
 const ownership = { generation: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   attempt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) };

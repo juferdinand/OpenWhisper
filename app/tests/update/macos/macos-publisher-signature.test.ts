@@ -8,7 +8,6 @@ import { MACOS_UPDATE_SIGNATURE_FLAGS } from "../../../src/services/update/macos
 import { copyMacosPublisherAdversary, MacosPublisherSignatureError, readMacosPublisherRequirement } from "../../../scripts/macos-publisher-signature.js";
 
 const original = "/owned/Original.app";
-const candidate = "/owned/Candidate.app";
 const binaryRequirement = Buffer.from([0xfa, 0xde, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x01]);
 
 test("Mac publisher adversarial copy preserves relative framework links verbatim", async () => {

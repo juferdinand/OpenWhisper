@@ -104,7 +104,7 @@ are follow-up work. Model communication precedes TTS, which precedes structured 
 
 The previous chronological migration diary is preserved at the immutable
 [a0e1aff status snapshot](https://github.com/juferdinand/OpenWhisper/blob/a0e1affb9fe4abd4c62890a66ce35750a337511a/docs/ELECTRON-STATUS.md).
-Detailed owned Dev checks remain in [the Dev evidence](ELECTRON-DEV-EVIDENCE.md).
+Detailed owned Dev evidence is preserved in the [immutable source snapshot](https://github.com/juferdinand/OpenWhisper/blob/122d68e4e029dbfebb8b9157ac53ab316687ebb8/docs/ELECTRON-DEV-EVIDENCE.md).
 AppImage source/relink evidence includes an actual modified-libfuse runtime build and inert
 image extraction/FUSE-free launch; that experiment did not build a production AppImage or
 establish byte-identical/Alpine compatibility.

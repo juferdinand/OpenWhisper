@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
 import { z } from "zod";
-import { speechModelSchema, speechWindowSchema, speechLanguageSchema } from "../../src/workers/native-speech.js";
+import { speechModelSchema, speechWindowSchema, speechLanguageSchema } from "../../src/workers/speech/native-speech.js";
 import { recordingRequestSchema } from "../../src/core/recording/recording.js";
 
 const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
