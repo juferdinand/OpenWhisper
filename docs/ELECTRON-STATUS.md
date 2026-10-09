@@ -18,10 +18,49 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | macOS dictation | Actual Intel/Apple Silicon Dev packages pass sandbox, signed utilities, CPU recognition of public audio, shortcut setup/removal and original Quit. Normal stable packages pass migration, edited-state restart and clean exits at b892d86 | Physical microphone/TCC, actual target insertion and device changes; Metal selection remains open |
 | Linux desktop integration | Owned stock KDE 5.27 native Wayland F8, binding Quit/crash recovery and paste into separate Wayland/XWayland editors pass. Genuine X11 shortcuts and all five no-display CLI commands pass, including installed stable autostart enable/disable and generated-target restart | Expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
-| Packaging and updates | Ubuntu22 .deb and AppImage construction/runtime pass. Fresh Dev installation and normal Mac stable runtime pass. Fixed-key Linux verification includes real files and actual Electron execution; actual Mac signatures and ZIP roundtrips pass on Intel/Apple Silicon. Original-file staging, bounded download and AppImage admission/autostart are implemented | Actual new AppImage admission/autostart runtime, installation/restart/rollback, persistent publisher continuity, authenticated Dev replacement, universal DMG+ZIP and release signing |
+| Packaging and updates | Fresh Ubuntu22 AppImage passes permanent-launch admission, autostart and the complete owned runtime. Debian metadata consumer passes in actual embedded Node; original-file downloads, signatures and Mac ZIP roundtrips pass. Universal Mac constructor is implemented | Actual universal construction/runtime, installation/restart/rollback, persistent publisher continuity, authenticated Dev replacement, DMG and release signing |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 ## Current package checkpoint
+
+Fresh clean `340dee3fb60cbf5abf6819553d9b575848919305` Ubuntu22 packages
+retain their original source inventory. The 119,618,040-byte AppImage has
+SHA-256 `40156f21310f03a06cd114217163586b2d355f3c209c86c0e1d94cd579341873`.
+Its complete owned runtime passes eighteen checks in 74.44 seconds: actual
+permanent-launch admission, read-only preservation of the legacy autostart
+entry, explicit UI disable/enable, generated launcher/image restart, disabled
+state across another restart, command control, native X11, CPU dictation,
+clipboard/history, Retry/Discard and secondary resource survival. All three
+original image/process chains exit normally and their private extraction trees
+disappear. The first attempt failed a contradictory test seed; changing only
+that seed produced this result with the same immutable package. Real login,
+physical devices and update replacement remain separate.
+
+Both original owned Mac jobs in
+[CI 37873249720](https://github.com/juferdinand/OpenWhisper/actions/runs/37873249720)
+pass Dev and stable ZIP/signature checks and normal original exits. API head is
+`340dee3f`; the actual thin package producer is synthetic PR merge
+`bcf527b8b1f51d5705a9b92b5cc664b2e77786b3`. The universal constructor now
+uses exactly pinned official `@electron/universal` with common V2 metadata,
+both locked Koffi variants and architecture-indexed original receipts. It
+retains thin inputs, checks common bytes and both native slices, captures final
+native hashes after signing and verifies the ZIP roundtrip. Portable fixture
+tests and independent review are separate from the pending actual Darwin
+construction and universal runtime.
+
+The inactive Debian installer consumer authenticates the original private
+download again, reads exact package/version/architecture through retained fd3,
+and admits one fixed Polkit/dpkg transaction. Its eight checks pass in unchanged
+Electron 44.7.0 / Node 24.21.0 with actual `dpkg-deb`; install effects remain
+synthetic. No privileged install or restart took place. Application wiring,
+post-native-cleanup restart and rollback remain open.
+
+This combined source increment passes strict typing, the normal app/shared-UI
+build and 1174 unit tests in 17.55 seconds, with zero failures and 34 explicit
+native/opt-in skips. The separate eight-case embedded Debian check above has no
+skips. Independent source reviews pass for both new consumers and the harness.
+
+Earlier package checkpoints follow with their original producers and scopes.
 
 [CI37862779046](https://github.com/juferdinand/OpenWhisper/actions/runs/37862779046)
 passes all six jobs at clean `b892d861921fd51c6a1de2e35c987a0bd620ac9b`, including

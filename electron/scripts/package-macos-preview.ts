@@ -110,6 +110,9 @@ async function verifyDescriptor(root: string, value: DevelopmentRecordingDescrip
   ] as const) if (JSON.stringify(await digest(join(root, path))) !== JSON.stringify(expected)) throw new Error(`Captured native input changed: ${path}.`);
 }
 
+export { descriptor as readMacPreviewRecordingDescriptor, verifyDescriptor as verifyMacPreviewRecordingDescriptor,
+  files as inspectMacPreviewFiles, digest as digestMacPreviewFile, verifyBundleMetadata as verifyMacPreviewBundleMetadata };
+
 /** Build-time finalization after codesign. Runtime admission never calls this function. */
 export async function captureSignedMacDescriptor(root: string, original: DevelopmentRecordingDescriptor): Promise<DevelopmentRecordingDescriptor> {
   if (original.platform !== "darwin") throw new Error("The preview requires a Darwin recording build.");

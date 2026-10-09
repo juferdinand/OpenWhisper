@@ -1,5 +1,17 @@
 # Owned normal Linux Dev recording
 
+For the fresh clean `340dee3fb60cbf5abf6819553d9b575848919305` AppImage candidate,
+append `--appimage-admission` after `--stable-package --appimage-bundle /absolute/bundle`.
+The ordinary older AppImage mode retains its original b892 package pins and unavailable
+admission expectation. The new mode checks the fresh construction receipt against the
+exact reference package and producer, then uses that captured image hash throughout.
+It seeds the native legacy autostart entry and preserves its bytes/inode/request on
+startup and focus. The ordinary UI disables then enables it into the exact permanent
+launcher-plus-image target. That generated target restarts the app; another disable,
+normal restart and re-enable verifies retained state. Existing recording, CLI, secondary
+resource survival and all original cleanup checks remain. No actual login session,
+host installation, update authority or signed public-release acceptance is claimed.
+
 This maintainer fixture exercises the normal main/preload/shared UI and recording utility,
 not a replacement recording entry. It uses private generated Pulse audio and public pinned
 Tiny/JFK fixtures, real CPU recognition, private clipboard readback, recovery Retry/Discard

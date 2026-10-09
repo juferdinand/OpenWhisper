@@ -1,6 +1,69 @@
 # Electron development evidence
 
-## Mac ZIP acceptance and next installed-launch source increment
+## Fresh permanent AppImage runtime and reviewed universal/installer source
+
+The exact clean `340dee3fb60cbf5abf6819553d9b575848919305` source produces a
+119,618,040-byte AppImage with SHA-256
+`40156f21310f03a06cd114217163586b2d355f3c209c86c0e1d94cd579341873`.
+The Ubuntu22 construction checks retain all 696 tracked source inputs and verify
+native ABI, package metadata, notices and extracted payloads. Cached dependency
+selection and its initial refused mismatches are recorded separately; no older
+package is relabeled as this producer.
+
+The first matching runtime exits normally with a failed assertion in 10.63
+seconds: actual effective autostart was true, but the test's own persisted legacy
+seed was false. One reviewed seed correction retains the original failure and
+the same immutable image. The corrected complete owned runtime passes all
+eighteen checks in 74.44 seconds. Permanent AppImage admission is AVAILABLE;
+ordinary startup/focus preserve the native legacy desktop bytes, inode and
+timestamps. Explicit shared-UI disable/enable produces the exact permanent
+launcher/image pair. That generated pair restarts edited state; another normal
+restart preserves disabled state, and re-enable succeeds. CPU recognition,
+clipboard/history, Retry/Discard, native X11, all five no-display commands and
+secondary activation/resource survival pass in the same run.
+
+All three original launcher/runtime/main chains exit 0 without a signal; PIDs
+and extraction trees disappear. Original Docker commands close, private servers
+close and the namespace is removed. Returned/source package, launcher and image
+pins match. This is offline UID1000 Kubuntu24/Xvfb/private generated audio
+evidence, without FUSE, host sockets/devices, physical microphone/GPU, real login
+or update replacement claims.
+
+Both original owned Mac jobs in
+[CI 37873249720](https://github.com/juferdinand/OpenWhisper/actions/runs/37873249720)
+pass Dev/stable ZIP and signature cases, edited-state restart and original
+normal exits. API head is `340dee3f`; actual thin checkout/package producer is
+`bcf527b8b1f51d5705a9b92b5cc664b2e77786b3`. No rerun or replacement build was
+dispatched. These thin ad-hoc packages remain distinct from universal and
+persistent publisher acceptance.
+
+The independently reviewed universal constructor uses exactly pinned official
+`@electron/universal` 3.0.6. Only fresh copies receive the common V2 descriptor,
+locked Koffi union and architecture-indexed original receipts. The merger has
+two literal native skip paths, no broad wildcard, forced replacement or ASAR
+shim. Common resources, internal links, original snapshots and both Mach-O
+slices are checked; native signing precedes final descriptor capture, nested/
+outer signing and exact ZIP roundtrip. Nineteen focused constructor/preview
+checks pass. This is portable inert-header/private-file evidence; actual Darwin
+merging, universal execution and certificate continuity remain open.
+
+The inactive Debian consumer verifies the original fixed-key/version signature
+again, reads fixed metadata through retained fd3 and admits one Polkit-owned
+transaction. Eight unchanged tests pass in actual Electron44.7.0/Node24.21.0
+using real `dpkg-deb` and pinned public 0.2.5 bytes. Install outcomes use synthetic
+effects; no `pkexec`, installation or restart occurs. The original test exits 0
+in an 11.29-second complete lifecycle; package/fixture pins remain equal and
+private stages disappear. The idle container's separate teardown exits137 after
+the test closes normally. Application wiring, privileged installation,
+post-native-cleanup restart and rollback are separate gates.
+
+Combined source checks pass strict typing, normal app/shared-UI build and
+1174 unit tests in 17.55 seconds, with 34 explicit native/opt-in skips and zero
+failures. The skipped optional Debian asset cases are covered separately by the
+eight-case actual embedded-Node run above. New source and harness each received
+independent review.
+
+## Historical Mac ZIP acceptance and installed-launch source increment
 
 Both original owned Mac jobs in
 [CI 37871798972](https://github.com/juferdinand/OpenWhisper/actions/runs/37871798972)
