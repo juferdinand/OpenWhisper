@@ -18,7 +18,7 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | macOS dictation | Actual Intel/Apple Silicon thin Dev/Stable and same-ZIP Universal Stable packages pass sandbox, signed utilities, public-audio CPU recognition, shortcut setup/removal, migration, edited-state restart and clean exits at 5bfd71b1 | Physical microphone/TCC, actual target insertion, device changes and Metal selection remain open |
 | Linux desktop integration | Owned stock KDE 5.27 native Wayland F8, binding Quit/crash recovery and paste into separate Wayland/XWayland editors pass. Genuine X11 shortcuts and all five no-display CLI commands pass, including installed stable autostart enable/disable and generated-target restart | Expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Live LM Studio/Ollama trials and remaining provider/workflow scope are deferred to #11, outside 0.3.0; ordinary dictation remains independent |
-| Packaging and updates | A genuine signed Electron Debian 0.3.0→private 0.3.1 GUI upgrade passes with real installation, same-PID restart and preserved preferences in an offline owned container. Signed installed mutation guards and canonical AppImage construction pass. Both Mac thin and Universal runtime jobs pass on Intel and ARM | Production HTTPS/Polkit composition, native 0.2.5 transition, AppImage upgrade/migration, persistent Mac publisher/installation/relaunch, authenticated Dev replacement and signed release packages |
+| Packaging and updates | Signed Debian and private older-AppRun AppImage 0.3.0→0.3.1 GUI upgrades pass with real installation, fixed exec and preserved preferences in offline owned containers. Signed installed mutation guards and canonical AppImage construction pass. Both Mac thin and Universal runtime jobs pass on Intel and ARM | Production HTTPS/Polkit composition, native 0.2.5 transition, AppImage migration/rollback, persistent Mac publisher/installation/relaunch, authenticated Dev replacement and signed release packages |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 ## Current package checkpoint
@@ -241,6 +241,14 @@ one frozen, content-free observation of the original admission attempt, which th
 owned smoke reads without repeating security checks. Strict signing requirements
 are unchanged; signed installation/relaunch remains open.
 
+[CI 37916675308](https://github.com/juferdinand/OpenWhisper/actions/runs/37916675308)
+records the original refusal as `publisher/refused/EXIT`, excluding a timeout in
+that invocation. The publisher requirement lacked the leading `=` needed by
+`codesign` for literal text; the correction preserves the certificate pin and
+strict recursive, all-architecture verification. Focused tests, typing and build
+pass. [CI 37918205418](https://github.com/juferdinand/OpenWhisper/actions/runs/37918205418)
+must confirm actual runtime admission; signing alone does not establish it.
+
 Fresh Ubuntu 22.04 packages use genuine versioned sources: 0.3.0 at `16bb0af5`
 and its private version-only 0.3.1 child `8433def6`. The second version reuses
 unchanged native inputs/artifacts. Both canonical Debian archives are signed
@@ -266,6 +274,18 @@ attempt stopped before installation at the retirement/installer boundary with
 an unlogged underlying cause. After bounded kernel-PID absence observation and
 prompt harness failure reporting were added, the second attempt passes using
 the same immutable package pair. Production retirement requirements are unchanged.
+
+The [owned AppImage upgrade runner](../electron/tests/owned-appimage-upgrade/README.md)
+also passes with existing-key-signed images from those genuine versioned Ubuntu
+payloads. Ordinary Update controls install 0.3.1. Immediately before actual fixed
+exec, the guard observes old GUI/native PID absence, the closed source descriptor
+and absent staging directory. The supervisor retains PID and birth ticks; the
+successor confirms its version/source and preserves the edited German preference.
+Normal Quit closes descendants and private services; all 19 Docker commands close
+successfully and the stopped namespace is removed. The older AppRun explicitly
+uses a private offline host fixture; the successor retains production AppRun.
+This establishes updater composition, not native 0.2.5 migration, production
+HTTPS, general rollback coverage or physical desktop acceptance.
 
 ### Preceding Universal failure and reviewed correction
 
