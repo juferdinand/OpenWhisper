@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmod, cp, lstat, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -24,7 +24,7 @@ test("publication checksums require the exact safe filename set", () => {
 });
 
 test("publication rejects incomplete builder outputs before staging any public asset", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "openwhisper-publication-"));
+  const temporary = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-publication-")));
   const root = join(temporary, "source"), macosDirectory = join(temporary, "macos"),
     linuxDirectory = join(temporary, "linux"), outputDirectory = join(temporary, "assets");
   try {
@@ -61,7 +61,7 @@ test("publication stages canonical assets from the existing public signed Linux 
   skip: !ownedAssets ? "Requires the existing public 0.2.5 signed fixture directory; no download or signing fallback." : false,
 }, async () => {
   assert.ok(ownedAssets);
-  const temporary = await mkdtemp(join(tmpdir(), "openwhisper-publication-valid-"));
+  const temporary = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-publication-valid-")));
   const root = join(temporary, "source"), linuxDirectory = join(temporary, "linux"),
     macosDirectory = join(temporary, "macos"), outputDirectory = join(temporary, "assets");
   const version = "0.2.5";
