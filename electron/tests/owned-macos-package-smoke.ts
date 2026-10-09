@@ -196,6 +196,7 @@ try {
   const selfAvailability = classifyMacPublisherFixtureResult({ fixture: "self", packageFormat,
     signingMode: packageMetadata.signingMode, result: selfSignature });
   signatureAdmission = { ...signatureContext, cases: signatureCases, selfAvailability };
+  console.log(JSON.stringify({ stage, signingMode: packageMetadata.signingMode, selfAvailability }));
   const signatureRoot = join(evidence, "signature-candidates"); await mkdir(signatureRoot, { mode: 0o700 });
   const wrongRoot = join(signatureRoot, "different-identity"), tamperedRoot = join(signatureRoot, "tampered");
   for (const path of [wrongRoot, tamperedRoot]) await mkdir(path, { mode: 0o700 });
@@ -339,6 +340,7 @@ try {
   assert.deepEqual(await Promise.all(archiveFixtures.map((name) => frozenFile(join(archiveRoot, `${name}.zip`)))), archiveOriginals);
   assert.ok((await readdir(archiveRoot)).every((name) => !name.startsWith("download-")));
   archiveAdmission = { ...archiveContext, publisherAvailability };
+  console.log(JSON.stringify({ stage, signingMode: packageMetadata.signingMode, selfAvailability, publisherAvailability }));
   checks.push(publisherAvailability === "ACCEPTED"
     ? "Original fd3 Mac ZIP extraction accepts actual packaged app and refuses version, traversal, symlink and corrupt archives with complete owned cleanup"
     : "Actual original-fd3 ZIP publisher acceptance is unavailable at the measured universal ad-hoc requirement; same-version and hostile archive refusals and complete owned cleanup pass");
@@ -606,15 +608,17 @@ try {
   }
   const accelerator = "Command+Shift+F8";
   assert.equal(await application.evaluate(({ globalShortcut }, key) => globalShortcut.isRegistered(key), accelerator), false);
-  stage = "shortcut-setup";
+  stage = "shortcut-focus";
   await page.locator('[data-ui-language="en"]').click();
   await page.locator('[data-tab="general"]').click();
   await application.evaluate(({ app, BrowserWindow }) => { app.focus({ steal: true });
     const window = BrowserWindow.getAllWindows().find((item) => item.webContents.getURL() === "app://openwhisper/index.html"); window?.show(); window?.focus(); });
   await expect.poll(() => application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some((item) =>
     item.webContents.getURL() === "app://openwhisper/index.html" && item.isFocused())), { timeout: 10_000 }).toBe(true);
+  stage = "shortcut-capture-start";
   await page.locator('[data-portal="enable_shortcut"]').click();
   await expect.poll(async () => (await state()).macos?.recording_shortcut, { timeout: 10_000 }).toBe(true);
+  stage = "shortcut-commit";
   const cdp = await page.context().newCDPSession(page);
   // Electron emits before-input-event for rawKeyDown/keyUp, not CDP's distinct keyDown type.
   // Dispatch only to this window's Chromium session, never the OS/global input queue.

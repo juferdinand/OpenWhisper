@@ -29,6 +29,7 @@ const stablePackage = process.env.OPENWHISPER_STABLE_PACKAGE === "1";
 const installedDebian = process.env.OPENWHISPER_INSTALLED_DEBIAN === "1";
 const supervisedLaunch = process.env.OPENWHISPER_SUPERVISED_LAUNCH === "1";
 const resourceDiagnostic = process.env.OPENWHISPER_RESOURCE_DIAGNOSTIC === "1";
+const updateCheck = process.env.OPENWHISPER_UPDATE_CHECK === "1";
 const diagnosticRoots: DiagnosticRoot[] = [];
 let resourceSequence = 0;
 async function captureResources(boundary: string): Promise<void> {
@@ -71,7 +72,7 @@ let startupStderr = Buffer.alloc(0), startupStderrBytes = 0, startupRetentionEna
 let startupPhase: "launch" | "context-evaluation" | "runtime-owner" | "resource-identity" | "initial-ui" = "launch";
 let startupIds: { launcherPid: number | null; mainPid: number | null; runtimePid: number | null } = { launcherPid: null, mainPid: null, runtimePid: null };
 const appOwners: { original: ChildProcess; closed: Promise<void>; closeObserved: boolean; termination: "quit" | "crash" | null;
-  quitEvents: ("before-quit" | "will-quit")[]; supervisor?: { pid: number; guiPid: number; parentPid: number; socket: true; noncePresent: true } | undefined; image?: { mainPid: number; runtimePid: number; temporary: string;
+  quitEvents: ("before-quit" | "will-quit")[]; supervisor?: { pid: number; guiPid: number; parentPid: number; socket: true; noncePresent: boolean } | undefined; image?: { mainPid: number; runtimePid: number; temporary: string;
     processes: Map<number, ImageProcess>; resources: Record<string, string> } | undefined }[] = [];
 type ImageProcess = { pid: number; ppid: number; pgid: number; role: "runtime" | "extracted" | "supervisor" };
 let lastState: Readonly<{ status: string; recordingAvailable: boolean; recoveryAvailable: boolean; elapsed: number; progress: number;
@@ -140,9 +141,31 @@ async function assertInstalledPackage(source = "/payload/package", installed = "
     for (const name of entries) await assertInstalledPackage(join(source, name), join(installed, name));
   } else { assert.equal(expected.isFile(), true); assert.equal(sha(await readFile(installed)), sha(await readFile(source))); }
 }
+async function assertRendererIsolation(application: ElectronApplication, page: Page) {
+  const security = await application.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0]; if (!window) throw new Error("MISSING_WINDOW");
+    const rendererPid = window.webContents.getOSProcessId();
+    return { rendererPid, pid: process.pid, uid: process.getuid?.() };
+  });
+  assert.equal(security.uid, 1000);
+  // Electron's ProcessMetric.sandboxed is documented only for Darwin/Windows.
+  // Retain the actual Linux renderer process and inspect its kernel isolation.
+  const rendererStatus = await readFile(`/proc/${security.rendererPid}/status`, "utf8");
+  const rendererArguments = (await readFile(`/proc/${security.rendererPid}/cmdline`, "utf8")).split("\0");
+  assert.match(rendererStatus, /^NoNewPrivs:\s+1$/mu); assert.match(rendererStatus, /^Seccomp:\s+2$/mu);
+  assert.match(rendererStatus, /^Seccomp_filters:\s+[2-9]\d*$/mu); assert.match(rendererStatus, /^NSpid:\s+\d+\s+\d+/mu);
+  assert.match(rendererStatus, /^CapEff:\s+0+$/mu); assert.match(rendererStatus, /^Uid:\s+1000\s+1000\s+1000\s+1000$/mu);
+  assert.equal(rendererArguments.some((argument) => argument.includes("no-sandbox")), false);
+  assert.match(rendererArguments.join(" "), /(?:^|\s)--type=renderer(?:\s|$)/u);
+  assert.match(rendererArguments.join(" "), /(?:^|\s)--enable-sandbox(?:\s|$)/u);
+  assert.deepEqual(await page.evaluate(() => ({ process: "process" in globalThis, require: "require" in globalThis,
+    bridge: typeof window.openwhisper?.invoke })), { process: false, require: false, bridge: "function" });
+  return security;
+}
 async function main(): Promise<void> {
   assert.equal(process.platform, "linux"); assert.equal(process.arch, "x64"); assert.equal(process.getuid?.(), 1000);
   if (supervisedLaunch) assert.ok(packaged && stablePackage && nativeX11 && (installedDebian !== appImage) && !appImageStartupOnly);
+  if (updateCheck) assert.ok(supervisedLaunch && installedDebian && !appImage && !resourceDiagnostic);
   if (resourceDiagnostic) { assert.ok(supervisedLaunch && installedDebian && !appImage); diagnosticRoots.push(await diagnosticIdentity(process.pid, "driver")); }
   assert.equal(process.versions.node, "24.21.0");
   assert.equal(sha(await readFile(process.execPath)), "7fde7b8afa198da66257f42ee2001d874c7355631e6d1579a5fb5ef1f246df4c");
@@ -243,7 +266,8 @@ async function main(): Promise<void> {
     assert.equal(owner.original.exitCode, 0); assert.equal(owner.original.signalCode, null);
     for (const pid of [owner.supervisor.pid, owner.supervisor.guiPid]) await assert.rejects(lstat(`/proc/${pid}`), { code: "ENOENT" });
     await writeFile(join(evidence, `supervisor-close-${appOwners.indexOf(owner)}.json`), JSON.stringify({ ...owner.supervisor,
-      originalNormalClose: true, allObservedPidsAbsent: true, updateAuthority: false, restartReceiptSent: false }), { mode: 0o600 });
+      originalNormalClose: true, allObservedPidsAbsent: true,
+      ...(updateCheck ? { updateScope: "V2_CHECK_ONLY_NO_INSTALL_REQUESTED" } : { updateAuthority: false }), restartReceiptSent: false }), { mode: 0o600 });
   };
   const assertImageClosed = async (owner: (typeof appOwners)[number]) => {
     assert.ok(owner.image && owner.closeObserved); if (supervisedLaunch) await assertSupervisedClosed(owner); assert.equal(owner.original.exitCode, 0); assert.equal(owner.original.signalCode, null);
@@ -556,9 +580,12 @@ async function main(): Promise<void> {
       const fs = process.getBuiltinModule("fs"); if (!fs) throw new Error("OWNED_SUPERVISOR_FS_UNAVAILABLE");
       return { guiPid: process.pid, supervisorPid: process.ppid, executable: process.execPath, appPath: app.getAppPath(),
         socket: fs.fstatSync(3).isSocket(), noncePresent: /^[a-f0-9]{64}$/u.test(process.env["OPENWHISPER_RESTART_NONCE"] ?? ""),
-        version: process.env["OPENWHISPER_RESTART_VERSION"] };
+        version: process.env["OPENWHISPER_RESTART_VERSION"], protocolPresent: process.env["OPENWHISPER_UPDATE_PROTOCOL"] !== undefined,
+        packageVersion: app.getVersion() };
     });
-    assert.equal(actual.socket, true); assert.equal(actual.noncePresent, true); assert.equal(actual.version, "0.3.0");
+    assert.equal(actual.socket, true); assert.equal(actual.packageVersion, "0.3.0");
+    assert.equal(actual.noncePresent, !updateCheck); assert.equal(actual.version, updateCheck ? undefined : "0.3.0");
+    assert.equal(actual.protocolPresent, false);
     assert.notEqual(actual.guiPid, actual.supervisorPid);
     for (const pid of [actual.guiPid, actual.supervisorPid]) assert.equal((await lstat(`/proc/${pid}`)).uid, 1000);
     assert.equal(await readlink(`/proc/${actual.supervisorPid}/exe`), actual.executable);
@@ -570,9 +597,10 @@ async function main(): Promise<void> {
     const raw = await readFile(`/proc/${actual.supervisorPid}/stat`, "utf8"); assert.ok(raw.length <= 4096);
     const parent = raw.slice(raw.lastIndexOf(")") + 2).trim().split(/\s+/u)[1]; assert.ok(parent && /^[0-9]+$/u.test(parent));
     if (installedDebian) { assert.equal(actual.executable, "/opt/openwhisper/openwhisper"); assert.equal(actual.supervisorPid, original.pid); }
-    owner.supervisor = { pid: actual.supervisorPid, guiPid: actual.guiPid, parentPid: Number(parent), socket: true, noncePresent: true };
+    owner.supervisor = { pid: actual.supervisorPid, guiPid: actual.guiPid, parentPid: Number(parent), socket: true, noncePresent: actual.noncePresent };
     await writeFile(join(evidence, `supervisor-owner-${appOwners.length - 1}.json`), JSON.stringify({ ...owner.supervisor,
-      moduleMatches: true, executableMatches: true, sameUid: true, version: actual.version, updateAuthority: false }), { mode: 0o600 });
+      moduleMatches: true, executableMatches: true, sameUid: true, version: actual.packageVersion,
+      ...(updateCheck ? { updateScope: "V2_CHECK_ONLY_NO_INSTALL_REQUESTED", inheritedHintsConsumed: true } : { updateAuthority: false }) }), { mode: 0o600 });
   }
   if (appImage) {
     startupPhase = "context-evaluation";
@@ -685,6 +713,57 @@ async function main(): Promise<void> {
     await focusRefresh(); assert.equal((await state()).preferences.launch_at_login, false); assert.equal(await persistedLogin(), true);
     await assert.rejects(lstat(dirname(autostartPath)), { code: "ENOENT" }); await assertStableOriginals(); startupAutostartReadOnly = true;
     checks.push("installed stable startup/focus exposes actual autostart false while preserving legacy requested true privately; no registration or autostart directory created");
+  }
+  if (updateCheck) {
+    await checkpoint("actual-packaged-v2-ui-check");
+    assert.equal(initial.updates.configured, true); assert.equal(initial.updates.status, "idle"); assert.equal(initial.updates.progress, 0);
+    assert.equal(initial.preferences.auto_check_updates, false); await assertRendererIsolation(application, page);
+    assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
+    await page.locator('[data-tab="about"]').click();
+    await expect(page.locator('[data-pref="auto_check_updates"]')).not.toBeChecked();
+    await expect(page.locator('[data-command="check_updates"]')).toBeEnabled();
+    const observation = page.evaluate(() => new Promise<string[]>((accept, reject) => {
+      const bridge = window.openwhisper; if (!bridge) { reject(new Error("OWNED_BRIDGE_UNAVAILABLE")); return; }
+      const statuses: string[] = [];
+      const finish = (success: boolean): void => { clearTimeout(timer); unsubscribe(); if (success) accept(statuses); else reject(new Error("OWNED_UPDATE_OBSERVATION_FAILED")); };
+      const timer = setTimeout(() => finish(false), 20_000);
+      const unsubscribe = bridge.subscribe("state", (payload: unknown) => {
+        if (!payload || typeof payload !== "object" || !("updates" in payload) || !payload.updates || typeof payload.updates !== "object") { finish(false); return; }
+        const updates = payload.updates;
+        if (!("status" in updates) || typeof updates.status !== "string" || !["idle", "checking", "error"].includes(updates.status) ||
+            !("configured" in updates) || updates.configured !== true || !("progress" in updates) || updates.progress !== 0 || statuses.length >= 16) { finish(false); return; }
+        statuses.push(updates.status);
+        if (updates.status === "error") finish(statuses.includes("checking"));
+      });
+    })); void observation.catch(() => {});
+    await page.locator('[data-command="check_updates"]').click();
+    const statuses = await observation; assert.ok(statuses.includes("checking")); assert.equal(statuses.at(-1), "error");
+    const after = await state(); assert.equal(after.updates.configured, true); assert.equal(after.updates.status, "error"); assert.equal(after.updates.progress, 0);
+    assert.equal(after.preferences.auto_check_updates, false); assert.equal(after.recording_available, true); assert.equal(after.recovery_available, true);
+    await expect(page.locator('[data-command="check_updates"]')).toBeEnabled();
+    assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
+    assert.equal(await readFile(autostartPath, "utf8"), legacyAutostart); await assertStableOriginals(); await assertNoDevControl(); await assertInstalledPackage();
+    const desktopAfter = await lstat(autostartPath);
+    for (const key of ["dev", "ino", "mtimeMs", "ctimeMs"] as const) assert.equal(desktopAfter[key], legacyAutostartIdentity![key]);
+    await checkpoint("v2-check-normal-original-quit");
+    const owner = appOwners.at(-1)!; owner.termination = "quit";
+    const observedPids = await application.evaluate(({ app }) => app.getAppMetrics().map((metric) => metric.pid));
+    assert.ok(observedPids.length > 0 && observedPids.length <= 64 && new Set(observedPids).size === observedPids.length);
+    assert.ok(observedPids.includes(owner.supervisor!.guiPid));
+    for (const pid of observedPids) { assert.ok(Number.isSafeInteger(pid) && pid > 0); assert.equal((await lstat(`/proc/${pid}`)).uid, 1000); }
+    const closing = application.close().then(() => owner.closed); void closing.catch(() => {});
+    let timer: NodeJS.Timeout | undefined;
+    try { await Promise.race([closing, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("OWNED_APP_CLOSE_TIMEOUT")), 10_000); })]); }
+    finally { if (timer) clearTimeout(timer); }
+    await assertSupervisedClosed(owner); application = undefined; page = undefined;
+    for (const pid of observedPids) await assert.rejects(lstat(`/proc/${pid}`), { code: "ENOENT" });
+    await assertStableOriginals();
+    await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", classification: "DEBIAN_V2_UI_CHECK_ONLY", checks,
+      actualV2Configured: true, checkingObserved: true, terminalCheckFailure: true, observedStatuses: statuses,
+      inheritedHintsConsumed: true, originalNormalQuit: true, supervisorOriginalsClosed: true, startupAutostartReadOnly,
+      allObservedAppPidsAbsent: true, observedAppPids: observedPids,
+      recordingOrInferenceStarted: false, installerInvoked: false, upgradeAcceptance: "NOT_TESTED", physicalMicrophone: "NOT_USED" }), { mode: 0o600 });
+    status = "PASS"; return;
   }
   if (appImage) {
     assert.equal(initial.launch_at_login_available, appImageAdmission);
@@ -852,11 +931,11 @@ async function main(): Promise<void> {
     const value = /^\s*string "(\{[^\r\n]*\})"\s*$/mu.exec(reply.stdout)?.[1];
     assert.ok(value, "Owned control must return its closed JSON status."); return parseControlStatus(value.replaceAll('\\"', '"')).status;
   };
-  const assertNoDevControl = async () => {
+  async function assertNoDevControl(): Promise<void> {
     const reply = await execute("/usr/bin/dbus-send", ["--session", "--type=method_call", "--print-reply", "--dest=org.freedesktop.DBus",
       "/org/freedesktop/DBus", "org.freedesktop.DBus.NameHasOwner", "string:io.github.whisperfree.dev.Control"], { env, timeout: 5000, maxBuffer: 4096 });
     assert.match(reply.stdout, /boolean false/u);
-  };
+  }
   if (stablePackage) { await assertNoDevControl(); assert.equal(await control(), initial.status); }
   else assert.equal(await control(), "idle");
   if (installation) {
@@ -898,24 +977,7 @@ async function main(): Promise<void> {
   await page.locator('[data-pref="language"]').selectOption("en");
   await until(async () => (await state()).preferences.language === "en");
   await checkpoint("renderer-security");
-  const security = await application.evaluate(({ BrowserWindow }) => {
-    const window = BrowserWindow.getAllWindows()[0]; if (!window) throw new Error("MISSING_WINDOW");
-    const rendererPid = window.webContents.getOSProcessId();
-    return { rendererPid, pid: process.pid, uid: process.getuid?.() };
-  });
-  assert.equal(security.uid, 1000);
-  // Electron's ProcessMetric.sandboxed is documented only for Darwin/Windows.
-  // Retain the actual Linux renderer process and inspect its kernel isolation.
-  const rendererStatus = await readFile(`/proc/${security.rendererPid}/status`, "utf8");
-  const rendererArguments = (await readFile(`/proc/${security.rendererPid}/cmdline`, "utf8")).split("\0");
-  assert.match(rendererStatus, /^NoNewPrivs:\s+1$/mu); assert.match(rendererStatus, /^Seccomp:\s+2$/mu);
-  assert.match(rendererStatus, /^Seccomp_filters:\s+[2-9]\d*$/mu); assert.match(rendererStatus, /^NSpid:\s+\d+\s+\d+/mu);
-  assert.match(rendererStatus, /^CapEff:\s+0+$/mu); assert.match(rendererStatus, /^Uid:\s+1000\s+1000\s+1000\s+1000$/mu);
-  assert.equal(rendererArguments.some((argument) => argument.includes("no-sandbox")), false);
-  assert.match(rendererArguments.join(" "), /(?:^|\s)--type=renderer(?:\s|$)/u);
-  assert.match(rendererArguments.join(" "), /(?:^|\s)--enable-sandbox(?:\s|$)/u);
-  assert.deepEqual(await page.evaluate(() => ({ process: "process" in globalThis, require: "require" in globalThis,
-    bridge: typeof window.openwhisper?.invoke })), { process: false, require: false, bridge: "function" });
+  const security = await assertRendererIsolation(application, page);
   checks.push("normal main/shared UI/preload; private Tiny inventory; enumeration with zero streams; sandboxed renderer");
   await captureResources("after-ready");
   if (stablePackage) {

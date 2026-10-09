@@ -64,7 +64,7 @@ async function run(root: string, distribution: string): Promise<void> {
   let native: MacProbeNative | undefined, worker: Worker | undefined;
   const cases: ProbeResult["cases"] = [], phases: string[] = [];
   type CaseName = ProbeResult["cases"][number]["name"] | "synthetic-environment-cleanup";
-  type Stage = "spawn" | "bind" | "retire" | "kill" | "kill-returned" | "post-kill-observe" | "wait-reap" | "exit" | "close" |
+  type Stage = "spawn" | "wait-absence" | "bind" | "bind-result" | "retire" | "kill" | "kill-returned" | "post-kill-observe" | "wait-reap" | "exit" | "close" |
     "worker-sdk-before" | "worker-load" | "worker-barrier" | "worker-terminate" | "worker-after-terminate" | "worker-sdk-read" |
     "worker-assert-cleanup" | "worker-assert-completion-order" | "worker-assert-frames" | "worker-assert-disposal" | "worker-assert-reservation";
   let checkpoint: Readonly<{ case: CaseName; stage: Stage; configuredHandler: "default" | "delayed" | "ignore";
@@ -178,8 +178,19 @@ async function run(root: string, distribution: string): Promise<void> {
     {
       await record("early-exit", "spawn");
       const child = await spawn("early"); await bounded(child.exit);
+      // The original exit event can precede reaping. Establish this fixture's
+      // absent-at-bind precondition; the native probe must still confirm it.
+      await record("early-exit", "wait-absence", "default", { helperExitObserved: child.state.exited });
+      await until(() => {
+        try { process.kill(child.pid, 0); return false; }
+        catch (error: unknown) {
+          if (error instanceof Error && "code" in error && error.code === "ESRCH") return true;
+          throw error;
+        }
+      });
       await record("early-exit", "bind", "default", { helperExitObserved: child.state.exited });
       const probe = acquire(child), started = performance.now(), first = await probe.bind();
+      await record("early-exit", "bind-result", "default", { helperExitObserved: child.state.exited, observedLevel: first.level });
       assert.equal(first.canAdmit, false); assert.equal(first.level, "reaped"); assert.equal(child.state.challenged, false);
       await probe.close(); const state = probeStateSchema.parse(probe.probeState(edge));
       cases.push({ name: "early-exit", admitted: false, originalNonceConfirmed: false, sameUid: null, directParent: null,

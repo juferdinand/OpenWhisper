@@ -18,30 +18,62 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | macOS dictation | Actual Intel/Apple Silicon thin Dev/Stable and same-ZIP Universal Stable packages pass sandbox, signed utilities, public-audio CPU recognition, shortcut setup/removal, migration, edited-state restart and clean exits at 5bfd71b1 | Physical microphone/TCC, actual target insertion, device changes and Metal selection remain open |
 | Linux desktop integration | Owned stock KDE 5.27 native Wayland F8, binding Quit/crash recovery and paste into separate Wayland/XWayland editors pass. Genuine X11 shortcuts and all five no-display CLI commands pass, including installed stable autostart enable/disable and generated-target restart | Expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Live LM Studio/Ollama trials and remaining provider/workflow scope are deferred to #11, outside 0.3.0; ordinary dictation remains independent |
-| Packaging and updates | Unchanged supervised Debian and AppImage pass all 18 runtime checks; the owned X11 rendering budget is corrected. Inactive consumers authenticate downloads and preserve the AppImage predecessor through handoff. Both Mac thin packages, Universal construction and ordinary Universal runtime checks pass | Connect installation/restart/rollback, installed Debian audit, persistent publisher continuity, authenticated Dev replacement, DMG and release signing; retain earlier resource failures separately |
+| Packaging and updates | Ordinary Debian/AppImage checks pass. Debian's actual packaged check/error/Quit path and fresh signed installed audit pass, including retained-snapshot mutation refusal. The inactive AppImage consumer retains both image and signature. Earlier ordinary Mac Universal checks pass | Genuine signed upgrade/restart, AppImage activation and migration, persistent Mac publisher and installation handoff, authenticated Dev replacement, DMG/release signing; resolve the two current Mac CI failures |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 ## Current package checkpoint
 
-The next source increment connects Debian updates directly to the existing
+The combined source increment passes strict typing, the normal application/shared
+UI build and 1,251 tests: 1,295 total, zero failures and 44 explicit native/opt-in
+skips in 18.49 seconds. The generated standalone Debian driver imports and retains
+its argument checks without executing acceptance. Independent source reviews pass.
+
+Debian updates connect directly to the existing
 parent supervisor, V2 channel and shared Update controls. Only a canonical
 installed Debian version admits the capability. The parent owns the fixed
 feed, authenticated original download, installer and installed audit. Original
 GUI/native cleanup, retirement acknowledgment and clean duplex/process closure
 precede installation; authorization and full hashing have a separate long phase.
 A synchronous physical metadata check immediately precedes fixed-target exec.
-AppImage keeps its ordinary V1 path until current-image signature and successor
-signature continuity are implemented. These changes still require packaged
-V2/UI and actual signed upgrade evidence; source ordering tests are distinct.
+The actual canonical package from producer `a70819eb` (direct parent `c19cb056`)
+passes an owned, network-disabled Debian V2/UI check in 22.39 seconds. The shared
+Update control reports checking then error; inherited hints are consumed, saved
+data remains intact, and the original GUI/supervisor close normally. All observed
+app processes disappear and the namespace is removed. This check performs no
+recording, installation, retirement or restart and does not prove an upgrade.
 
-The next normal Linux CI exports a fresh canonical Stable validation package
+Normal Linux CI exports a fresh canonical Stable validation package
 and the already-built, locked signer/verifier tools from the same source.
 An owner-only dependent job admits those inputs before accessing the existing
 signing key, verifies exact signed bytes and version through both packaged
 Electron and the native oracle, then installs and audits inside a disposable
 Ubuntu 22.04 container. An altered installed notice must be rejected.
-Missing signing material is explicitly unavailable. This prepared path has
-not established a signed candidate, installed-positive result or active updater.
+Missing signing material is explicitly unavailable. In
+[CI 37894973906](https://github.com/juferdinand/OpenWhisper/actions/runs/37894973906),
+actual producer `32465416`, candidate admission, signing with the existing key,
+packaged fixed-key verification and the legacy verifier pass. The installed audit
+fails at its generic physical-audit boundary; its underlying cause was not logged.
+The later original signed job in
+[CI 37897858417](https://github.com/juferdinand/OpenWhisper/actions/runs/37897858417),
+producer `a70819eb`, passes the actual installed positive, fresh mismatch and
+same-retained-snapshot mutation refusal under packaged Electron. Original source
+closure and staging removal complete before the final guard: accepted for the
+unchanged installation and refused after mutation. The original container exits0
+and is removed. This supersedes the earlier audit failure without assigning its
+unlogged cause. A genuinely newer signed upgrade and same-PID exec remain open.
+
+AppImage retains V1. Its independently reviewed inactive consumer authenticates
+the signed current image/version, preserves and restores the image/signature pair,
+and retains a final physical guard after descriptor closure. Ten focused cases
+pass using cached original signed 0.2.5 bytes; the inert-predecessor transaction
+fixtures do not prove a genuine upgrade. Explicit clean Stable AppImage construction
+now supports the fixed release asset name; construction alone grants no update or
+publication authority. Activation and missing/stale-sidecar migration remain open.
+
+The next owned Mac publisher job reuses admitted same-run thin packages and the
+existing signing identity, then compares the candidate with the original pinned
+0.2.5 binary's designated requirement. Temporary credentials are cleaned before
+runtime acceptance. This is a prepared CI path, not a persistent-publisher result.
 
 All five relevant Mac jobs in
 [normal CI 37892162932](https://github.com/juferdinand/OpenWhisper/actions/runs/37892162932)
@@ -54,6 +86,12 @@ The consoles do not print the selected publisher-availability branch; this
 does not establish an updater positive or persistent-certificate continuity.
 The earlier ARM refusal remains unclassified; unchanged admission requirements
 and deadlines pass in this invocation, without proving a diagnostic-caused fix.
+
+Later [CI 37897858417](https://github.com/juferdinand/OpenWhisper/actions/runs/37897858417),
+actual producer `a70819eb`, fails Intel's early-exit retirement fixture and ARM's
+shortcut setup. The reviewed Intel fixture now establishes kernel PID absence
+before testing absent-at-bind behavior. ARM shortcut focus/start/commit diagnostics
+are separated; no production fix or current Mac pass is inferred from these changes.
 
 ### Preceding Universal failure and reviewed correction
 

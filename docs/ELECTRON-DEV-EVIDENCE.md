@@ -1,5 +1,60 @@
 # Electron development evidence
 
+## Actual canonical Debian V2/UI check
+
+The canonical Debian artifact from
+[CI 37897858417](https://github.com/juferdinand/OpenWhisper/actions/runs/37897858417)
+passes one owned, network-disabled package run in 22.385 seconds. Actual clean
+producer `a70819eb0b71c6e70495ce9274d500facd2fa743` has API head `c19cb056` as a
+verified direct parent. Artifact 11601506458 is admitted by its API SHA-256;
+the inner Debian SHA-256 is
+`0c23376e81aadec5b2e7a8c3ea7f7e061617a4e86f95b6cdb495403e954d9d6b`.
+
+The compiled bootstrap grants V2, the GUI consumes the original fd3 hints and
+the actual shared Check now control reports checking then error without network.
+Recovery/recording availability and legacy/autostart/sentinel data stay intact.
+Original GUI PID225 and supervisor PID210 exit normally; all seven observed app
+PIDs are absent, private servers close, original Docker commands join and the
+namespace is removed. Physical renderer sandbox checks pass. No recording,
+inference, installer, retirement or restart runs; this is check-only acceptance.
+
+## Signed installed Debian acceptance
+
+The original signed job113721260553 in CI37897858417 passes at actual producer
+`a70819eb0b71c6e70495ce9274d500facd2fa743`, distinct from API head `c19cb056`.
+The fresh signed canonical candidate is accepted by packaged Electron and the
+legacy fixed-key verifier. The actual installed positive runs
+`/opt/openwhisper/openwhisper`, Electron44.7.0/Node24.21.0, UID1000.
+`installed=ACCEPTED`, `originalSourceClosed=true`, `stageAbsent=true` and
+`finalGuardAfterSourceClose=ACCEPTED` are recorded in original receipts.
+
+After an owned notice mutation, the same retained audit reports
+`sameSnapshotMutation=REFUSED`, `installed=INSTALLED_MISMATCH` and a refused final
+guard after source closure. A fresh mismatch is also refused. Original container
+`aa24caaa` exits0, reaches PID0/not-running and is removed. Only the 10413-byte
+evidence artifact11601957840 is downloaded; its SHA-256 matches the Actions API:
+`d281706d60edc121b60bd67881fb11ea316eedf07c0fe1e3b8f1c7d8ac983006`.
+No genuinely newer update, same-PID exec or public release follows from this audit.
+
+## Earlier signed candidate and current Mac boundaries
+
+In [CI 37894973906](https://github.com/juferdinand/OpenWhisper/actions/runs/37894973906),
+actual clean producer `3246541603f87406b116914fc6ec32fb50ab001f`, the fresh canonical
+0.3.0 Debian candidate is admitted, signed with the existing key and accepted by
+packaged Electron and the legacy fixed-key verifier. Original signed archive:
+142425766 bytes, SHA-256
+`0752e7812b24fb40c3ab4cc23e9c3d3c168ac8545dff90a4717263631d4ec13e`.
+Installed positive fails at `installed-physical-audit`; no underlying category or
+mismatch result was logged. The original container exits1 without OOM and is
+removed. The retained evidence archive's API digest is verified independently.
+
+Later CI37897858417 fails Intel's absent-at-bind retirement fixture after the
+original helper exit, and ARM's combined shortcut-setup poll. Neither failure
+establishes a production cause. The reviewed test precondition now waits for
+kernel PID absence before native absent-at-bind admission; focus/start/commit
+phases are separately observable. Existing deadlines and assertions remain.
+Earlier ordinary Universal success below retains its own producer and scope.
+
 ## Debian update activation source
 
 The existing bootstrap/supervisor, V2 channel, main handlers and installed audit

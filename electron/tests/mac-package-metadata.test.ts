@@ -3,6 +3,8 @@ import { test } from "node:test";
 import { developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
 import { SPEECH_ENTRY_FILES } from "../src/services/speech-entry-graph.js";
 import { classifyMacPublisherFixtureResult, parseMacPackageSmokeArguments, validateUniversalMacPackageMetadata } from "./fixtures/mac-package-metadata.js";
+import { parseMacPublisherIdentity, parseMacPublisherKeychains, parseMacPublisherZipListing, parseOwnedMacPublisherArguments,
+  validateMacPublisherCompletion } from "./owned-macos-publisher.js";
 const artifact = { bytes: 123, sha256: "a".repeat(64) };
 function descriptor(architecture: "arm64" | "x64") {
   return developmentRecordingDescriptorSchema.parse({ version: 1, platform: "darwin", architecture,
@@ -102,4 +104,47 @@ test("actual ZIP publisher unavailability requires the previously measured exact
   assert.throws(() => classifyMacPublisherFixtureResult({ ...context, selfAvailability: "UNAVAILABLE",
     result: { accepted: false, code: "INVALID_BUNDLE", osStatus: -67050 } }));
   assert.throws(() => classifyMacPublisherFixtureResult({ ...context, selfAvailability: "UNAVAILABLE", signingMode: "persistent-validation" }));
+});
+
+test("owned publisher commands and keychain output reject ambiguous or unbounded authority", () => {
+  for (const mode of ["admit", "oracle", "keychain-list", "keychain-identity", "runtime-input", "result"]) assert.equal(parseOwnedMacPublisherArguments([mode]), mode);
+  for (const args of [[], ["sign"], ["oracle", "--original", "/other.app"]]) assert.throws(() => parseOwnedMacPublisherArguments(args));
+  assert.deepEqual(parseMacPublisherKeychains('    "/Users/runner/Library/Keychains/login.keychain-db"\n    "/owned/path with spaces.keychain-db"\n'),
+    ["/Users/runner/Library/Keychains/login.keychain-db", "/owned/path with spaces.keychain-db"]);
+  for (const value of ['', '/unquoted\n', '"relative"\n', '"/owned/../elsewhere"\n', '"/owned"\n"/owned"\n', '"/owned\u0000key"\n']) {
+    assert.throws(() => parseMacPublisherKeychains(value));
+  }
+  const identity = "A".repeat(40), valid = `  1) ${identity} "WhisperFree Dev"\n     1 valid identities found\n`;
+  assert.equal(parseMacPublisherIdentity(valid), identity);
+  for (const value of ['', '     0 valid identities found\n', valid.replace('1 valid', '2 valid'), valid + valid,
+    valid.replace(identity, "A".repeat(39)), valid.replace('WhisperFree Dev', 'unexpected\nline')]) assert.throws(() => parseMacPublisherIdentity(value));
+});
+function publisherListing(entries: readonly { path: string; kind?: string; bytes?: number }[]) {
+  return `Archive:  /owned/original.zip\nZip file size: 123 bytes, number of entries: ${entries.length}\n` + entries.map((entry) =>
+    `${entry.kind ?? '-'}rwxr-xr-x  2.1 unx ${entry.bytes ?? 1} bx stor 20261007.220837 ${entry.path}\n`).join('') +
+    `${entries.length} files, 1 bytes uncompressed, 1 bytes compressed:  0.0%\n`;
+}
+test("fixed ZIP tool listing admits internal framework links and rejects escape and link-write entries", () => {
+  const path = "OpenWhisper.app/Contents/Frameworks/whisper.framework/Versions/Current";
+  assert.equal(parseMacPublisherZipListing(publisherListing([{ path: "OpenWhisper.app/", kind: "d", bytes: 0 },
+    { path, kind: "l" }, { path: "__MACOSX/._OpenWhisper.app" }]), 123).length, 3);
+  for (const entries of [[{ path: "../outside" }], [{ path: "/outside" }], [{ path: "OpenWhisper.app/../outside" }],
+    [{ path: "OpenWhisper.app/link", kind: "l" }], [{ path, kind: "l" }, { path: `${path}/write` }],
+    [{ path }, { path }], [{ path, kind: "p" }], [{ path: "OpenWhisper.app/huge", bytes: 2 * 1024 ** 3 + 1 }],
+    [{ path: "OpenWhisper.app/control\rname" }]]) assert.throws(() => parseMacPublisherZipListing(publisherListing(entries), 123));
+  assert.throws(() => parseMacPublisherZipListing(publisherListing([{ path }]), 124));
+  assert.throws(() => parseMacPublisherZipListing(publisherListing([{ path }]).replace(' bx ', ' Bx '), 123));
+  assert.throws(() => parseMacPublisherZipListing(publisherListing([{ path }]).replace('number of entries: 1', 'number of entries: 2'), 123));
+});
+test("persistent completion requires measured self and ZIP acceptance, old publisher negatives and successful cleanup", () => {
+  const oracle = { status: "PASS", originalRequirement: "ACCEPTED", validSameIdDifferentPublisher: "REJECTED" };
+  const input = { smoke: { status: "PASS", architecture: "arm64", packageFormat: "universal",
+    signatureAdmission: { signingMode: "persistent-validation", selfAvailability: "ACCEPTED" }, archiveAdmission: { publisherAvailability: "ACCEPTED" } },
+    cleanup: { status: "PASS" }, staged: oracle, zip: oracle, package: { directory: "/owned/OpenWhisper.app", archive: "/owned/candidate.zip", sha256: "a".repeat(64) } };
+  assert.equal(validateMacPublisherCompletion(input).smoke.status, "PASS");
+  for (const changed of [{ ...input, cleanup: { status: "FAIL" } }, { ...input, staged: { ...oracle, originalRequirement: "UNAVAILABLE" } },
+    { ...input, zip: { ...oracle, validSameIdDifferentPublisher: "ACCEPTED" } },
+    { ...input, smoke: { ...input.smoke, architecture: "x64" } },
+    { ...input, smoke: { ...input.smoke, signatureAdmission: { signingMode: "ad-hoc", selfAvailability: "UNAVAILABLE" } } },
+    { ...input, smoke: { ...input.smoke, archiveAdmission: { publisherAvailability: "UNAVAILABLE" } } }]) assert.throws(() => validateMacPublisherCompletion(changed));
 });

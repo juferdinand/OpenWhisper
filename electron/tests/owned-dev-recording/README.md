@@ -1,5 +1,26 @@
 # Owned normal Linux Dev recording
 
+For a clean canonical Stable Debian candidate containing the V2 activation introduced in
+`c19cb0566138a5966735d8a90990c8d4687884bf`,
+append `--update-check` to the supervised Debian command. Supply that candidate's
+existing `CANONICAL_STABLE_VALIDATION_ONLY` producer receipt and its independently
+captured SHA-256 through the same `--producer-receipt` / `--producer-sha256` arguments.
+The full candidate archive/package bytes, modes and clean source must match. CI uses
+its actual recorded synthetic merge producer; the host-side evidence must independently
+verify its relationship to the activation source. The receipt's independently supplied
+SHA-256 and exact embedded producer remain mandatory. Preview `~dev` packages and
+historical ordinary-supervisor producer receipts cannot select this mode.
+
+This short mode exercises the actual installed parent/GUI V2 duplex, consumed inherited
+hints, configured shared Update controls and the real Check now button. It requires
+checking followed by a terminal check error in the existing network-none namespace,
+zero percentage progress, preserved auto-check opt-out/recovery/legacy data and desktop
+entry, renderer isolation and normal original supervisor/GUI/server closure. It does
+not infer a specific network error from the categorical reply. It stops before
+recording, shortcut input or inference, and requests no installation or retirement.
+Actual execution requires a freshly constructed matching canonical candidate; it does
+not establish the separate newer signed update, installed-positive or replacement gate.
+
 The private X11 environment forces Mesa llvmpipe and sets `LP_NUM_THREADS=2`,
 matching the existing owned KDE rendering budget. This bounds software rendering
 workers independently of CPU inference; the 256-task cap and runtime assertions

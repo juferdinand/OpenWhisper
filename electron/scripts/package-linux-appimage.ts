@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { chmod, cp, lstat, mkdir, readFile, readdir, readlink, realpath, writeFile } from "node:fs/promises";
@@ -9,7 +9,7 @@ import { z } from "zod";
 import { parseApplicationBuildModule } from "../src/contracts/build-identity.js";
 import { developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
 import { appImageLauncher } from "../src/services/linux-appimage-launcher.js";
-import { linuxSupervisorLauncher } from "../src/cli/linux-supervisor-bootstrap.js";
+import { linuxSupervisorLauncher } from "../src/cli/linux-supervisor.js";
 export { appImageLauncher };
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -71,7 +71,20 @@ function command(executable: string, args: readonly string[], cwd: string, recei
   if (reply.error || reply.status !== 0) throw new Error(`APPIMAGE_COMMAND_FAILED:${reply.status ?? "unknown"}`);
   return reply.stdout;
 }
-export interface LinuxAppImageOptions { readonly directory: string; readonly output: string; readonly tools: string }
+export interface LinuxAppImageOptions { readonly directory: string; readonly output: string; readonly tools: string;
+  readonly canonicalStableValidation?: boolean }
+
+/** A release filename requires an explicit clean Stable construction, never a renamed preview. */
+export function appImageArtifactName(kind: "stable" | "development", version: string,
+  producer: z.infer<typeof producerSchema>, canonical = false): string {
+  producerSchema.parse(producer);
+  if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u.test(version)) throw new Error("PACKAGE_VERSION_MISMATCH");
+  if (canonical) {
+    if (kind !== "stable" || producer.modified) throw new Error("CANONICAL_STABLE_REQUIRED");
+    return "OpenWhisper-Linux-x86_64.AppImage";
+  }
+  return `OpenWhisper${kind === "stable" ? "" : "-Dev"}-Linux-x86_64_${version}~dev.${producer.commit.slice(0, 12)}${producer.modified ? ".modified" : ""}.AppImage`;
+}
 
 /** Wrap existing Ubuntu22 package bytes only. No builds, downloads, signing, installation or application launch. */
 export async function packageLinuxAppImage(options: LinuxAppImageOptions): Promise<{ image: string; launcher: string; receipt: string }> {
@@ -102,6 +115,13 @@ export async function packageLinuxAppImage(options: LinuxAppImageOptions): Promi
   if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u.test(version) ||
       z.object({ version: z.string() }).parse(JSON.parse(await readFile(join(application, "package.json"), "utf8"))).version !== version) throw new Error("PACKAGE_VERSION_MISMATCH");
   const producer = producerSchema.parse(JSON.parse(await readFile(join(dist, "resources/development-build.json"), "utf8")) as unknown);
+  const imageName = appImageArtifactName(identity.kind, version, producer, options.canonicalStableValidation);
+  if (options.canonicalStableValidation) {
+    const git = (args: string[]): string => execFileSync("git", args, { cwd: root, encoding: "utf8", timeout: 5_000 }).trim();
+    if (version !== (await readFile(join(root, "../VERSION"), "utf8")).trim() ||
+        version !== z.object({ version: z.string() }).parse(JSON.parse(await readFile(join(root, "package.json"), "utf8"))).version ||
+        producer.commit !== git(["rev-parse", "HEAD"]) || git(["status", "--porcelain"]) !== "") throw new Error("CANONICAL_SOURCE_MISMATCH");
+  }
   const descriptorLiteral = /(?:export\s+)?const DEVELOPMENT_RECORDING_BUILD\s*=\s*(\{[^]*?\});/u
     .exec(await readFile(join(dist, "main/development-recording-build.js"), "utf8"))?.[1];
   if (!descriptorLiteral) throw new Error("MISSING_CAPTURED_PACKAGE_RECORDING");
@@ -132,7 +152,7 @@ export async function packageLinuxAppImage(options: LinuxAppImageOptions): Promi
   const launcher = join(output, `${executable}-launch`); await writeFile(launcher, appImageLauncher(), { mode: 0o755 });
   const toolExtraction = join(output, "tool"); await mkdir(toolExtraction);
   command(join(tools, "appimagetool-x86_64.AppImage"), ["--appimage-extract"], toolExtraction, join(output, "tool-extraction-command.json"));
-  const image = join(output, `OpenWhisper${identity.kind === "stable" ? "" : "-Dev"}-Linux-x86_64_${version}~dev.${producer.commit.slice(0, 12)}${producer.modified ? ".modified" : ""}.AppImage`);
+  const image = join(output, imageName);
   const environment: NodeJS.ProcessEnv = { ...process.env, ARCH: "x86_64" };
   delete environment["APPIMAGE"]; delete environment["APPDIR"]; delete environment["TARGET_APPIMAGE"]; delete environment["APPIMAGE_EXTRACT_AND_RUN"];
   command(join(toolExtraction, "squashfs-root/AppRun"), ["--no-appstream", "--runtime-file", join(tools, "runtime-x86_64"), "--comp", "zstd", appDir, image], output,
@@ -150,6 +170,7 @@ export async function packageLinuxAppImage(options: LinuxAppImageOptions): Promi
   assert.deepEqual(await inventory(directory), before);
   const receipt = join(output, "receipt.json");
   await writeFile(receipt, `${JSON.stringify({ classification: "UNSIGNED_CONSTRUCTION_ONLY", applicationProducer: producer, buildIdentity: identity, version,
+    canonicalStableValidation: options.canonicalStableValidation === true,
     sourceDirectory: directory, sourceInventory: before, image: { path: image, bytes: imageBytes.length, sha256: hash(imageBytes) },
     launcher: { path: launcher, sha256: hash(Buffer.from(appImageLauncher())) }, tools: pins, runtimeDigestMd5Only: true,
     passiveExtractionMatches: true, originalInputUnchanged: true, runtimeAcceptance: false, updateAuthority: false,
@@ -158,8 +179,10 @@ export async function packageLinuxAppImage(options: LinuxAppImageOptions): Promi
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
-  if (args.length !== 6 || args[0] !== "--directory" || args[2] !== "--output" || args[4] !== "--tools" || !args[1] || !args[3] || !args[5]) {
-    throw new Error("Usage: tsx scripts/package-linux-appimage.ts --directory /existing/preview --output /fresh/output --tools /verified/tools");
+  if (![6, 7].includes(args.length) || args[0] !== "--directory" || args[2] !== "--output" || args[4] !== "--tools" || !args[1] || !args[3] || !args[5] ||
+      (args.length === 7 && args[6] !== "--canonical-stable-validation")) {
+    throw new Error("Usage: tsx scripts/package-linux-appimage.ts --directory /existing/preview --output /fresh/output --tools /verified/tools [--canonical-stable-validation]");
   }
-  console.log(JSON.stringify(await packageLinuxAppImage({ directory: args[1], output: args[3], tools: args[5] })));
+  console.log(JSON.stringify(await packageLinuxAppImage({ directory: args[1], output: args[3], tools: args[5],
+    ...(args.length === 7 ? { canonicalStableValidation: true } : {}) })));
 }

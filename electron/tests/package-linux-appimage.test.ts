@@ -5,9 +5,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
-import { appImageLauncher, packageLinuxAppImage } from "../scripts/package-linux-appimage.js";
+import { appImageArtifactName, appImageLauncher, packageLinuxAppImage } from "../scripts/package-linux-appimage.js";
 
 const supported = process.platform === "linux" && process.arch === "x64";
+
+test("canonical AppImage naming refuses Dev or modified producers while previews retain their source suffix", () => {
+  const source = { commit: "0123456789abcdef0123456789abcdef01234567", modified: false };
+  assert.equal(appImageArtifactName("stable", "0.3.0", source, true), "OpenWhisper-Linux-x86_64.AppImage");
+  assert.equal(appImageArtifactName("stable", "0.3.0", source), "OpenWhisper-Linux-x86_64_0.3.0~dev.0123456789ab.AppImage");
+  assert.equal(appImageArtifactName("development", "0.3.0", { ...source, modified: true }),
+    "OpenWhisper-Dev-Linux-x86_64_0.3.0~dev.0123456789ab.modified.AppImage");
+  assert.throws(() => appImageArtifactName("development", "0.3.0", source, true), /CANONICAL_STABLE_REQUIRED/);
+  assert.throws(() => appImageArtifactName("stable", "0.3.0", { ...source, modified: true }, true), /CANONICAL_STABLE_REQUIRED/);
+  for (const version of ["0.3.0~dev.0123456789ab", "0.3", "0.3.00", "0.3.0/other"]) {
+    assert.throws(() => appImageArtifactName("stable", version, source, true), /PACKAGE_VERSION_MISMATCH/);
+  }
+});
 function closed(child: ChildProcess): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
   return new Promise((resolve, reject) => { child.once("error", reject); child.once("close", (code, signal) => resolve({ code, signal })); });
 }

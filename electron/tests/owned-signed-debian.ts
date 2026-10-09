@@ -177,17 +177,22 @@ async function embedded(candidate: string, mode: "embedded-verify" | "audit" | "
       await assert.rejects(verifier.verifyOwnedLinuxUpdateFile({ ...download, artifactName: artifact, signature, version: "0.0.0" }),
         (error: unknown) => error instanceof signatures.LinuxUpdateSignatureError && error.code === "SIGNED_VERSION_MISMATCH");
     } else {
-      phase = "installed-physical-audit";
+      phase = "installed-service-import";
       const service = require(join(root, "dist/services/linux-debian-installed.js")) as typeof import("../src/services/linux-debian-installed.js");
+      phase = "installed-canonical-version-query";
       await service.assertCanonicalInstalledDebianVersion(receipt.sourceVersion);
+      phase = "installed-audit-prepare";
       const audit = await service.prepareDebianInstalledAudit({ download, signature, expectedVersion: receipt.sourceVersion });
       mismatch = (error: unknown) => error instanceof service.DebianInstalledAuditError && error.code === "INSTALLED_MISMATCH";
       finalGuard = audit.assertForExec;
       assert.throws(finalGuard, mismatch);
       if (mode === "audit-mismatch") {
+        phase = "installed-fresh-mismatch-audit";
         await assert.rejects(audit.assertInstalled(), mismatch); assert.throws(finalGuard, mismatch);
       } else {
-        await audit.assertInstalled(); finalGuard();
+        phase = "installed-full-positive-audit";
+        await audit.assertInstalled();
+        phase = "installed-final-guard"; finalGuard();
         if (mode === "audit-mutation") {
           phase = "installed-original-snapshot-mutation";
           await writeReceipt(join(evidence!, "mutation-ready.partial"), { ready: true, scope: "OWNED_FIXED_NOTICE_MUTATION_ONLY" });

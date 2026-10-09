@@ -1,19 +1,26 @@
 import { createHash } from "node:crypto";
-import { constants, type BigIntStats } from "node:fs";
-import { link, lstat, mkdtemp, open, readdir, realpath, rename, rmdir, unlink, type FileHandle } from "node:fs/promises";
+import * as nodeFs from "node:fs";
+import type { BigIntStats } from "node:fs";
+import { createRequire } from "node:module";
+import type { FileHandle } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { LinuxInstalledLaunch } from "../main/linux-installed-launch.js";
 import { verifyOwnedLinuxUpdateFile } from "./linux-update-file.js";
-import { MAX_LINUX_UPDATE_BYTES, verifyLinuxUpdateStream } from "./linux-update-signature.js";
+import { LinuxUpdateSignatureError, MAX_LINUX_UPDATE_BYTES, verifyLinuxUpdateStream } from "./linux-update-signature.js";
 import { appImageLauncher } from "./linux-appimage-launcher.js";
-import { isNewerUpdateVersion } from "./update-policy.js";
+import { isNewerUpdateVersion, parseUpdateVersion, UPDATE_POLICY_LIMITS } from "./update-policy.js";
 import { assertPrivateUpdateDirectory, inspectOwnedUpdateFile, type OwnedUpdateDownload } from "./update-staging.js";
+
+// Use physical files even when this consumer runs in embedded Electron Node.
+const physicalFs = process.versions["electron"] ? createRequire(import.meta.url)("original-fs") as typeof nodeFs : nodeFs;
+const { constants } = physicalFs;
+const { link, lstat, mkdtemp, open, readdir, realpath, rename, rmdir, unlink } = physicalFs.promises;
 
 type Failure = "INVALID_INPUT" | "INVALID_PACKAGE" | "SOURCE_CHANGED" | "PREPARE_FAILED" | "INSTALL_FAILED" | "ROLLBACK_FAILED" | "CLEANUP_FAILED" | "INVALID_STATE";
 export class LinuxAppImageUpdateError extends Error {
   constructor(readonly code: Failure) { super(code); this.name = "LinuxAppImageUpdateError"; }
 }
-const fail = (code: Failure): never => { throw new LinuxAppImageUpdateError(code); };
+function fail(code: Failure): never { throw new LinuxAppImageUpdateError(code); }
 const artifactName = "OpenWhisper-Linux-x86_64.AppImage";
 const same = (a: BigIntStats, b: BigIntStats): boolean => a.dev === b.dev && a.ino === b.ino && a.uid === b.uid &&
   a.mode === b.mode && a.nlink === b.nlink && a.size === b.size && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
@@ -39,6 +46,96 @@ async function syncDirectory(path: string): Promise<void> {
   const directory = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   try { await directory.sync(); } finally { await directory.close(); }
 }
+async function readBounded(file: FileHandle, path: string, uid: bigint, mode: bigint, identity: BigIntStats, limit: number): Promise<Buffer> {
+  if (identity.size < 1n || identity.size > BigInt(limit)) fail("SOURCE_CHANGED");
+  await observe(file, path, uid, mode, identity);
+  const bytes = Buffer.alloc(Number(identity.size) + 1); let position = 0;
+  while (position < bytes.length) {
+    const { bytesRead } = await file.read(bytes, position, bytes.length - position, position);
+    if (!bytesRead) break; position += bytesRead;
+  }
+  if (position !== Number(identity.size)) fail("SOURCE_CHANGED");
+  await observe(file, path, uid, mode, identity); return bytes.subarray(0, position);
+}
+async function* fileChunks(file: FileHandle, path: string, uid: bigint, mode: bigint, identity: BigIntStats,
+  guard: () => Promise<void>): AsyncGenerator<Buffer> {
+  if (identity.size < 1n || identity.size > BigInt(MAX_LINUX_UPDATE_BYTES)) fail("SOURCE_CHANGED");
+  const block = Buffer.alloc(64 * 1024), bytes = Number(identity.size); let position = 0;
+  while (position < bytes) {
+    await guard(); await observe(file, path, uid, mode, identity);
+    const wanted = Math.min(block.length, bytes - position), { bytesRead } = await file.read(block, 0, wanted, position);
+    if (bytesRead <= 0 || bytesRead > wanted) fail("SOURCE_CHANGED");
+    position += bytesRead; yield block.subarray(0, bytesRead);
+  }
+  if ((await file.read(block, 0, 1, position)).bytesRead !== 0) fail("SOURCE_CHANGED");
+  await guard(); await observe(file, path, uid, mode, identity);
+}
+function directories(directory: string, home: string, uid: bigint): ReadonlyMap<string, BigIntStats> {
+  const result = new Map<string, BigIntStats>();
+  for (let cursor = directory;; cursor = dirname(cursor)) {
+    const value = physicalFs.lstatSync(cursor, { bigint: true }), mode = value.mode & 0o7777n;
+    if (!value.isDirectory() || value.isSymbolicLink() || (value.uid !== uid && value.uid !== 0n) ||
+        ((mode & 0o022n) !== 0n && !(value.uid === 0n && (mode & 0o1000n) !== 0n)) ||
+        ((cursor === home || cursor.startsWith(`${home}/`)) && value.uid !== uid)) fail("SOURCE_CHANGED");
+    result.set(cursor, value); if (dirname(cursor) === cursor) return result;
+  }
+}
+function assertDirectories(before: ReadonlyMap<string, BigIntStats>): void {
+  for (const [path, value] of before) {
+    const current = physicalFs.lstatSync(path, { bigint: true });
+    if (value.dev !== current.dev || value.ino !== current.ino || value.uid !== current.uid || value.mode !== current.mode) fail("SOURCE_CHANGED");
+  }
+}
+/** Fixed current pair authentication only. Missing/stale signatures refuse this capability, not ordinary V1 launch.
+ * The caller must separately supply genuine live installed-launch admission; metadata is not publisher authentication. */
+export async function admitSignedAppImageLaunch(input: { readonly home: string; readonly version: string;
+  readonly launch: Extract<LinuxInstalledLaunch, { kind: "appimage" }> }): Promise<Readonly<{ assertUnchanged(): void }>> {
+  const { home, version, launch } = input, user = process.getuid?.();
+  const image = join(home, ".local/lib/whisperfree/OpenWhisper.AppImage"), launcher = join(dirname(image), "openwhisper-launch"), signed = `${image}.sig`;
+  try { parseUpdateVersion(version); } catch { return fail("INVALID_INPUT"); }
+  if (process.platform !== "linux" || process.arch !== "x64" || user === undefined || user === 0 || !isAbsolute(home) ||
+      resolve(home) !== home || /[\p{Cc}]/u.test(home) || await realpath(home).catch(() => fail("INVALID_INPUT")) !== home || launch.kind !== "appimage" ||
+      launch.executable !== launcher || launch.arguments.length !== 1 || launch.arguments[0] !== image) fail("INVALID_INPUT");
+  const uid = BigInt(user);
+  let ancestors: ReadonlyMap<string, BigIntStats>;
+  try { ancestors = directories(dirname(image), home, uid); } catch { return fail("SOURCE_CHANGED"); }
+  let file: FileHandle | undefined, signatureFile: FileHandle | undefined, launcherFile: FileHandle | undefined;
+  try {
+    launch.assertUnchanged();
+    file = await open(image, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const initial = await file.stat({ bigint: true }), mode = initial.mode & 0o7777n;
+    if ((mode & 0o7022n) !== 0n || (mode & 0o111n) === 0n) fail("SOURCE_CHANGED");
+    const imageIdentity = await observe(file, image, uid, mode, initial);
+    signatureFile = await open(signed, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const signatureIdentity = await signatureFile.stat({ bigint: true }), signatureMode = signatureIdentity.mode & 0o7777n;
+    if (signatureMode !== 0o600n && signatureMode !== 0o644n) fail("SOURCE_CHANGED");
+    const signatureBytes = await readBounded(signatureFile, signed, uid, signatureMode, signatureIdentity, UPDATE_POLICY_LIMITS.signatureBytes);
+    launcherFile = await open(launcher, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const launcherIdentity = await launcherFile.stat({ bigint: true }), launcherMode = launcherIdentity.mode & 0o7777n;
+    if ((launcherMode & 0o7022n) !== 0n || !(launcherMode & 0o111n) ||
+        !(await readBounded(launcherFile, launcher, uid, launcherMode, launcherIdentity, 16 * 1024)).equals(Buffer.from(appImageLauncher()))) fail("SOURCE_CHANGED");
+    const guard = async (): Promise<void> => { launch.assertUnchanged(); assertDirectories(ancestors);
+      await observe(signatureFile!, signed, uid, signatureMode, signatureIdentity); };
+    const header = Buffer.alloc(64);
+    if ((await file.read(header, 0, 64, 0)).bytesRead !== 64) fail("INVALID_PACKAGE");
+    validateAppImageUpdateHeader(header);
+    await verifyLinuxUpdateStream(fileChunks(file, image, uid, mode, imageIdentity, guard), signatureBytes.toString("utf8"), version);
+    const assertUnchanged = (): void => {
+      try { launch.assertUnchanged(); assertDirectories(ancestors);
+        for (const [path, identity] of [[image, imageIdentity], [signed, signatureIdentity], [launcher, launcherIdentity]] as const) {
+          if (!same(identity, physicalFs.lstatSync(path, { bigint: true }))) fail("SOURCE_CHANGED");
+        }
+      } catch { fail("SOURCE_CHANGED"); }
+    };
+    assertUnchanged(); return Object.freeze({ assertUnchanged });
+  } catch (error: unknown) {
+    if (error instanceof LinuxUpdateSignatureError) throw error;
+    if (error instanceof LinuxAppImageUpdateError) throw error; return fail("SOURCE_CHANGED");
+  } finally {
+    const closed = await Promise.allSettled([file?.close(), signatureFile?.close(), launcherFile?.close()]);
+    if (closed.some((result) => result.status === "rejected")) fail("CLEANUP_FAILED");
+  }
+}
 /** Synthetic filesystem faults only; production uses fixed same-filesystem rename/link operations. */
 export interface AppImageUpdateEffects { move(from: string, to: string): Promise<void>; publish(from: string, to: string): Promise<void> }
 export interface PreparedAppImageUpdate {
@@ -58,17 +155,21 @@ export interface PreparedAppImageUpdate {
 export interface AppImageExecContinuation {
   /** Reauthenticate the fixed installed image, settling all temporary descriptors before returning. */
   assertInstalledForExec(): Promise<void>;
+  /** Synchronous physical metadata observation after full reauthentication and descriptor settlement; no CAS/adversary claim. */
+  assertForExec(): void;
   /** Same original parent only, after exec refused; never reads a persisted record as authority. */
   rollbackBeforeExec(): Promise<void>;
 }
 
-/** Inactive host consumer. The caller retains the original download and parent-owned restart/signature handoff. */
+/** Inactive host consumer. Production must first obtain admitSignedAppImageLaunch and recheck it through preparation/install.
+ * This transaction preserves predecessor bytes/metadata; its inert filesystem tests do not grant signed-current admission.
+ * The caller retains the original download and parent-owned restart/signature handoff. */
 export async function prepareAppImageUpdate(input: {
   readonly download: OwnedUpdateDownload; readonly signature: unknown; readonly expectedVersion: string; readonly currentVersion: string;
   readonly home: string; readonly launch: Extract<LinuxInstalledLaunch, { kind: "appimage" }>;
 }, effects: Partial<AppImageUpdateEffects> = {}): Promise<Readonly<PreparedAppImageUpdate>> {
   const { download, signature, expectedVersion, currentVersion, home, launch } = input, user = process.getuid?.();
-  const image = join(home, ".local/lib/whisperfree/OpenWhisper.AppImage"), launcher = join(dirname(image), "openwhisper-launch");
+  const image = join(home, ".local/lib/whisperfree/OpenWhisper.AppImage"), launcher = join(dirname(image), "openwhisper-launch"), signaturePath = `${image}.sig`;
   if (process.platform !== "linux" || process.arch !== "x64" || user === undefined || user === 0 || download.artifactName !== artifactName ||
       !isNewerUpdateVersion(expectedVersion, currentVersion) || !isAbsolute(home) || resolve(home) !== home || /[\p{Cc}]/u.test(home) ||
       launch.kind !== "appimage" || launch.executable !== launcher || launch.arguments.length !== 1 || launch.arguments[0] !== image ||
@@ -76,13 +177,19 @@ export async function prepareAppImageUpdate(input: {
   const uid = BigInt(user), io: AppImageUpdateEffects = { move: rename, publish: link, ...effects };
   const original = await inspectOwnedUpdateFile(download);
   await verifyOwnedLinuxUpdateFile({ ...download, artifactName, signature, version: expectedVersion });
+  if (typeof signature !== "string") fail("INVALID_INPUT");
+  let oldSignature: FileHandle | undefined, signatureCopy: FileHandle | undefined, signatureCopyIdentity: BigIntStats | undefined;
+  let oldSignatureIdentity: BigIntStats | undefined, installedSignature: BigIntStats | undefined, backupSignatureIdentity: BigIntStats | undefined;
   const assertOriginal = async (): Promise<void> => {
-    try { launch.assertUnchanged(); await original.assertUnchanged(); await download.assertUnchanged(); }
+    try { launch.assertUnchanged(); await original.assertUnchanged(); await download.assertUnchanged();
+      if (oldSignature && oldSignatureIdentity) await observe(oldSignature, signaturePath, uid, oldSignatureIdentity.mode & 0o7777n, oldSignatureIdentity); }
     catch { fail("SOURCE_CHANGED"); }
   };
   await assertOriginal();
   const launcherIdentity = await lstat(launcher, { bigint: true });
   const old = await open(image, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  let signatureSource = "", signatureBackup = "";
+  let continuationDirectories: ReadonlyMap<string, BigIntStats> | undefined;
   let copy: FileHandle | undefined, directory: string | undefined, directoryGuard: Awaited<ReturnType<typeof assertPrivateUpdateDirectory>> | undefined;
   let oldIdentity: BigIntStats, copyIdentity: BigIntStats | undefined;
   let source: string | undefined, backup: string | undefined, backupIdentity: BigIntStats | undefined;
@@ -93,10 +200,13 @@ export async function prepareAppImageUpdate(input: {
     } catch { fail("SOURCE_CHANGED"); }
   };
   let closing: Promise<void> | undefined;
-  const closeOwned = (): Promise<void> => closing ??= Promise.allSettled([copy?.close(), old.close()]).then((results) => {
+  const closeOwned = (): Promise<void> => closing ??= Promise.allSettled([copy?.close(), old.close(), signatureCopy?.close(), oldSignature?.close()]).then((results) => {
     if (results.some((result) => result.status === "rejected")) fail("CLEANUP_FAILED");
   });
-  const removeCopy = async (file = copy): Promise<void> => {
+  const removeCopy = async (file = copy, signedFile = signatureCopy): Promise<void> => {
+    if (signedFile && signatureSource && signatureCopyIdentity && await optional(signatureSource)) {
+      await guard(); await observe(signedFile, signatureSource, uid, signatureCopyIdentity.mode & 0o7777n); await unlink(signatureSource);
+    }
     if (!file || !source || !copyIdentity) return;
     await guard(); const named = await optional(source);
     // Cleanup owns this descriptor/inode; partial own writes are not installation authority.
@@ -106,10 +216,26 @@ export async function prepareAppImageUpdate(input: {
     const initial = await old.stat({ bigint: true }), mode = initial.mode & 0o7777n;
     if ((mode & 0o7022n) !== 0n || (mode & 0o111n) === 0n) fail("SOURCE_CHANGED");
     oldIdentity = await observe(old, image, uid, mode, initial);
+    oldSignature = await open(signaturePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    oldSignatureIdentity = await oldSignature.stat({ bigint: true });
+    const signatureMode = oldSignatureIdentity.mode & 0o7777n;
+    if (signatureMode !== 0o600n && signatureMode !== 0o644n) fail("SOURCE_CHANGED");
+    await readBounded(oldSignature, signaturePath, uid, signatureMode, oldSignatureIdentity, UPDATE_POLICY_LIMITS.signatureBytes);
     await assertOriginal();
     directory = await mkdtemp(join(dirname(image), ".openwhisper-update-"));
     directoryGuard = await assertPrivateUpdateDirectory(directory);
+    continuationDirectories = directories(directory, home, uid);
     source = join(directory, artifactName); backup = join(directory, "previous.AppImage");
+    signatureSource = `${source}.sig`; signatureBackup = `${backup}.sig`;
+    signatureCopy = await open(signatureSource, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    signatureCopyIdentity = await observe(signatureCopy, signatureSource, uid, 0o600n);
+    const signatureBytes = Buffer.from(signature); let signaturePosition = 0;
+    while (signaturePosition < signatureBytes.length) {
+      const { bytesWritten } = await signatureCopy.write(signatureBytes, signaturePosition, signatureBytes.length - signaturePosition, signaturePosition);
+      if (!bytesWritten) fail("PREPARE_FAILED"); signaturePosition += bytesWritten;
+    }
+    signatureCopyIdentity = await observe(signatureCopy, signatureSource, uid, 0o600n);
+    await signatureCopy.sync();
     copy = await open(source, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     const acquiredCopy = await observe(copy, source, uid, 0o600n);
     copyIdentity = acquiredCopy;
@@ -149,6 +275,8 @@ export async function prepareAppImageUpdate(input: {
   const assertCandidate = async (): Promise<void> => {
     if (!installed) fail("INVALID_STATE");
     await guard(); await observe(candidate, image, uid, 0o755n, installed);
+    if (!installedSignature || !signatureCopy) fail("SOURCE_CHANGED");
+    await observe(signatureCopy, signaturePath, uid, 0o644n, installedSignature);
   };
   const assertInstalled = async (): Promise<void> => {
     if (phase !== "installed") fail("INVALID_STATE");
@@ -163,6 +291,28 @@ export async function prepareAppImageUpdate(input: {
     await observe(predecessor, previousPath, uid, oldIdentity.mode & 0o7777n, linked, false, 2n);
     await unlink(previousPath); oldIdentity = await observe(predecessor, image, uid, oldIdentity.mode & 0o7777n, linked, true);
     backupIdentity = undefined; await syncDirectory(dirname(image)); await syncDirectory(stage);
+  };
+  const restoreSignature = async (predecessor = oldSignature): Promise<void> => {
+    if (!oldSignatureIdentity || !predecessor) fail("ROLLBACK_FAILED");
+    const mode = oldSignatureIdentity.mode & 0o7777n;
+    if (!backupSignatureIdentity) { await observe(predecessor, signaturePath, uid, mode, oldSignatureIdentity); return; }
+    await guard(); await observe(predecessor, signatureBackup, uid, mode, backupSignatureIdentity);
+    if (await optional(signaturePath)) fail("ROLLBACK_FAILED");
+    await link(signatureBackup, signaturePath);
+    const linked = await observe(predecessor, signaturePath, uid, mode, backupSignatureIdentity, true, 2n);
+    await observe(predecessor, signatureBackup, uid, mode, linked, false, 2n);
+    await unlink(signatureBackup); oldSignatureIdentity = await observe(predecessor, signaturePath, uid, mode, linked, true);
+    backupSignatureIdentity = undefined; await syncDirectory(dirname(image)); await syncDirectory(stage);
+  };
+  const withdrawSignature = async (published = signatureCopy): Promise<void> => {
+    if (!backupSignatureIdentity) return;
+    await guard(); if (!await optional(signaturePath)) return;
+    if (!published || !signatureCopyIdentity) fail("ROLLBACK_FAILED");
+    const staged = await optional(signatureSource), links = staged ? 2n : 1n;
+    const current = await observe(published, signaturePath, uid, 0o644n, installedSignature ?? signatureCopyIdentity, true, links);
+    if (staged) { await observe(published, signatureSource, uid, 0o644n, current, false, 2n); await unlink(signaturePath); }
+    else await io.move(signaturePath, signatureSource);
+    signatureCopyIdentity = await observe(published, signatureSource, uid, 0o644n, current, true);
   };
   const withdrawCandidate = async (published = candidate): Promise<void> => {
     await guard();
@@ -189,11 +339,20 @@ export async function prepareAppImageUpdate(input: {
       copyIdentity = await observe(candidate, preparedPath, uid, 0o755n, copyIdentity);
       await io.move(image, previousPath);
       backupIdentity = await observe(old, previousPath, uid, oldIdentity.mode & 0o7777n, oldIdentity, true);
+      if (!oldSignature || !oldSignatureIdentity || !signatureCopy || !signatureCopyIdentity) fail("SOURCE_CHANGED");
+      await io.move(signaturePath, signatureBackup);
+      backupSignatureIdentity = await observe(oldSignature, signatureBackup, uid, oldSignatureIdentity.mode & 0o7777n, oldSignatureIdentity, true);
       await guard(); await io.publish(preparedPath, image);
       const linked = await observe(candidate, image, uid, 0o755n, copyIdentity, true, 2n);
       await observe(candidate, preparedPath, uid, 0o755n, linked, false, 2n);
       await unlink(preparedPath);
       installed = await observe(candidate, image, uid, 0o755n, linked, true);
+      await observe(signatureCopy, signatureSource, uid, 0o600n, signatureCopyIdentity);
+      await signatureCopy.chmod(0o644); signatureCopyIdentity = await observe(signatureCopy, signatureSource, uid, 0o644n, signatureCopyIdentity, true);
+      await io.publish(signatureSource, signaturePath);
+      const signedLinked = await observe(signatureCopy, signaturePath, uid, 0o644n, signatureCopyIdentity, true, 2n);
+      await observe(signatureCopy, signatureSource, uid, 0o644n, signedLinked, false, 2n);
+      await unlink(signatureSource); installedSignature = await observe(signatureCopy, signaturePath, uid, 0o644n, signedLinked, true);
       await syncDirectory(dirname(image)); await syncDirectory(stage); phase = "installed"; await assertInstalled();
     } catch {
       phase = "failed";
@@ -202,7 +361,10 @@ export async function prepareAppImageUpdate(input: {
         if (!backupIdentity && await optional(previousPath)) {
           backupIdentity = await observe(old, previousPath, uid, oldIdentity.mode & 0o7777n, oldIdentity, true);
         }
-        if (backupIdentity) { await withdrawCandidate(); await restore(); }
+        if (!backupSignatureIdentity && oldSignature && oldSignatureIdentity && await optional(signatureBackup)) {
+          backupSignatureIdentity = await observe(oldSignature, signatureBackup, uid, oldSignatureIdentity.mode & 0o7777n, oldSignatureIdentity, true);
+        }
+        if (backupIdentity) { await withdrawSignature(); await withdrawCandidate(); await restore(); await restoreSignature(); }
       } catch {
         await closeOwned().catch(() => {}); return fail("ROLLBACK_FAILED");
       }
@@ -219,11 +381,14 @@ export async function prepareAppImageUpdate(input: {
         if (kind !== "discard") {
           await assertInstalled();
           if (kind === "rollback") {
-            await withdrawCandidate();
-            await restore();
+            await withdrawSignature(); await withdrawCandidate();
+            await restore(); await restoreSignature();
           } else {
             if (!backupIdentity) fail("INVALID_STATE");
-            await observe(old, previousPath, uid, oldIdentity.mode & 0o7777n, backupIdentity); await unlink(previousPath); backupIdentity = undefined;
+            if (!oldSignature || !oldSignatureIdentity || !backupSignatureIdentity) fail("SOURCE_CHANGED");
+            await observe(oldSignature, signatureBackup, uid, oldSignatureIdentity.mode & 0o7777n, backupSignatureIdentity);
+            await observe(old, previousPath, uid, oldIdentity.mode & 0o7777n, backupIdentity);
+            await unlink(previousPath); backupIdentity = undefined; await unlink(signatureBackup); backupSignatureIdentity = undefined;
           }
         }
         await removeCopy(); await closeOwned(); await guard(); await rmdir(stage); await syncDirectory(dirname(image)); phase = "closed";
@@ -236,22 +401,16 @@ export async function prepareAppImageUpdate(input: {
   };
   const recordPath = join(stage, "continuation.json");
   let recordIdentity: BigIntStats | undefined, continuing: Promise<Readonly<AppImageExecContinuation>> | undefined;
-  async function* chunks(file: FileHandle, path: string, mode: bigint, identity: BigIntStats): AsyncGenerator<Buffer> {
-    if (identity.size < 1n || identity.size > BigInt(MAX_LINUX_UPDATE_BYTES)) fail("SOURCE_CHANGED");
-    const block = Buffer.alloc(64 * 1024), bytes = Number(identity.size);
-    let position = 0;
-    while (position < bytes) {
-      await guard(); await observe(file, path, uid, mode, identity);
-      const wanted = Math.min(block.length, bytes - position), { bytesRead } = await file.read(block, 0, wanted, position);
-      if (bytesRead <= 0 || bytesRead > wanted) fail("SOURCE_CHANGED");
-      position += bytesRead; yield block.subarray(0, bytesRead);
-    }
-    if ((await file.read(block, 0, 1, position)).bytesRead !== 0) fail("SOURCE_CHANGED");
-    await guard(); await observe(file, path, uid, mode, identity);
-  }
   const authenticateInstalled = async (file: FileHandle): Promise<void> => {
     const identity = installed ?? fail("INVALID_STATE");
-    await verifyLinuxUpdateStream(chunks(file, image, 0o755n, identity), signature, expectedVersion);
+    if (!installedSignature) fail("SOURCE_CHANGED");
+    const signedFile = await open(signaturePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const currentSignature = await readBounded(signedFile, signaturePath, uid, 0o644n, installedSignature, UPDATE_POLICY_LIMITS.signatureBytes);
+      if (!currentSignature.equals(Buffer.from(signature))) fail("SOURCE_CHANGED");
+      await verifyLinuxUpdateStream(fileChunks(file, image, uid, 0o755n, identity, guard), currentSignature.toString("utf8"), expectedVersion);
+      await observe(signedFile, signaturePath, uid, 0o644n, installedSignature);
+    } finally { await signedFile.close(); }
   };
   const assertLauncher = async (): Promise<void> => {
     await guard();
@@ -259,13 +418,7 @@ export async function prepareAppImageUpdate(input: {
     try {
       const template = Buffer.from(appImageLauncher());
       if (launcherIdentity.size !== BigInt(template.length)) fail("SOURCE_CHANGED");
-      await observe(file, launcher, uid, launcherIdentity.mode & 0o7777n, launcherIdentity);
-      const bytes = Buffer.alloc(template.length); let position = 0;
-      while (position < bytes.length) {
-        const { bytesRead } = await file.read(bytes, position, bytes.length - position, position);
-        if (!bytesRead) fail("SOURCE_CHANGED"); position += bytesRead;
-      }
-      if (!bytes.equals(template)) fail("SOURCE_CHANGED");
+      if (!(await readBounded(file, launcher, uid, launcherIdentity.mode & 0o7777n, launcherIdentity, 16 * 1024)).equals(template)) fail("SOURCE_CHANGED");
       await observe(file, launcher, uid, launcherIdentity.mode & 0o7777n, launcherIdentity); await guard();
     } finally { await file.close(); }
   };
@@ -274,7 +427,8 @@ export async function prepareAppImageUpdate(input: {
     const names = (await readdir(stage)).sort();
     if (!recordIdentity || !same(recordIdentity, await lstat(recordPath, { bigint: true })) ||
         !backupIdentity || !same(backupIdentity, await lstat(previousPath, { bigint: true })) ||
-        names.length !== 2 || names[0] !== "continuation.json" || names[1] !== "previous.AppImage") fail("SOURCE_CHANGED");
+        !backupSignatureIdentity || !same(backupSignatureIdentity, await lstat(signatureBackup, { bigint: true })) ||
+        names.length !== 3 || names[0] !== "continuation.json" || names[1] !== "previous.AppImage" || names[2] !== "previous.AppImage.sig") fail("SOURCE_CHANGED");
   };
   const encodeIdentity = (value: BigIntStats) => Object.fromEntries(
     (["dev", "ino", "uid", "mode", "nlink", "size", "mtimeNs", "ctimeNs"] as const).map((key) => [key, value[key].toString()]));
@@ -287,17 +441,18 @@ export async function prepareAppImageUpdate(input: {
       try {
         await assertCandidate(); await assertLauncher();
         const predecessorIdentity = backupIdentity ?? fail("SOURCE_CHANGED");
-        if ((await readdir(stage)).join() !== "previous.AppImage") fail("SOURCE_CHANGED");
+        if ((await readdir(stage)).sort().join() !== "previous.AppImage,previous.AppImage.sig") fail("SOURCE_CHANGED");
         await observe(old, previousPath, uid, oldIdentity.mode & 0o7777n, predecessorIdentity);
         await authenticateInstalled(candidate);
         const hash = createHash("sha256");
-        for await (const chunk of chunks(old, previousPath, oldIdentity.mode & 0o7777n, predecessorIdentity)) hash.update(chunk);
+        for await (const chunk of fileChunks(old, previousPath, uid, oldIdentity.mode & 0o7777n, predecessorIdentity, guard)) hash.update(chunk);
         const directoryIdentity = await lstat(stage, { bigint: true });
-        const bytes = Buffer.from(JSON.stringify({ schemaVersion: 1, artifact: artifactName, stage: basename(stage),
+        const bytes = Buffer.from(JSON.stringify({ schemaVersion: 2, artifact: artifactName, stage: basename(stage),
           predecessorVersion: currentVersion, installedVersion: expectedVersion, signature,
           directory: { dev: directoryIdentity.dev.toString(), ino: directoryIdentity.ino.toString(),
             uid: directoryIdentity.uid.toString(), mode: directoryIdentity.mode.toString() },
           launcher: encodeIdentity(launcherIdentity), installed: encodeIdentity(installed!),
+          installedSignature: encodeIdentity(installedSignature!), predecessorSignature: encodeIdentity(backupSignatureIdentity!),
           predecessor: encodeIdentity(predecessorIdentity), predecessorSha256: hash.digest("hex") }));
         if (bytes.length > 32 * 1024) fail("INVALID_INPUT");
         await guard();
@@ -332,14 +487,29 @@ export async function prepareAppImageUpdate(input: {
         return fail("PREPARE_FAILED");
       }
       let checking: Promise<void> | undefined, rollingBack: Promise<void> | undefined;
+      let finalDirectories: ReadonlyMap<string, BigIntStats> | undefined;
+      const assertForExec = (): void => {
+        if (phase !== "continued" || !finalDirectories) fail("INVALID_STATE");
+        try {
+          assertDirectories(finalDirectories);
+          for (const [path, identity] of [[image, installed], [signaturePath, installedSignature], [launcher, launcherIdentity],
+            [recordPath, recordIdentity], [previousPath, backupIdentity], [signatureBackup, backupSignatureIdentity]] as const) {
+            if (!identity || !same(identity, physicalFs.lstatSync(path, { bigint: true }))) fail("SOURCE_CHANGED");
+          }
+          if (physicalFs.readdirSync(stage).sort().join() !== "continuation.json,previous.AppImage,previous.AppImage.sig") fail("SOURCE_CHANGED");
+        } catch { finalDirectories = undefined; fail("SOURCE_CHANGED"); }
+      };
       const assertInstalledForExec = (): Promise<void> => {
         if (phase !== "continued") return Promise.reject(new LinuxAppImageUpdateError("INVALID_STATE"));
         if (checking) return checking;
+        finalDirectories = undefined;
         const operation = Promise.resolve().then(async () => {
           await assertRecord(); await assertLauncher();
           const file = await open(image, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
           try { await authenticateInstalled(file); await assertRecord(); }
           finally { await file.close(); }
+          // All original candidate/predecessor and temporary authentication descriptors are closed.
+          finalDirectories = continuationDirectories; assertForExec();
         });
         checking = operation;
         void operation.finally(() => { if (checking === operation) checking = undefined; }).catch(() => {});
@@ -348,29 +518,33 @@ export async function prepareAppImageUpdate(input: {
       const rollbackBeforeExec = (): Promise<void> => {
         if (rollingBack) return rollingBack;
         if (phase !== "continued") return Promise.reject(new LinuxAppImageUpdateError("INVALID_STATE"));
-        phase = "rolling-back";
+        phase = "rolling-back"; finalDirectories = undefined;
         const originalCheck = checking;
         return rollingBack = Promise.resolve().then(async () => {
-          let published: FileHandle | undefined, predecessor: FileHandle | undefined;
+          let published: FileHandle | undefined, predecessor: FileHandle | undefined,
+            publishedSignature: FileHandle | undefined, predecessorSignature: FileHandle | undefined;
           try {
             await originalCheck; await assertRecord(); await assertLauncher();
             published = await open(image, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
             predecessor = await open(previousPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+            publishedSignature = await open(signaturePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+            predecessorSignature = await open(signatureBackup, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
             await authenticateInstalled(published);
             if (!backupIdentity) fail("ROLLBACK_FAILED");
             await observe(predecessor, previousPath, uid, oldIdentity.mode & 0o7777n, backupIdentity);
-            await assertRecord(); await withdrawCandidate(published); await restore(predecessor); await removeCopy(published);
+            await assertRecord(); await withdrawSignature(publishedSignature); await withdrawCandidate(published);
+            await restore(predecessor); await restoreSignature(predecessorSignature); await removeCopy(published, publishedSignature);
             if (!recordIdentity || !same(recordIdentity, await lstat(recordPath, { bigint: true }))) fail("SOURCE_CHANGED");
             await unlink(recordPath);
           } catch { fail("ROLLBACK_FAILED"); }
           finally {
-            const results = await Promise.allSettled([published?.close(), predecessor?.close()]);
+            const results = await Promise.allSettled([published?.close(), predecessor?.close(), publishedSignature?.close(), predecessorSignature?.close()]);
             if (results.some((result) => result.status === "rejected")) fail("CLEANUP_FAILED");
           }
           await guard(); await rmdir(stage); await syncDirectory(dirname(image)); phase = "closed";
         });
       };
-      return Object.freeze({ assertInstalledForExec, rollbackBeforeExec });
+      return Object.freeze({ assertInstalledForExec, assertForExec, rollbackBeforeExec });
     });
   };
   return Object.freeze({ version: expectedVersion, bytes: original.bytes, install, assertInstalled, prepareExecContinuation,

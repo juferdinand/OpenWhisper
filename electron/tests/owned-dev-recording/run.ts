@@ -33,13 +33,19 @@ const appImageStartupOnly = appImage && args[12] === "--appimage-startup-only";
 const supervisedLaunch = stablePackage && (installedDebian || appImage) && args[12] === "--supervised-launch";
 const appImageAdmission = appImage && (args[12] === "--appimage-admission" || supervisedLaunch);
 const resourceDiagnostic = supervisedLaunch && installedDebian && args[17] === "--resource-diagnostic";
-if (args.length !== (resourceDiagnostic ? 18 : supervisedLaunch ? 17 : appImageStartupOnly || appImageAdmission ? 13 : installedDebian || appImage ? 12 : packaged ? installPackage || stablePackage ? 10 : 9 : copiedNode ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
+const updateCheck = supervisedLaunch && installedDebian && args[17] === "--update-check";
+if (args.length !== (resourceDiagnostic || updateCheck ? 18 : supervisedLaunch ? 17 : appImageStartupOnly || appImageAdmission ? 13 : installedDebian || appImage ? 12 : packaged ? installPackage || stablePackage ? 10 : 9 : copiedNode ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
     || process.platform !== "linux" || process.arch !== "x64" || process.getuid?.() === 0) throw new Error("INVALID_EXECUTION");
 const output = absolute.parse(args[1]), planning = absolute.parse(args[3]), fixtures = absolute.parse(args[5]);
 const packageDirectory = packaged ? absolute.parse(args[8]) : undefined;
 const debianPackage = installedDebian ? absolute.parse(args[11]) : undefined;
 const appImageBundle = appImage ? absolute.parse(args[11]) : undefined;
 const artifactSchema = z.strictObject({ bytes: z.number().int().nonnegative().max(1024 * 1024 * 1024), sha256: z.string().regex(/^[a-f0-9]{64}$/u) });
+const updateInputSchema = z.strictObject({ version: z.literal(1), classification: z.literal("CANONICAL_STABLE_VALIDATION_ONLY"),
+  source: z.strictObject({ commit: z.string().regex(/^[a-f0-9]{40}$/u), modified: z.literal(false) }),
+  sourceVersion: z.literal("0.3.0"), files: z.record(z.string(), artifactSchema),
+  modes: z.record(z.string(), z.number().int().min(0).max(0o7777)) });
+let updateInput: z.infer<typeof updateInputSchema> | undefined;
 const supervisorInputSchema = z.strictObject({ version: z.literal(1), classification: z.literal("OWNED_SUPERVISOR_RUNTIME_INPUT"),
   source: z.strictObject({ commit: z.literal("2ce4a2285bf90de15fe9294bfa1c30630d1ab8bc"), modified: z.literal(false) }),
   packageDirectory: absolute, packageFiles: z.record(z.string(), artifactSchema),
@@ -55,9 +61,15 @@ if (supervisedLaunch) {
   const file = await lstat(supervisorReceiptPath); assert.ok(file.isFile() && !file.isSymbolicLink() && file.size <= 8 * 1024 * 1024);
   supervisorReceiptBytes = await readFile(supervisorReceiptPath);
   assert.equal(createHash("sha256").update(supervisorReceiptBytes).digest("hex"), supervisorReceiptSha256);
-  supervisorInput = supervisorInputSchema.parse(JSON.parse(supervisorReceiptBytes.toString("utf8")) as unknown);
-  assert.equal(supervisorInput.packageDirectory, packageDirectory);
-  assert.ok(Object.keys(supervisorInput.packageFiles).length <= 20_000 && Object.keys(supervisorInput.packageModes).length <= 25_000);
+  const receipt: unknown = JSON.parse(supervisorReceiptBytes.toString("utf8"));
+  if (updateCheck) {
+    updateInput = updateInputSchema.parse(receipt);
+    assert.ok(Object.keys(updateInput.files).length <= 20_000 && Object.keys(updateInput.modes).length <= 25_000);
+  } else {
+    supervisorInput = supervisorInputSchema.parse(receipt);
+    assert.equal(supervisorInput.packageDirectory, packageDirectory);
+    assert.ok(Object.keys(supervisorInput.packageFiles).length <= 20_000 && Object.keys(supervisorInput.packageModes).length <= 25_000);
+  }
 }
 
 for (const path of [planning, fixtures]) {
@@ -103,6 +115,7 @@ if (packageDirectory) {
   applicationBuild = parseApplicationBuildModule(await readFile(join(app, "dist/main/application-build.js"), "utf8"));
   assert.equal(applicationBuild.kind, stablePackage ? "stable" : "development");
   if (supervisorInput) assert.deepEqual(JSON.parse(await readFile(join(app, "dist/resources/development-build.json"), "utf8")), supervisorInput.source);
+  if (updateInput) assert.deepEqual(JSON.parse(await readFile(join(app, "dist/resources/development-build.json"), "utf8")), updateInput.source);
   const module: unknown = await import(pathToFileURL(join(app, "dist/main/development-recording-build.js")).href);
   original = z.object({ DEVELOPMENT_RECORDING_BUILD: developmentRecordingDescriptorSchema }).parse(module).DEVELOPMENT_RECORDING_BUILD;
   descriptor = original;
@@ -124,7 +137,17 @@ if (packageDirectory) {
     const version = (await readFile(join(app, "dist/resources/VERSION"), "utf8")).trim();
     assert.match(version, /^\d+\.\d+\.\d+$/u);
     assert.equal(z.object({ version: z.string() }).parse(JSON.parse(await readFile(join(app, "package.json"), "utf8"))).version, version);
-    debianVersion = `${version}~dev.${source.commit.slice(0, 12)}${source.modified ? ".modified" : ""}`;
+    debianVersion = updateInput ? updateInput.sourceVersion : `${version}~dev.${source.commit.slice(0, 12)}${source.modified ? ".modified" : ""}`;
+    if (updateInput) {
+      assert.equal(version, updateInput.sourceVersion);
+      const directory = "OpenWhisper-Linux-x64", artifact = "OpenWhisper-Linux-amd64.deb";
+      assert.equal(packageDirectory, join(dirname(packageDirectory), directory));
+      assert.equal(debianPackage, join(dirname(debianPackage), artifact));
+      assert.deepEqual(updateInput.files, { [artifact]: debianBefore,
+        ...Object.fromEntries(Object.entries(packageBefore).map(([name, value]) => [`${directory}/${name}`, value])) });
+      assert.deepEqual(updateInput.modes, { [artifact]: archive.mode & 0o7777, [directory]: (await lstat(packageDirectory)).mode & 0o7777,
+        ...Object.fromEntries(Object.entries(packageModes).map(([name, mode]) => [`${directory}/${name}`, mode])) });
+    }
     await cp(debianPackage, join(payload, "package.deb"), { errorOnExist: true, force: false });
     assert.deepEqual(await describe(join(payload, "package.deb")), debianBefore);
   }
@@ -292,6 +315,8 @@ try {
   await writeFile(join(output, "assembly.json"), JSON.stringify({ image: IMAGE, sources, originalDescriptor: original, descriptor,
     originalDist: distBefore, payload: frozen,
     ...(supervisorInput ? { supervisedInput: { receiptPath: supervisorReceiptPath, receiptSha256: supervisorReceiptSha256, source: supervisorInput.source, scope: "ORDINARY_BOOTSTRAP_ONLY_NO_UPDATE_AUTHORITY" } } : {}),
+    ...(updateInput ? { updateCheckInput: { receiptPath: supervisorReceiptPath, receiptSha256: supervisorReceiptSha256, source: updateInput.source,
+      scope: "ACTUAL_V2_READ_ONLY_CHECK_NETWORK_NONE_NO_INSTALL_OR_REPLACEMENT" } } : {}),
     ...(packageDirectory ? { packageInput: { directory: packageDirectory, files: packageBefore, capturedDescriptorPreserved: true,
       installedRuntime: installPackage, stableRuntime: stablePackage, applicationBuild } } : {}),
     ...(appImageInput ? { appImageInput: { ...appImageInput, directory: appImageBundle, scope: "UNSIGNED_OWNED_RUNTIME_ONLY" } } : {}),
@@ -303,7 +328,8 @@ try {
     portalFixture: portalFixture ? { compilerImage, binary: await describe(join(payload, "owned-bus/owned-portal")) } : null,
     ...(copiedNode ? { nodeRuntime: { sourceImage: compilerImage, ...await describe(join(payload, "node")) } } : {}),
     seccomp: { path: seccomp, ...await describe(seccomp) },
-    scope: supervisedLaunch ? "Fresh frozen2ce4 ordinary supervisor/package/CPU/CLI/autostart/PID/fd3 normal-close checks; no update authority or public release claim." : appImage ? appImageAdmission ? "Fresh captured340 AppImage admission and private UI autostart/generated Exec restarts; no FUSE, actual login session, host installation, update authority or public release claim."
+    scope: updateCheck ? "Fresh clean captured canonical Debian actual V2/UI update check under network-none; CI producer relation verified separately, no recording, inference, installer, upgrade or public-release acceptance."
+      : supervisedLaunch ? "Fresh frozen2ce4 ordinary supervisor/package/CPU/CLI/autostart/PID/fd3 normal-close checks; no update authority or public release claim." : appImage ? appImageAdmission ? "Fresh captured340 AppImage admission and private UI autostart/generated Exec restarts; no FUSE, actual login session, host installation, update authority or public release claim."
       : "Immutable AppImage through its exact private installed launcher; no FUSE, host installation, autostart/update admission or public release claim." : installedDebian ? "Exact Debian installed in disposable container /opt/openwhisper; normal stable UI autostart and generated Exec target restart with private Xvfb/Pulse; no actual login session, host installation or release claim."
       : stablePackage ? "Normal stable package migration/shared UI/CPU recording against private Xvfb/Pulse with actual XTEST native X11 keys; no host profile, installation or release claim."
       : nativeX11 ? "Normal Dev UI against private Xvfb with actual XTEST native X11 keys; no compositor, portal fixture or synthetic signals."
@@ -405,14 +431,19 @@ try {
     : nativeX11 ? ["OPENWHISPER_NATIVE_X11=1", ...(packaged ? ["OPENWHISPER_PACKAGE_DIRECTORY=/payload/package"] : []),
       ...(installPackage ? ["OPENWHISPER_INSTALL_PACKAGE=1"] : []), ...(stablePackage ? ["OPENWHISPER_STABLE_PACKAGE=1"] : []),
       ...(installedDebian ? ["OPENWHISPER_INSTALLED_DEBIAN=1"] : []), ...(supervisedLaunch ? ["OPENWHISPER_SUPERVISED_LAUNCH=1"] : []), ...(resourceDiagnostic ? ["OPENWHISPER_RESOURCE_DIAGNOSTIC=1"] : []), ...(appImage ? ["OPENWHISPER_APPIMAGE=1"] : []),
+      ...(updateCheck ? ["OPENWHISPER_UPDATE_CHECK=1"] : []),
       ...(appImageAdmission ? ["OPENWHISPER_APPIMAGE_ADMISSION=1", `OPENWHISPER_APPIMAGE_SHA256=${appImageInput!.image.sha256}`] : []),
       ...(appImageStartupOnly ? ["OPENWHISPER_APPIMAGE_STARTUP_ONLY=1"] : []), "/payload/node", "/payload/driver.mjs"]
     : ["/opt/node/bin/node", "/payload/driver.mjs"];
   const observed = await docker(["exec", "--user", "1000:1000", container, "/usr/bin/env", "-i", "PATH=/opt/node/bin:/usr/bin:/bin", "LANG=C.UTF-8",
-    "OPENWHISPER_OWNED_DEV_RECORDING=1", ...command], stockKde ? 240_000 : 210_000);
+    "OPENWHISPER_OWNED_DEV_RECORDING=1", ...command], updateCheck ? 60_000 : stockKde ? 240_000 : 210_000);
   if (stockKde) await required(["cp", `${container}:/tmp/owned-desktop`, join(output, "owned-desktop")]);
   await required(["cp", `${container}:/evidence/.`, output]); assert.equal(observed.code, 0); assert.equal(observed.closureObserved, true);
-  (appImageStartupOnly ? z.object({ status: z.literal("PASS"), classification: z.literal("APPIMAGE_STARTUP_DIAGNOSTIC_ONLY"),
+  (updateCheck ? z.object({ status: z.literal("PASS"), classification: z.literal("DEBIAN_V2_UI_CHECK_ONLY"),
+    actualV2Configured: z.literal(true), checkingObserved: z.literal(true), terminalCheckFailure: z.literal(true),
+    inheritedHintsConsumed: z.literal(true), originalNormalQuit: z.literal(true), supervisorOriginalsClosed: z.literal(true),
+    recordingOrInferenceStarted: z.literal(false), installerInvoked: z.literal(false), upgradeAcceptance: z.literal("NOT_TESTED") })
+    : appImageStartupOnly ? z.object({ status: z.literal("PASS"), classification: z.literal("APPIMAGE_STARTUP_DIAGNOSTIC_ONLY"),
     actualOwnerVerified: z.literal(true), initialUiVerified: z.literal(true), originalNormalQuit: z.literal(true),
     allObservedPidsAbsent: z.literal(true), temporaryEmpty: z.literal(true), recordingOrInferenceStarted: z.literal(false),
     autostartAdmission: z.literal("UNAVAILABLE"), updateAuthority: z.literal(false) }) : kdeLifecycle ? z.object({ status: z.literal("PASS"), activeBindingQuit: z.literal(true), crashRecovery: z.literal(true),
@@ -440,7 +471,8 @@ try {
       nativeInMain: z.literal(false), pasteConfirmed: z.literal(true), permissionRevoked: z.literal(true), targetBackend: z.literal(kdeXwaylandPaste ? "XWAYLAND" : "WAYLAND") })
     : z.object({ status: z.literal("PASS"), clipboardConfirmed: z.literal(true), recoveryRemoved: z.literal(true), nativeInMain: z.literal(false) }))
     .parse(JSON.parse(await readFile(join(output, "result.json"), "utf8")));
-  z.object({ status: z.literal("PASS"), appClosed: z.literal(true), serverClosesObserved: z.literal(true) })
+  z.object({ status: z.literal("PASS"), appClosed: z.literal(true), serverClosesObserved: z.literal(true),
+    ...(updateCheck ? { forcedAppTermination: z.literal(false) } : {}) })
     .parse(JSON.parse(await readFile(join(output, "lifecycle.json"), "utf8")));
   assert.deepEqual(await inventory(payload), frozen);
   if (packageDirectory) {

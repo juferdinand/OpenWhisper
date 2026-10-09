@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, link, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, link, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { test } from "node:test";
-import { LinuxAppImageUpdateError, prepareAppImageUpdate, validateAppImageUpdateHeader,
+import { LinuxAppImageUpdateError, admitSignedAppImageLaunch, prepareAppImageUpdate, validateAppImageUpdateHeader,
   type AppImageExecContinuation, type PreparedAppImageUpdate } from "../src/services/linux-appimage-update.js";
 import { LinuxUpdateSignatureError } from "../src/services/linux-update-signature.js";
 import { retainOwnedUpdateDownload } from "../src/services/update-staging.js";
@@ -36,14 +36,16 @@ async function fixture(bytes = Buffer.from("unsigned private test")) {
   const launcher = join(dirname(image), "openwhisper-launch"), stageDirectory = join(root, "download");
   await mkdir(dirname(image), { recursive: true, mode: 0o700 }); await mkdir(stageDirectory, { mode: 0o700 });
   await writeFile(image, "inert private predecessor", { mode: 0o755 });
+  const signed = `${image}.sig`; await writeFile(signed, "inert predecessor signature", { mode: 0o600 });
   await writeFile(launcher, "inert private launcher", { mode: 0o755 });
   const path = join(stageDirectory, artifactName);
   const file = await open(path, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   await file.writeFile(bytes); await file.sync();
   const download = await retainOwnedUpdateDownload({ file, stageDirectory, artifactName });
-  // Host-installed admission is synthetic here; real ancestry is tested separately. No image is executed.
+  // Host-installed admission and unsigned predecessor are synthetic filesystem evidence only.
+  // Production additionally requires signed-current-pair admission; no image is executed.
   const launch = Object.freeze({ kind: "appimage" as const, executable: launcher, arguments: Object.freeze([image] as const), assertUnchanged() {} });
-  return { root, image, launcher, path, download,
+  return { root, image, signed, launcher, path, download,
     input: { download, signature: "", expectedVersion: "0.2.5", currentVersion: "0.2.4", home, launch },
     async cleanup() { await download.cleanup().catch(() => {}); await rm(root, { recursive: true, force: true }); } };
 }
@@ -61,7 +63,7 @@ test("Unsigned AppImage refuses before copying or installation and preserves the
       await assert.rejects(prepareAppImageUpdate({ ...f.input, currentVersion }), failure("INVALID_INPUT"));
     }
     await assert.rejects(prepareAppImageUpdate({ ...f.input, launch: { ...f.input.launch, arguments: [f.path] } }), failure("INVALID_INPUT"));
-    assert.deepEqual((await readdir(dirname(f.image))).sort(), ["OpenWhisper.AppImage", "openwhisper-launch"]);
+    assert.deepEqual((await readdir(dirname(f.image))).sort(), ["OpenWhisper.AppImage", "OpenWhisper.AppImage.sig", "openwhisper-launch"]);
   } finally { await f.cleanup(); }
 });
 
@@ -75,10 +77,10 @@ async function originalFixture() {
   const f = await fixture(bytes); return { ...f, input: { ...f.input, signature } };
 }
 const cleanInstallation = async (image: string): Promise<void> => {
-  assert.deepEqual((await readdir(dirname(image))).sort(), ["OpenWhisper.AppImage", "openwhisper-launch"]);
+  assert.deepEqual((await readdir(dirname(image))).sort(), ["OpenWhisper.AppImage", "OpenWhisper.AppImage.sig", "openwhisper-launch"]);
 };
 
-test("Original signed AppImage installs once and retains its predecessor until explicit commit", ownedOptions, async () => {
+test("Signed candidate filesystem transaction retains an inert predecessor pair until explicit commit", ownedOptions, async () => {
   const f = await originalFixture();
   try {
     const prepared = await prepareAppImageUpdate(f.input);
@@ -87,10 +89,14 @@ test("Original signed AppImage installs once and retains its predecessor until e
     const first = prepared.install(); assert.equal(prepared.install(), first);
     await assert.rejects(prepared.discard(), failure("INVALID_STATE"));
     await first; await prepared.assertInstalled();
+    assert.equal(await readFile(f.signed, "utf8"), f.input.signature);
+    assert.equal((await lstat(f.signed)).mode & 0o777, 0o644);
     assert.equal(createHash("sha256").update(await readFile(f.image)).digest("hex"), "81ee1be21506a3deb0a5e90846c639e81df766eab728b9970f4af14ef166ffab");
     const stages = (await readdir(dirname(f.image))).filter((name) => name.startsWith(".openwhisper-update-"));
     assert.equal(stages.length, 1);
     assert.equal(await readFile(join(dirname(f.image), stages[0]!, "previous.AppImage"), "utf8"), "inert private predecessor");
+    assert.equal(await readFile(join(dirname(f.image), stages[0]!, "previous.AppImage.sig"), "utf8"), "inert predecessor signature");
+    assert.equal((await lstat(join(dirname(f.image), stages[0]!, "previous.AppImage.sig"))).mode & 0o777, 0o600);
     const committed = prepared.commit(); assert.equal(prepared.commit(), committed); await committed;
     await cleanInstallation(f.image); await f.download.assertUnchanged();
     await assert.rejects(prepared.rollback(), failure("INVALID_STATE"));
@@ -102,7 +108,9 @@ test("Explicit rollback restores the exact inert predecessor and preparation can
   try {
     const prepared = await prepareAppImageUpdate(f.input); await prepared.install();
     const rolledBack = prepared.rollback(); assert.equal(prepared.rollback(), rolledBack); await rolledBack;
-    assert.equal(await readFile(f.image, "utf8"), "inert private predecessor"); await cleanInstallation(f.image);
+    assert.equal(await readFile(f.image, "utf8"), "inert private predecessor");
+    assert.equal(await readFile(f.signed, "utf8"), "inert predecessor signature");
+    assert.equal((await lstat(f.signed)).mode & 0o777, 0o600); await cleanInstallation(f.image);
     const cancelled = await prepareAppImageUpdate(f.input); await cancelled.discard();
     assert.equal(await readFile(f.image, "utf8"), "inert private predecessor"); await cleanInstallation(f.image);
     await f.download.assertUnchanged();
@@ -189,12 +197,14 @@ test("Durable continuation retains the predecessor and settles original descript
     const record: unknown = JSON.parse(bytes.toString("utf8"));
     assert.ok(record && typeof record === "object");
     assert.deepEqual(Object.keys(record).sort(), ["artifact", "directory", "installed", "installedVersion", "launcher",
-      "predecessor", "predecessorSha256", "predecessorVersion", "schemaVersion", "signature", "stage"]);
+      "installedSignature", "predecessor", "predecessorSha256", "predecessorSignature", "predecessorVersion", "schemaVersion", "signature", "stage"].sort());
     assert.ok(!bytes.toString("utf8").includes(f.root));
+    assert.throws(continuation.assertForExec, failure("INVALID_STATE"));
     const check = continuation.assertInstalledForExec(); assert.equal(continuation.assertInstalledForExec(), check); await check;
     assert.equal(await retainedDescriptors([f.image, backup]), 0);
     assert.equal(await readFile(backup, "utf8"), "inert private predecessor");
-    await f.download.assertUnchanged();
+    await f.download.assertUnchanged(); await f.download.cleanup(); continuation.assertForExec();
+    assert.equal(await retainedDescriptors([f.image, f.signed, backup, `${backup}.sig`, join(stage, "continuation.json")]), 0);
     // No image or exec is invoked. The same parent can still restore after a refused handoff.
     const rollback = continuation.rollbackBeforeExec(); assert.equal(continuation.rollbackBeforeExec(), rollback); await rollback;
     assert.equal(await readFile(f.image, "utf8"), "inert private predecessor"); await cleanInstallation(f.image);
@@ -207,7 +217,7 @@ test("Durable continuation retains the predecessor and settles original descript
 });
 
 test("Continuation refuses foreign records before closure and preserves replacements after closure", ownedOptions, async () => {
-  for (const changed of ["record-before", "record-after", "candidate", "backup-mode", "unknown-child"] as const) {
+  for (const changed of ["record-before", "record-after", "candidate", "signature", "backup-signature", "backup-mode", "unknown-child"] as const) {
     const f = await continuationFixture();
     let prepared: PreparedAppImageUpdate | undefined, continuation: AppImageExecContinuation | undefined;
     try {
@@ -225,9 +235,12 @@ test("Continuation refuses foreign records before closure and preserves replacem
       continuation = await prepared.prepareExecContinuation();
       if (changed === "record-after") { await rename(record, `${record}.original`); await writeFile(record, "foreign record", { mode: 0o600 }); }
       if (changed === "candidate") { await rename(f.image, `${f.image}.original`); await writeFile(f.image, "foreign candidate", { mode: 0o755 }); }
+      if (changed === "signature") await writeFile(f.signed, "foreign signature");
+      if (changed === "backup-signature") await writeFile(`${backup}.sig`, "foreign predecessor signature");
       if (changed === "backup-mode") await chmod(backup, 0o700);
       if (changed === "unknown-child") await writeFile(join(stage, "unknown"), "foreign child", { mode: 0o600 });
       await assert.rejects(continuation.assertInstalledForExec());
+      assert.throws(continuation.assertForExec, failure("INVALID_STATE"));
       await assert.rejects(continuation.rollbackBeforeExec(), failure("ROLLBACK_FAILED"));
       assert.equal(await readFile(backup, "utf8"), "inert private predecessor");
       assert.equal(await retainedDescriptors([f.image, backup, record]), 0);
@@ -239,4 +252,38 @@ test("Continuation refuses foreign records before closure and preserves replacem
       await prepared?.rollback().catch(() => {}); await prepared?.discard().catch(() => {}); await f.cleanup();
     }
   }
+});
+
+
+test("Signed-current admission refuses missing, writable, linked and foreign launcher inputs without retained descriptors", { skip: !supported }, async () => {
+  for (const kind of ["missing", "writable", "hardlink", "symlink", "launcher"] as const) {
+    const f = await fixture();
+    try {
+      await writeFile(f.launcher, appImageLauncher());
+      if (kind === "missing") await unlink(f.signed);
+      if (kind === "writable") await chmod(f.signed, 0o666);
+      if (kind === "hardlink") await link(f.signed, `${f.signed}.other`);
+      if (kind === "symlink") { await rename(f.signed, `${f.signed}.other`); await symlink(`${f.signed}.other`, f.signed); }
+      if (kind === "launcher") await writeFile(f.launcher, "foreign launcher");
+      await assert.rejects(admitSignedAppImageLaunch({ home: f.input.home, version: "0.2.5", launch: f.input.launch }), failure("SOURCE_CHANGED"));
+      assert.equal(await retainedDescriptors([f.image, f.signed, f.launcher]), 0);
+    } finally { await f.cleanup(); }
+  }
+});
+
+test("Original signed current pair admits only its exact version and retains a post-close mutation guard", ownedOptions, async () => {
+  const f = await originalFixture();
+  try {
+    await writeFile(f.image, await readFile(f.path)); await writeFile(f.launcher, appImageLauncher());
+    await writeFile(f.signed, f.input.signature); await chmod(f.signed, 0o644);
+    const admitted = await admitSignedAppImageLaunch({ home: f.input.home, version: "0.2.5", launch: f.input.launch });
+    assert.ok(Object.isFrozen(admitted)); admitted.assertUnchanged();
+    assert.equal(await retainedDescriptors([f.image, f.signed, f.launcher]), 0);
+    await assert.rejects(admitSignedAppImageLaunch({ home: f.input.home, version: "0.2.4", launch: f.input.launch }),
+      (error: unknown) => error instanceof LinuxUpdateSignatureError && error.code === "SIGNED_VERSION_MISMATCH");
+    assert.equal(await retainedDescriptors([f.image, f.signed, f.launcher]), 0);
+    await writeFile(f.signed, "stale or replaced sidecar");
+    assert.throws(admitted.assertUnchanged, failure("SOURCE_CHANGED"));
+    assert.equal(await readFile(f.signed, "utf8"), "stale or replaced sidecar");
+  } finally { await f.cleanup(); }
 });
