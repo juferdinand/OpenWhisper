@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, lstat, open, realpath, rm, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { appImageUpdates, bootstrapLinuxSupervisor, linuxSupervisorLauncher } from "../src/cli/linux-supervisor-bootstrap.js";
+import { appImageUpdates, bootstrapLinuxSupervisor, debianUpdates, linuxSupervisorLauncher } from "../src/cli/linux-supervisor-bootstrap.js";
 import type { LinuxSupervisorEffects } from "../src/cli/linux-supervisor.js";
 import type { OwnedUpdateDownload } from "../src/services/update-staging.js";
 import { LINUX_UPDATE_FEED_URL, LINUX_UPDATE_REPOSITORY, type LinuxUpdateCandidate } from "../src/services/update-policy.js";
@@ -56,6 +56,31 @@ test("both fixed shell bootstraps clear Node injection and preserve literal appl
     }
     await assert.rejects(lstat(unexpected), { code: "ENOENT" });
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Debian parent captures host discovery authority and refuses installation without a live candidate", async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-debian-parent-")));
+  let discoveries = 0;
+  const dependencies: NonNullable<Parameters<typeof debianUpdates>[1]> = {
+    home: () => home,
+    async feed(input) { discoveries++; assert.equal(input.package, "deb"); assert.equal(input.currentVersion, "0.3.0"); return undefined; },
+    async download() { assert.fail("No candidate may reach a download."); },
+    async prepare() { assert.fail("No candidate may reach package preparation."); },
+  };
+  try {
+    const updates = debianUpdates("0.3.0", dependencies), signal = new AbortController().signal;
+    dependencies.feed = async () => { assert.fail("Later callbacks must not replace captured parent authority."); };
+    assert.equal(discoveries, 0);
+    await assert.rejects(updates.action("install", signal), { code: "INVALID_REQUEST" });
+    await assert.rejects(updates.installPrepared("0.3.1"), { code: "INVALID_REQUEST" });
+    const cancelled = new AbortController(); cancelled.abort();
+    await assert.rejects(updates.action("check", cancelled.signal), { code: "INVALID_REQUEST" });
+    assert.equal(discoveries, 0);
+    assert.deepEqual(await updates.action("check", signal), { status: "idle" });
+    assert.equal(discoveries, 1);
+    await assert.rejects(updates.action("install", signal), { code: "INVALID_REQUEST" });
+    await updates.discardPrepared();
+  } finally { await rm(home, { recursive: true, force: true }); }
 });
 
 // Inert host authority only: owned files, no signature verification, feed, installer or process execution.

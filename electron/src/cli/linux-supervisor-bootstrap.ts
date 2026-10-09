@@ -22,9 +22,19 @@ export { linuxSupervisorLauncher } from "./linux-supervisor.js";
 interface BootstrapContext { readonly version: string; readonly launch: LinuxInstalledLaunch | undefined; readonly updates?: LinuxSupervisorUpdates }
 type PrepareBootstrap = (argv: readonly string[]) => Promise<BootstrapContext>;
 
-/** All executable/source authority stays in this parent, never in a GUI frame or preference. */
-function debianUpdates(currentVersion: string): LinuxSupervisorUpdates {
-  const profile = resolveStableProfile({ platform: "linux", home: homedir(),
+interface DebianUpdateDependencies {
+  home: typeof homedir;
+  feed: typeof readUpdateFeed;
+  download: typeof downloadUpdateCandidate;
+  prepare: typeof prepareDebianUpdate;
+}
+const debianDependencies: DebianUpdateDependencies = { home: homedir, feed: readUpdateFeed,
+  download: downloadUpdateCandidate, prepare: prepareDebianUpdate };
+
+/** Trusted host seams only. All executable/source authority stays in this parent, never in a GUI frame or preference. */
+export function debianUpdates(currentVersion: string, dependencies: DebianUpdateDependencies = debianDependencies): LinuxSupervisorUpdates {
+  dependencies = Object.freeze({ ...dependencies });
+  const profile = resolveStableProfile({ platform: "linux", home: dependencies.home(),
     ...(process.env.XDG_CONFIG_HOME ? { configHome: process.env.XDG_CONFIG_HOME } : {}),
     ...(process.env.XDG_DATA_HOME ? { dataHome: process.env.XDG_DATA_HOME } : {}),
     ...(process.env.XDG_CACHE_HOME ? { cacheHome: process.env.XDG_CACHE_HOME } : {}) });
@@ -45,7 +55,7 @@ function debianUpdates(currentVersion: string): LinuxSupervisorUpdates {
       active();
       if (kind === "check") {
         await discardPrepared(); candidate = undefined;
-        const result = await readUpdateFeed({ package: "deb", currentVersion, signal }); active();
+        const result = await dependencies.feed({ package: "deb", currentVersion, signal }); active();
         if (!result) return { status: "idle" } as const;
         if (result.package !== "deb") throw new LinuxRestartError("INVALID_REQUEST");
         candidate = result; return { status: "available", updateVersion: result.version } as const;
@@ -53,8 +63,8 @@ function debianUpdates(currentVersion: string): LinuxSupervisorUpdates {
       const selected = candidate;
       if (!selected || download || prepared || failedCleanup) throw new LinuxRestartError("INVALID_REQUEST");
       try {
-        download = await downloadUpdateCandidate({ candidate: selected, currentVersion, cacheDirectory: profile.paths.cache, signal }); active();
-        prepared = await prepareDebianUpdate({ download, signature: selected.signature, currentVersion, expectedVersion: selected.version }); active();
+        download = await dependencies.download({ candidate: selected, currentVersion, cacheDirectory: profile.paths.cache, signal }); active();
+        prepared = await dependencies.prepare({ download, signature: selected.signature, currentVersion, expectedVersion: selected.version }); active();
         audit = await prepareDebianInstalledAudit({ download, signature: selected.signature, expectedVersion: selected.version, signal }); active();
         return { status: "prepared", updateVersion: selected.version } as const;
       } catch (error: unknown) {
