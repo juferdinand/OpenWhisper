@@ -9,10 +9,21 @@ import { isNewerUpdateVersion } from "./update-policy.js";
 import { assertPrivateUpdateDirectory, type OwnedUpdateDownload } from "./update-staging.js";
 
 type Failure = "INVALID_INPUT" | "UNSUPPORTED_HOST" | "INVALID_ARCHIVE" | "INVALID_BUNDLE" | "EXTRACTION_FAILED" | "CLEANUP_FAILED";
+type CleanupPhase = "PRIVATE_STAGE" | "CHILD_IDENTITY" | "REMOVE_TREE";
+const cleanupCauses = ["EACCES", "EPERM", "ENOTEMPTY", "EBUSY", "ENOENT", "ENOTDIR", "ELOOP", "EIO", "FILE_CHANGED", "UNSAFE_STAGING", "CLEANUP_FAILED"] as const;
+type CleanupCause = typeof cleanupCauses[number] | "UNCLASSIFIED";
 export class MacosUpdateArchiveError extends Error {
-  constructor(readonly code: Failure) { super(code); this.name = "MacosUpdateArchiveError"; }
+  constructor(readonly code: Failure, readonly cleanupPhase?: CleanupPhase, readonly cleanupCause?: CleanupCause) {
+    super(cleanupPhase ? `${code}:${cleanupPhase}:${cleanupCause ?? "UNCLASSIFIED"}` : code);
+    this.name = "MacosUpdateArchiveError";
+  }
 }
 const fail = (code: Failure): never => { throw new MacosUpdateArchiveError(code); };
+function cleanupFailure(phase: CleanupPhase, error: unknown): MacosUpdateArchiveError {
+  const code = error instanceof Error && "code" in error ? error.code : undefined;
+  const cause = cleanupCauses.find((candidate) => candidate === code) ?? "UNCLASSIFIED";
+  return new MacosUpdateArchiveError("CLEANUP_FAILED", phase, cause);
+}
 
 /** Inspect without following directory links. Internal framework links remain intact. */
 export async function validateMacUpdateBundleFiles(bundle: string): Promise<void> {
@@ -67,6 +78,16 @@ export interface ExtractedMacUpdate {
   cleanup(): Promise<void>;
 }
 
+/** Preserve an extraction cleanup failure while still closing the original download descriptor.
+ * Download cleanup refuses to remove a stage with a retained extraction child. */
+export async function cleanupMacUpdateArchiveDownload(extracted: Pick<ExtractedMacUpdate, "cleanup"> | undefined,
+  download: OwnedUpdateDownload): Promise<void> {
+  let failed = false, failure: unknown;
+  try { await extracted?.cleanup(); } catch (error: unknown) { failed = true; failure = error; }
+  try { await download.cleanup(); } catch (error: unknown) { if (!failed) { failed = true; failure = error; } }
+  if (failed) throw failure;
+}
+
 /** The caller holds the original stage throughout. Its producer uses positioned writes from zero;
  * fd3 inherits that descriptor's cursor, and no other borrower may advance it during extraction.
  * Signature/version observation is not authorization to replace the running installation. */
@@ -91,14 +112,17 @@ export async function extractVerifiedMacUpdateArchive(input: {
   const bundlePath = join(directory, `${build.data.productName}.app`);
   let closing: Promise<void> | undefined;
   const cleanup = (): Promise<void> => closing ??= (async () => {
+    let phase: CleanupPhase = "PRIVATE_STAGE";
     try {
       // Cleanup needs the private directory identity, even when archive bytes changed during extraction.
       await stageGuard.assertUnchanged();
+      phase = "CHILD_IDENTITY";
       const current = await lstat(directory, { bigint: true });
       if (!current.isDirectory() || current.isSymbolicLink() || current.dev !== original.dev ||
           current.ino !== original.ino || current.uid !== original.uid) fail("CLEANUP_FAILED");
+      phase = "REMOVE_TREE";
       await rm(directory, { recursive: true });
-    } catch { fail("CLEANUP_FAILED"); }
+    } catch (error: unknown) { throw cleanupFailure(phase, error); }
   })();
   try {
     // Preserve bsdtar's traversal protections: never pass -P or reopen the ZIP pathname.

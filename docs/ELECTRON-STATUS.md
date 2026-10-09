@@ -79,10 +79,21 @@ stage removal in 1.52 seconds. This uses synthetic current version 0.2.4 and
 establishes download compatibility rather than an upgrade or Electron-embedded
 network execution. The Mac consumer uses fixed system bsdtar/plutil,
 internal framework links, exact metadata/version and the existing running-app
-signature requirement. Its new real ZIP/hostile archive smoke awaits matching
-CI; filesystem checks already pass. Complete typing, ordinary build and
+signature requirement. The original ARM job in
+[CI37868932078](https://github.com/juferdinand/OpenWhisper/actions/runs/37868932078)
+and Intel job fail while cleaning the extraction child after archive admission;
+both Stable smoke steps are skipped. Their producer is synthetic merge `b561cfe5` of head `9ac9ae9` into
+`68294863`. The original log does not distinguish stage/child identity failure
+from recursive removal or expose an errno. ZIP acceptance remains outstanding.
+The next focused change adds closed phase/errno diagnostics and closes the
+original ZIP descriptor even if extraction cleanup refuses, without changing
+permissions or adding retries. Complete typing, ordinary build and
 1149 default-suite cases pass in 17.87 seconds, with zero failures and 28 explicit
-native or opt-in skips.
+native or opt-in skips for the preceding committed increment. The reviewed
+follow-up adds the explicit thin Mac persistent-validation signing mode and an
+owned AppImage runtime harness. Strict typing, ordinary build and 1153 tests pass
+with 28 explicit skips in 17.83 seconds. Actual AppImage runtime and the next Mac
+ZIP cleanup diagnostic remain separate acceptance work.
 
 Unsigned AppImage construction reuses the exact clean `b892d861` stable package.
 The 119,441,912-byte image has SHA-256

@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
 import { SPEECH_ENTRY_FILES } from "../src/services/speech-entry-graph.js";
-import { captureSignedMacDescriptor, insideOutMacCodePaths, inspectMacBinary, inspectMacMinimumOS, macHelperBundleIdentifier, macPreviewPlistValues, stageMacPreview } from "../scripts/package-macos-preview.js";
+import { captureSignedMacDescriptor, insideOutMacCodePaths, inspectMacBinary, inspectMacMinimumOS, macHelperBundleIdentifier, macPreviewCodesignArguments, macPreviewPlistValues, macPreviewSigningPolicy, stageMacPreview } from "../scripts/package-macos-preview.js";
 import { buildIdentitySchema } from "../src/contracts/build-identity.js";
 const nobleSource = new URL("../node_modules/@noble/hashes/", import.meta.url);
 
@@ -123,6 +123,73 @@ test("each thin stable Mac validation package uses its captured identity and pre
       assert.match(await readFile(join(staged.directory, "Contents/Resources/notices/README.txt"), "utf8"), /^OpenWhisper\. Per-architecture, non-hardened ad-hoc validation signing/u);
     } finally { await rm(input.base, { recursive: true, force: true }); }
   }
+});
+
+test("persistent validation stages only clean thin stable captures while preserving unsigned source and notices", async () => {
+  const previous = process.env["SIGN_IDENTITY"], fingerprint = "0123456789ABCDEF0123456789ABCDEF01234567";
+  process.env["SIGN_IDENTITY"] = fingerprint;
+  try {
+    for (const architecture of ["arm64", "x64"] as const) {
+      const input = await fixture("stable", architecture);
+      try {
+        const source = { commit: "0123456789abcdef0123456789abcdef01234567", modified: false };
+        await writeFile(join(input.root, "dist/resources/development-build.json"), JSON.stringify(source));
+        const staged = await stageMacPreview({ root: input.root, output: input.output, architecture, signingMode: "persistent-validation" });
+        assert.deepEqual(staged.source, source); assert.equal(staged.signing.mode, "persistent-validation");
+        assert.equal(staged.signing.identity, fingerprint); assert.ok(Object.isFrozen(staged.signing));
+        assert.deepEqual(macPreviewCodesignArguments(staged.signing, staged.directory), ["--force", "--sign", fingerprint, "--timestamp=none", staged.directory]);
+        assert.equal(staged.directory, join(input.output, "OpenWhisper.app"));
+        assert.deepEqual(await readFile(join(staged.application, "dist/resources/development-build.json")), await readFile(join(input.root, "dist/resources/development-build.json")));
+        assert.deepEqual(await readFile(join(staged.directory, "Contents/Resources/notices/speech-cpu-unsigned-build.json")), await readFile(join(input.root, "native/build-cpu/build-manifest.json")));
+        assert.match(await readFile(join(staged.directory, "Contents/Resources/notices/README.txt"), "utf8"), /^OpenWhisper\. Per-architecture, non-hardened persistent certificate validation signing; no notarization or stable update channel/u);
+        assert.deepEqual(staged.recording, input.recording);
+      } finally { await rm(input.base, { recursive: true, force: true }); }
+    }
+  } finally { if (previous === undefined) delete process.env["SIGN_IDENTITY"]; else process.env["SIGN_IDENTITY"] = previous; }
+});
+
+test("persistent policy rejects Dev, source or modified provenance, noncanonical versions and fingerprint fallback", () => {
+  const stable = buildIdentitySchema.parse({ version: 1, kind: "stable", appId: "io.github.whisperfree", productName: "OpenWhisper" });
+  const dev = buildIdentitySchema.parse({ version: 1, kind: "development", appId: "io.github.whisperfree.dev", productName: "OpenWhisper Dev" });
+  const source = { commit: "0123456789abcdef0123456789abcdef01234567", modified: false }, fingerprint = "0123456789ABCDEF0123456789ABCDEF01234567";
+  for (const identity of [undefined, "", "-", "WhisperFree Dev", `${fingerprint}\n`, ` ${fingerprint}`, fingerprint.slice(1), `${fingerprint}0`, "g".repeat(40)]) {
+    assert.throws(() => macPreviewSigningPolicy("persistent-validation", stable, "0.3.0", source, identity), /exact certificate fingerprint/u);
+  }
+  for (const provenance of [{ ...source, commit: "source" }, { ...source, modified: true }, { ...source, commit: `${source.commit}\n` }]) {
+    assert.throws(() => macPreviewSigningPolicy("persistent-validation", stable, "0.3.0", provenance, fingerprint), /clean committed stable/u);
+  }
+  assert.throws(() => macPreviewSigningPolicy("persistent-validation", dev, "0.3.0", source, fingerprint), /clean committed stable/u);
+  for (const version of ["03.0.0", "0.3.0\n", "18446744073709551616.0.0", "0.3.0-dev"]) {
+    assert.throws(() => macPreviewSigningPolicy("persistent-validation", stable, version, source, fingerprint));
+  }
+  for (const certificate of [fingerprint, fingerprint.toLowerCase()]) {
+    assert.equal(macPreviewSigningPolicy("persistent-validation", stable, "0.3.0", source, certificate).identity, certificate);
+  }
+  const defaultPolicy = macPreviewSigningPolicy("ad-hoc", dev, "0.3.0", { ...source, modified: true }, fingerprint);
+  assert.equal(defaultPolicy.identity, "-");
+  assert.deepEqual(macPreviewCodesignArguments(defaultPolicy, "/private/fixture/app.node"), ["--force", "--sign", "-", "--timestamp=none", "/private/fixture/app.node"]);
+  assert.throws(() => macPreviewCodesignArguments({ ...defaultPolicy, identity: fingerprint }, "/private/fixture/app.node"));
+  assert.throws(() => macPreviewCodesignArguments({ ...defaultPolicy, mode: "persistent-validation" }, "/private/fixture/app.node"));
+});
+
+test("persistent stage admission refuses missing fingerprint and modified or Dev captures before output creation", async () => {
+  const previous = process.env["SIGN_IDENTITY"], fingerprint = "0123456789ABCDEF0123456789ABCDEF01234567";
+  try {
+    for (const kind of ["stable", "development"] as const) {
+      const input = await fixture(kind);
+      try {
+        process.env["SIGN_IDENTITY"] = fingerprint;
+        await assert.rejects(stageMacPreview({ root: input.root, output: input.output, architecture: "arm64", signingMode: "persistent-validation" }), /clean committed stable/u);
+        await assert.rejects(lstat(input.output), { code: "ENOENT" });
+        if (kind === "stable") {
+          await writeFile(join(input.root, "dist/resources/development-build.json"), '{"commit":"0123456789abcdef0123456789abcdef01234567","modified":false}');
+          delete process.env["SIGN_IDENTITY"];
+          await assert.rejects(stageMacPreview({ root: input.root, output: input.output, architecture: "arm64", signingMode: "persistent-validation" }), /exact certificate fingerprint/u);
+          await assert.rejects(lstat(input.output), { code: "ENOENT" });
+        }
+      } finally { await rm(input.base, { recursive: true, force: true }); }
+    }
+  } finally { if (previous === undefined) delete process.env["SIGN_IDENTITY"]; else process.env["SIGN_IDENTITY"] = previous; }
 });
 
 test("Mac preview refuses mixed captured identities before creating output", async () => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, readlink, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -26,6 +26,7 @@ const payload = resolve(fileURLToPath(new URL("./", import.meta.url)));
 const packaged = process.env.OPENWHISPER_PACKAGE_DIRECTORY === "/payload/package";
 const stablePackage = process.env.OPENWHISPER_STABLE_PACKAGE === "1";
 const installedDebian = process.env.OPENWHISPER_INSTALLED_DEBIAN === "1";
+const appImage = process.env.OPENWHISPER_APPIMAGE === "1";
 const sourcePackageRoot = packaged ? "/payload/package/resources/app" : join(payload, "app"), evidence = "/evidence";
 const sourceExecutable = packaged ? `/payload/package/${stablePackage ? "openwhisper" : "openwhisper-dev"}` : join(sourcePackageRoot, "node_modules/electron/dist/electron");
 let packageRoot = installedDebian ? "/opt/openwhisper/resources/app" : sourcePackageRoot;
@@ -44,7 +45,9 @@ let stage = "guard", status = "FAIL", application: ElectronApplication | undefin
 let failure: { name: string; location: string | null } | undefined;
 let appCloseObserved = false, appOriginalClose: Promise<void> | undefined;
 const appOwners: { original: ChildProcess; closed: Promise<void>; closeObserved: boolean; termination: "quit" | "crash" | null;
-  quitEvents: ("before-quit" | "will-quit")[] }[] = [];
+  quitEvents: ("before-quit" | "will-quit")[]; image?: { mainPid: number; runtimePid: number; temporary: string;
+    processes: Map<number, ImageProcess>; resources: Record<string, string> } | undefined }[] = [];
+type ImageProcess = { pid: number; ppid: number; pgid: number; role: "runtime" | "extracted" | "supervisor" };
 let lastState: Readonly<{ status: string; recordingAvailable: boolean; recoveryAvailable: boolean; elapsed: number; progress: number;
   messageCategory: "NONE" | "RECORDING_ERROR" | "ACTION_REFUSED" | "OTHER"; recordingError: string | null }> | undefined;
 const owners: { child: ChildProcess; closed: Promise<void>; closeObserved: boolean }[] = [];
@@ -140,8 +143,9 @@ async function main(): Promise<void> {
     assert.equal(installedDebian, true); assert.equal(stablePackage && packaged && nativeX11, true); assert.equal(installPackage, false);
     await assertInstalledPackage();
   }
+  if (process.env.OPENWHISPER_APPIMAGE !== undefined) assert.equal(appImage && stablePackage && nativeX11 && !installedDebian && !installPackage, true);
   assert.ok((await lstat("/.dockerenv")).isFile());
-  for (const device of ["/dev/snd", "/dev/input", "/dev/uinput", "/dev/dri"]) await assert.rejects(lstat(device), { code: "ENOENT" });
+  for (const device of ["/dev/snd", "/dev/input", "/dev/uinput", "/dev/dri", ...(appImage ? ["/dev/fuse"] : [])]) await assert.rejects(lstat(device), { code: "ENOENT" });
   for (const key of ["NODE_OPTIONS", "ELECTRON_RUN_AS_NODE"]) assert.equal(process.env[key], undefined);
   if (stockKde) {
     assert.equal(process.env.WF_OWNED_DESKTOP_TEST, process.env.XDG_RUNTIME_DIR);
@@ -167,6 +171,55 @@ async function main(): Promise<void> {
     XDG_SESSION_TYPE: "x11", XDG_CURRENT_DESKTOP: "Owned X11", LIBGL_ALWAYS_SOFTWARE: "1", GALLIUM_DRIVER: "llvmpipe",
   };
   if (installedDebian) { env.XDG_CONFIG_DIRS = join(home, "system-config"); await mkdir(env.XDG_CONFIG_DIRS, { mode: 0o700 }); }
+  const permanentImage = join(home, ".local/lib/whisperfree/OpenWhisper.AppImage"), imageLauncher = join(dirname(permanentImage), "openwhisper-launch");
+  const imageTemporary = join(root, "appimage-temporary"), imageAdapter = join(root, "appimage-playwright");
+  let secondaryResourcesSurvived = false;
+  if (appImage) {
+    await mkdir(dirname(permanentImage), { recursive: true, mode: 0o700 }); await mkdir(imageTemporary, { mode: 0o700 });
+    for (const [source, target, expected] of [
+      ["OpenWhisper.AppImage", permanentImage, "5307c99c5d8f603fbf8ed937d8688dc24181509163cdfc365552dd9bd5eb5069"],
+      ["openwhisper-launch", imageLauncher, "ea17d105cc470ba5bc23d9e503b2e344b7b78ac2772655a8700d582d84a57fe1"],
+    ] as const) {
+      const file = await lstat(join(payload, "appimage", source)); assert.ok(file.isFile() && !file.isSymbolicLink());
+      assert.equal(sha(await readFile(join(payload, "appimage", source))), expected);
+      await copyFile(join(payload, "appimage", source), target); await chmod(target, 0o755);
+      const installed = await lstat(target); assert.ok(installed.isFile() && !installed.isSymbolicLink()); assert.equal(installed.uid, 1000);
+    }
+    // Fixed owned adapter only inserts the image before Playwright's inspect/CDP arguments.
+    assert.match(root, /^\/tmp\/openwhisper-owned-dev-recording-[A-Za-z0-9]+$/u);
+    await writeFile(imageAdapter, `#!/bin/sh\nexec "${imageLauncher}" "${permanentImage}" "$@"\n`, { mode: 0o700 });
+    env.TMPDIR = imageTemporary;
+    for (const key of ["TARGET_APPIMAGE", "APPIMAGE", "APPDIR", "ARGV0", "APPIMAGE_EXTRACT_AND_RUN", "NO_CLEANUP"]) delete env[key];
+  }
+  const observeImageProcesses = async (launcherPid: number, records: Map<number, ImageProcess>) => {
+    const output = await execute("/bin/ps", ["-eo", "pid=,ppid=,pgid="], { env, timeout: 2000, maxBuffer: 16 * 1024 });
+    const processes = output.stdout.trim().split("\n").map((line) => {
+      const match = /^\s*([0-9]+)\s+([0-9]+)\s+([0-9]+)\s*$/u.exec(line); assert.ok(match);
+      return { pid: Number(match[1]), ppid: Number(match[2]), pgid: Number(match[3]) };
+    }); assert.ok(processes.length <= 256);
+    const descendants = new Set([launcherPid]);
+    for (let depth = 0; depth < 16; depth++) for (const process of processes) if (descendants.has(process.ppid)) descendants.add(process.pid);
+    for (const process of processes.filter((process) => descendants.has(process.pid))) {
+      let path: string; try { path = await readlink(`/proc/${process.pid}/exe`); } catch { continue; }
+      const role = path === permanentImage ? "runtime" : path.startsWith(`${imageTemporary}/`) ? "extracted" : "supervisor";
+      records.set(process.pid, { ...process, role });
+    }
+  };
+  const assertImageClosed = async (owner: (typeof appOwners)[number]) => {
+    assert.ok(owner.image && owner.closeObserved); assert.equal(owner.original.exitCode, 0); assert.equal(owner.original.signalCode, null);
+    for (const pid of owner.image.processes.keys()) await assert.rejects(lstat(`/proc/${pid}`), { code: "ENOENT" });
+    await assert.rejects(lstat(owner.image.temporary), { code: "ENOENT" }); assert.deepEqual(await readdir(imageTemporary), []);
+    await writeFile(join(evidence, `appimage-close-${appOwners.indexOf(owner)}.json`), JSON.stringify({ launcherPid: owner.original.pid,
+      mainPid: owner.image.mainPid, runtimePid: owner.image.runtimePid, processes: [...owner.image.processes.values()],
+      originalCloseObserved: true, allObservedPidsAbsent: true, temporaryAbsent: true, signal: null, exitCode: 0 }), { mode: 0o600 });
+  };
+  const assertImageResources = async () => {
+    const owner = appOwners.at(-1)!; assert.ok(owner.image && application && !owner.closeObserved);
+    assert.equal(await application.evaluate(() => process.pid), owner.image.mainPid);
+    for (const [path, digest] of Object.entries(owner.image.resources)) assert.equal(sha(await readFile(path)), digest);
+    await observeImageProcesses(owner.original.pid!, owner.image.processes);
+    assert.deepEqual(await readdir(imageTemporary), [basename(owner.image.temporary)]);
+  };
   const profileRoot = join(installPackage ? home : root, "dev-profile");
   const stable = join(env.XDG_DATA_HOME!, "whisperfree"); await mkdir(stable, { mode: 0o700 });
   await writeFile(join(stable, "sentinel"), "Owned stable sentinel", { mode: 0o600 });
@@ -402,7 +455,7 @@ async function main(): Promise<void> {
         JSON.stringify({ processes: processes.stdout, pids, maximum, memory }), { mode: 0o600 })).catch(() => {});
   }, 10_000);
   try {
-    application = await _electron.launch({ executablePath: executable,
+    application = await _electron.launch({ executablePath: appImage ? imageAdapter : executable,
       args: [...(packaged ? [] : [packageRoot]), ...(stablePackage ? [] : ["--dev", "--dev-profile", profileRoot]),
         ...(kdeWaylandOverlay ? ["--experimental-wayland-overlay"] : []),
         ...(stockKde ? [kdeOverlay ? "--ozone-platform=x11" : "--ozone-platform=wayland"] : nativeX11 ? ["--ozone-platform=x11"] : [])],
@@ -410,7 +463,7 @@ async function main(): Promise<void> {
   } finally { clearTimeout(startupWatch); }
   const original = application.process();
   const owner = { original, closed: Promise.resolve(), closeObserved: false, termination: null as "quit" | "crash" | null,
-    quitEvents: [] as ("before-quit" | "will-quit")[] };
+    quitEvents: [] as ("before-quit" | "will-quit")[], image: undefined as (typeof appOwners)[number]["image"] };
   original.stdout?.on("data", (bytes: Buffer) => { diagnostics.stdoutBytes += bytes.length; });
   owner.closed = new Promise<void>((accept) => original.once("close", () => { owner.closeObserved = true; appCloseObserved = true; accept(); }));
   appOwners.push(owner); appOriginalClose = owner.closed;
@@ -443,6 +496,35 @@ async function main(): Promise<void> {
       }
     }
   });
+  if (appImage) {
+    const actual = await application.evaluate(({ app }) => ({ mainPid: process.pid, runtimePid: process.ppid, appPath: app.getAppPath(),
+      executable: process.execPath, appImage: process.env["APPIMAGE"], appDir: process.env["APPDIR"], temporary: process.env["TMPDIR"],
+      noCleanup: process.env["NO_CLEANUP"] }));
+    assert.equal(actual.appImage, permanentImage); assert.equal(actual.noCleanup, undefined); assert.ok(actual.temporary && actual.appDir);
+    assert.equal(dirname(actual.temporary), imageTemporary); assert.match(basename(actual.temporary), /^openwhisper-appimage\.[A-Za-z0-9]+$/u);
+    assert.equal(dirname(actual.appDir), actual.temporary); assert.match(basename(actual.appDir), /^appimage_extracted_[a-f0-9]{32}$/u);
+    const temporary = await lstat(actual.temporary); assert.ok(temporary.isDirectory() && !temporary.isSymbolicLink());
+    assert.equal(temporary.uid, 1000); assert.equal(temporary.mode & 0o7777, 0o700);
+    executable = join(actual.appDir, "usr/lib/openwhisper/openwhisper"); packageRoot = join(dirname(executable), "resources/app");
+    assert.equal(actual.appPath, packageRoot); assert.equal(actual.executable, executable);
+    assert.equal(await readlink(`/proc/${actual.runtimePid}/exe`), permanentImage);
+    const runtime = await lstat(`/proc/${actual.runtimePid}`); assert.equal(runtime.uid, 1000);
+    const runningImage = await stat(`/proc/${actual.runtimePid}/exe`), permanent = await lstat(permanentImage);
+    assert.equal(runningImage.dev, permanent.dev); assert.equal(runningImage.ino, permanent.ino); assert.equal(runningImage.size, permanent.size);
+    const resources: Record<string, string> = {};
+    for (const relative of ["dist/main/application-build.js", "dist/main/development-recording-build.js", "dist/workers/capture-entry.js",
+      "dist/workers/platform-entry.js", "dist/native/capture/openwhisper_capture.node", "dist/native/speech/cpu/openwhisper_speech.node",
+      "dist/native/openwhisper_linux_bus.node"]) {
+      const path = join(packageRoot, relative), file = await lstat(path); assert.ok(file.isFile() && !file.isSymbolicLink()); assert.equal(file.uid, 1000);
+      resources[path] = sha(await readFile(path)); assert.equal(resources[path], sha(await readFile(join(sourcePackageRoot, relative))));
+    }
+    assert.equal(sha(await readFile(executable)), sha(await readFile(sourceExecutable)));
+    owner.image = { mainPid: actual.mainPid, runtimePid: actual.runtimePid, temporary: actual.temporary, resources, processes: new Map() };
+    await observeImageProcesses(original.pid!, owner.image.processes);
+    assert.equal(owner.image.processes.get(actual.runtimePid)?.role, "runtime"); assert.equal(owner.image.processes.get(actual.mainPid)?.role, "extracted");
+    await writeFile(join(evidence, `appimage-owner-${appOwners.length - 1}.json`), JSON.stringify({ ...actual, launcherPid: original.pid,
+      processes: [...owner.image.processes.values()], resources, autostartAdmission: "UNAVAILABLE", updateAuthority: false }), { mode: 0o600 });
+  }
   await application.evaluate(({ app }) => {
     app.on("before-quit", () => console.error("OpenWhisper owned quit event: before-quit"));
     app.on("will-quit", () => console.error("OpenWhisper owned quit event: will-quit"));
@@ -495,6 +577,24 @@ async function main(): Promise<void> {
     await assert.rejects(lstat(dirname(autostartPath)), { code: "ENOENT" }); await assertStableOriginals(); startupAutostartReadOnly = true;
     checks.push("installed stable startup/focus exposes actual autostart false while preserving legacy requested true privately; no registration or autostart directory created");
   }
+  if (appImage) {
+    assert.equal(initial.launch_at_login_available, false); await assert.rejects(lstat(dirname(autostartPath)), { code: "ENOENT" });
+    await checkpoint("appimage-secondary-activation");
+    const secondary = execute(imageLauncher, [permanentImage, "--ozone-platform=x11"], { env, timeout: 10_000, maxBuffer: 32 * 1024 });
+    const original = secondary.child, records = new Map<number, ImageProcess>(); assert.ok(original.pid);
+    const secondaryOwner = { child: original, closed: Promise.resolve(), closeObserved: false };
+    secondaryOwner.closed = new Promise<void>((accept) => original.once("close", () => { secondaryOwner.closeObserved = true; accept(); })); owners.push(secondaryOwner);
+    let observing = true; const observation = (async () => { while (observing) { await observeImageProcesses(original.pid!, records); await delay(25); } })();
+    void observation.catch(() => {});
+    let reply: Awaited<typeof secondary>; try { reply = await secondary; } finally { observing = false; await observation; }
+    await secondaryOwner.closed; assert.equal(secondaryOwner.closeObserved, true);
+    assert.equal(original.exitCode, 0); assert.equal(original.signalCode, null);
+    for (const pid of records.keys()) await assert.rejects(lstat(`/proc/${pid}`), { code: "ENOENT" });
+    assert.ok([...records.values()].some((process) => process.role === "runtime")); await assertImageResources();
+    await writeFile(join(evidence, "appimage-secondary.json"), JSON.stringify({ pid: original.pid, exitCode: 0, signal: null,
+      originalCloseObserved: true, stdoutBytes: Buffer.byteLength(reply.stdout), stderrBytes: Buffer.byteLength(reply.stderr), processes: [...records.values()], resourcesSurvived: true }), { mode: 0o600 });
+    secondaryResourcesSurvived = true;
+  }
   const capturedControl = packaged ? parseApplicationBuildModule(await readFile(join(packageRoot, "dist/main/application-build.js"), "utf8")) : undefined;
   if (capturedControl) assert.equal(capturedControl.kind, stablePackage ? "stable" : "development");
   const target = controlTarget(capturedControl?.kind ?? "development");
@@ -531,8 +631,11 @@ async function main(): Promise<void> {
     const before = application ? await application.evaluate(({ BrowserWindow }) => ({ pid: process.pid, windows: BrowserWindow.getAllWindows().length })) : undefined;
     await assertControlStorage();
     const started = performance.now();
-    const request = execute(executable, ["--control", command], { env: controlEnvironment, timeout: 8000, maxBuffer: 32 * 1024 });
+    const request = execute(appImage ? imageLauncher : executable, [...(appImage ? [permanentImage] : []), "--control", command], { env: controlEnvironment, timeout: 8000, maxBuffer: 32 * 1024 });
     const original = request.child, pid = original.pid; assert.ok(pid);
+    const imageProcesses = new Map<number, ImageProcess>(); let imageObserving = appImage;
+    const imageObservation = appImage ? (async () => { while (imageObserving) { await observeImageProcesses(pid, imageProcesses); await delay(25); } })() : undefined;
+    void imageObservation?.catch(() => {});
     const owner = { child: original, closed: Promise.resolve(), closeObserved: false };
     owner.closed = new Promise<void>((accept) => original.once("close", () => { owner.closeObserved = true; accept(); })); owners.push(owner);
     const force = setTimeout(() => { original.kill("SIGKILL"); }, 9000);
@@ -540,7 +643,12 @@ async function main(): Promise<void> {
     try {
       let reply: Awaited<typeof request> | undefined, requestFailure: unknown;
       try { reply = await request; } catch (error: unknown) { requestFailure = error; }
-      await owner.closed;
+      imageObserving = false; await imageObservation; await owner.closed;
+      if (appImage) {
+        assert.ok([...imageProcesses.values()].some((process) => process.role === "runtime"));
+        for (const process of imageProcesses.values()) await assert.rejects(lstat(`/proc/${process.pid}`), { code: "ENOENT" });
+        if (application) await assertImageResources(); else assert.deepEqual(await readdir(imageTemporary), []);
+      }
       let pidAbsent = false;
       try { await lstat(`/proc/${pid}`); } catch (error: unknown) {
         pidAbsent = error instanceof Error && "code" in error && error.code === "ENOENT";
@@ -551,9 +659,9 @@ async function main(): Promise<void> {
       let parsed: ControlWireStatus | undefined;
       try { parsed = parseControlStatus(stdout); } catch { /* Record categorical parse outcome, never raw stdout. */ }
       const warnings = [...stderrText.matchAll(/^\[([1-9][0-9]{0,9}):[0-9]{4}\/[0-9]{6}\.[0-9]{6}:ERROR:dbus\/bus\.cc:406\] Failed to connect to the bus: Failed to connect to socket ([^\r\n]{1,4096}): No such file or directory\n/gmu)]
-        .filter((warning) => warning[1] === String(pid) && warning[2] === join(runtime, "disabled-system-bus"));
+        .filter((warning) => (appImage ? imageProcesses.get(Number(warning[1]))?.role === "extracted" : warning[1] === String(pid)) && warning[2] === join(runtime, "disabled-system-bus"));
       // Chromium may report our deliberately absent SYSTEM socket before Node;
-      // only this original PID, exact owned path and complete fixed line qualify.
+      // Only the original executable PID (or observed owned AppImage descendant), exact socket and complete fixed line qualify.
       const remainingStderr = warnings.length === 1 ? stderrText.replace(warnings[0]![0], "") : stderrText;
       const stderr = Buffer.from(stderrText), boundedStderr = stderr.subarray(0, 32 * 1024);
       const diagnostic = `cli-diagnostic-${commandRecords.length}-${command}`;
@@ -564,7 +672,7 @@ async function main(): Promise<void> {
           truncated: boundedStderr.length !== stderr.length, file: `${diagnostic}.stderr` },
         allowedSystemBusWarning: { category: warnings.length === 1 ? "OWNED_DISABLED_SYSTEM_BUS" : "NONE",
           count: warnings.length === 1 ? 1 : 0, matchingLines: warnings.length },
-        storage,
+        storage, ...(appImage ? { imageProcesses: [...imageProcesses.values()], allObservedPidsAbsent: true } : {}),
         strictStdoutParse: parsed !== undefined && stdout.endsWith("\n"), originalCloseObserved: owner.closeObserved, pidAbsent,
         scope: "Private owned container command only; no raw stdout or host inputs." }), { mode: 0o600, flag: "wx" });
       assert.equal(owner.closeObserved, true); assert.equal(pidAbsent, true); assert.ok(warnings.length <= 1);
@@ -585,7 +693,7 @@ async function main(): Promise<void> {
         noDisplay: true, noNodeModeOrRuntimeOverrides: true, protectedProfileAbsent: true, nativeFontCachePermitted: true,
         scope: "Actual frozen package executable before graphical readiness; private session and virtual audio only." }, null, 2), { mode: 0o600 });
       return result;
-    } finally { clearTimeout(force); }
+    } finally { imageObserving = false; clearTimeout(force); await imageObservation; }
   };
   const control = async (action?: ControlAction) => {
     if (packaged) { const result = await packageCommand(action ?? "status"); assert.ok(result); return result.status; }
@@ -1497,7 +1605,15 @@ async function main(): Promise<void> {
     await page.evaluate(() => window.openwhisper?.invoke("save_preferences", { changes: { vocabulary: "Owned edited stable setting" } }));
     await until(async () => (await state()).preferences.vocabulary === "Owned edited stable setting");
     const historyBeforeRestart = (await state()).history;
-    appOwners.at(-1)!.termination = "quit"; await application.close(); await appOriginalClose;
+    appOwners.at(-1)!.termination = "quit";
+    if (appImage) {
+      await observeImageProcesses(application.process().pid!, appOwners.at(-1)!.image!.processes);
+      const firstClosing = application.close().then(() => appOriginalClose); void firstClosing.catch(() => {});
+      let firstTimer: NodeJS.Timeout | undefined;
+      try { await Promise.race([firstClosing, new Promise<never>((_, reject) => { firstTimer = setTimeout(() => reject(new Error("OWNED_APP_CLOSE_TIMEOUT")), 10_000); })]); }
+      finally { if (firstTimer) clearTimeout(firstTimer); }
+      await assertImageClosed(appOwners.at(-1)!);
+    } else { await application.close(); await appOriginalClose; }
     assert.equal(appOwners.at(-1)!.closeObserved, true); application = undefined; page = undefined;
     if (installedDebian) {
       await assertAutostart(true);
@@ -1537,6 +1653,7 @@ async function main(): Promise<void> {
   await checkpoint("graceful-normal-quit");
   const quitOwner = appOwners.at(-1)!; assert.equal(quitOwner.original, application.process());
   const quitPid = quitOwner.original.pid; assert.ok(quitPid); quitOwner.termination = "quit";
+  if (appImage) await observeImageProcesses(quitPid, quitOwner.image!.processes);
   let quitPhase: "playwright-close" | "original-close" | "complete" = "playwright-close";
   let quitOutcome: "closed" | "failed" = "failed", quitExpired = false, quitTimer: NodeJS.Timeout | undefined;
   await checkpoint("graceful-playwright-close");
@@ -1563,6 +1680,11 @@ async function main(): Promise<void> {
       await writeFile(join(evidence, "quit-timeout-processes.json"), JSON.stringify({ processes: processes?.stdout ?? null }), { mode: 0o600 });
     }
   }
+  if (appImage) {
+    await assertImageClosed(quitOwner);
+    assert.equal(sha(await readFile(permanentImage)), "5307c99c5d8f603fbf8ed937d8688dc24181509163cdfc365552dd9bd5eb5069");
+    assert.equal(sha(await readFile(imageLauncher)), "ea17d105cc470ba5bc23d9e503b2e344b7b78ac2772655a8700d582d84a57fe1");
+  }
   application = undefined;
   if (packaged) { await packageCommand("status", true); checks.push("absent package owner refuses no-display CLI without activation, profile creation or residual process"); }
   await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", checks, architecture: process.arch, uid: process.getuid?.(),
@@ -1573,6 +1695,8 @@ async function main(): Promise<void> {
     ...(nativeX11 ? { nativeX11: true, nativeCapture: true, escapePreserved: true, holdStaleReleaseSafe: true, clearedKeyInactive: true } : {}),
     ...(packaged ? { packagedApplication: true, packageAppPath: packageRoot, executable, packageControl: { allCommands: true, noDisplay: true,
       profileAbsent: true, absentOwnerRefused: true, processesClosed: true } } : {}),
+    ...(appImage ? { appImageRuntime: true, secondaryResourcesSurvived, appImageAdmission: "UNAVAILABLE",
+      appImageOriginalsClosed: appOwners.every((owner) => owner.closeObserved), appImageTemporaryEmpty: (await readdir(imageTemporary)).length === 0 } : {}),
     ...(installation ? { installedRuntime: true, installation } : {}),
     ...(installedDebian ? { debianInstalled: true, installedGeneratedExecRestart: generatedExecRestart, startupAutostartReadOnly,
       uiEnableDisableVerified, actualLoginSession: "NOT_TESTED" } : {}),

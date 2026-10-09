@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, mkdir, mkdtemp, open, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { MacosUpdateArchiveError, validateMacUpdateBundleFiles } from "../src/services/macos-update-archive.js";
+import { cleanupMacUpdateArchiveDownload, MacosUpdateArchiveError, validateMacUpdateBundleFiles } from "../src/services/macos-update-archive.js";
+import { retainOwnedUpdateDownload } from "../src/services/update-staging.js";
 
 const invalid = (error: unknown): boolean => error instanceof MacosUpdateArchiveError && error.code === "INVALID_BUNDLE";
 async function fixture() {
@@ -47,4 +49,21 @@ test("Mac bundle file inspection requires a canonical absolute app pathname", as
   for (const path of ["relative.app", "/owned/../OpenWhisper.app", "/owned/OpenWhisper.app\0", "/owned/other"]) {
     await assert.rejects(validateMacUpdateBundleFiles(path), (error: unknown) => error instanceof MacosUpdateArchiveError && error.code === "INVALID_INPUT");
   }
+});
+
+test("failed extraction cleanup preserves the child and original error while closing the retained ZIP descriptor", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-mac-cleanup-")));
+  const stage = await mkdtemp(join(root, "stage-")), child = join(stage, "retained-child");
+  await mkdir(child, { mode: 0o700 }); await writeFile(join(child, "marker"), "retained owned bytes", { mode: 0o600 });
+  const file = await open(join(stage, "OpenWhisper-macOS.zip"), constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  try {
+    await file.write(Buffer.from("owned zip fixture"), 0, 17, 0); await file.sync();
+    const download = await retainOwnedUpdateDownload({ file, stageDirectory: stage, artifactName: "OpenWhisper-macOS.zip" });
+    const refusal = new MacosUpdateArchiveError("CLEANUP_FAILED", "CHILD_IDENTITY", "FILE_CHANGED");
+    await assert.rejects(cleanupMacUpdateArchiveDownload({ cleanup: async () => { throw refusal; } }, download), (error: unknown) => error === refusal);
+    await assert.rejects(file.stat(), { code: "EBADF" });
+    assert.equal(await readFile(join(child, "marker"), "utf8"), "retained owned bytes");
+    assert.ok((await lstat(stage)).isDirectory());
+    await assert.rejects(lstat(join(stage, "OpenWhisper-macOS.zip")), { code: "ENOENT" });
+  } finally { await file.close(); await rm(root, { recursive: true, force: true }); }
 });

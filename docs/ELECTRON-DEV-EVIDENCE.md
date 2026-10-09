@@ -33,9 +33,37 @@ internal framework links, refuses escaping/special files and requires exact
 captured metadata/newer version and the running application's designated
 requirement. Four local filesystem cases pass. The new ordinary Mac smoke adds
 a real ditto ZIP plus version/corrupt/missing-app/traversal/symlink cases and
-owned cleanup; its actual execution awaits the matching CI. The prior version
+owned cleanup. Original ARM job113622220613 in
+[CI37868932078](https://github.com/juferdinand/OpenWhisper/actions/runs/37868932078)
+fails with `CLEANUP_FAILED` at extraction-child cleanup; Stable smoke is skipped.
+Original Intel job113622220509 fails in the same Dev stage with `CLEANUP_FAILED`;
+its Stable smoke is also skipped. Actual producer is PR merge
+`b561cfe50230ed4560e02408e94cbb3806293ded`, not pure
+API head `9ac9ae9`. Its original log does not expose the underlying phase/errno.
+No actual ZIP or final-process-cleanup PASS is claimed. A focused follow-up
+retains categorical phase/whitelisted-error diagnostics and preserves the first
+cleanup error while still closing the original download descriptor. A real
+private-file regression confirms that a refused extraction child remains intact,
+the original descriptor closes and parent removal refuses the retained child.
+No speculative permission change or retry is included. The prior version
 is explicitly synthetic 0.0.0, and the fixture remains ad-hoc. No persistent
 publisher transition, installation or updater UI is established.
+
+The existing thin Mac packager now has an explicit persistent-validation mode:
+stable identity, canonical version, clean captured commit and exact existing
+certificate fingerprint are required before staging. Every existing signing
+operation uses that admitted identity; signed native descriptors are recaptured
+and original unsigned manifests remain intact. Fourteen focused tests and an
+independent review pass. Default ad-hoc behavior is preserved. No actual
+certificate signing, keychain access, universal build or release is performed;
+captured clean metadata is not source-bit attestation or old-publisher acceptance.
+
+The reviewed cleanup/signing/harness follow-up passes strict typing and the
+ordinary application/shared-UI build. One complete default suite passes 1153
+cases in 17.83 seconds, zero failures, 28 explicit native/opt-in skips. The final
+smoke-only failure-label correction receives a fresh typecheck; it does not
+change the default-suite production sources or tests. Actual Mac ZIP execution
+and owned AppImage runtime are outstanding at this source checkpoint.
 
 Independent source reviews pass. One completed increment passes strict typing,
 ordinary app/shared-UI build and 1149 default-suite tests in 17.87 seconds,

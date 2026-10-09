@@ -248,6 +248,7 @@ try {
         nativeFS.constants.O_RDWR | nativeFS.constants.O_CREAT | nativeFS.constants.O_EXCL | nativeFS.constants.O_NOFOLLOW, 0o600);
       let download: Awaited<ReturnType<typeof staging.retainOwnedUpdateDownload>> | undefined;
       let extracted: Awaited<ReturnType<typeof archive.extractVerifiedMacUpdateArchive>> | undefined;
+      let cleanupFailure: Error | undefined;
       try {
         const source = await fs.open(path.join(input.root, `${name}.zip`), nativeFS.constants.O_RDONLY | nativeFS.constants.O_NOFOLLOW);
         try {
@@ -279,14 +280,26 @@ try {
           results.push({ name, accepted: true, code: null, bytes: download.bytes, sameVersionRefused });
         } catch (error: unknown) {
           if (!(error instanceof archive.MacosUpdateArchiveError)) throw error;
+          if (error.code === "CLEANUP_FAILED") { cleanupFailure = error; throw error; }
           assert.deepEqual(await fs.readdir(stageDirectory), ["OpenWhisper-macOS.zip"]);
           assert.equal((await file.stat()).size, download.bytes);
           results.push({ name, accepted: false, code: error.code, bytes: download.bytes, sameVersionRefused });
         }
       } finally {
-        await extracted?.cleanup();
-        if (download) await download.cleanup();
-        else { await file.close(); await fs.rm(stageDirectory, { recursive: true }); }
+        try {
+          if (download) await archive.cleanupMacUpdateArchiveDownload(extracted, download);
+          else { await file.close(); await fs.rm(stageDirectory, { recursive: true }); }
+        } catch (error: unknown) {
+          cleanupFailure ??= error instanceof Error ? error : new Error("UNCLASSIFIED_CLEANUP_FAILURE");
+        }
+        if (cleanupFailure) {
+          // Fixed fixture names and categorical codes only; never expose paths or raw filesystem messages.
+          if (cleanupFailure instanceof archive.MacosUpdateArchiveError) {
+            throw new Error(`Owned archive fixture ${name}: ${cleanupFailure.code}:${cleanupFailure.cleanupPhase ?? "UNCLASSIFIED"}:${cleanupFailure.cleanupCause ?? "UNCLASSIFIED"}`);
+          }
+          if (cleanupFailure instanceof staging.UpdateStagingError) throw new Error(`Owned archive fixture ${name}: ${cleanupFailure.code}`);
+          throw new Error(`Owned archive fixture ${name}: UNCLASSIFIED_CLEANUP_FAILURE`);
+        }
       }
       await assert.rejects(fs.lstat(stageDirectory), { code: "ENOENT" });
       await assert.rejects(fs.lstat(path.join(input.outside, "marker")), { code: "ENOENT" });
