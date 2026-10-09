@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import { access, mkdir, readdir, readlink, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { BusFailure, openLinuxBus, type BusMethod } from "../../src/platforms/linux/shared/bus.js";
+import { BusFailure, openLinuxBus, type LinuxBus, type BusMethod } from "../../src/platforms/linux/shared/bus.js";
 import type { BusValue } from "../../src/platforms/linux/shared/bus-values.js";
 import { safeFailure } from "../owned-bus-opening/diagnostics.js";/* owned-legacy-diagnostic */
 import { writeFileSync } from "node:fs";

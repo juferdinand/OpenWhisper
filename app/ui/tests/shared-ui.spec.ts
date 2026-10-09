@@ -17,7 +17,11 @@ declare global {
     openwhisper?: DesktopBridge;
     testState: AppState;
     publishState(): void;
-    publishTelemetry(payload: { generation: number; elapsed: number; level: number }): void;
+    publishTelemetry(payload: {
+      generation: number;
+      elapsed: number;
+      level: number;
+    }): void;
     calls: { command: string }[];
   }
 }
@@ -300,7 +304,8 @@ async function start(
         for (const callback of callbacks.get("state") ?? []) callback(snapshot);
       };
       const publishTelemetry = (payload: unknown) => {
-        for (const callback of callbacks.get("recording_telemetry") ?? []) callback(payload);
+        for (const callback of callbacks.get("recording_telemetry") ?? [])
+          callback(payload);
       };
       const invoke = async (command: string, args: any = {}) => {
         host.calls.push({ command, args });
@@ -421,9 +426,13 @@ test("recording telemetry follows the newest full state and ignores stale genera
   await start(page, "linux", false, false, true);
   await expect(page.locator("#record-label")).toHaveText("Recording · 0:05");
   expect(
-    await page.locator("#record-control").evaluate((element) =>
-      Number.parseFloat(getComputedStyle(element).getPropertyValue("--voice-level")),
-    ),
+    await page
+      .locator("#record-control")
+      .evaluate((element) =>
+        Number.parseFloat(
+          getComputedStyle(element).getPropertyValue("--voice-level"),
+        ),
+      ),
   ).toBeCloseTo(0.76);
 
   await page.evaluate(() => {
@@ -432,9 +441,13 @@ test("recording telemetry follows the newest full state and ignores stale genera
   });
   await expect(page.locator("#record-label")).toHaveText("Recording · 0:05");
   expect(
-    await page.locator("#record-control").evaluate((element) =>
-      Number.parseFloat(getComputedStyle(element).getPropertyValue("--voice-level")),
-    ),
+    await page
+      .locator("#record-control")
+      .evaluate((element) =>
+        Number.parseFloat(
+          getComputedStyle(element).getPropertyValue("--voice-level"),
+        ),
+      ),
   ).toBeCloseTo(0.76);
 
   await page.evaluate(() => {
@@ -446,9 +459,13 @@ test("recording telemetry follows the newest full state and ignores stale genera
   });
   await expect(page.locator("#record-label")).toHaveText("Start dictation");
   expect(
-    await page.locator("#record-control").evaluate((element) =>
-      Number.parseFloat(getComputedStyle(element).getPropertyValue("--voice-level")),
-    ),
+    await page
+      .locator("#record-control")
+      .evaluate((element) =>
+        Number.parseFloat(
+          getComputedStyle(element).getPropertyValue("--voice-level"),
+        ),
+      ),
   ).toBeCloseTo(0.2);
 });
 
