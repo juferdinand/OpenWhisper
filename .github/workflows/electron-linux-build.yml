@@ -35,7 +35,6 @@ jobs:
           cache: npm
           cache-dependency-path: |
             electron/package-lock.json
-            linux/package-lock.json
             shared/ui/package-lock.json
       - name: Install pinned Electron Linux build dependencies
         run: |
@@ -47,7 +46,6 @@ jobs:
         run: |
           npm ci --prefix shared/ui
           npm ci --prefix electron
-          npm ci --prefix linux
       - name: Verify committed release source and versions
         working-directory: electron
         env:
@@ -117,7 +115,7 @@ jobs:
           mkdir -m 700 "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
           output="$RUNNER_TEMP/openwhisper-electron-linux-release"
           for asset in OpenWhisper-Linux-amd64.deb OpenWhisper-Linux-x86_64.AppImage; do
-            ./../linux/node_modules/.bin/tauri signer sign --app-version "$RELEASE_VERSION" "$output/$asset"
+            node_modules/.bin/tauri signer sign --app-version "$RELEASE_VERSION" "$output/$asset"
           done
           node --import tsx scripts/finalize-linux-release.ts --directory "$output" --version "$RELEASE_VERSION" --commit "$GITHUB_SHA"
           (cd "$output" && sha256sum --check SHA256SUMS)
