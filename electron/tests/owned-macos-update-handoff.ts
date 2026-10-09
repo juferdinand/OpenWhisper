@@ -13,11 +13,14 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 function canonical(path: string): string { assert.ok(path.startsWith("/") && resolve(path) === path && !/[\u0000-\u001f\u007f]/u.test(path)); return path; }
-const args = process.argv.slice(2); assert.equal(args.length, 6); assert.equal(args[0], "--package"); assert.equal(args[2], "--successor"); assert.equal(args[4], "--evidence");
+const args = process.argv.slice(2); assert.equal(args.length, 10); assert.equal(args[0], "--package"); assert.equal(args[2], "--successor");
+assert.equal(args[4], "--evidence"); assert.equal(args[6], "--source-commit"); assert.equal(args[8], "--successor-commit");
 assert.equal(process.platform, "darwin"); assert.equal(process.arch, "arm64"); assert.equal(process.getuid?.() === 0, false);
 assert.equal(process.env["GITHUB_ACTIONS"], "true"); assert.equal(process.env["RUNNER_ENVIRONMENT"], "github-hosted");
 assert.equal(process.env["OPENWHISPER_OWNED_MAC_UPDATE_TEST"], "1");
 const sourceBundle = canonical(args[1] ?? ""), successorArchive = canonical(args[3] ?? ""), evidence = canonical(args[5] ?? "");
+const expectedSourceCommit = z.string().regex(/^[a-f0-9]{40}$/u).parse(args[7]);
+const expectedSuccessorCommit = z.string().regex(/^[a-f0-9]{40}$/u).parse(args[9]);
 const runnerTemp = canonical(process.env["RUNNER_TEMP"] ?? "");
 assert.ok([sourceBundle, successorArchive, evidence].every((path) => path.startsWith(`${runnerTemp}/`)));
 const forbiddenRuntimeArgument = /^--(?:owned-macos-update-fixture|inspect(?:-|=|$)|remote-debugging(?:-|=|$)|debug(?:-|=|$)|test(?:-|=|$))/u;
@@ -32,6 +35,7 @@ const versionFrom = (bundle: string): string => run("/usr/bin/plutil", ["-extrac
 const currentVersion = versionFrom(sourceBundle); assert.equal(currentVersion, "0.3.0");
 const source = z.object({ commit: z.string().regex(/^[a-f0-9]{40}$/u), modified: z.literal(false) });
 const sourceInfo = source.parse(JSON.parse(await readFile(join(sourceBundle, "Contents/Resources/app/dist/resources/development-build.json"), "utf8")) as unknown);
+assert.equal(sourceInfo.commit, expectedSourceCommit);
 const currentBuild = parseApplicationBuildModule(await readFile(join(sourceBundle, "Contents/Resources/app/dist/main/application-build.js"), "utf8"));
 assert.deepEqual(currentBuild, { version: 1, kind: "stable", appId: "io.github.whisperfree", productName: "OpenWhisper" });
 const currentPlist: unknown = JSON.parse(run("/usr/bin/plutil", ["-convert", "json", "-o", "-", join(sourceBundle, "Contents/Info.plist")]));
@@ -54,6 +58,7 @@ run("/usr/bin/ditto", ["-x", "-k", successorArchive, successorRoot], 120_000);
 const successorBundle = join(successorRoot, "OpenWhisper.app"); assert.equal(versionFrom(successorBundle), "0.3.1");
 const successorSource = source.parse(JSON.parse(await readFile(join(successorBundle, "Contents/Resources/app/dist/resources/development-build.json"), "utf8")) as unknown);
 assert.match(successorSource.commit, /^[a-f0-9]{40}$/u); assert.notEqual(successorSource.commit, sourceInfo.commit);
+assert.equal(successorSource.commit, expectedSuccessorCommit);
 assert.equal((await readFile(join(successorBundle, "Contents/Resources/app/dist/resources/VERSION"), "utf8")).trim(), "0.3.1");
 run("/usr/bin/codesign", ["--verify", "--deep", "--strict", successorBundle], 30_000);
 const installationRoot = join(evidence, "Installation Slot"), bundle = join(installationRoot, "OpenWhisper.app");
