@@ -23,6 +23,12 @@ const oracleResult = z.object({ status: z.literal("PASS"), originalRequirement: 
 export function parseOwnedMacPublisherArguments(args: readonly string[]) {
   assert.equal(args.length, 1); return z.enum(modes).parse(args[0]);
 }
+type OwnedMacPublisherMode = (typeof modes)[number];
+export function macPublisherArchitectureAllowed(mode: OwnedMacPublisherMode, architecture: string): boolean {
+  return mode === "keychain-list" || mode === "keychain-identity"
+    ? architecture === "arm64" || architecture === "x64"
+    : architecture === "arm64";
+}
 function canonical(value: unknown): string {
   const path = z.string().min(1).max(4096).parse(value);
   assert.ok(isAbsolute(path) && resolve(path) === path && !/[\u0000-\u001f\u007f]/u.test(path)); return path;
@@ -228,7 +234,7 @@ async function stdin(): Promise<string> {
 }
 async function main() {
   const mode = parseOwnedMacPublisherArguments(process.argv.slice(2)); phase = mode;
-  assert.equal(process.platform, "darwin"); assert.equal(process.arch, "arm64"); assert.ok(process.getuid?.());
+  assert.equal(process.platform, "darwin"); assert.ok(macPublisherArchitectureAllowed(mode, process.arch)); assert.ok(process.getuid?.());
   assert.equal(process.env["GITHUB_ACTIONS"], "true"); assert.equal(process.env["RUNNER_ENVIRONMENT"], "github-hosted");
   assert.equal(process.env["OPENWHISPER_OWNED_MAC_PUBLISHER"], "1");
   if (mode === "keychain-list") { console.log(parseMacPublisherKeychains(await stdin()).join("\n")); return; }
