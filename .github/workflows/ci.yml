@@ -436,6 +436,8 @@ jobs:
   mac_persistent_publisher:
     name: Owned persistent Mac publisher validation
     needs: mac_capture
+    outputs:
+      available: ${{ steps.publisher.outputs.available }}
     if: >-
       github.actor == github.repository_owner && github.actor != 'dependabot[bot]' &&
       ((github.event_name == 'pull_request' &&
@@ -631,21 +633,60 @@ jobs:
             --evidence "$RUNNER_TEMP/mac-publisher-smoke" \
             --fixtures "$PWD/.local/speech-fixtures" --variant stable --package-format universal
           node --import tsx tests/owned-macos-publisher.ts result
-      - name: Install and relaunch one genuine same-identity successor on the owned Mac slot
+      - name: Stage exact signed packages for isolated update handoff
         if: steps.publisher.outputs.available == 'true'
         working-directory: app
         shell: bash
-        env:
-          OPENWHISPER_OWNED_MAC_UPDATE_TEST: '1'
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          archives=("$RUNNER_TEMP/mac-publisher-successor"/*.zip)
-          test "${#archives[@]}" -eq 1
-          node --import tsx tests/owned-macos-update-handoff.ts \
-            --package "$RUNNER_TEMP/mac-publisher-output/OpenWhisper.app" \
-            --successor "${archives[0]}" \
-            --evidence "$RUNNER_TEMP/mac-publisher-update-handoff"
+          umask 077
+          evidence="$RUNNER_TEMP/mac-publisher-evidence"
+          packet="$RUNNER_TEMP/mac-update-handoff-input"
+          mkdir -m 700 "$packet"
+          universal_archive="$(jq -er '.archive' "$evidence/package-result.json")"
+          universal_sha="$(jq -er '.sha256' "$evidence/package-result.json")"
+          successor_archive="$(jq -er '.archive' "$RUNNER_TEMP/mac-publisher-successor/successor-package-result.json")"
+          successor_sha="$(jq -er '.sha256' "$RUNNER_TEMP/mac-publisher-successor/successor-package-result.json")"
+          successor_commit="$(jq -er '.sourceCommit' "$RUNNER_TEMP/mac-publisher-successor/successor-package-result.json")"
+          test "$universal_archive" = "$RUNNER_TEMP/mac-publisher-output/$(basename "$universal_archive")"
+          test "$successor_archive" = "$RUNNER_TEMP/mac-publisher-successor/$(basename "$successor_archive")"
+          test -f "$universal_archive" && test ! -L "$universal_archive"
+          test -f "$successor_archive" && test ! -L "$successor_archive"
+          [[ "$universal_archive" =~ /OpenWhisper-validation-macOS-universal_0\.3\.0_[a-f0-9]{12}\.zip$ ]]
+          [[ "$successor_archive" =~ /OpenWhisper-validation-macOS-arm64_0\.3\.1_[a-f0-9]{12}\.zip$ ]]
+          test "$(jq -er '.status' "$RUNNER_TEMP/mac-publisher-successor/successor-package-result.json")" = PASS
+          test "$(jq -er '.version' "$RUNNER_TEMP/mac-publisher-successor/successor-package-result.json")" = 0.3.1
+          test "$(jq -er '.updateConfigured' "$RUNNER_TEMP/mac-publisher-successor/successor-package-result.json")" = true
+          test "$(jq -er '.successorCommit' "$RUNNER_TEMP/publisher-successor-source/source-path.json")" = "$successor_commit"
+          for receipt in old-requirement-staged.json old-requirement-zip.json successor-old-requirement-staged.json successor-old-requirement-zip.json; do
+            jq -e '.status == "PASS" and .originalRequirement == "ACCEPTED" and .validSameIdDifferentPublisher == "REJECTED"' \
+              "$evidence/$receipt" >/dev/null
+          done
+          universal_name=OpenWhisper-universal-0.3.0.zip
+          successor_name=OpenWhisper-arm64-successor-0.3.1.zip
+          cp "$universal_archive" "$packet/$universal_name"
+          cp "$successor_archive" "$packet/$successor_name"
+          chmod 600 "$packet/$universal_name" "$packet/$successor_name"
+          universal_actual="$(/usr/bin/shasum -a 256 "$packet/$universal_name" | awk '{print $1}')"
+          successor_actual="$(/usr/bin/shasum -a 256 "$packet/$successor_name" | awk '{print $1}')"
+          test "$universal_actual" = "$universal_sha"
+          test "$successor_actual" = "$successor_sha"
+          jq -n --arg source "$GITHUB_SHA" --arg universal "$universal_actual" \
+            --arg successor "$successor_actual" --arg successor_commit "$successor_commit" \
+            '{schema:1,sourceCommit:$source,universal:{version:"0.3.0",sha256:$universal,publisherRequirement:"ACCEPTED"},successor:{parentCommit:$source,commit:$successor_commit,version:"0.3.1",sha256:$successor,publisherRequirement:"ACCEPTED"}}' \
+            > "$packet/input.json"
+          chmod 600 "$packet/input.json"
+      - name: Upload exact signed handoff inputs for a fresh Mac runner
+        if: steps.publisher.outputs.available == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OpenWhisper-mac-update-handoff-input-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/mac-update-handoff-input/OpenWhisper-universal-0.3.0.zip
+            ${{ runner.temp }}/mac-update-handoff-input/OpenWhisper-arm64-successor-0.3.1.zip
+            ${{ runner.temp }}/mac-update-handoff-input/input.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Upload only public publisher receipts after signing cleanup
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -657,7 +698,78 @@ jobs:
             ${{ runner.temp }}/mac-publisher-evidence/old-UpdateService.swift
             ${{ runner.temp }}/mac-publisher-evidence/old-UpdateSignatureVerifier.swift
             ${{ runner.temp }}/mac-publisher-smoke/result.json
-            ${{ runner.temp }}/mac-publisher-update-handoff/result.json
+          if-no-files-found: warn
+          retention-days: 14
+  mac_persistent_update_handoff:
+    name: Isolated persistent Mac successor handoff
+    needs: mac_persistent_publisher
+    if: needs.mac_persistent_publisher.outputs.available == 'true'
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install locked test tools without building or fetching native inputs
+        working-directory: app
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: npm ci
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: OpenWhisper-mac-update-handoff-input-${{ github.sha }}
+          path: ${{ runner.temp }}/mac-update-handoff-input
+      - name: Admit exact same-run signed package inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          packet="$RUNNER_TEMP/mac-update-handoff-input"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          test "$(find "$packet" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')" = 3
+          test -z "$(find "$packet" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          for name in input.json OpenWhisper-universal-0.3.0.zip OpenWhisper-arm64-successor-0.3.1.zip; do
+            test -f "$packet/$name" && test ! -L "$packet/$name"
+          done
+          jq -e --arg source "$GITHUB_SHA" '
+            .schema == 1 and .sourceCommit == $source and
+            .universal.version == "0.3.0" and .universal.publisherRequirement == "ACCEPTED" and
+            (.universal.sha256 | test("^[a-f0-9]{64}$")) and
+            .successor.parentCommit == $source and .successor.version == "0.3.1" and
+            .successor.publisherRequirement == "ACCEPTED" and .successor.commit != $source and
+            (.successor.commit | test("^[a-f0-9]{40}$")) and (.successor.sha256 | test("^[a-f0-9]{64}$"))
+          ' "$packet/input.json" >/dev/null
+          test "$(/usr/bin/shasum -a 256 "$packet/OpenWhisper-universal-0.3.0.zip" | awk '{print $1}')" = "$(jq -er '.universal.sha256' "$packet/input.json")"
+          test "$(/usr/bin/shasum -a 256 "$packet/OpenWhisper-arm64-successor-0.3.1.zip" | awk '{print $1}')" = "$(jq -er '.successor.sha256' "$packet/input.json")"
+          mkdir -m 700 "$RUNNER_TEMP/mac-update-handoff-predecessor"
+          /usr/bin/ditto -x -k "$packet/OpenWhisper-universal-0.3.0.zip" "$RUNNER_TEMP/mac-update-handoff-predecessor"
+          test -d "$RUNNER_TEMP/mac-update-handoff-predecessor/OpenWhisper.app"
+      - name: Install and relaunch one genuine same-identity successor on an isolated Mac runner
+        working-directory: app
+        shell: bash
+        env:
+          OPENWHISPER_OWNED_MAC_UPDATE_TEST: '1'
+        run: |
+          set -euo pipefail
+          node --import tsx tests/owned-macos-update-handoff.ts \
+            --package "$RUNNER_TEMP/mac-update-handoff-predecessor/OpenWhisper.app" \
+            --successor "$RUNNER_TEMP/mac-update-handoff-input/OpenWhisper-arm64-successor-0.3.1.zip" \
+            --evidence "$RUNNER_TEMP/mac-update-handoff-evidence" \
+            --source-commit "$(jq -er '.sourceCommit' "$RUNNER_TEMP/mac-update-handoff-input/input.json")" \
+            --successor-commit "$(jq -er '.successor.commit' "$RUNNER_TEMP/mac-update-handoff-input/input.json")"
+      - name: Upload sanitized isolated handoff result
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OpenWhisper-persistent-Mac-update-handoff-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/mac-update-handoff-evidence/result.json
           if-no-files-found: warn
           retention-days: 14
   linux_signed_candidate:
