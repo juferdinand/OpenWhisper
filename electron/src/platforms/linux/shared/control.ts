@@ -1,31 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { controlStatusSchema } from "../../../core/recording-control.js";
+import type { ControlCaptureLease, ControlCapturePort, ControlStatus } from "../../../core/recording-control.js";
 import { BusFailure, type BusEvent, type BusFilter, type BusMethod, type BusReply } from "./bus.js";
 import { controlTarget, type ControlKind } from "./control-identity.js";
-import { serializeControlStatus, type ControlWireStatus } from "./control-status.js";
+import { serializeControlStatus } from "./control-status.js";
+
+export { controlStatusSchema, ControlCaptureLeaseError } from "../../../core/recording-control.js";
+export type { ControlCaptureLease, ControlCapturePort, ControlStatus } from "../../../core/recording-control.js";
 
 export const DEV_CONTROL_NAME = controlTarget("development").name;
 export const DEV_CONTROL_PATH = controlTarget("development").path;
 const daemon = "org.freedesktop.DBus";
-export const controlStatusSchema = z.enum(["idle", "recording", "transcribing", "unavailable"]);
 export const controlActionSchema = z.enum(["start", "stop", "toggle", "cancel"]);
-export type ControlStatus = z.infer<typeof controlStatusSchema>;
 type Refusal = "Denied" | "Busy" | "Expired" | "InvalidRequest" | "Unavailable";
-
-/** Each lease owns only its acquisition. Stop resolves after closure/sample fencing. */
-export interface ControlCaptureLease { stop(): Promise<void>; cancel(): Promise<void> }
-/** A different immutable recording owner proves this lease has already ended. */
-export class ControlCaptureLeaseError extends Error {
-  constructor() { super("Recording owner changed."); this.name = "ControlCaptureLeaseError"; }
-}
-export interface ControlCapturePort {
-  status(): ControlStatus | Promise<ControlStatus>;
-  /** Separate wire observation preserves done/error/recovery without changing action gating. */
-  wireStatus?(): ControlWireStatus | Promise<ControlWireStatus>;
-  start(signal: AbortSignal): Promise<ControlCaptureLease>;
-  /** Capture the current immutable owner after authentication, never retarget a stale lease. */
-  currentLease?(): Promise<ControlCaptureLease | undefined>;
-}
 export interface ControlBus {
   readonly generation: string;
   readonly isClosed: boolean;

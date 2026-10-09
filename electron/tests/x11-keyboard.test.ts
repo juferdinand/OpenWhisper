@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { X11Trigger } from "../src/contracts/ui.js";
-import type { ControlCapturePort } from "../src/platforms/linux/shared/control.js";
+import type { ControlCapturePort } from "../src/core/recording-control.js";
 import { X11Keyboard, X11KeyboardError, isGenuineX11,
   type X11KeyboardEvent, type X11KeyboardNative, type X11KeyboardState } from "../src/platforms/linux/x11/keyboard.js";
 

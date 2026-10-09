@@ -3,8 +3,8 @@ import { z } from "zod";
 import { BusFailure, type BusEvent } from "../shared/bus.js";
 import type { BusValue } from "../shared/bus-values.js";
 import { linuxApplicationIdSchema, type LinuxApplicationId, type ShortcutBus } from "../shared/portal-shortcuts.js";
-import type { ControlCapturePort } from "../shared/control.js";
-import { ShortcutRecording } from "../shared/shortcut-recording.js";
+import type { ControlCapturePort } from "../../../core/recording-control.js";
+import { ShortcutRecording } from "../../../core/shortcut-recording.js";
 
 const serviceName = "org.kde.kglobalaccel", iface = "org.kde.KGlobalAccel", path = "/kglobalaccel";
 const action = "_k_session:dictate";

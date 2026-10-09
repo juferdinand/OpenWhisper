@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { BusFailure, type BusEvent, type BusFilter, type BusMethod, type BusReply } from "../src/platforms/linux/shared/bus.js";
-import { DevControlService, DEV_CONTROL_NAME, DEV_CONTROL_PATH, type ControlBus,
-  type ControlCaptureLease, type ControlCapturePort, type ControlStatus } from "../src/platforms/linux/shared/control.js";
+import { DevControlService, DEV_CONTROL_NAME, DEV_CONTROL_PATH, type ControlBus } from "../src/platforms/linux/shared/control.js";
+import type { ControlCaptureLease, ControlCapturePort, ControlStatus } from "../src/core/recording-control.js";
 import { controlTarget, type ControlKind } from "../src/platforms/linux/shared/control-identity.js";
 import { parseControlStatus } from "../src/platforms/linux/shared/control-status.js";
 

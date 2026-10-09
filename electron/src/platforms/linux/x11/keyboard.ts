@@ -1,8 +1,8 @@
 import { createRequire } from "node:module";
 import type { LibraryHandle } from "koffi";
 import { x11TriggerSchema, type X11Trigger } from "../../../contracts/ui.js";
-import type { ControlCapturePort } from "../shared/control.js";
-import { ShortcutRecording } from "../shared/shortcut-recording.js";
+import type { ControlCapturePort } from "../../../core/recording-control.js";
+import { ShortcutRecording } from "../../../core/shortcut-recording.js";
 
 export interface X11KeyboardState {
   available: boolean;

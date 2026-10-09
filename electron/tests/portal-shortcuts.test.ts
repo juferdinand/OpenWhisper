@@ -5,8 +5,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { BusFailure, type BusEvent, type BusFilter, type BusMethod, type BusReply } from "../src/platforms/linux/shared/bus.js";
 import { parseBusValues, signatureOf, type BusValue } from "../src/platforms/linux/shared/bus-values.js";
 import { PortalShortcuts, type ShortcutBus } from "../src/platforms/linux/shared/portal-shortcuts.js";
-import { ShortcutRecording } from "../src/platforms/linux/shared/shortcut-recording.js";
-import type { ControlCaptureLease, ControlCapturePort, ControlStatus } from "../src/platforms/linux/shared/control.js";
+import { ShortcutRecording } from "../src/core/shortcut-recording.js";
+import type { ControlCaptureLease, ControlCapturePort, ControlStatus } from "../src/core/recording-control.js";
 
 const desktop = "/org/freedesktop/portal/desktop", iface = "org.freedesktop.portal.GlobalShortcuts";
 const text = (value: string): BusValue => ({ type: "s", value });

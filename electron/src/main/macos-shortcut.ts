@@ -1,6 +1,6 @@
 import type { GlobalShortcut, Input } from "electron";
-import type { ControlCapturePort } from "../platforms/linux/shared/control.js";
-import { ShortcutRecording } from "../platforms/linux/shared/shortcut-recording.js";
+import type { ControlCapturePort } from "../core/recording-control.js";
+import { ShortcutRecording } from "../core/shortcut-recording.js";
 
 export interface MacosShortcutState {
   available: boolean;

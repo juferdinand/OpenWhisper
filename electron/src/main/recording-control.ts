@@ -1,8 +1,8 @@
 import type { RecordingSnapshot } from "../core/recording.js";
-import type { ControlCaptureLease, ControlCapturePort, ControlStatus } from "../platforms/linux/shared/control.js";
-import { ControlCaptureLeaseError } from "../platforms/linux/shared/control.js";
+import { ControlCaptureLeaseError, type ControlCaptureLease, type ControlCapturePort, type ControlStatus } from "../core/recording-control.js";
 import type { RecordingIdentity } from "./development-recording-host.js";
-import { MAX_CONTROL_ELAPSED, type ControlWireStatus } from "../platforms/linux/shared/control-status.js";
+import { MAX_CONTROL_ELAPSED } from "../platforms/linux/shared/control-status.js";
+import type { ControlWireStatus } from "../core/recording-control.js";
 
 interface RecordingControlOwner {
   currentIdentity(): RecordingIdentity | undefined;

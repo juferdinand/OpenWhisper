@@ -1,5 +1,4 @@
-import type { ControlCaptureLease, ControlCapturePort } from "./control.js";
-import { ControlCaptureLeaseError } from "./control.js";
+import { ControlCaptureLeaseError, type ControlCaptureLease, type ControlCapturePort } from "./recording-control.js";
 
 /** Portal edges act on immutable recording leases, including a recording started by the UI. */
 export class ShortcutRecording {

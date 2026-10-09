@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import { developmentArtifactSchema } from "../services/development-artifact.js";
-import { controlStatusSchema, ControlCaptureLeaseError, type ControlCaptureLease, type ControlCapturePort, type ControlStatus } from "../platforms/linux/shared/control.js";
+import { controlStatusSchema, ControlCaptureLeaseError, type ControlCaptureLease, type ControlCapturePort, type ControlStatus } from "../core/recording-control.js";
 import { boundPlatformFrame, platformCaptureRequestSchema, platformCaptureReplySchema,
   type PlatformCaptureRequest, type PlatformCaptureReply } from "../workers/platform-protocol.js";
 import { createUtilityPlatformChannelFactory, PlatformChannelError, type PlatformChannel } from "./platform-channel.js";

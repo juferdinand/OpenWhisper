@@ -1,9 +1,5 @@
-export type RecordingStatus = "idle" | "recording" | "transcribing" | "done" | "error";
-export interface ControlWireStatus {
-  readonly status: RecordingStatus;
-  readonly elapsed: bigint;
-  readonly recovery_available: boolean;
-}
+import type { ControlWireStatus, RecordingStatus } from "../../../core/recording-control.js";
+export type { ControlWireStatus, RecordingStatus } from "../../../core/recording-control.js";
 
 export const MAX_CONTROL_STATUS_BYTES = 4096;
 export const MAX_CONTROL_ELAPSED = (1n << 64n) - 1n;

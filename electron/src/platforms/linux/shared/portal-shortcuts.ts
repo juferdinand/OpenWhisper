@@ -3,8 +3,8 @@ import { z } from "zod";
 import { x11TriggerSchema } from "../../../contracts/ui.js";
 import { BusFailure, type BusEvent, type BusFilter, type BusMethod, type BusReply } from "./bus.js";
 import type { BusValue } from "./bus-values.js";
-import type { ControlCapturePort } from "./control.js";
-import { ShortcutRecording } from "./shortcut-recording.js";
+import type { ControlCapturePort } from "../../../core/recording-control.js";
+import { ShortcutRecording } from "../../../core/shortcut-recording.js";
 
 const desktop = "/org/freedesktop/portal/desktop";
 const portalName = "org.freedesktop.portal.Desktop";

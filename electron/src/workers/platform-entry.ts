@@ -1,5 +1,6 @@
 import { BusFailure, LinuxBus, openLinuxBus } from "../platforms/linux/shared/bus.js";
-import { ControlServiceError, DevControlService, type ControlCapturePort } from "../platforms/linux/shared/control.js";
+import { ControlServiceError, DevControlService } from "../platforms/linux/shared/control.js";
+import type { ControlCapturePort } from "../core/recording-control.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";

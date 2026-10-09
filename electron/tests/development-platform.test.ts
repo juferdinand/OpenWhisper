@@ -5,9 +5,9 @@ import { setTimeout as delay } from "node:timers/promises";
 import { DevelopmentPlatformCaptureBridge } from "../src/main/development-platform-host.js";
 import { PlatformCaptureClient, platformCaptureRequestSchema, platformCaptureReplySchema,
   type PlatformCaptureRequest } from "../src/workers/platform-protocol.js";
-import type { ControlCaptureLease, ControlStatus } from "../src/platforms/linux/shared/control.js";
+import type { ControlCaptureLease, ControlStatus } from "../src/core/recording-control.js";
 import { createRecordingControlPort } from "../src/main/recording-control.js";
-import { ShortcutRecording } from "../src/platforms/linux/shared/shortcut-recording.js";
+import { ShortcutRecording } from "../src/core/shortcut-recording.js";
 import type { RecordingIdentity } from "../src/main/development-recording-host.js";
 
 test("real main leases and worker RPC recover after held shortcut GUI Cancel and a later GUI acquisition", async () => {

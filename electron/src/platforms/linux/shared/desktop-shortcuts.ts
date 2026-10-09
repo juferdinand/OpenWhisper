@@ -1,7 +1,7 @@
 import { KdeKeyboard, keyLabel, type KdeJournal, type KdeKeyboardState } from "../kde/keyboard.js";
 import { PortalShortcuts, portalShortcutStateSchema, linuxApplicationIdSchema, type LinuxApplicationId,
   type PortalShortcutState, type ShortcutBus } from "./portal-shortcuts.js";
-import type { ControlCapturePort } from "./control.js";
+import type { ControlCapturePort } from "../../../core/recording-control.js";
 import { X11Keyboard, type X11KeyboardState } from "../x11/keyboard.js";
 
 /** Only one desktop adapter may own a recording trigger. Portal probing stays independent. */

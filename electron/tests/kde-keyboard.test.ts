@@ -7,7 +7,7 @@ import { KdeKeyCapture, type KeyboardInput } from "../src/platforms/linux/kde/ke
 import { BusFailure, type BusEvent, type BusFilter, type BusMethod, type BusReply } from "../src/platforms/linux/shared/bus.js";
 import { parseBusValues, signatureOf, type BusValue } from "../src/platforms/linux/shared/bus-values.js";
 import type { ShortcutBus } from "../src/platforms/linux/shared/portal-shortcuts.js";
-import type { ControlCaptureLease, ControlCapturePort, ControlStatus } from "../src/platforms/linux/shared/control.js";
+import type { ControlCaptureLease, ControlCapturePort, ControlStatus } from "../src/core/recording-control.js";
 const text = (value: string): BusValue => ({ type: "s", value });
 class Journal implements KdeJournal {
   entries: ReturnType<typeof kdeJournalSchema.parse> = [];

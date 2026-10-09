@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { controlStatusSchema, ControlCaptureLeaseError, type ControlCaptureLease, type ControlCapturePort, type ControlStatus } from "../platforms/linux/shared/control.js";
+import { controlStatusSchema, ControlCaptureLeaseError, type ControlCaptureLease, type ControlCapturePort, type ControlStatus, type ControlWireStatus } from "../core/recording-control.js";
 import { developmentArtifactSchema } from "../services/development-artifact.js";
 import { linuxApplicationIdSchema, portalShortcutStateSchema } from "../platforms/linux/shared/portal-shortcuts.js";
 import { kdeKeySchema } from "../platforms/linux/kde/keyboard.js";
 import { portalPasteStateSchema } from "../platforms/linux/shared/portal-paste.js";
-import { controlWireStatusTextSchema, parseControlStatus, type ControlWireStatus } from "../platforms/linux/shared/control-status.js";
+import { controlWireStatusTextSchema, parseControlStatus } from "../platforms/linux/shared/control-status.js";
 
 const envelope = { version: z.literal(1), id: z.uuid() };
 const address = z.string().max(1024).regex(/^unix:(?:path=\/[A-Za-z0-9_./%\-]+|abstract=[A-Za-z0-9_./%\-]+)(?:,guid=[a-fA-F0-9]{32})?$/);
