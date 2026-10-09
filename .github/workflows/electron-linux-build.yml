@@ -68,18 +68,7 @@ jobs:
           set -euo pipefail
           tools="$RUNNER_TEMP/openwhisper-electron-appimage-tools"
           test ! -e "$tools"
-          mkdir -m 700 "$tools"
-          for component in appimagetool runtime; do
-            if test "$component" = appimagetool; then filename=appimagetool-x86_64.AppImage; else filename=runtime-x86_64; fi
-            url="$(jq -er ".$component.url" native/appimage-tools.json)"
-            bytes="$(jq -er ".$component.bytes" native/appimage-tools.json)"
-            digest="$(jq -er ".$component.sha256" native/appimage-tools.json)"
-            curl --fail --location --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 120 \
-              --output "$tools/$filename" "$url"
-            test "$(wc -c < "$tools/$filename")" -eq "$bytes"
-            printf '%s  %s\n' "$digest" "$tools/$filename" | sha256sum --check --status
-            chmod 755 "$tools/$filename"
-          done
+          node --import tsx scripts/fetch-appimage-tools.ts --output "$tools"
           extractor_status=0
           unsquashfs -version > "$RUNNER_TEMP/openwhisper-electron-unsquashfs.txt" 2>&1 || extractor_status=$?
           test "$extractor_status" -eq 0 || test "$extractor_status" -eq 1

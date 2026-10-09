@@ -123,18 +123,7 @@ jobs:
             > "$RUNNER_TEMP/openwhisper-linux-canonical-result.json"
           tools="$RUNNER_TEMP/openwhisper-appimage-tools"
           test ! -e "$tools"
-          mkdir -m 700 "$tools"
-          for component in appimagetool runtime; do
-            if test "$component" = appimagetool; then filename=appimagetool-x86_64.AppImage; else filename=runtime-x86_64; fi
-            url="$(jq -er ".$component.url" native/appimage-tools.json)"
-            bytes="$(jq -er ".$component.bytes" native/appimage-tools.json)"
-            digest="$(jq -er ".$component.sha256" native/appimage-tools.json)"
-            curl --fail --location --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 120 \
-              --output "$tools/$filename" "$url"
-            test "$(wc -c < "$tools/$filename")" -eq "$bytes"
-            printf '%s  %s\n' "$digest" "$tools/$filename" | sha256sum --check --status
-            chmod 755 "$tools/$filename"
-          done
+          node --import tsx scripts/fetch-appimage-tools.ts --output "$tools"
           extractor_status=0
           unsquashfs -version > "$RUNNER_TEMP/openwhisper-appimage-extractor.txt" 2>&1 || extractor_status=$?
           test "$extractor_status" -eq 0 || test "$extractor_status" -eq 1
@@ -270,9 +259,16 @@ jobs:
         env:
           OPENWHISPER_OWNED_MAC_PACKAGE_SMOKE: '1'
         run: |
-          npm run build -- --recording
+          if test -n "$(git status --porcelain)"; then
+            git status --short
+            exit 1
+          fi
           node --import tsx scripts/fetch-speech-fixtures.ts
-          node --import tsx scripts/package-macos-preview.ts --output "$RUNNER_TEMP/openwhisper-mac-dev" > "$RUNNER_TEMP/openwhisper-mac-dev-result.json"
+          npm run build -- --mac-validation-pair \
+            --dev-output "$RUNNER_TEMP/openwhisper-mac-dev" \
+            --stable-output "$RUNNER_TEMP/openwhisper-mac-stable" \
+            --dev-result "$RUNNER_TEMP/openwhisper-mac-dev-result.json" \
+            --stable-result "$RUNNER_TEMP/openwhisper-mac-stable-result.json"
           node --import tsx tests/owned-macos-package-smoke.ts --package "$RUNNER_TEMP/openwhisper-mac-dev/OpenWhisper Dev.app" --evidence "$RUNNER_TEMP/openwhisper-mac-smoke" --fixtures "$PWD/.local/speech-fixtures"
       - name: Upload the isolated ad-hoc Mac Dev package
         if: always()
@@ -291,12 +287,7 @@ jobs:
         env:
           OPENWHISPER_OWNED_MAC_PACKAGE_SMOKE: '1'
         run: |
-          if test -n "$(git status --porcelain)"; then
-            git status --short
-            exit 1
-          fi
-          npm run build -- --recording --stable
-          node --import tsx scripts/package-macos-preview.ts --output "$RUNNER_TEMP/openwhisper-mac-stable" > "$RUNNER_TEMP/openwhisper-mac-stable-result.json"
+          test -z "$(git status --porcelain)"
           node --import tsx tests/owned-macos-package-smoke.ts --package "$RUNNER_TEMP/openwhisper-mac-stable/OpenWhisper.app" --evidence "$RUNNER_TEMP/openwhisper-mac-stable-smoke" --fixtures "$PWD/.local/speech-fixtures" --variant stable
       - name: Build a private same-source signed-update successor from the warm arm64 builder
         if: matrix.os == 'macos-15'
@@ -870,6 +861,40 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
+      - name: Configure the official Docker Hub pull-through mirror for this isolated job
+        shell: bash
+        run: |
+          set -euo pipefail
+          config=/etc/docker/daemon.json
+          mirror=https://mirror.gcr.io
+          if sudo test -L "$config"; then
+            printf '%s\n' 'Docker daemon config must not be a symlink.' >&2
+            exit 1
+          fi
+          temporary="$(sudo mktemp /etc/docker/daemon.json.openwhisper.XXXXXX)"
+          cleanup() { sudo rm -f -- "$temporary"; }
+          trap cleanup EXIT
+          if sudo test -e "$config"; then
+            sudo test -f "$config"
+            sudo jq -e 'type == "object" and ((.["registry-mirrors"] | type) == "array" or (has("registry-mirrors") | not)) and all(.["registry-mirrors"][]?; type == "string")' "$config" >/dev/null
+            if ! sudo jq -e --arg mirror "$mirror" '(.["registry-mirrors"] // []) | index($mirror) != null' "$config" >/dev/null; then
+              sudo jq --arg mirror "$mirror" '.["registry-mirrors"] = ((.["registry-mirrors"] // []) as $mirrors | if ($mirrors | index($mirror)) == null then $mirrors + [$mirror] else $mirrors end)' "$config" | sudo tee "$temporary" >/dev/null
+              sudo chown --reference="$config" "$temporary"
+              sudo chmod --reference="$config" "$temporary"
+              sudo mv -- "$temporary" "$config"
+              temporary=""
+            fi
+          else
+            printf '{"registry-mirrors":["%s"]}\n' "$mirror" | sudo tee "$temporary" >/dev/null
+            sudo chmod 644 "$temporary"
+            sudo mv -- "$temporary" "$config"
+            temporary=""
+          fi
+          if test -n "$temporary"; then sudo rm -f -- "$temporary"; fi
+          trap - EXIT
+          sudo systemctl restart docker
+          # The official pull-through mirror still falls back to Docker Hub when its cache misses.
+          docker info --format '{{json .RegistryConfig.Mirrors}}' | jq -e 'any(.[]; startswith("https://mirror.gcr.io"))' >/dev/null
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
