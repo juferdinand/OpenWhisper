@@ -52,6 +52,7 @@ import { MacosAutostart } from "./macos-autostart.js";
 import { APPLICATION_MACOS_UPDATE_BUILD } from "./macos-update-build.js";
 import { admitMacosUpdates, type MacosUpdateAdmission } from "./macos-update-admission.js";
 import { createMacosUpdateCoordinator, handoffMacosUpdate } from "./macos-update-coordinator.js";
+import { ownedMacosUpdateFixtureEffects } from "./owned-macos-update-fixture.js";
 import type { PreparedMacosUpdateInstall } from "../services/macos-update-install.js";
 import { LinuxAutostart } from "../services/linux-autostart.js";
 import { admitLinuxInstalledLaunch } from "./linux-installed-launch.js";
@@ -745,6 +746,24 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     try { await channel.request(kind); }
     catch { await channel.close(); throw new Error("The update connection failed."); }
   };
+  const ownedMacUpdateFixture = "--owned-macos-update-fixture";
+  if (process.argv.filter((argument) => argument === ownedMacUpdateFixture).length > 1) throw new Error("Invalid owned Mac updater test mode.");
+  if (process.argv.includes(ownedMacUpdateFixture)) {
+    if (process.platform !== "darwin" || identity.kind !== "stable" || !app.isPackaged || !macUpdateAdmission || !macUpdates ||
+      version !== "0.3.0" || macUpdateAdmission.repository !== "juferdinand/OpenWhisper") throw new Error("Owned Mac updater test mode is unavailable.");
+    let invoked = false;
+    Object.defineProperty(app, "openWhisperRunOwnedMacUpdateFixture", { configurable: false, enumerable: false, value: async (): Promise<void> => {
+      if (invoked || shutdownInProgress || !preferences.snapshot().setup_completed) throw new Error("Owned Mac updater fixture is not ready.");
+      invoked = true;
+      macUpdates = createMacosUpdateCoordinator({ admission: macUpdateAdmission!, identity, currentVersion: version,
+        cacheDirectory: profile.paths.cache }, ownedMacosUpdateFixtureEffects({ archive: join(profile.paths.cache, "owned-macos-successor.zip"),
+        repository: macUpdateAdmission!.repository, currentVersion: version, expectedVersion: "0.3.1" }));
+      const candidate = await macUpdates.check(new AbortController().signal);
+      if (!candidate || candidate.version !== "0.3.1") throw new Error("Owned Mac updater fixture was not admitted.");
+      updates = { ...updates, status: "available", version: candidate.version, error: null, progress: 0 }; notify();
+      await requestUpdate("install");
+    } });
+  }
   app.on("before-quit", (event) => {
     if (shutdownComplete) return;
     event.preventDefault();

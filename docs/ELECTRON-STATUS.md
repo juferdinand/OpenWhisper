@@ -247,7 +247,20 @@ that invocation. The publisher requirement lacked the leading `=` needed by
 `codesign` for literal text; the correction preserves the certificate pin and
 strict recursive, all-architecture verification. Focused tests, typing and build
 pass. [CI 37918205418](https://github.com/juferdinand/OpenWhisper/actions/runs/37918205418)
-must confirm actual runtime admission; signing alone does not establish it.
+then stops before signing at an unauthenticated GitHub API request returning HTTP
+403. The two metadata requests now use the existing read-only workflow token;
+the pinned source/archive and signature checks remain unchanged. Actual runtime
+confirmation requires the next normal CI run; signing alone does not establish it.
+
+The next owned Mac update check builds a genuine private 0.3.1 child from the warm
+arm64 builder and verifies its parent and exact three-file version diff. It uses
+the existing identity for a Universal 0.3.0 predecessor and arm64-thin successor,
+then exercises the real coordinator, native-owner retirement, filesystem
+transaction and fixed-path relaunch on an Apple Silicon runner. Only feed and
+archive transport are owned fixtures. Successor observation checks actual process,
+version/source, preserved preferences/migration and ordinary Quit; production
+relaunch arguments remain empty. This check is prepared, not yet passed, and does
+not establish Intel successor or live native 0.2.5 upgrade acceptance.
 
 Fresh Ubuntu 22.04 packages use genuine versioned sources: 0.3.0 at `16bb0af5`
 and its private version-only 0.3.1 child `8433def6`. The second version reuses

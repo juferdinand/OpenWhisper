@@ -44,6 +44,9 @@ export async function nativeTool(command: string, args: readonly string[], cwd: 
     child.once("error", (error) => { clearTimeout(timer); if (escalation) clearTimeout(escalation); reject(error); });
     child.once("close", (code) => {
       clearTimeout(timer); if (escalation) clearTimeout(escalation);
+      if (process.env["OPENWHISPER_CAPTURE_NATIVE_BUILD_LOG"] === "1" && command === "cmake" && args[0] === "--build") {
+        process.stdout.write(`$ cmake ${args.join(" ")}\n${stdout}${stderr}`);
+      }
       if (code !== 0 || timedOut || outputExceeded) {
         // Public build diagnostics only; no native inference requests/replies use this helper.
         reject(new Error(`Native build command failed (${command}). ${stderr}`));
