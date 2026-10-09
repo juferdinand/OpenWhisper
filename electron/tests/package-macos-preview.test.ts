@@ -67,7 +67,7 @@ async function fixture(kind: "development" | "stable" = "development", architect
   await symlink("A", join(root, runtime, "Contents/Frameworks/Electron Framework.framework/Versions/Current"));
   await symlink("Versions/Current/Electron Framework", join(root, runtime, "Contents/Frameworks/Electron Framework.framework/Electron Framework"));
   for (const path of ["node_modules/electron/dist/LICENSE", "node_modules/electron/dist/LICENSES.chromium.html", "../LICENSE",
-    "vendor/whisper.cpp/LICENSE", "native/build-cpu/build-manifest.json", "../macos/Resources/AppIcon.icns",
+    "vendor/whisper.cpp/LICENSE", "native/build-cpu/build-manifest.json", "resources/AppIcon.icns",
     ...["LICENSE-MIT", "LICENSE-APACHE-2.0", "LICENSE.spdx"].map((name) => `../shared/ui/node_modules/@tauri-apps/api/${name}`)]) await write(path, "fixture original notice/icon");
   return { base, root, runtime, source, metadata, recording, identity, koffi, output: join(base, "preview") };
 }

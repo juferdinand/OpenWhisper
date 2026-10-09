@@ -201,7 +201,7 @@ export async function stageMacPreview(options: MacPreviewStageOptions): Promise<
     ...(metadata.dependencies["tar"] ? [[join(root, "node_modules/tar/LICENSE.md"), "tar-LICENSE.md"]] : []),
     [join(root, "vendor/whisper.cpp/LICENSE"), "whisper.cpp-LICENSE"], [join(root, "native/build-cpu/build-manifest.json"), "speech-cpu-unsigned-build.json"],
     ...["LICENSE-MIT", "LICENSE-APACHE-2.0", "LICENSE.spdx"].map((name) => [resolve(root, "../shared/ui/node_modules/@tauri-apps/api", name), `tauri-api-${name}`])];
-  const icon = resolve(root, "../macos/Resources/AppIcon.icns");
+  const icon = resolve(root, "resources/AppIcon.icns");
   for (const [path] of [...notices, [icon]]) { if (!path) throw new Error("Missing notice input."); await files(path); }
   await mkdir(output, { mode: 0o700 });
   const directory = join(output, `${identity.productName}.app`), application = join(directory, "Contents/Resources/app");
