@@ -8,6 +8,7 @@ import { developmentRecordingDescriptorSchema } from "../src/main/development-re
 import { parseApplicationBuildModule, type BuildIdentity } from "../src/contracts/build-identity.js";
 import { installedElectronExecutable } from "./runtime.js";
 import { linuxSupervisorLauncher } from "../src/cli/linux-supervisor-bootstrap.js";
+import { parseUpdateVersion } from "../src/services/update-policy.js";
 
 const defaultRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageSchema = z.object({ name: z.string(), version: z.string(), main: z.literal("dist/main/index.js"),
@@ -113,12 +114,15 @@ async function nativeLibcFloor(root: string, recording: boolean): Promise<string
   return floor.join(".");
 }
 
-export interface LinuxPreviewOptions { readonly output: string; readonly root?: string; readonly directoryOnly?: boolean }
+export interface LinuxPreviewOptions { readonly output: string; readonly root?: string; readonly directoryOnly?: boolean;
+  readonly mode?: "preview" | "canonical-stable-validation" }
 export interface LinuxPreviewResult { readonly directory: string; readonly debianRoot: string; readonly version: string; readonly debianPackage: string | null }
 
 /** Package an existing build only. No downloads, builds, signing, installation, or app launch. */
 export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise<LinuxPreviewResult> {
   if (process.platform !== "linux" || process.arch !== "x64") throw new Error("The preview packager supports Linux x64 only.");
+  const mode = options.mode ?? "preview", canonical = mode === "canonical-stable-validation";
+  if (mode !== "preview" && !canonical) throw new Error("Unknown Linux validation package mode.");
   if (!isAbsolute(options.output) || options.output.includes("\0")) throw new Error("An explicit absolute output directory is required.");
   const root = resolve(options.root ?? defaultRoot), output = resolve(options.output);
   const inside = (parent: string, child: string): boolean => {
@@ -135,7 +139,13 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
   const build = buildSchema.parse(await json(join(root, "dist/resources/development-build.json")));
   const sourceVersion = (await readFile(join(root, "dist/resources/VERSION"), "utf8")).trim();
   if (!/^\d+\.\d+\.\d+$/u.test(sourceVersion) || sourceVersion !== metadata.version) throw new Error("Existing build and package versions differ.");
-  const version = `${sourceVersion}~dev.${build.commit.slice(0, 12)}${build.modified ? ".modified" : ""}`;
+  if (canonical) {
+    if (!stable || build.modified || !/^[a-f0-9]{40}$/u.test(build.commit)) throw new Error("Canonical validation requires a captured clean Stable commit.");
+    parseUpdateVersion(sourceVersion);
+    const repositoryVersion = resolve(root, "../VERSION"); await checkTree(repositoryVersion);
+    if ((await readFile(repositoryVersion, "utf8")).trim() !== sourceVersion) throw new Error("Repository and captured package versions differ.");
+  }
+  const version = canonical ? sourceVersion : `${sourceVersion}~dev.${build.commit.slice(0, 12)}${build.modified ? ".modified" : ""}`;
   const runtime = dirname(await installedElectronExecutable(root));
   const selected = await dependencies(root, metadata.dependencies);
   await checkTree(join(root, "dist"));
@@ -225,7 +235,7 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
     `Description: ${identity.productName} ${stable ? "stable-profile validation package" : "isolated Electron preview"}`,
     stable ? " Unsigned validation package; no public release or stable update channel." : " Unsigned development package with a separate Dev identity and data profile.", "",
   ].join("\n"));
-  const debianPackage = options.directoryOnly ? null : join(output, `OpenWhisper${stable ? "" : "-Dev"}-Linux-amd64_${version}.deb`);
+  const debianPackage = options.directoryOnly ? null : join(output, canonical ? "OpenWhisper-Linux-amd64.deb" : `OpenWhisper${stable ? "" : "-Dev"}-Linux-amd64_${version}.deb`);
   if (debianPackage) {
     runDpkg(["--root-owner-group", "-Zgzip", "-z1", "--build", debianRoot, debianPackage]);
     if (runDpkg(["--field", debianPackage, "Package", "Version", "Architecture"]).trim() !==
@@ -241,9 +251,12 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
-  if (args[0] !== "--output" || !args[1] || (args.length !== 2 && !(args.length === 3 && args[2] === "--directory-only"))) {
-    throw new Error("Usage: tsx scripts/package-linux-preview.ts --output /absolute/fresh/output [--directory-only]");
+  const flags = args.slice(2);
+  if (args[0] !== "--output" || !args[1] || flags.length > 2 || new Set(flags).size !== flags.length ||
+      flags.some((flag) => flag !== "--directory-only" && flag !== "--canonical-stable-validation")) {
+    throw new Error("Usage: tsx scripts/package-linux-preview.ts --output /absolute/fresh/output [--directory-only] [--canonical-stable-validation]");
   }
-  const result = await packageLinuxPreview({ output: args[1], directoryOnly: args[2] === "--directory-only" });
+  const result = await packageLinuxPreview({ output: args[1], directoryOnly: flags.includes("--directory-only"),
+    mode: flags.includes("--canonical-stable-validation") ? "canonical-stable-validation" : "preview" });
   console.log(JSON.stringify(result));
 }

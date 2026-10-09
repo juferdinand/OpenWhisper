@@ -1,5 +1,56 @@
 # Electron development evidence
 
+## Prepared signed Linux candidate acceptance
+
+Normal Linux CI now has a prepared path for a fresh canonical Stable validation
+package. Default Dev and Stable preview versions retain their development suffix;
+the explicit canonical mode requires unchanged Stable build provenance and exact
+source, compiled-resource and manifest versions. Native recording/platform hashes
+remain required, and the result stays an unsigned validation package until the
+separate owner-only signing step. No older binary is relabelled.
+
+The dependent job admits the same-run package and existing locked signing tools
+before exposing the unchanged key. Both packaged Electron and the existing Rust
+oracle must accept exact signed bytes/version and reject a different announced
+version. Actual installation and the packaged installed-target audit run only in
+a pinned disposable Ubuntu 22.04 container. The audit runs as UID 1000 against
+fixed root-owned paths; a changed notice must produce `INSTALLED_MISMATCH`.
+Original child closure, PID absence, container exit/removal, input preservation
+and private stage cleanup remain required. Missing keys produce explicit
+unavailable evidence. These are prepared checks, not an actual signed/install
+positive, desktop runtime result or activation of the in-app updater.
+
+The canonical producer's actual Debian archive case passes in an owned,
+network-disabled Ubuntu container with one inert runtime/native fixture:
+one test, zero failures/skips, 377 ms. The earlier noexec tmpfs refusal is
+retained separately. This proves archive construction and metadata/payload
+preservation only; it does not execute Electron, sign or install a package.
+
+The coherent source increment passes strict typing, the application/shared-UI
+build and the full normal suite: 1,282 total, 1,239 passing, zero failures and
+43 native/opt-in skips in 17.76 seconds.
+
+## Complete ordinary Universal runtime checks
+
+All five relevant jobs in
+[normal CI 37892162932](https://github.com/juferdinand/OpenWhisper/actions/runs/37892162932)
+pass at actual synthetic producer `5bfd71b11bfce6043ac51b50beb3a5ea9218fcd5`
+(API head `6c3743ec`). Both thin Dev/Stable producers and the constructor pass.
+The same Universal ZIP completes normal Stable UI/native composition, pinned
+public-audio CPU recognition, migration/restart and clean original Quit on ARM
+and Intel, reaching `restarted-original-quit` at 06:22:57 and 06:24:34 UTC.
+No capture device is opened. This is owned hosted-runner package evidence;
+physical microphone/TCC and target insertion remain separate.
+
+Original ARM and Intel Universal log SHA-256 values are
+`587d0a1a6e922be20e32c910347e499d709bc319074c92133968113fe63c54f8` and
+`cea4bfc3a336ebe4025d0493ba41c854654ccf52a5845dc1229637bbae46bd05`.
+Neither console prints `selfAvailability` or `publisherAvailability`; no
+updater-positive or specific availability branch is inferred. The earlier
+ARM failure remains unclassified. The unchanged production admission budgets
+pass here; the new diagnostic does not establish why the earlier invocation
+failed. Persistent-certificate update continuity remains mandatory.
+
 ## Universal runtime boundaries after fixture preparation
 
 Original [CI 37889109350](https://github.com/juferdinand/OpenWhisper/actions/runs/37889109350)

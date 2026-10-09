@@ -70,6 +70,37 @@ jobs:
           node --import tsx scripts/build-capture.ts
           OPENWHISPER_CAPTURE_SYNTHETIC_ADDON="$PWD/native/capture/build/openwhisper_capture.node" \
             node --import tsx --test tests/capture.test.ts
+      - name: Assemble the canonical Linux Stable validation candidate
+        if: runner.os == 'Linux'
+        working-directory: electron
+        env:
+          OPENWHISPER_OWNED_SIGNED_DEBIAN: '1'
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          if test -n "$(git status --porcelain)"; then git status --short; exit 1; fi
+          npm run setup
+          npm run build -- --stable --recording
+          if test -n "$(git status --porcelain)"; then git status --short; exit 1; fi
+          node --import tsx scripts/package-linux-preview.ts \
+            --output "$RUNNER_TEMP/openwhisper-linux-canonical" --canonical-stable-validation \
+            > "$RUNNER_TEMP/openwhisper-linux-canonical-result.json"
+          node_modules/.bin/esbuild tests/owned-signed-debian.ts \
+            --bundle --platform=node --format=esm --target=node24 --external:original-fs \
+            --outfile="$RUNNER_TEMP/owned-signed-debian.mjs"
+          node "$RUNNER_TEMP/owned-signed-debian.mjs" capture --candidate "$RUNNER_TEMP/openwhisper-linux-canonical"
+          tar -C "$RUNNER_TEMP/openwhisper-linux-canonical" -cf "$RUNNER_TEMP/openwhisper-linux-canonical.tar" \
+            OpenWhisper-Linux-amd64.deb OpenWhisper-Linux-x64 candidate-receipt.json
+      - name: Upload the same-run canonical Linux candidate
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OpenWhisper-canonical-Linux-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/openwhisper-linux-canonical.tar
+            ${{ runner.temp }}/openwhisper-linux-canonical-result.json
+            ${{ runner.temp }}/owned-signed-debian.mjs
+          if-no-files-found: error
+          retention-days: 14
   mac_capture:
     name: Electron owned Mac native tests (${{ matrix.os }})
     strategy:
@@ -336,6 +367,139 @@ jobs:
     uses: ./.github/workflows/linux-build.yml
     with:
       artifact_name: OpenWhisper-Linux-development-${{ github.sha }}
+  linux_signed_candidate:
+    name: Owned signed Electron Debian audit
+    needs: [electron, linux]
+    if: >-
+      github.actor == github.repository_owner && github.actor != 'dependabot[bot]' &&
+      ((github.event_name == 'pull_request' &&
+        github.event.pull_request.user.login == github.repository_owner &&
+        github.event.pull_request.user.login != 'dependabot[bot]' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.head.repo.fork == false) ||
+       (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
+      - name: Download the same-run canonical candidate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: OpenWhisper-canonical-Linux-${{ github.sha }}
+          path: ${{ runner.temp }}/signed-candidate-packet
+      - name: Download the same-run locked signing tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: OpenWhisper-Linux-update-tools-${{ github.sha }}
+          path: ${{ runner.temp }}/signed-tools-packet
+      - name: Admit source, native inputs, canonical package and locked tools before secrets
+        env:
+          OPENWHISPER_OWNED_SIGNED_DEBIAN: '1'
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          if test -n "$(git status --porcelain)"; then git status --short; exit 1; fi
+          mkdir -m 700 "$RUNNER_TEMP/signed-candidate" "$RUNNER_TEMP/signed-tools" "$RUNNER_TEMP/signed-evidence"
+          tar -xf "$RUNNER_TEMP/signed-candidate-packet/openwhisper-linux-canonical.tar" -C "$RUNNER_TEMP/signed-candidate"
+          tar -xf "$RUNNER_TEMP/signed-tools-packet/openwhisper-update-tools.tar" -C "$RUNNER_TEMP/signed-tools"
+          node "$RUNNER_TEMP/signed-candidate-packet/owned-signed-debian.mjs" admit \
+            --candidate "$RUNNER_TEMP/signed-candidate" --tools "$RUNNER_TEMP/signed-tools" \
+            --evidence "$RUNNER_TEMP/signed-evidence/admission"
+      - name: Sign only the admitted canonical candidate with the existing key
+        id: sign
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if test -z "$TAURI_SIGNING_PRIVATE_KEY"; then
+            printf '%s\n' '{"status":"UNAVAILABLE","reason":"SIGNING_KEY_UNAVAILABLE","scope":"No signed candidate or installed-positive evidence"}' > "$RUNNER_TEMP/signed-evidence/signing.json"
+            printf '%s\n' 'available=false' >> "$GITHUB_OUTPUT"
+            printf '%s\n' '::notice::Signed Electron candidate evidence is unavailable: the existing signing key was not supplied.'
+            exit 0
+          fi
+          version="$(cat VERSION)"
+          if ! node "$RUNNER_TEMP/signed-tools/node_modules/@tauri-apps/cli/tauri.js" signer sign \
+            --app-version "$version" "$RUNNER_TEMP/signed-candidate/OpenWhisper-Linux-amd64.deb" >/dev/null 2>&1; then
+            printf '%s\n' '::error::The admitted candidate signing step failed.'
+            exit 1
+          fi
+          printf '%s\n' '{"status":"SIGNED","scope":"Private canonical candidate; no public release or updater activation"}' > "$RUNNER_TEMP/signed-evidence/signing.json"
+          printf '%s\n' 'available=true' >> "$GITHUB_OUTPUT"
+      - name: Verify exact signed bytes and version with embedded Electron and the existing Rust oracle
+        if: steps.sign.outputs.available == 'true'
+        env:
+          OPENWHISPER_OWNED_SIGNED_DEBIAN: '1'
+        run: |
+          node "$RUNNER_TEMP/signed-candidate-packet/owned-signed-debian.mjs" verify \
+            --candidate "$RUNNER_TEMP/signed-candidate" --tools "$RUNNER_TEMP/signed-tools" \
+            --evidence "$RUNNER_TEMP/signed-evidence/verification"
+      - name: Install and audit only inside the original disposable Ubuntu namespace
+        if: steps.sign.outputs.available == 'true'
+        env:
+          OPENWHISPER_OWNED_SIGNED_DEBIAN: '1'
+        run: |
+          namespace="openwhisper-signed-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            status=$?
+            trap - EXIT
+            printf '%s\n' "$status" > "$RUNNER_TEMP/signed-evidence/original-step-exit.txt"
+            if test -n "${original_container:-}"; then
+              if ! docker inspect "$original_container" > "$RUNNER_TEMP/signed-evidence/container-inspect.json"; then status=1; fi
+              if ! docker cp "$original_container:/owned-evidence/." "$RUNNER_TEMP/signed-evidence/installed" >/dev/null 2>&1; then status=1; fi
+              if docker rm -f "$original_container" >/dev/null; then
+                printf '%s\n' '{"originalContainerRemoved":true}' > "$RUNNER_TEMP/signed-evidence/container-removal.json"
+              else
+                status=1
+              fi
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          original_container="$(docker create --name "$namespace" --platform linux/amd64 \
+            --network bridge --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID \
+            --security-opt no-new-privileges --pids-limit 128 --memory 2g \
+            --mount "type=bind,src=$RUNNER_TEMP/signed-candidate,dst=/input,readonly" \
+            --mount "type=bind,src=$RUNNER_TEMP/signed-candidate-packet/owned-signed-debian.mjs,dst=/driver.mjs,readonly" \
+            --env GITHUB_ACTIONS=true --env OPENWHISPER_OWNED_SIGNED_DEBIAN=1 \
+            ubuntu:22.04@sha256:5ec03bb3441e8b0bf3b4f9cd4629a1ae763010dc3035bb8da3ae6cf026486401 \
+            /bin/bash -euc '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 update
+              apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 install -y --no-install-recommends \
+                ca-certificates util-linux libc6 libstdc++6 libgcc-s1 libgtk-3-0 libnss3 libnspr4 libasound2 libgbm1 libdrm2 \
+                libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 libxkbcommon0 \
+                libdbus-1-3 libatomic1 libpulse0 libsystemd0
+              /usr/bin/dpkg --install /input/OpenWhisper-Linux-amd64.deb
+              useradd --create-home --uid 1000 tester
+              mkdir -m 755 /candidate
+              cp -a /input/. /candidate/
+              chown -R root:root /candidate
+              chmod 755 /candidate
+              chmod 444 /candidate/candidate-receipt.json /candidate/OpenWhisper-Linux-amd64.deb.sig
+              mkdir -m 700 /owned-evidence
+              chown 1000:1000 /owned-evidence
+              cd /owned-evidence
+              runuser -u tester -- env ELECTRON_RUN_AS_NODE=1 /opt/openwhisper/openwhisper /driver.mjs audit \
+                --candidate /candidate --evidence /owned-evidence/positive
+              printf "%s\\n" "Owned audit mismatch fixture" >> /opt/openwhisper/notices/README.txt
+              runuser -u tester -- env ELECTRON_RUN_AS_NODE=1 /opt/openwhisper/openwhisper /driver.mjs audit-mismatch \
+                --candidate /candidate --evidence /owned-evidence/mismatch
+            ')"
+          printf '%s\n' "$original_container" > "$RUNNER_TEMP/signed-evidence/original-container.txt"
+          docker start -a "$original_container"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$original_container")" = 0
+          test "$(docker inspect --format '{{.State.Pid}}' "$original_container")" = 0
+          test "$(docker inspect --format '{{.State.OOMKilled}}' "$original_container")" = false
+      - name: Retain signed-candidate admission and original namespace evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OpenWhisper-signed-Electron-audit-${{ github.sha }}
+          path: ${{ runner.temp }}/signed-evidence/
+          if-no-files-found: warn
+          retention-days: 14
   macos:
     runs-on: macos-15
     timeout-minutes: 30

@@ -10,6 +10,25 @@ import { DebianInstalledAuditError, DEBIAN_AUDIT_LIMITS, inspectDebianDataTar, i
   prepareDebianInstalledAudit, validateDebianInstalledMetadata } from "../src/services/linux-debian-installed.js";
 import { LinuxUpdateSignatureError } from "../src/services/linux-update-signature.js";
 import { retainOwnedUpdateDownload } from "../src/services/update-staging.js";
+import { parseOwnedSignedDebianArguments } from "./owned-signed-debian.js";
+
+test("Owned signed Debian roles require exact argument selectors and canonical absolute paths", () => {
+  assert.equal(parseOwnedSignedDebianArguments(["capture", "--candidate", "/owned/candidate"]).mode, "capture");
+  for (const mode of ["admit", "verify"]) {
+    assert.deepEqual(parseOwnedSignedDebianArguments([mode, "--candidate", "/owned/candidate", "--tools", "/owned/tools", "--evidence", "/owned/evidence"]),
+      { mode, candidate: "/owned/candidate", tools: "/owned/tools", evidence: "/owned/evidence" });
+  }
+  for (const mode of ["embedded-verify", "audit", "audit-mismatch"]) {
+    assert.equal(parseOwnedSignedDebianArguments([mode, "--candidate", "/owned/candidate", "--evidence", "/owned/evidence"]).mode, mode);
+  }
+  for (const args of [["other", "--candidate", "/owned/candidate"], ["capture", "--candidate", "relative"],
+    ["capture", "--candidate", "/owned/../candidate"], ["capture", "--candidate", "/owned/candidate\0"],
+    ["capture", "--candidate", "/owned/candidate", "--evidence", "/owned/evidence"],
+    ["audit", "--tools", "/owned/candidate", "--evidence", "/owned/evidence"],
+    ["verify", "--candidate", "/owned/candidate", "--evidence", "/owned/tools", "--tools", "/owned/evidence"]]) {
+    assert.throws(() => parseOwnedSignedDebianArguments(args));
+  }
+});
 
 const failure = (code: DebianInstalledAuditError["code"]) => (error: unknown): boolean =>
   error instanceof DebianInstalledAuditError && error.code === code && error.message === code;

@@ -460,6 +460,7 @@ and replies are transient and are not persisted by the host; the renderer retain
 that session and the selected server receives the submitted input. They do not change dictation, history,
 clipboard delivery or recovery. See [manual model preview](LOCAL_MODELS.md) for setup,
 privacy, limits and acceptance steps. This development feature is absent from release 0.2.5.
+Live LM Studio/Ollama trials are deferred to #11 and do not block release 0.3.0.
 
 The owned UI fixture also exercises actual Dev IPC against its own synthetic model server:
 send, cancel, retry, categorical HTTP errors, transient multilingual text, English/German

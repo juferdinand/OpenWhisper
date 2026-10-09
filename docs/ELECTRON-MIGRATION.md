@@ -19,6 +19,11 @@ Keep actual known basic-function failures blocking, unsupported controls explici
 strict update/data/signing guarantees intact and user acceptance before merging
 or replacing an installation.
 
+Owner scope update, 2026-10-09: live LM Studio/Ollama trials are follow-up work
+in [#11](https://github.com/juferdinand/OpenWhisper/issues/11), outside the 0.3.0
+release gates. Retain the existing disabled manual preview and deterministic
+regression checks; ordinary dictation remains independent of model servers.
+
 Replace the Swift/WebKit macOS host and Rust/Tauri Linux host with one Electron application.
 Keep the current `shared/ui` design, icon, Inter font, navigation and English/German interface.
 Use shared Chromium renderer code and one set of typed application services, with explicit platform
@@ -394,8 +399,9 @@ no redirects/proxies/implicit credentials, bounded messages and request generati
 dictation/history/clipboard/recovery continue with both servers stopped. No automatic cloud
 fallback, agent execution, TTS or Obsidian is introduced by this slice.
 
-Review English/German examples with the user's actual local models after automated fake-server
-and UI checks. Those fixtures prove protocol/failure behavior, not generated-text quality.
+Review English/German examples with the user's actual local models later under #11,
+after automated fake-server and UI checks. The live trial does not block 0.3.0.
+Those fixtures prove protocol/failure behavior, not generated-text quality.
 Optional additional/cloud models follow explicit provider consent and secure credential storage.
 The feature order stays **model communication → optional speech output → structured Obsidian**;
 agent handoff has its own explicit, reviewed action boundary.
@@ -417,7 +423,7 @@ Ordinary dictation must not start a model server implicitly.
 | P2 | Shared text/state/settings/model/history services and disposable speech/audio/recovery pipeline | Existing shared vectors, cancellation/generation races, Stop ordering, no cutoff, long private audio, worker failures and both CPU engines; no ordinary dictation dependency on LLMs. |
 | P3 | Linux and macOS adapters, native boundaries and complete current UI behavior | Each L-/M-/SPEECH gate above, exact packages and owned compositor sessions; no root/raw input/real unattended microphone. Universal Mac native loads and CI smoke; focused user Mac permission/input checks where synthetic evidence cannot establish behavior. |
 | P4 | AppImage/.deb/universal DMG+ZIP, version/signing/feed, existing data migration and old-client update | Actual signed 0.2.5 positive/adversarial updater checks, exact assets/checksums/signatures, rollback and supervised restart; no relabelled old package. |
-| P5 | Ported manual local-model preview and user-testable isolated development package | PR17 contract/UI/failure fixture equivalence, local server off/cancel/retry tests and a reviewable AI trial. Track remaining #11 scope separately. |
+| P5 | Retain the ported manual local-model preview and isolated development package | PR17 contract/UI/failure fixture equivalence and local server off/cancel/retry regressions. Live LM Studio/Ollama trials and remaining #11 scope are follow-up work outside 0.3.0. |
 | P6 | Remove Swift/Rust hosts/tests/builds and obsolete Tauri/WebKit paths; update docs/commands/CI/Renovate/notices | Full replacement regression matrix, no orphaned manifests/source/build references, synchronized AGENTS/CLAUDE, README as entry point, dependency/license audit, independent review and user acceptance of the functional migration. |
 
 P3 overlay/native-hook probes may run early to expose feasibility risks. P5 may be offered in

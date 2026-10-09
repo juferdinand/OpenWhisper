@@ -15,13 +15,36 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | Plan and architecture | Reviewed plan, repository research answers and issue/PR review recorded | Keep decisions aligned with final implementation |
 | Shared interface and services | Existing design, strict TS bridge, isolated Dev profile, settings, models/history and localized shared-owner tray actions; sandboxed recording overlay connected | Native tray presentation, assembled Mac overlay and remaining platform behaviors |
 | Linux dictation | CPU recognition, clipboard/history, Retry/Discard and original cleanup pass in exact Dev/stable packages with private virtual audio. The installed stable package also passes migration, command control, autostart and permanent-target restart | Accelerated inference; an earlier final-Quit hang did not reproduce and remains unclassified |
-| macOS dictation | Actual Intel/Apple Silicon thin Dev and Stable packages pass sandbox, signed utilities, CPU recognition of public audio, shortcut setup/removal, migration, edited-state restart and clean exits at 866c3a74 | Complete the Universal runtime checks; physical microphone/TCC, actual target insertion, device changes and Metal selection remain open |
+| macOS dictation | Actual Intel/Apple Silicon thin Dev/Stable and same-ZIP Universal Stable packages pass sandbox, signed utilities, public-audio CPU recognition, shortcut setup/removal, migration, edited-state restart and clean exits at 5bfd71b1 | Physical microphone/TCC, actual target insertion, device changes and Metal selection remain open |
 | Linux desktop integration | Owned stock KDE 5.27 native Wayland F8, binding Quit/crash recovery and paste into separate Wayland/XWayland editors pass. Genuine X11 shortcuts and all five no-display CLI commands pass, including installed stable autostart enable/disable and generated-target restart | Expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
-| Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
-| Packaging and updates | Unchanged supervised Debian and AppImage pass all 18 runtime checks; the owned X11 rendering budget is corrected. Inactive consumers authenticate downloads and preserve the AppImage predecessor through handoff. Both Mac thin packages and Universal construction pass; ARM Universal startup and Intel ad-hoc update-fixture checks still fail | Complete Universal Mac runtime; connect installation/restart/rollback, installed Debian audit, persistent publisher continuity, authenticated Dev replacement, DMG and release signing; retain earlier resource failures separately |
+| Optional model communication | Isolated manual local-model preview port exists | Live LM Studio/Ollama trials and remaining provider/workflow scope are deferred to #11, outside 0.3.0; ordinary dictation remains independent |
+| Packaging and updates | Unchanged supervised Debian and AppImage pass all 18 runtime checks; the owned X11 rendering budget is corrected. Inactive consumers authenticate downloads and preserve the AppImage predecessor through handoff. Both Mac thin packages, Universal construction and ordinary Universal runtime checks pass | Connect installation/restart/rollback, installed Debian audit, persistent publisher continuity, authenticated Dev replacement, DMG and release signing; retain earlier resource failures separately |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 ## Current package checkpoint
+
+The next normal Linux CI exports a fresh canonical Stable validation package
+and the already-built, locked signer/verifier tools from the same source.
+An owner-only dependent job admits those inputs before accessing the existing
+signing key, verifies exact signed bytes and version through both packaged
+Electron and the native oracle, then installs and audits inside a disposable
+Ubuntu 22.04 container. An altered installed notice must be rejected.
+Missing signing material is explicitly unavailable. This prepared path has
+not established a signed candidate, installed-positive result or active updater.
+
+All five relevant Mac jobs in
+[normal CI 37892162932](https://github.com/juferdinand/OpenWhisper/actions/runs/37892162932)
+pass: both thin producers, Universal construction and both normal Universal
+runtime checks. Original logs print actual synthetic producer `5bfd71b1`,
+distinct from API head `6c3743ec`. ARM and Intel finish at
+`restarted-original-quit` after the required ordinary UI, native composition,
+public-audio CPU recognition and restart checks. No capture device is opened.
+The consoles do not print the selected publisher-availability branch; this
+does not establish an updater positive or persistent-certificate continuity.
+The earlier ARM refusal remains unclassified; unchanged admission requirements
+and deadlines pass in this invocation, without proving a diagnostic-caused fix.
+
+### Preceding Universal failure and reviewed correction
 
 In [normal CI 37889109350](https://github.com/juferdinand/OpenWhisper/actions/runs/37889109350),
 both thin Mac jobs and Universal construction pass at actual synthetic producer
@@ -42,8 +65,8 @@ uses the producer's admitted signing mode: only the exact Universal ad-hoc
 publisher acceptance unavailable. It still runs real ZIP extraction, hostile
 archive refusals and cleanup, then ordinary application acceptance. Thin and
 persistent-validation packages require successful publisher acceptance; all
-unexpected results fail. Production update verification is unchanged. Actual
-Universal application results require the next normal CI.
+unexpected results fail. Production update verification is unchanged.
+The subsequent normal CI results above establish ordinary Universal acceptance.
 
 This source increment passes strict typing, the normal application/shared-UI
 build and 1,236 tests in 18.42 seconds:

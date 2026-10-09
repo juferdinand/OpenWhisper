@@ -246,3 +246,74 @@ test("stable package refuses absent recording, mismatched identity and missing p
     await assert.rejects(lstat(input.output), { code: "ENOENT" });
   } finally { await rm(input.base, { recursive: true, force: true }); }
 });
+
+
+test("canonical Stable validation derives its exact version without rewriting captured app or native inputs", { skip: !supportedHost }, async () => {
+  const input = await fixture();
+  try {
+    await stableRecording(input); await input.write("../VERSION", "0.3.0\n");
+    const cleanBuild = JSON.stringify({ commit: "0123456789abcdef0123456789abcdef01234567", modified: false });
+    await input.write("dist/resources/development-build.json", cleanBuild);
+    const paths = ["package.json", "dist/resources/VERSION", "dist/resources/development-build.json",
+      "dist/main/application-build.js", "dist/main/development-recording-build.js", "dist/native/openwhisper_linux_bus.node"];
+    const originals = await Promise.all(paths.map((path) => readFile(join(input.root, path))));
+    const result = await packageLinuxPreview({ root: input.root, output: input.output, directoryOnly: true, mode: "canonical-stable-validation" });
+    assert.equal(result.version, "0.3.0"); assert.equal(result.debianPackage, null);
+    assert.match(await readFile(join(result.debianRoot, "DEBIAN/control"), "utf8"), /^Version: 0\.3\.0$/mu);
+    assert.match(await readFile(join(result.directory, "notices/README.txt"), "utf8"), /Unsigned; no stable update channel/u);
+    assert.deepEqual(await Promise.all(paths.map((path) => readFile(join(result.directory, "resources/app", path)))), originals);
+    assert.deepEqual(await Promise.all(paths.map((path) => readFile(join(input.root, path)))), originals);
+  } finally { await rm(input.base, { recursive: true, force: true }); }
+});
+
+test("canonical mode refuses Dev, dirty or uncaptured producer, version disagreement and changed native inputs before output", { skip: !supportedHost }, async () => {
+  const input = await fixture(), options = { root: input.root, output: input.output, directoryOnly: true, mode: "canonical-stable-validation" as const };
+  try {
+    await input.write("../VERSION", "0.3.0\n");
+    await assert.rejects(packageLinuxPreview(options), /captured clean Stable commit/u);
+    await stableRecording(input);
+    await assert.rejects(packageLinuxPreview(options), /captured clean Stable commit/u);
+    await input.write("dist/resources/development-build.json", JSON.stringify({ commit: "source", modified: false }));
+    await assert.rejects(packageLinuxPreview(options), /captured clean Stable commit/u);
+    await input.write("dist/resources/development-build.json", JSON.stringify({ commit: "0123456789abcdef0123456789abcdef01234567", modified: false }));
+    await input.write("../VERSION", "0.2.5\n");
+    await assert.rejects(packageLinuxPreview(options), /Repository and captured package versions differ/u);
+    await input.write("../VERSION", "0.3.0\n");
+    const metadata = await readFile(join(input.root, "package.json"), "utf8");
+    const changed: unknown = JSON.parse(metadata); assert.ok(changed && typeof changed === "object");
+    await input.write("package.json", JSON.stringify({ ...changed, version: "0.2.5" }));
+    await assert.rejects(packageLinuxPreview(options), /Existing build and package versions differ/u);
+    await input.write("package.json", JSON.stringify({ ...changed, version: "00.3.0" }));
+    await input.write("dist/resources/VERSION", "00.3.0\n"); await input.write("../VERSION", "00.3.0\n");
+    await assert.rejects(packageLinuxPreview(options), (error: unknown) => error instanceof Error && error.message === "INVALID_VERSION");
+    await input.write("package.json", metadata); await input.write("dist/resources/VERSION", "0.3.0\n"); await input.write("../VERSION", "0.3.0\n");
+    const captured = await readFile(join(input.root, "dist/main/development-recording-build.js"), "utf8");
+    await input.write("dist/main/development-recording-build.js", "export const DEVELOPMENT_RECORDING_BUILD = null;\n");
+    await assert.rejects(packageLinuxPreview(options), /captured recording build/u);
+    await input.write("dist/main/development-recording-build.js", captured);
+    await input.write("dist/native/openwhisper_linux_bus.node", "changed inert native input");
+    await assert.rejects(packageLinuxPreview(options), /differs from its captured descriptor/u);
+    await assert.rejects(lstat(input.output), { code: "ENOENT" });
+  } finally { await rm(input.base, { recursive: true, force: true }); }
+});
+
+test("canonical Stable produces the fixed unsigned Debian archive with exact source version and unchanged payload", {
+  skip: !hasDpkg ? "Requires the actual dpkg-deb tool; no host installation or unsigned signing fallback." : false,
+}, async () => {
+  const input = await fixture();
+  try {
+    await stableRecording(input); await input.write("../VERSION", "0.3.0\n");
+    await input.write("dist/resources/development-build.json", JSON.stringify({ commit: "0123456789abcdef0123456789abcdef01234567", modified: false }));
+    const descriptor = await readFile(join(input.root, "dist/main/development-recording-build.js")), metadata = await readFile(join(input.root, "package.json"));
+    const result = await packageLinuxPreview({ root: input.root, output: input.output, mode: "canonical-stable-validation" });
+    assert.equal(result.debianPackage, join(input.output, "OpenWhisper-Linux-amd64.deb")); assert.equal(result.version, "0.3.0");
+    const fields = spawnSync("dpkg-deb", ["--field", result.debianPackage!, "Package", "Version", "Architecture"], { encoding: "utf8", shell: false });
+    assert.equal(fields.status, 0); assert.equal(fields.stdout.trim(), "Package: io-github-whisperfree\nVersion: 0.3.0\nArchitecture: amd64");
+    const extracted = join(input.base, "extracted");
+    assert.equal(spawnSync("dpkg-deb", ["--extract", result.debianPackage!, extracted], { shell: false }).status, 0);
+    const app = join(extracted, "opt/openwhisper/resources/app");
+    assert.deepEqual(await readFile(join(app, "package.json")), metadata);
+    assert.deepEqual(await readFile(join(app, "dist/main/development-recording-build.js")), descriptor);
+    assert.equal((await lstat(join(extracted, "usr/bin/openwhisper-desktop"))).isFile(), true);
+  } finally { await rm(input.base, { recursive: true, force: true }); }
+});

@@ -4,6 +4,7 @@ Start with [README.md](../README.md) for current release behavior. This document
 the isolated [Electron Dev build](ELECTRON-DEVELOPMENT.md), implementing the first slice of
 [#11](https://github.com/juferdinand/OpenWhisper/issues/11). Release 0.2.5 does not include it.
 The functional migration requires user acceptance before merging or replacing an installation.
+Live LM Studio/Ollama trials are follow-up work in #11, outside the 0.3.0 release gates.
 
 ## Setup and behavior
 
