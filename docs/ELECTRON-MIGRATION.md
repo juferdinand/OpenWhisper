@@ -1,16 +1,32 @@
 # Electron migration plan
 
-Status: implementation plan, not an implemented or released Electron application.
+Status: implementation in progress on isolated draft PR #34; target release **0.3.0**.
+See [implementation status](ELECTRON-STATUS.md) for delivered behavior and remaining work.
 Prepared 2026-10-08 against signed public `v0.2.5`
 (`d69b43bf6e7017c61089e117e79af34f57f297c4`). This is the authoritative record of
 the requested architecture, research answers, development-build strategy and issue/PR disposition.
-Complete and independently review this plan before creating its implementation issue; then
-implement it on an isolated branch with reviewable packages and automated evidence.
+The final source layout is now `app/`, with `app/ui/` and `app/data/`; the renderer is Electron-only.
+Replacement, signing, package construction, and release acceptance are still gated. Keep this plan's
+research record until those gates pass, then consolidate the durable results in the README.
 
 ## Decision and scope
 
+Owner priority update, 2026-10-08: finish the current genuine-X11 increment, then
+defer expanded Linux desktop and special-input coverage to existing bug reports.
+Basic dictation, controls and installation must work on both macOS and Linux for
+0.3.0. The broader gates below remain the architecture/backlog record, rather
+than requiring exhaustive Linux matrices before the basic replacement is usable.
+Keep actual known basic-function failures blocking, unsupported controls explicit,
+strict update/data/signing guarantees intact and user acceptance before merging
+or replacing an installation.
+
+Owner scope update, 2026-10-09: live LM Studio/Ollama trials are follow-up work
+in [#11](https://github.com/juferdinand/OpenWhisper/issues/11), outside the 0.3.0
+release gates. Retain the existing disabled manual preview and deterministic
+regression checks; ordinary dictation remains independent of model servers.
+
 Replace the Swift/WebKit macOS host and Rust/Tauri Linux host with one Electron application.
-Keep the current `shared/ui` design, icon, Inter font, navigation and English/German interface.
+Keep the current `app/ui` design, icon, Inter font, navigation and English/German interface.
 Use shared Chromium renderer code and one set of typed application services, with explicit platform
 adapters. A later design change is separate work. Windows remains unimplemented.
 Retain macOS 14+ on Apple Silicon and Intel and Linux x86_64 packaging from Ubuntu 22.04.
@@ -32,6 +48,35 @@ native audio conversion, signature checks and any unavoidable overlay/restart pr
 it is not a second application host. Audit and minimize it rather than copying an untyped
 third-party application. Remove all Swift/Rust application sources and obsolete build paths
 after their replacement gates pass. Wrapping the existing hosts permanently is outside this plan.
+
+### Why are C/C++ files present?
+
+Electron does not require our own C/C++ application code. The current boundary contains:
+
+- `app/native/speech_*.cpp`: bindings to the pinned whisper.cpp/Parakeet library for local
+  CPU/GPU inference. These engines are native dependencies; TypeScript orchestrates them.
+- `app/native/capture/` and `macos-capture/`: miniaudio and CoreAudio bindings for capture
+  and conversion. Browser audio APIs are an alternative subject to the M-CAPTURE parity gate.
+- `app/native/linux-bus/`: the chosen D-Bus transport binding; KDE/portal policy remains
+  TypeScript. A custom addon is an implementation choice, not an Electron requirement.
+- `app/native/macos-retirement/`: a process-lifecycle probe and separately gated production
+  source role. This custom kernel boundary is also an implementation choice.
+
+Prefer existing Electron/Node APIs or maintained typed adapters where they meet the same
+behavioral requirements. Keep application logic, new scripts and tests in strict TypeScript.
+The user's preference is to avoid custom C/C++ where possible. Before adding any new native
+source, identify the required capability and explain why an existing API or executable
+does not meet it. A chosen custom transport is not proof that the transport requires C++.
+C++ is statically typed but does not provide automatic memory safety; native bindings require
+their own validation and lifetime checks. Native libraries may be used through a separate
+executable instead of a custom Node addon; that still leaves a native dependency.
+
+OpenWhispr also uses native components: its
+[Whisper service](https://github.com/OpenWhispr/openwhispr/blob/7ba7a37bf8340cc474cdcb3f5643e8d207fa9dbb/src/helpers/whisperServer.js)
+starts a compiled server, and its
+[Linux paste helper](https://github.com/OpenWhispr/openwhispr/blob/7ba7a37bf8340cc474cdcb3f5643e8d207fa9dbb/resources/linux-fast-paste.c)
+is written in C. This supports the need for some native dependencies, not the necessity of
+every custom binding chosen here.
 
 Pin a supported Electron patch and its lockfile. The audited starting point is
 [Electron 44.7.0](https://github.com/electron/electron/releases/tag/v44.7.0), released
@@ -109,8 +154,12 @@ sync ideas remain private planning; this migration creates no Enterprise feature
 
 ## Target structure and contracts
 
+The application now lives in `app/` while legacy host sources remain until replacement gates pass.
+Windows remains separate follow-up work
+in [issue #35](https://github.com/juferdinand/OpenWhisper/issues/35).
+
 ```text
-electron/
+app/
   src/main/                 App lifecycle, trusted windows, tray and service wiring
   src/preload/              Minimal schema-backed renderer API
   src/contracts/            Commands, events, worker messages and runtime schemas
@@ -127,12 +176,80 @@ electron/
   native/                   Minimal compiled bindings/helpers; no Swift/Rust host
   scripts/                  TypeScript build, packaging and development commands
   tests/                    Contract, service, package and native acceptance checks
-shared/
-  ui/                       Existing authoritative renderer, layout and assets
-  locales/                  Existing synchronized English/German messages
-  models.json               Existing authoritative model catalog
-  test-vectors.json         Existing multilingual text-processing fixtures
+app/ui/                      Authoritative renderer, layout, locales and assets
+app/data/                    Model catalog, schemas and multilingual test vectors
 ```
+
+### Code quality and final repository layout
+
+Track the reviewed cleanup in [issue #36](https://github.com/juferdinand/OpenWhisper/issues/36)
+alongside the original P6 replacement scope.
+
+The bounded Luna review at `40805be` counted tracked authored files from Git,
+excluding vendored/generated inputs: 104 application TypeScript files with
+14,791 lines, 262 test/harness/fixture TypeScript files with 30,418 lines,
+18 TypeScript build scripts with 1,702 lines, and nine Markdown guides with
+4,156 lines. These counts distinguish application code from test infrastructure;
+they do not make file count or test count a quality target.
+
+Keep process boundaries (`main`, `preload`, `workers`, runtime contracts) explicit.
+Within `core`, `services`, `contracts` and ordinary tests, group cohesive existing
+features such as recording, speech, models, preferences and optional integrations.
+Mirror those feature folders under `tests/` so tests are easy to find and excluded
+from production compilation. Keep owned desktop/package harnesses distinct from
+unit tests. Do not add empty platform/feature folders.
+
+The concrete cleanup order is:
+
+1. Move the platform-neutral recording lease/port currently imported by
+   `main/macos-shortcut.ts` from `platforms/linux/shared` into a common recording
+   area. Update both Mac and Linux consumers together.
+2. Keep `main/index.ts` as the single composition entry, but extract focused
+   recording/platform/UI setup functions. Move Mac and Linux adapters to their
+   respective `platforms/` folders, preserving their APIs and fixed worker entry
+   names. Group ordinary tests alongside the corresponding feature hierarchy.
+3. P6 source relocation is implemented: the renderer/assets/locales are in `app/ui/`,
+   and catalog/fixtures are in `app/data/`. The Electron renderer uses only the typed
+   preload bridge. The basic package/runtime and actual Mac successor handoff gates now pass;
+   the replacement branch removes the obsolete Swift/Tauri hosts and Cargo manifests.
+   Immutable 0.2.5 sources and hash-pinned historical test fixtures preserve reference inputs.
+4. Manifest/entry graphs, CI caches, version tooling, installers and release inputs now use
+   `app/`. Validate the final revision's packages before acceptance; imports compiling alone
+   do not establish package correctness.
+
+Use small interfaces for genuine platform/process boundaries and stateful
+services. Retain pure functions for text and model rules. Apply the Rule of Three
+to demonstrated duplication; an abstract base class is justified only when its
+implementations share behavior, rather than just method names. Avoid generic
+repositories, DTO wrappers and dependency-injection frameworks that add no
+required behavior.
+
+README remains the documentation entry. Keep operational development, signing
+and platform instructions through the transition; after acceptance, consolidate
+durable instructions and replace the growing migration status/evidence diary
+with the final result and exact CI/package references. Preserve evidence before
+removing obsolete descriptions. Keep AGENTS/CLAUDE synchronized and concise.
+
+Renovate discovers the application and renderer npm manifests without a second npm
+manager. Its custom whisper.cpp manager watches `app/native/whisper-source.json`;
+human review must check the tag, revision, archive checksum, headers and both speech
+APIs. Keep automerge disabled. The removed Cargo manifests no longer need a Cargo manager
+or the GTK/Tauri dependency constraint. The pinned Tauri CLI in the npm toolchain remains
+only as the existing Linux signature tool, with the same key and version checks.
+
+The bounded post-functionality Luna audit on 2026-10-09 reviewed source/test feature
+folders, the renderer and release tools. The current feature/platform boundaries are
+coherent; small contracts and fixed worker entries retain their separate runtime roles.
+Two focused structural follow-ups remain in #36: split the large `main/index.ts` startup
+closure into cohesive feature composition functions, and split the renderer's tab views
+from `app/ui/src/main.ts`. Preserve explicit dependencies, DOM behavior and existing test
+coverage; no abstract service hierarchy or broad file shuffle is required.
+
+The audit also found a release-staging path check that accepted a symlinked output parent;
+the bounded correction requires a canonical parent before staging. The current status
+document replaces its chronological diary with milestone results and immutable history
+links. Vocabulary matching on very long transcripts is a performance follow-up, not a
+reason to add an arbitrary vocabulary or recording limit without measurement.
 
 The renderer invokes a fixed schema-derived command map, never arbitrary command strings,
 shell commands or paths. Validate sender frame/origin, arguments, responses and events;
@@ -185,7 +302,8 @@ permissions and fixtures. Port behavior and tests together. A feasibility probe 
 keeps the old production release intact and records the replacement gap; it does not redefine
 an existing capability as unsupported to make migration appear complete.
 
-Carry forward the retained version/profile matrix from [Linux validation](LINUX.md#validation-status):
+Carry forward the retained version/profile matrix from the immutable
+[0.2.5 Linux validation record](https://github.com/juferdinand/OpenWhisper/blob/d69b43bf6e7017c61089e117e79af34f57f297c4/docs/LINUX.md#validation-status):
 stock Fedora/Arch/openSUSE Plasma 6 and Ubuntu/Kubuntu Plasma 5.27; GNOME 46/48/49; actual
 Xfce/Cinnamon/MATE/KDE X11; headless Sway and an owned virtual-graphics Hyprland guest.
 Preserve unavailable-portal and unsupported-stock-keymap fallbacks. Modified synthetic keymaps
@@ -230,6 +348,12 @@ trust/format policy. Implement the current policy in typed services with native 
 where required. [Electron updater](https://github.com/electron/electron/blob/v44.7.0/docs/api/auto-updater.md),
 [current signing policy](SIGNING.md).
 
+The initial strict TS policy projects canonical UInt64 versions and exact Mac/Linux
+release sources into explicitly unauthenticated candidates. It preserves the fixed
+asset/feed targets and bounded required metadata. Transport, signature verification,
+installation and automatic checks remain disabled until their actual adapters pass
+acceptance; matching metadata alone does not authenticate an update.
+
 On Linux, release windows, clipboard, bus/shortcut sessions, capture and workers explicitly,
 then replace the supervised process in place. Do not use `app.relaunch()` plus exit. Node
 24.21 `process.execve` is experimental and runs no cleanup handlers; test availability and
@@ -242,6 +366,24 @@ snippets, history, vocabulary, saved Linux recordings, onboarding and interface 
 Do not adopt Electron's default product-named userData path accidentally. Test empty/old/partial
 profiles and repeat migration, interrupted updates and rollback. Keep published legacy binaries
 immutable. The already documented 0.2.4 manual update is separate from this future 0.2.5 transition.
+
+The stable profile keeps legacy model locations and their safe existing permissions.
+New Electron state lives in private sibling children. On Linux, prepare a complete
+`config/electron` unit privately before publishing it with a no-replace rename:
+exact source backups, normalized settings/history and mapped recording copies.
+An existing completed migration must retain later edits and discarded recordings;
+an incomplete destination must be preserved and refused. Run this transition before
+model/download/transcript consumers can prepare their directories. Audio copying
+belongs in an isolated worker and must stream without a recording-duration limit.
+macOS conversion receives native model/hardware/login facts explicitly and preserves
+opaque native trigger data; an Electron accelerator must never be guessed from it.
+Stable preference stores require migrated state. Dev stores retain their separate
+defaults and restrictions. These helpers do not establish update or release acceptance.
+The startup boundary resolves the stable profile in main without preparation,
+passes only validated profile inputs to a fixed compiled Node worker, and waits
+for its original clean exit before opening stores. Migration audio never passes
+through main or the renderer. The packaged build must establish stable identity
+before selecting this boundary; Dev packages must continue to reject stable startup.
 
 ## Safe development builds and first AI preview
 
@@ -268,11 +410,20 @@ no redirects/proxies/implicit credentials, bounded messages and request generati
 dictation/history/clipboard/recovery continue with both servers stopped. No automatic cloud
 fallback, agent execution, TTS or Obsidian is introduced by this slice.
 
-Review English/German examples with the user's actual local models after automated fake-server
-and UI checks. Those fixtures prove protocol/failure behavior, not generated-text quality.
+Review English/German examples with the user's actual local models later under #11,
+after automated fake-server and UI checks. The live trial does not block 0.3.0.
+Those fixtures prove protocol/failure behavior, not generated-text quality.
 Optional additional/cloud models follow explicit provider consent and secure credential storage.
 The feature order stays **model communication → optional speech output → structured Obsidian**;
 agent handoff has its own explicit, reviewed action boundary.
+
+Optional local-server startup is a later model-communication feature. Electron's main
+process can launch installed programs with typed Node `spawn`/`execFile`, without opening
+a terminal or adding native bindings. Detect and reuse an existing server first; offer an
+explicit start action for [Ollama `serve`](https://github.com/ollama/ollama/blob/main/docs/cli.mdx)
+or [LM Studio `lms server start`](https://lmstudio.ai/docs/developer/core/server).
+Use fixed executable/argument boundaries and the local API for subsequent communication.
+Ordinary dictation must not start a model server implicitly.
 
 ## Implementation sequence and completion evidence
 
@@ -283,7 +434,7 @@ agent handoff has its own explicit, reviewed action boundary.
 | P2 | Shared text/state/settings/model/history services and disposable speech/audio/recovery pipeline | Existing shared vectors, cancellation/generation races, Stop ordering, no cutoff, long private audio, worker failures and both CPU engines; no ordinary dictation dependency on LLMs. |
 | P3 | Linux and macOS adapters, native boundaries and complete current UI behavior | Each L-/M-/SPEECH gate above, exact packages and owned compositor sessions; no root/raw input/real unattended microphone. Universal Mac native loads and CI smoke; focused user Mac permission/input checks where synthetic evidence cannot establish behavior. |
 | P4 | AppImage/.deb/universal DMG+ZIP, version/signing/feed, existing data migration and old-client update | Actual signed 0.2.5 positive/adversarial updater checks, exact assets/checksums/signatures, rollback and supervised restart; no relabelled old package. |
-| P5 | Ported manual local-model preview and user-testable isolated development package | PR17 contract/UI/failure fixture equivalence, local server off/cancel/retry tests and a reviewable AI trial. Track remaining #11 scope separately. |
+| P5 | Retain the ported manual local-model preview and isolated development package | PR17 contract/UI/failure fixture equivalence and local server off/cancel/retry regressions. Live LM Studio/Ollama trials and remaining #11 scope are follow-up work outside 0.3.0. |
 | P6 | Remove Swift/Rust hosts/tests/builds and obsolete Tauri/WebKit paths; update docs/commands/CI/Renovate/notices | Full replacement regression matrix, no orphaned manifests/source/build references, synchronized AGENTS/CLAUDE, README as entry point, dependency/license audit, independent review and user acceptance of the functional migration. |
 
 P3 overlay/native-hook probes may run early to expose feasibility risks. P5 may be offered in
@@ -333,12 +484,12 @@ because of a host change. Transfer concrete defects, not stale implementation wo
 capability is intentionally excluded later, keep its requirement as a documented gap rather than
 calling it fixed or declaring full desktop support.
 
-## Open engineering questions to resolve through probes
+## Original engineering questions and remaining acceptance
 
-The native binding choice/packaged ABI, Mac TCC attribution and self-signed login-item continuity,
-Wayland focus-free overlay primitive, no-UI CLI runtime, strict old-client signature compatibility
-and supervised exec lifecycle remain unproven. They are explicit implementation gates above,
-not reasons to ask for broad permission or to promise unsupported behavior. Retain failed-probe
-evidence and choose a tested replacement before retiring its old path. Any actual user-only
-acceptance blocker is reported with a concrete package and focused steps after independently
+At plan approval, native bindings/packaged ABI, Mac TCC and login-item continuity, Wayland
+overlay behavior, no-UI CLI, old-client signatures and supervised exec still required probes.
+The [current milestone record](ELECTRON-STATUS.md) distinguishes their passing automated scopes
+from remaining physical-Mac, expanded desktop and final release coverage. Keep original criteria
+and failed-probe evidence without presenting resolved questions as current blockers. Report an
+actual user-only acceptance blocker with a concrete package and focused steps after independently
 runnable checks complete.

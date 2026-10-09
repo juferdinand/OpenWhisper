@@ -1,236 +1,107 @@
 # OpenWhisper — Agent Instructions
 
-OpenWhisper is a free, fully local dictation app, inspired by tools such as WhisperBar and Wispr Flow:
-press a trigger, speak, and insert the recognized text at the cursor. No cloud recognition, account,
-or subscription. The project is open source under the MIT License.
+OpenWhisper is a free, local dictation application. Speech recognition runs on the user's computer;
+the app requires no account or subscription.
 
 ## Documentation and language
 
-- Keep `AGENTS.md` and `CLAUDE.md` in English and synchronized.
-- Keep source comments, logs, scripts, workflows, and project documentation in English.
-- Default the shared app interface to English; maintain the requested English/German switch in
-  `shared/locales/`. Keep translation keys and placeholders synchronized, and never translate user text.
-- `README.md` is the single documentation entry point.
-- Preserve multilingual speech-processing patterns and test inputs; use English test names and comments.
+- Keep `AGENTS.md` and `CLAUDE.md` synchronized and in English.
+- Write source comments, scripts, logs and documentation in English.
+- Keep the renderer's English and German translations in `app/ui/locales/` synchronized,
+  including keys and placeholders. Never translate user text.
+- Keep `README.md` as the documentation entry point; link to focused reference documents.
 
 ## Delivery and acceptance
 
-- Prepare functional changes on isolated branches with automated evidence and independent review.
-  Linux desktop acceptance uses the documented automated package/runtime checks; the user waived proactive
-  manual desktop checks in favor of bug reports. Merge validated changes through the normal PR workflow.
-  The user actively relies on the app; replacing the running installation still requires explicit instruction.
-- Prioritize Linux installation and desktop reliability. Deliver new integrations incrementally:
+- The published version is 0.2.5. The Electron 0.3.0 replacement is still under acceptance;
+  consult [the current status](docs/ELECTRON-STATUS.md) and do not describe a candidate as a
+  published release or claim unpassed desktop coverage.
+- Work in an isolated branch/worktree, keep changes reviewable, and run focused checks while
+  editing. Run the required common checks once for a complete increment. Prepare functional
+  changes with automated evidence and independent review; merge through the normal PR workflow
+  after user acceptance.
+- Linux desktop acceptance uses the documented automated package/runtime checks. The user waived
+  proactive manual desktop checks in favor of bug reports. Close automated-scope issues when their
+  checks pass; track concrete remaining defects without requiring proactive physical-device or
+  login-session checks.
+- Do not replace the user's installed app, publish a release, or alter signing identities without
+  explicit authorization. Preserve any existing installation during tests.
+- Never use a real microphone or unattended physical input in tests. Identify synthetic, container,
+  nested-desktop, and physical-device evidence separately.
+- Keep ordinary dictation independent of optional integrations. Deliver integrations in order:
   model communication first, optional text-to-speech next, then structured Obsidian output.
-  Ordinary dictation must remain independent of these integrations.
-- Close Linux desktop acceptance issues after their automated scope passes; retain concrete remaining
-  defects as bug reports. Do not keep them open solely for proactive physical-device or login-session checks.
-  Mark synthetic, container, nested-compositor, and physical-device evidence separately; never infer full
-  desktop support from a build or claim untested hardware coverage.
 
-## Project structure
+## Project layout
 
-- `macos/`: native Swift app, SwiftPM, Swift 5.10 language mode, macOS 14+.
-  It can be built with the Xcode Command Line Tools without a full Xcode installation.
-  - `Sources/OpenWhisperCore/`: testable logic: `TranscriptCleaner`, `VocabularyCorrector`,
-    `SnippetExpander`, and `ModelCatalog`.
-  - `Sources/OpenWhisper/App/`: `AppState` state machine
-    (`idle → recording → transcribing → done/error`), preferences, app, and app delegate.
-  - `Sources/OpenWhisper/Services/`: `SpeechEngine` (whisper.cpp C API for Whisper and NVIDIA Parakeet),
-    `AudioRecorder`, `HotkeyService` (CGEvent tap, Fn/modifier/mouse triggers, Carbon fallback,
-    push-to-talk), `TextInjector` (paste, clipboard, or editor), `ModelManager`,
-    `UpdateService` (GitHub Releases with signature verification), `Permissions`, and `SnippetStore`.
-  - `Sources/OpenWhisper/UI/`: native non-activating `NSPanel` overlay and a dedicated
-    `NSWindow` hosting `SharedSettingsView` (WKWebView). The settings use the same compiled
-    UI assets as Linux, including the floating recording controls. Only trusted bundle files
-    can navigate or invoke the native bridge.
-  - `Vendor/whisper.xcframework`: downloaded by `scripts/fetch-whisper.sh`;
-    pinned to `b5130`, including the Parakeet API.
-- `shared/`: authoritative cross-platform model catalog (`models.json`) and test cases
-  (`test-vectors.json`).
-- `shared/ui/src/`: shared custom settings and recording UI for macOS and Linux. Keep one layout, icon set,
-  font, and navigation structure. `bridge.ts` selects Tauri IPC or the native WebKit reply handler.
-- `linux/src-tauri/`: Linux Rust backend (CPAL audio, downloads, and history).
-  `src/desktops/kde/` owns KGlobalAccel, KWin leases, and direct trigger capture.
-  `src/desktops/x11/` owns explicit keyboard setup, helper-only Xlib/XKB grabs, and opt-in
-  session-only XTEST paste on actual X11 sessions; keep its trigger profile separate from KDE.
-  `src/desktops/shared/` owns bounded portal probes, the portal/native paste facade, clipboard,
-  session command control, tray-host monitoring, and overlay fallbacks. GNOME and wlroots use
-  these shared services according to detected capabilities. Acceptance evidence belongs in
-  `docs/LINUX.md`; implemented services do not imply complete desktop or release acceptance.
-- `linux/crates/core/`: text processing against the same shared fixtures as Swift.
-- `linux/crates/speech/` and `linux/native/`: pinned whisper.cpp / Parakeet C++ bridge.
-  Speech contexts stay on one worker thread. Packages include Vulkan with a portable CPU fallback;
-  detect real devices at runtime and preserve a manual CPU choice. Khronos headers are checksum-pinned.
-- `shared/ui/public/app-icon.png` and `src-tauri/icons/icon.png`: exact 256px PNG from the existing
-  Mac ICNS. Do not redesign one platform's logo independently. Inter is bundled with its license.
-- `docs/LINUX.md`: build dependencies, support matrix, validation evidence, and remaining tests.
-- `docs/PLATFORMS.md`: architecture and remaining platform work. Windows is not implemented.
-- `VERSION`: one project version for all platforms.
+- `app/` is the strict TypeScript Electron application, native speech boundary, platform services,
+  build scripts, and tests.
+- `app/src/main/` owns application lifecycle and composition; `preload/` exposes a narrow typed
+  bridge; `src/contracts/` validates IPC at runtime; `src/services/` owns platform integrations.
+- Group feature logic under `app/src/core/` and `app/src/services/`, including recording, speech,
+  models, text, settings/history, and update features. Keep platform-specific host code under its
+  platform area.
+- `app/src/platforms/linux/{kde,x11,shared}/` owns Linux desktop adapters. Here `shared` means
+  common Linux integration code, not the renderer or shared UI. GNOME and wlroots use capability-
+  driven shared fallbacks.
+- `app/ui/` is the Electron-only renderer. Preserve its layout, icons, Inter font, English/German
+  switch, and stable interactive controls.
+- `app/data/` contains the model catalog, schemas, and multilingual test vectors.
+- `app/native/` contains checksum-pinned native speech and focused platform bindings. Prefer the
+  existing Electron/Node APIs or typed adapters before adding native code.
+- The obsolete `macos/` and `linux/` hosts are removed from this replacement branch. Their
+  historical source and evidence remain at [the immutable 0.2.5 commit](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4).
+  Exact updater and desktop reference inputs used by current tests live in
+  `app/tests/fixtures/legacy-linux/`, with their hashes and provenance.
+- `VERSION` is the project version. Keep it, Electron and UI manifests, and lockfiles aligned.
 
-## Commands
+## Development commands
+
+Use Node.js 24–26 and npm.
 
 ```bash
-make linux-test                   # Check Linux frontend, Rust tests, Clippy, and shared assets
-make linux                        # Build Linux with Vulkan and CPU fallback
-make linux-install                # Install the local Linux build for this user
-cd shared/ui && npm run test:ui      # Shared UI tests (install Playwright Chromium first)
-make test                         # Run Swift tests against shared/test-vectors.json
-make mac                          # Build macos/build/OpenWhisper.app
-make mac-install                  # Replace the app in /Applications and launch it
-make -C macos app UNIVERSAL=1      # Build arm64 and x86_64, then combine with lipo
-make -C macos zip UNIVERSAL=1      # Build and package OpenWhisper-macOS.zip
-make -C macos dmg UNIVERSAL=1      # Build a drag-to-Applications installation image
+npm ci --prefix app/ui
+npm ci --prefix app
+npm run setup --prefix app
+npm run dev --prefix app
+npm run preflight --prefix app
+npm run typecheck --prefix app
+npm test --prefix app
+npm run build --prefix app
+npm run build --prefix app/ui && npm run test:ui --prefix app/ui
+make linux                         # Build candidate only; does not install
+make mac                           # Build candidate only; does not install
 ```
 
-For live logs, use the absolute path because `log` may be a shell function in zsh:
+For a renderer change, run `npm run build && npm run test:ui` in `app/ui/`. For an application
+change, run the focused tests, `npm run typecheck`, and the appropriate build. `npm run preflight`
+checks workflow syntax and shell, strict typing, formatting, and whitespace before a push.
 
-```bash
-/usr/bin/log stream --info --predicate 'subsystem == "io.github.whisperfree"' --style compact
-```
+## Behavior and safety constraints
 
-Run `make test` for Swift logic changes and build the Mac app for application changes.
-Mac builds now also require Node.js/npm to build the shared UI.
-Run `make linux-test` for Linux changes and shared UI tests for UI changes.
-The macOS app supports `--ui-smoke-test` and `--overlay-smoke-test` for native WebKit checks in CI.
-`linux/scripts/test-session.py` exercises Linux capture through a private virtual audio source,
-including a recording beyond two minutes, floating controls, recognition, and clipboard output.
-Its optional `--portals` mode also checks KDE shortcut binding and pasting into an owned test field.
-`linux/scripts/test-x11-triggers.py` and `test-x11-session.py` require an owned non-root X11
-session from `run-owned-desktop.py`; `--x11-desktop` starts a genuine Xfce, Cinnamon, MATE,
-or KDE session inside the private display. `test-compositor-control.py` verifies explicit
-commands with private audio and owned compositor bindings. These checks must never inherit
-the user's desktop sockets, input devices, or audio services.
-See `docs/LINUX.md` for dependencies and permission details. Never use the real microphone for unattended tests.
-Recording, permissions, hotkeys, and pasting also need manual testing on macOS.
-For documentation-only changes, check content, links, and formatting.
+- Do not impose a recording-duration limit or truncate audio. Record until explicit stop or cancel;
+  audio stays in memory and long recordings consume more RAM.
+- Keep Dev data and identity separate from stable data. Reject symlinked or unsafe profile paths;
+  never import preferences, models, or recovery files automatically.
+- Keep audio, transcripts, vocabulary, clipboard contents, and device names out of logs and test
+  receipts. Expose only bounded, non-sensitive status through control interfaces.
+- Retain strict update-source, version, archive, signature, and installed-tree checks. Preserve the
+  macOS signing identity, Linux update key, package identity `io.github.whisperfree`, and existing
+  data locations. Never relabel an old binary or silently fall back to ad-hoc release signing.
+- Use private, owned fixtures for recording, replacement, and desktop tests. Never inherit the
+  user's display, audio service, sockets, or input devices in unattended checks.
+- Preserve model and language fixtures, vocabulary and snippet behavior, and English test names.
 
-## Known pitfalls
+## Releases and security
 
-- **Persistent identities:** keep `io.github.whisperfree`, the Debian package identity, existing data
-  directories, and signing keys stable. Public branding and new package names use OpenWhisper.
-  Never relabel old release binaries. Preserve strict source/signature validation when
-  configuring the repository and expected asset names.
+The public 0.2.5 macOS and Linux applications use separate native hosts and update identities.
+Electron replacement, signed package, and upgrade gates are recorded in
+[the Electron status](docs/ELECTRON-STATUS.md). Do not imply an automatic migration between
+host formats until that exact path has passed acceptance.
 
-- **Recording duration:** the user explicitly requires no fixed time limit. Do not reintroduce
-  an automatic cutoff or truncate the audio buffer. Record until explicit stop/cancel; explain
-  that recordings stay in RAM and grow with duration.
-- **Linux inference recovery:** keep native inference in the disposable speech helper. Bound
-  individual inference windows, retry failed windows at smaller sizes on GPU/CPU, and preserve
-  the manual CPU choice. Save stopped audio privately before inference; keep failed WAV backups
-  across restarts until successful delivery or explicit discard. Never log helper requests or replies.
-- **Settings:** persist edited fields as patches against the current host state, and keep switch DOM
-  nodes stable while saving. Login-item pending approval is distinct from disabled on macOS.
-  Linux autostart must point to the installed AppImage, never its extraction directory.
-- **Linux app identity:** install and launch `io.github.whisperfree.desktop` so GTK, KDE's taskbar,
-  and portals agree on the application identity. Starting from a terminal can associate portal
-  permissions with that terminal. Preserve the package-specific bundler config and desktop template.
-  Keep the main window's `create: false` and create it in the one-shot setup hook: GTK activation
-  emits another Ready event in Tao, and automatic window creation would crash on a duplicate label.
-  Native UI and session tests cover reactivation.
-- **Linux update restart:** keep the supervised process alive with an in-place `exec` after
-  native event-loop cleanup. Do not use Tauri's spawn-and-exit restart: systemd desktop services
-  may kill the replacement with the old process. Capture the permanent executable before updating,
-  since a Debian replacement can make `current_exe()` point to a deleted inode.
-- **Wayland overlay:** initialize layer-shell before Wry realizes the GTK window. Keep keyboard
-  focus disabled. A missing compositor protocol must leave the main recording control usable.
-- **macOS WebKit:** use the original bundle file URL and a document-start flag for overlay mode.
-  Applying `underPageBackgroundColor` before loading caused a startup hang in native CI. The
-  overlay uses WKWebView's `drawsBackground` configuration, also used by Wry, and transparent CSS.
-- **Signing and permissions:** an ad-hoc signature can cause macOS to discard Accessibility
-  permission after a rebuild. `macos/scripts/create-dev-cert.sh` creates a local
-  `WhisperFree Dev` certificate that the build detects automatically.
-  Public releases must keep the same signing identity in `SIGNING_CERT_P12`;
-  the updater rejects apps whose signatures do not meet the running app's designated requirement.
-  A self-signed certificate does not provide Apple notarization.
-- **macOS capture:** each recording owns its converter and synchronized sample buffer. Never
-  reset a converter concurrently with the tap callback or reuse an engine after a device change.
-  `OpenWhisperAudio` catches AVAudioEngine Objective-C exceptions before they cross Swift.
-  Synthetic capture tests must never open the microphone. Lifecycle diagnostics are bounded and
-  local; never log audio, transcripts, vocabulary, clipboard content, or device names.
-- **Metal shutdown:** ggml-metal can crash during process exit while a context remains loaded.
-  Call `SpeechEngine.shutdown()` from `applicationWillTerminate`.
-- **Testing with Command Line Tools:** use Swift Testing. The Makefile supplies the Testing
-  framework paths needed for a Command Line Tools-only setup.
-- **Keyboard shortcuts:** the previous KeyboardShortcuts dependency required preview macros
-  unavailable in the Command Line Tools-only setup. Use the existing `HotkeyService`.
-- **Linux KDE triggers:** `desktops/kde/capture.rs` captures GTK input only during explicit trigger setup.
-  KGlobalAccel handles keys; KWin button rebindings handle extra mouse buttons on Wayland
-  (middle button: Plasma 6.3+). The same executable's `--linux-trigger-helper` owns the temporary
-  binding, restores it on EOF/SIGTERM, and journals recovery after SIGKILL. Preserve conflicts
-  and later user edits. Never use root, raw input devices, or unattended real-desktop input tests.
-  Run `linux/scripts/test-kde-triggers.py --binary <binary>` for owned nested-KWin regression
-  coverage. Modifier-only triggers are toggle-only because KDE emits their edges on release.
-- **Linux X11 triggers and paste:** capture a keyboard key only during explicit setup, commit
-  on release, and restore the old binding on Escape or focus loss. The same executable's
-  `--linux-x11-helper` owns passive grabs; preserve conflicts, lock-modifier variants, real
-  release edges, layout-change invalidation, and finite EOF/SIGTERM cleanup. Never enable
-  this path on Wayland through XWayland. Preserve both saved profiles, but apply hold-mode
-  restrictions according to the active adapter, so an inactive X11 profile cannot bypass
-  KDE's modifier-only toggle rule. Keep X11 paste disabled until an explicit session Allow;
-  portal and native paste must never both be enabled. Reject paste while physical, latched,
-  or locked modifiers are active. Preserve the custom XKB state record and its primary-header
-  offset tests; x11-dl 2.21.0's record has a different field order from `XKBstr.h`.
-- **Linux command control:** dispatch `--control start|stop|toggle|cancel|status` before GTK or
-  audio initialization. Contact only the already running same-user session-bus owner, without
-  service activation or changes to compositor configuration. Bound requests and reject
-  expired/disconnected callers before starting capture. A failed Start reply must drop newly
-  opened audio. Stop acknowledges stream closure/error checks before duration-dependent
-  resampling and inference; its acknowledgment does not mean recognition or delivery completed.
-  Status must never expose transcripts, audio, history, or preferences.
-- **Linux tray lifecycle:** a successful tray-object creation does not establish a visible host.
-  Hide on close only while a registered tray host is available; restore a previously hidden
-  window when that host disappears. Keep the main-window path usable without tray support.
-- **Shortcut capture:** SwiftUI can take first-responder status away from an NSView recorder.
-  Capture shortcuts through the event tap instead of a text field.
-- **Mouse events:** reading `NSEvent.keyCode` for a mouse event raises an exception.
-- **Language detection:** automatic detection can mistake short German phrases for English.
-  Default to the system language where supported.
-- **Parakeet vocabulary:** Parakeet does not accept a text prompt.
-  Apply `VocabularyCorrector` after recognition for all model families.
+macOS releases are self-signed and not Apple-notarized. Linux update signatures are version-bound.
+See [release signing](docs/SIGNING.md) and [security policy](SECURITY.md). Keep signing material
+out of Git, logs, artifacts, issues, and pull requests. Never rotate a release identity casually.
 
-## CI and releases
-
-Repository: https://github.com/juferdinand/OpenWhisper (public).
-
-Signing decision (2026-10-05): use persistent self-signing for the initial public releases to avoid
-the annual Apple Developer Program fee during early development. Clearly document that the app
-is not Apple-notarized and may need a first-launch exception. Follow [docs/SIGNING.md](docs/SIGNING.md)
-for key continuity and a future Developer ID migration; changing identities requires an updater transition.
-
-- CI runs tests, builds a universal app, verifies its DMG, and uploads the DMG and ZIP as Actions artifacts.
-  CI builds use ad-hoc signing and do not enable the in-app updater.
-- The manual Release workflow runs from `main`, checks the requested `X.Y.Z` version, and builds
-  macOS and Linux in parallel with that version. macOS uses the persistent signing identity;
-  CI and Release share `.github/workflows/linux-build.yml` for Linux tests and packaging.
-  Only after both builds succeed does the publication job commit/tag the version, verify artifact
-  checksums, and upload DMG, ZIP, AppImage, Debian package, Linux signatures, `latest.json`, and combined `SHA256SUMS`.
-  It creates a complete draft by default for final artifact verification. The `draft` input controls
-  publication. No separate CI dispatch or manual Linux attachment is needed. Do not relabel
-  packages from an older version.
-- Linux release signing uses `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
-  Preserve the embedded public key and `requireSignedVersion`; never rotate the key casually.
-  First-run completion and interface language must survive upgrades.
-- `WFUpdateRepository` is set through `UPDATE_REPO` during release builds.
-- The DMG is the primary installation download. The in-app updater still consumes the ZIP asset.
-  Verify the mounted DMG and its contained app with `macos/scripts/verify-dmg.sh` before publication.
-- Signing requires the repository secrets `SIGNING_CERT_P12` and `SIGNING_CERT_PASSWORD`.
-  `macos/scripts/export-dev-cert.sh owner/repo /path/to/identity.p12` uploads one encrypted identity
-  previously exported using Keychain Access. Never export all keychain identities or rotate the release key.
-- Do not rotate the release signing identity casually or commit signing material.
-  Local signing backups belong under the ignored `.local/` directory.
-- Release publication must follow successful tests, packaging, and signature verification.
-  Keep the README and release instructions aligned with the app.
-- Linux CI builds on Ubuntu 22.04, checks both host UI adapters, and uploads development
-  packages. A main push never changes versions, tags, or public releases. Linux public releases
-  require the documented automated package/runtime checks; do not present intended distro support as tested.
-- The manual version step uses `linux/scripts/set-version.py` to synchronize all manifests.
-- CI repeats weekly. See `SECURITY.md` for the security policy.
-- Renovate tracks Cargo, npm, Actions, and whisper.cpp versions; keep SHA pins and auto-merge disabled.
-  A whisper.cpp update also needs a reviewed SHA-256 change; never bypass checksum verification.
-- Preserve strict update-source, version, archive, and signature checks and their regression tests.
-
-## Future work
-
-- Apple Developer ID signing and notarization.
-- Linux desktop acceptance, installation tests, compositor coverage, and GPU validation; Windows implementation.
-- Keep shared UI changes common to both hosts while retaining platform-specific permissions and services.
+Linux-specific published 0.2.5 behavior and evidence are linked from
+[Linux status](docs/LINUX.md) and its immutable source snapshot. Current Electron package evidence
+must remain separate from that legacy record. See [platform architecture](docs/PLATFORMS.md).

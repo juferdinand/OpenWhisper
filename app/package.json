@@ -1,0 +1,41 @@
+{
+  "name": "openwhisper-electron",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main/index.js",
+  "engines": {
+    "node": ">=24 <27"
+  },
+  "scripts": {
+    "setup": "tsx scripts/setup.ts",
+    "preflight": "tsx scripts/preflight.ts",
+    "set-version": "tsx scripts/set-version.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts tests/core/*.test.ts tests/application/*.test.ts tests/build/*.test.ts tests/contracts/*.test.ts tests/development/*.test.ts tests/migration/*.test.ts tests/models/*.test.ts tests/recording/*.test.ts tests/settings/*.test.ts tests/speech/*.test.ts tests/update/common/*.test.ts tests/update/linux/*.test.ts tests/update/macos/*.test.ts tests/platforms/linux/*.test.ts tests/platforms/macos/*.test.ts tests/owned-retirement/*.test.ts tests/owned-bus-async/*.test.ts tests/owned-supervisor-fallback/*.test.ts",
+    "test:platform": "tsx --test tests/platforms/linux/*.test.ts tests/platforms/macos/*.test.ts tests/recording/clipboard-output.test.ts tests/recording/delivery-receipts.test.ts tests/settings/preferences.test.ts",
+    "build": "tsx scripts/build.ts",
+    "build:native": "tsx scripts/build-native.ts",
+    "dev": "tsx scripts/dev.ts"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.4.0",
+    "koffi": "3.3.2",
+    "tar": "7.5.22",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@electron/universal": "3.0.6",
+    "@playwright/test": "1.63.0",
+    "@tauri-apps/cli": "2.12.1",
+    "@types/node": "24.19.1",
+    "electron": "44.7.0",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "yaml": "2.9.1"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}

@@ -1,7 +1,7 @@
 # OpenWhisper roadmap
 
-The next priorities are Linux installation and broader desktop acceptance. New integrations
-start with optional language-model communication, followed by speech output, then structured
+Remaining priorities include Linux desktop acceptance. New integrations start with optional
+language-model communication, followed by speech output, then structured
 Obsidian notes. Ordinary dictation remains independent of these services. These are planned features,
 not current capabilities or promised release dates. Start with [README.md](../README.md) for
 installation and current behavior.
@@ -26,11 +26,11 @@ still requires an explicit instruction from the user.
 
 ## Linux desktop acceptance
 
-KDE support is implemented through available KWin/KGlobalAccel services and optional KWin mouse
-rebinding capabilities. [`kde::capabilities`](../linux/src-tauri/src/desktops/kde/bindings.rs) checks
-services, Plasma version, plugin availability, and utilities; it does not check for CachyOS.
-The [Linux validation notes](LINUX.md) record automated package and graphical-session evidence
-across KDE, GNOME, named X11 desktops, Sway and Hyprland.
+Linux desktop integration is organized under `app/src/platforms/linux/`: `kde/` owns KDE
+bindings, `x11/` owns X11-specific paths, and `shared/` contains common Linux services. The
+Electron source layout is described in [platform architecture](PLATFORMS.md#electron-source-layout).
+The [Linux validation notes](LINUX.md) describe the published 0.2.5 evidence; consult
+[current Electron status](ELECTRON-STATUS.md) for replacement evidence and its limits.
 
 | Test track | Initial environments | Features to establish |
 | --- | --- | --- |
@@ -45,47 +45,32 @@ capabilities even when the distribution name matches a target. Test released App
 test `.deb` installation separately on Debian-family systems. A package build or container test
 cannot substitute for an actual graphical session.
 
-The [acceptance report format](LINUX.md#acceptance-evidence) requires release/checksum,
+The [acceptance report format](LINUX.md#checks-and-evidence) requires release/checksum,
 distribution, desktop/session, portals, package type, hardware, and a result for each feature.
 Agents can run fixture, isolated compositor, owned permission-dialog and private virtual-source
 tests. Physical microphones, device events and actual logout/login remain separately identified
 coverage limits. The user waived an additional proactive manual Linux acceptance round in favor
 of bug reports; completed automated acceptance issues can close with those limits documented.
 
-## Platform structure and Electron
+## Current source and historical hosts
 
-`shared/ui/` owns the settings and recording interface used by macOS and Linux.
-`linux/` owns the Linux Rust host, packages, native build dependencies, and host tests.
-Within the host, `desktops/kde/` owns direct trigger capture, KGlobalAccel and KWin recovery;
-`desktops/shared/` owns desktop-independent portals, clipboard, session helpers and overlays.
-GNOME, X11 and wlroots boundaries document the shared paths they use and the acceptance
-work still required. They do not claim a separate completed native adapter.
-The [platform architecture](PLATFORMS.md#source-ownership) maps these paths explicitly.
-Both hosts build the same UI assets; configuration, tests, release tooling and license
-packaging follow the shared location.
-
-Electron is a viable alternative host, but changing the UI runtime would not establish global
-input or paste support on every desktop. Electron itself uses the GlobalShortcuts portal on
-Wayland ([Usage on Linux](https://www.electronjs.org/docs/latest/api/global-shortcut#usage-on-linux))
-and documents rebuilding native modules for its runtime
-([Native Node Modules](https://www.electronjs.org/docs/latest/tutorial/using-native-node-modules)).
-Our architectural recommendation is to retain the current shared UI and native services, then
-revisit a runtime migration only with measured benefits and comparable integration tests.
-The common whisper.cpp engines already serve both hosts; OS permissions, triggers, focus,
-GPU backends, packaging, and updates account for the remaining platform-specific work.
+This replacement branch uses the Electron application in `app/`. `app/ui/` owns its renderer,
+settings and recording interface; `app/src/main/`, `app/src/preload/`, `app/src/contracts/`,
+`app/src/services/`, `app/src/platforms/`, and `app/src/workers/` contain the host and feature code.
+Linux adapters are grouped in
+`app/src/platforms/linux/{kde,x11,shared}/`. The [platform architecture](PLATFORMS.md) maps the
+current source layout. The original native macOS and Linux hosts belong to the published 0.2.5
+release and remain available at its [immutable source commit](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4); their behavior and evidence are historical references, not current source paths.
 
 ## Linux installation
 
-Terminal installation already exists through a downloaded `.deb` and `apt`, or a downloaded
-AppImage and the per-user installer in a source checkout. See the
-[terminal instructions](../README.md#install-from-the-linux-terminal).
-There is no project-managed APT/RPM repository, AUR package, or Flatpak distribution today.
-
-The next packaging step is a standalone installer that downloads a pinned release, verifies
-its signature and version, and installs the AppImage, desktop identity, icon, and notices
-without requiring a build or source checkout. Preserve existing settings and models. Evaluate
-AUR, RPM, APT, and Flatpak channels separately; each adds maintenance and installation tests,
-and sandboxed packaging must revalidate native helpers and desktop permissions.
+The published 0.2.5 packages and their legacy per-user installer are documented in the
+[README](../README.md#linux-025) and [Linux status](LINUX.md). The installer source is available
+at the immutable [0.2.5 commit](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4); it applies only to that AppImage. Electron package formats,
+construction evidence and remaining release checks are recorded in
+[current Electron status](ELECTRON-STATUS.md). Distribution channels such as AUR, RPM, APT
+repositories and Flatpak remain separate future work, each with its own installation and
+desktop-permission considerations.
 
 ## Obsidian output
 
@@ -162,21 +147,18 @@ English quality, latency, offline behavior, resource usage, and licenses with sh
 
 ## Work tracking
 
-GitHub issues track desktop acceptance, installation, architecture, Obsidian, providers,
-actions, and TTS. Each issue contains completion criteria and relevant sources. Desktop
-acceptance issues close after their documented automated package/runtime scope passes;
-a build alone is insufficient. Concrete defects remain separate bug reports, and untested
-physical-device or login coverage is recorded without requiring a proactive manual round.
+Issues #3–#9 are closed historical references for the earlier acceptance and architecture
+work. The current expanded Linux desktop follow-ups are tracked in [#21](https://github.com/juferdinand/OpenWhisper/issues/21),
+[#29](https://github.com/juferdinand/OpenWhisper/issues/29) and
+[#30](https://github.com/juferdinand/OpenWhisper/issues/30); Windows implementation is tracked
+in [#35](https://github.com/juferdinand/OpenWhisper/issues/35). Their current scope and status belong to those issues and
+the [Electron status page](ELECTRON-STATUS.md).
+
+Future integrations retain this delivery order: model communication, speech output, then
+structured Obsidian output. Their criteria and issue references remain:
 
 | Work item | Issue |
 | --- | --- |
-| Track Linux desktop and distribution acceptance | [#3](https://github.com/juferdinand/OpenWhisper/issues/3) |
-| Validate KDE Plasma integration beyond CachyOS | [#4](https://github.com/juferdinand/OpenWhisper/issues/4) |
-| Validate GNOME Wayland portals and usable desktop fallbacks | [#5](https://github.com/juferdinand/OpenWhisper/issues/5) |
-| Validate X11 desktops and define shortcut and paste fallback gaps | [#6](https://github.com/juferdinand/OpenWhisper/issues/6) |
-| Validate Sway and Hyprland capability paths and compositor bindings | [#7](https://github.com/juferdinand/OpenWhisper/issues/7) |
-| Provide a standalone verified Linux terminal installer | [#8](https://github.com/juferdinand/OpenWhisper/issues/8) |
-| Clarify shared UI and Linux desktop adapter boundaries | [#9](https://github.com/juferdinand/OpenWhisper/issues/9) |
 | Add optional Obsidian vault output for dictations | [#10](https://github.com/juferdinand/OpenWhisper/issues/10) |
 | Add optional LM Studio and Ollama processing profiles | [#11](https://github.com/juferdinand/OpenWhisper/issues/11) |
 | Add configurable workflow actions and coding-agent handoff | [#12](https://github.com/juferdinand/OpenWhisper/issues/12) |

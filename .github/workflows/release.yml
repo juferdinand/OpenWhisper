@@ -1,14 +1,13 @@
 name: Release
 run-name: Release ${{ inputs.version }}
 
-# Start manually: Actions → Release → Run workflow → enter a version (e.g. 0.2.0).
-# Builds and tests macOS and Linux, then commits VERSION, tags, and uploads all packages.
-# Creates a draft by default for final artifact verification before publication.
+# Builds the committed Electron source on both platforms, then tags that exact source commit.
+# Releases are manual and start from main. Draft is enabled by default for artifact review.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "New version (e.g. 0.2.0)"
+        description: "Committed project version to release (e.g. 0.3.0)"
         required: true
         type: string
       draft:
@@ -31,125 +30,43 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
-      - name: Validate version
+      - name: Validate manual main release and committed version
+        shell: bash
         run: |
-          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
-            echo "::error::Releases must be started from the main branch"; exit 1
-          fi
-          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "::error::Version must use X.Y.Z format (received: $VERSION)"; exit 1
-          fi
-          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main || { echo "::error::Releases must be started from main"; exit 1; }
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "::error::Version must use X.Y.Z format"; exit 1; }
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          test "$(cat VERSION)" = "$VERSION" || { echo "::error::Release version must already be committed in VERSION"; exit 1; }
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
             echo "::error::Tag v$VERSION already exists"; exit 1
           fi
 
   linux:
     needs: validate
-    uses: ./.github/workflows/linux-build.yml
+    uses: ./.github/workflows/electron-linux-build.yml
     secrets:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     with:
       version: ${{ inputs.version }}
-      artifact_name: OpenWhisper-Linux-v${{ inputs.version }}
+      artifact_name: OpenWhisper-electron-Linux-v${{ inputs.version }}
       retention_days: 30
 
   macos:
     needs: validate
-    runs-on: macos-15
-    timeout-minutes: 30
-    env:
-      VERSION: ${{ inputs.version }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '24'
-
-      # Download release dependencies fresh and verify SHA-256; no build cache.
-      - name: Tests
-        timeout-minutes: 5
-        working-directory: macos
-        run: make test
-
-      - name: Import signing certificate
-        env:
-          CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
-          CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
-        run: |
-          if [[ -z "$CERT_P12" || -z "$CERT_PASSWORD" ]]; then
-            echo "::error::SIGNING_CERT_P12 or SIGNING_CERT_PASSWORD is missing; see macos/scripts/export-dev-cert.sh"; exit 1
-          fi
-          umask 077
-          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
-          KEYCHAIN_PASSWORD="$(uuidgen)"
-          echo "::add-mask::$KEYCHAIN_PASSWORD"
-          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
-          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
-          rm "$RUNNER_TEMP/cert.p12"
-          SIGN_IDENTITY="$(security find-identity -p codesigning "$KEYCHAIN" | awk '/^[[:space:]]*[0-9]+\)/ { print $2; exit }')"
-          if [[ -z "$SIGN_IDENTITY" ]]; then
-            echo "::error::No code-signing identity found in the release keychain"; exit 1
-          fi
-          echo "SIGN_IDENTITY=$SIGN_IDENTITY" >> "$GITHUB_ENV"
-
-      - name: Set release version
-        run: |
-          python3 linux/scripts/set-version.py "$VERSION"
-          python3 linux/scripts/check-assets.py
-
-      - name: Build and sign universal app
-        working-directory: macos
-        run: make release UNIVERSAL=1 UPDATE_REPO="${{ github.repository }}"
-
-      - name: Verify signatures
-        working-directory: macos
-        run: |
-          codesign --verify --deep --strict --verbose=2 build/OpenWhisper.app
-          codesign -dr - build/OpenWhisper.app
-          bash scripts/test-release-signature.sh build/OpenWhisper.app
-          lipo build/OpenWhisper.app/Contents/MacOS/OpenWhisper -verify_arch arm64 x86_64
-          # Use the updater's extraction tool: signatures must survive the ZIP round trip.
-          mkdir "$RUNNER_TEMP/release-verification"
-          /usr/bin/tar -xf build/OpenWhisper-macOS.zip -C "$RUNNER_TEMP/release-verification" --no-same-owner
-          codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/release-verification/OpenWhisper.app"
-          bash scripts/verify-dmg.sh build/OpenWhisper-macOS.dmg build/OpenWhisper.app
-          cd build
-          shasum -a 256 OpenWhisper-macOS.dmg OpenWhisper-macOS.zip > SHA256SUMS
-
-      - name: Upload workflow artifacts
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: OpenWhisper-macOS-v${{ inputs.version }}
-          path: |
-            macos/build/OpenWhisper-macOS.dmg
-            macos/build/OpenWhisper-macOS.zip
-            macos/build/SHA256SUMS
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Smoke test shared UI
-        timeout-minutes: 2
-        working-directory: macos
-        run: |
-          build/OpenWhisper.app/Contents/MacOS/OpenWhisper --ui-smoke-test
-          build/OpenWhisper.app/Contents/MacOS/OpenWhisper --overlay-smoke-test
-
-      - name: Clean up keychain
-        if: always()
-        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+    uses: ./.github/workflows/electron-macos-build.yml
+    secrets:
+      SIGNING_CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
+      SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+    with:
+      version: ${{ inputs.version }}
 
   publish:
-    needs: [macos, linux]
+    needs: [linux, macos]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -158,46 +75,63 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.21.0"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install locked publication validator dependencies
+        run: npm ci --prefix app
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: OpenWhisper-macOS-v${{ inputs.version }}
-          path: .release/macos
+          name: OpenWhisper-electron-macOS-v${{ inputs.version }}
+          path: ${{ runner.temp }}/release-input/macos
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: OpenWhisper-Linux-v${{ inputs.version }}
-          path: .release/linux
-      - name: Verify packages and combine checksums
+          name: OpenWhisper-electron-Linux-v${{ inputs.version }}
+          path: ${{ runner.temp }}/release-input/linux
+      - name: Validate exact builder artifacts and stage canonical assets
+        working-directory: app
+        env:
+          MACOS_DIR: ${{ runner.temp }}/release-input/macos
+          LINUX_DIR: ${{ runner.temp }}/release-input/linux
+          ASSETS_DIR: ${{ runner.temp }}/release-assets
         run: |
-          (cd .release/macos && sha256sum -c SHA256SUMS)
-          (cd .release/linux && sha256sum -c SHA256SUMS)
-          mkdir -p .release/assets
-          cp .release/macos/OpenWhisper-macOS.dmg .release/macos/OpenWhisper-macOS.zip .release/assets/
-          cp .release/linux/OpenWhisper-Linux-x86_64.AppImage .release/linux/OpenWhisper-Linux-x86_64.AppImage.sig .release/linux/OpenWhisper-Linux-amd64.deb .release/linux/OpenWhisper-Linux-amd64.deb.sig .release/linux/latest.json .release/assets/
-          cd .release/assets
-          sha256sum OpenWhisper-macOS.dmg OpenWhisper-macOS.zip OpenWhisper-Linux-x86_64.AppImage OpenWhisper-Linux-x86_64.AppImage.sig OpenWhisper-Linux-amd64.deb OpenWhisper-Linux-amd64.deb.sig latest.json > SHA256SUMS
-          sha256sum -c SHA256SUMS
-      - name: Set version, commit, and tag
+          set -euo pipefail
+          node --import tsx scripts/validate-release-publication.ts \
+            --version "$VERSION" --commit "$GITHUB_SHA" --macos-dir "$MACOS_DIR" \
+            --linux-dir "$LINUX_DIR" --output-dir "$ASSETS_DIR"
+      - name: Confirm main still identifies the tested source and create its tag
+        shell: bash
         run: |
-          python3 linux/scripts/set-version.py "$VERSION"
-          python3 linux/scripts/check-assets.py
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet -- VERSION linux shared/ui; then
-            git add VERSION shared/ui/package.json shared/ui/package-lock.json linux/Cargo.toml linux/Cargo.lock linux/package.json linux/package-lock.json linux/src-tauri/tauri.conf.json
-            git commit -m "Release v$VERSION"
+          set -euo pipefail
+          remote_main="$(git ls-remote --exit-code origin refs/heads/main | awk 'NR == 1 { print $1 }')"
+          test "$remote_main" = "$GITHUB_SHA" || { echo "::error::main moved after release builds; refusing to publish stale artifacts"; exit 1; }
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "::error::Tag v$VERSION already exists"; exit 1
           fi
-          git tag "v$VERSION"
-      - name: Push and publish all platform packages
+          git tag "v$VERSION" "$GITHUB_SHA"
+      - name: Push the exact source and tag atomically, then create the release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_DRAFT: ${{ inputs.draft }}
+          ASSETS_DIR: ${{ runner.temp }}/release-assets
+        shell: bash
         run: |
-          git push --atomic origin HEAD:refs/heads/main "refs/tags/v$VERSION"
+          set -euo pipefail
+          git push --atomic --force-with-lease="refs/heads/main:$GITHUB_SHA" origin \
+            "$GITHUB_SHA:refs/heads/main" "refs/tags/v$VERSION"
           EXTRA_ARGS=()
           if [[ "$RELEASE_DRAFT" == "true" ]]; then EXTRA_ARGS+=(--draft); fi
-          gh release create "v$VERSION" .release/assets/OpenWhisper-macOS.dmg .release/assets/OpenWhisper-macOS.zip .release/assets/OpenWhisper-Linux-x86_64.AppImage .release/assets/OpenWhisper-Linux-amd64.deb .release/assets/OpenWhisper-Linux-x86_64.AppImage.sig .release/assets/OpenWhisper-Linux-amd64.deb.sig .release/assets/latest.json .release/assets/SHA256SUMS \
-            --title "OpenWhisper $VERSION" \
-            --verify-tag \
-            --notes-file .github/release-notes.md \
-            --generate-notes "${EXTRA_ARGS[@]}"
+          gh release create "v$VERSION" \
+            "$ASSETS_DIR/OpenWhisper-macOS.dmg" \
+            "$ASSETS_DIR/OpenWhisper-macOS.zip" \
+            "$ASSETS_DIR/OpenWhisper-Linux-x86_64.AppImage" \
+            "$ASSETS_DIR/OpenWhisper-Linux-amd64.deb" \
+            "$ASSETS_DIR/OpenWhisper-Linux-x86_64.AppImage.sig" \
+            "$ASSETS_DIR/OpenWhisper-Linux-amd64.deb.sig" \
+            "$ASSETS_DIR/latest.json" "$ASSETS_DIR/SHA256SUMS" \
+            --title "OpenWhisper $VERSION" --verify-tag \
+            --notes-file .github/release-notes.md --generate-notes "${EXTRA_ARGS[@]}"

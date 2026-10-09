@@ -1,0 +1,134 @@
+name: Electron Linux release build
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Must equal the checked-out VERSION and Electron/shared UI versions
+        type: string
+        required: true
+      artifact_name:
+        description: Name for the completed signed Linux release artifact
+        type: string
+        required: true
+      retention_days:
+        type: number
+        default: 14
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: true
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  electron-linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.21.0"
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            app/ui/package-lock.json
+      - name: Install pinned Electron Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config libasound2-dev libdbus-1-dev \
+            libglib2.0-dev libgtk-3-dev libayatana-appindicator3-dev libxkbcommon-dev libssl-dev \
+            squashfs-tools zstd libfuse2 curl jq
+      - name: Install locked workspace dependencies
+        run: |
+          npm ci --prefix app/ui
+          npm ci --prefix app
+      - name: Verify committed release source and versions
+        working-directory: app
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: node --import tsx scripts/verify-release-source.ts --version "$RELEASE_VERSION" --commit "$GITHUB_SHA"
+      - name: Install pinned Electron runtime
+        working-directory: app
+        run: npm run setup
+      - name: Build the stable Linux application with portable CPU recording
+        working-directory: app
+        run: npm run build -- --stable --recording
+      - name: Confirm build preserved the committed source tree
+        run: test -z "$(git status --porcelain)"
+      - name: Run focused release verifier tests
+        working-directory: app
+        run: node --import tsx --test tests/build/finalize-linux-release.test.ts tests/update/linux/linux-update-signature.test.ts tests/build/verify-release-source.test.ts
+      - name: Fetch the checksum-pinned AppImage tool and runtime
+        working-directory: app
+        run: |
+          set -euo pipefail
+          tools="$RUNNER_TEMP/openwhisper-electron-appimage-tools"
+          test ! -e "$tools"
+          mkdir -m 700 "$tools"
+          for component in appimagetool runtime; do
+            if test "$component" = appimagetool; then filename=appimagetool-x86_64.AppImage; else filename=runtime-x86_64; fi
+            url="$(jq -er ".$component.url" native/appimage-tools.json)"
+            bytes="$(jq -er ".$component.bytes" native/appimage-tools.json)"
+            digest="$(jq -er ".$component.sha256" native/appimage-tools.json)"
+            curl --fail --location --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 120 \
+              --output "$tools/$filename" "$url"
+            test "$(wc -c < "$tools/$filename")" -eq "$bytes"
+            printf '%s  %s\n' "$digest" "$tools/$filename" | sha256sum --check --status
+            chmod 755 "$tools/$filename"
+          done
+          extractor_status=0
+          unsquashfs -version > "$RUNNER_TEMP/openwhisper-electron-unsquashfs.txt" 2>&1 || extractor_status=$?
+          test "$extractor_status" -eq 0 || test "$extractor_status" -eq 1
+          IFS= read -r extractor_version < "$RUNNER_TEMP/openwhisper-electron-unsquashfs.txt"
+          [[ "$extractor_version" == "unsquashfs version "[0-9]* ]]
+      - name: Construct canonical unsigned Linux release payloads
+        working-directory: app
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(cat ../VERSION)" = "$RELEASE_VERSION"
+          output="$RUNNER_TEMP/openwhisper-electron-linux-release"
+          tools="$RUNNER_TEMP/openwhisper-electron-appimage-tools"
+          node --import tsx scripts/package-linux-release.ts --output "$output" --tools "$tools" --root "$PWD"
+      - name: Sign and version-verify both Linux assets
+        working-directory: app
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          signer_tmp="$(mktemp -d "$RUNNER_TEMP/openwhisper-electron-signer.XXXXXX")"
+          cleanup() {
+            unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+            rm -rf -- "$signer_tmp"
+          }
+          trap cleanup EXIT
+          export XDG_CONFIG_HOME="$signer_tmp/config"
+          export XDG_CACHE_HOME="$signer_tmp/cache"
+          mkdir -m 700 "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
+          output="$RUNNER_TEMP/openwhisper-electron-linux-release"
+          for asset in OpenWhisper-Linux-amd64.deb OpenWhisper-Linux-x86_64.AppImage; do
+            node_modules/.bin/tauri signer sign --app-version "$RELEASE_VERSION" "$output/$asset"
+          done
+          node --import tsx scripts/finalize-linux-release.ts --directory "$output" --version "$RELEASE_VERSION" --commit "$GITHUB_SHA"
+          (cd "$output" && sha256sum --check SHA256SUMS)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: |
+            ${{ runner.temp }}/openwhisper-electron-linux-release/OpenWhisper-Linux-amd64.deb
+            ${{ runner.temp }}/openwhisper-electron-linux-release/OpenWhisper-Linux-amd64.deb.sig
+            ${{ runner.temp }}/openwhisper-electron-linux-release/OpenWhisper-Linux-x86_64.AppImage
+            ${{ runner.temp }}/openwhisper-electron-linux-release/OpenWhisper-Linux-x86_64.AppImage.sig
+            ${{ runner.temp }}/openwhisper-electron-linux-release/latest.json
+            ${{ runner.temp }}/openwhisper-electron-linux-release/SHA256SUMS
+            ${{ runner.temp }}/openwhisper-electron-linux-release/release-construction-receipt.json
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}

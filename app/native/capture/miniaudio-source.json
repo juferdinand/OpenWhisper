@@ -1,0 +1,9 @@
+{
+  "repository": "mackron/miniaudio",
+  "tag": "0.11.25",
+  "revision": "9634bedb5b5a2ca38c1ee7108a9358a4e233f14d",
+  "sha256": "1a3a79b80fc6f0b0cc155e28b954a598e0ddfa2db64e2afa8466be88c476fa55",
+  "headerSha256": "ac7af4de748b7e26b777f37e01cee313a308a7296a3eb080e2906b320cc55c89",
+  "licenseSha256": "457f1b500e0adf6bc059edddfa78a2f62012e7c3bb43476c20e0bd23b25ba0eb",
+  "license": "MIT-0"
+}

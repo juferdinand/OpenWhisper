@@ -1,0 +1,276 @@
+name: Electron macOS build
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Exact project version to package without changing source manifests
+        required: true
+        type: string
+    secrets:
+      SIGNING_CERT_P12:
+        required: true
+      SIGNING_CERT_PASSWORD:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  thin:
+    name: Electron stable macOS input (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+          - os: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            app/ui/package-lock.json
+      - name: Install locked dependencies and pinned Electron runtime
+        run: |
+          npm ci --prefix app/ui
+          npm ci --prefix app
+          npm run setup --prefix app
+      - name: Install native recording build tools
+        run: brew list cmake ninja >/dev/null 2>&1 || brew install cmake ninja
+      - name: Admit exact source version before native construction
+        working-directory: app
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --import tsx scripts/verify-release-source.ts --version "$VERSION" --commit "$GITHUB_SHA"
+      - name: Build stable recording app and admit native outputs before credentials
+        working-directory: app
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          npm run build -- --recording --stable
+          node --import tsx scripts/verify-macos-release-workflow.ts thin-build \
+            --version "$VERSION" --commit "$GITHUB_SHA" --architecture "$EXPECTED_ARCH"
+          test -z "$(git status --porcelain)"
+      - name: Import the existing persistent identity into an isolated keychain
+        id: identity
+        working-directory: app
+        env:
+          CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$CERT_P12" && test -n "$CERT_PASSWORD"
+          umask 077
+          private="$RUNNER_TEMP/mac-signing-private"
+          mkdir -m 700 "$private"
+          LC_ALL=C /usr/bin/security list-keychains -d user | node --import tsx tests/owned-macos-publisher.ts keychain-list > "$private/previous-keychains"
+          keychain="$private/signing.keychain-db"
+          password="$(uuidgen)"
+          printf '::add-mask::%s\n' "$password"
+          printf '%s' "$CERT_P12" | /usr/bin/base64 --decode > "$private/cert.p12"
+          /usr/bin/security create-keychain -p "$password" "$keychain" >/dev/null
+          /usr/bin/security set-keychain-settings -lut 900 "$keychain" >/dev/null
+          /usr/bin/security unlock-keychain -p "$password" "$keychain" >/dev/null
+          /usr/bin/security import "$private/cert.p12" -k "$keychain" -P "$CERT_PASSWORD" -T /usr/bin/codesign >/dev/null
+          /usr/bin/security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+          /usr/bin/security list-keychains -d user -s "$keychain"
+          rm "$private/cert.p12"
+          unset CERT_P12 CERT_PASSWORD password
+          identity="$(/usr/bin/security find-identity -p codesigning "$keychain" | awk '/^[[:space:]]*[0-9]+\)/ { count++; value=$2 } END { if (count == 1) print value }')"
+          [[ "$identity" =~ ^[a-fA-F0-9]{40}$ ]]
+          printf 'SIGN_IDENTITY=%s\n' "$identity" >> "$GITHUB_ENV"
+      - name: Build and sign the stable thin release input
+        working-directory: app
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          test -n "${SIGN_IDENTITY:-}"
+          output="$RUNNER_TEMP/mac-release-input-${{ matrix.arch }}"
+          result="$RUNNER_TEMP/mac-release-package-result-${{ matrix.arch }}.json"
+          node --import tsx scripts/package-macos-preview.ts \
+            --output "$output" --signing-mode persistent-validation --enable-updates --construction-mode release \
+            > "$result"
+          node --import tsx scripts/verify-macos-release-workflow.ts thin-result \
+            --result "$result" --output "$output" --version "$VERSION" --commit "$GITHUB_SHA" \
+            --architecture "$EXPECTED_ARCH" --identity "$SIGN_IDENTITY"
+      - name: Restore keychain and remove signing material
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          private="$RUNNER_TEMP/mac-signing-private"
+          failed=0
+          if test -d "$private"; then
+            previous=()
+            if test -f "$private/previous-keychains"; then
+              while IFS= read -r path; do previous+=("$path"); done < "$private/previous-keychains"
+            fi
+            if ((${#previous[@]})); then /usr/bin/security list-keychains -d user -s "${previous[@]}" >/dev/null || failed=1; fi
+            if test -e "$private/signing.keychain-db"; then /usr/bin/security delete-keychain "$private/signing.keychain-db" >/dev/null || failed=1; fi
+            rm -f "$private/cert.p12" || failed=1
+            test ! -e "$private/signing.keychain-db" && test ! -e "$private/cert.p12" || failed=1
+          fi
+          exit "$failed"
+      - name: Upload the same-source signed thin input and receipt
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OpenWhisper-electron-macos-thin-${{ matrix.arch }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/mac-release-input-${{ matrix.arch }}/*.zip
+            ${{ runner.temp }}/mac-release-input-${{ matrix.arch }}/release-input.json
+          if-no-files-found: error
+          retention-days: 14
+
+  universal:
+    name: Electron signed universal Mac release package
+    needs: thin
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
+      - name: Install locked Electron package tools
+        run: npm ci --prefix app
+      - name: Download exact same-run arm64 input
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: OpenWhisper-electron-macos-thin-arm64-${{ github.sha }}
+          path: ${{ runner.temp }}/thin-arm64
+      - name: Download exact same-run Intel input
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: OpenWhisper-electron-macos-thin-x64-${{ github.sha }}
+          path: ${{ runner.temp }}/thin-x64
+      - name: Admit source, version, package bytes and signing identity before secrets
+        working-directory: app
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --import tsx scripts/verify-release-source.ts --version "$VERSION" --commit "$GITHUB_SHA"
+          for arch in arm64 x64; do
+            input="$RUNNER_TEMP/thin-$arch"
+            receipt="$input/release-input.json"
+            test "$(jq -er '.status' "$receipt")" = PASS
+            test "$(jq -er '.architecture' "$receipt")" = "$arch"
+            test "$(jq -er '.sourceCommit' "$receipt")" = "$GITHUB_SHA"
+            test "$(jq -er '.sourceModified' "$receipt")" = false
+            test "$(jq -er '.version' "$receipt")" = "$VERSION"
+            test "$(jq -er '.classification' "$receipt")" = STABLE_RELEASE_INPUT
+            test "$(jq -er '.signingMode' "$receipt")" = persistent-validation
+            test "$(jq -er '.updateConfigured' "$receipt")" = true
+            [[ "$(jq -er '.certificateFingerprint' "$receipt")" =~ ^[a-f0-9]{40}$ ]]
+            shopt -s nullglob
+            archives=("$input"/*.zip)
+            test "${#archives[@]}" -eq 1
+            test "$(basename "${archives[0]}")" = "$(jq -er '.archive' "$receipt")"
+            test "$(/usr/bin/shasum -a 256 "${archives[0]}" | awk '{print $1}')" = "$(jq -er '.archiveSha256' "$receipt")"
+            mkdir -m 700 "$RUNNER_TEMP/extracted-$arch"
+            /usr/bin/ditto -x -k "${archives[0]}" "$RUNNER_TEMP/extracted-$arch"
+            app="$RUNNER_TEMP/extracted-$arch/OpenWhisper.app"
+            test "$(jq -er '.commit' "$app/Contents/Resources/app/dist/resources/development-build.json")" = "$GITHUB_SHA"
+            test "$(jq -er '.modified' "$app/Contents/Resources/app/dist/resources/development-build.json")" = false
+            test "$(cat "$app/Contents/Resources/app/dist/resources/VERSION")" = "$VERSION"
+            test "$(jq -er '.sourceVersion' "$app/Contents/Resources/notices/mac-stable-release-input.json")" = "$VERSION"
+            test "$(jq -er '.certificateFingerprint | ascii_downcase' "$app/Contents/Resources/notices/mac-stable-release-input.json")" = "$(jq -er '.certificateFingerprint' "$receipt")"
+            /usr/bin/codesign --verify --deep --strict "$app"
+          done
+          test "$(jq -er '.certificateFingerprint' "$RUNNER_TEMP/thin-arm64/release-input.json")" = "$(jq -er '.certificateFingerprint' "$RUNNER_TEMP/thin-x64/release-input.json")"
+          node --import tsx scripts/verify-macos-release-workflow.ts universal-inputs \
+            --runner-temp "$RUNNER_TEMP" --version "$VERSION" --commit "$GITHUB_SHA"
+      - name: Import the existing persistent identity into an isolated keychain
+        working-directory: app
+        env:
+          CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$CERT_P12" && test -n "$CERT_PASSWORD"
+          umask 077
+          private="$RUNNER_TEMP/mac-signing-private"
+          mkdir -m 700 "$private"
+          LC_ALL=C /usr/bin/security list-keychains -d user | node --import tsx tests/owned-macos-publisher.ts keychain-list > "$private/previous-keychains"
+          keychain="$private/signing.keychain-db"
+          password="$(uuidgen)"
+          printf '::add-mask::%s\n' "$password"
+          printf '%s' "$CERT_P12" | /usr/bin/base64 --decode > "$private/cert.p12"
+          /usr/bin/security create-keychain -p "$password" "$keychain" >/dev/null
+          /usr/bin/security set-keychain-settings -lut 900 "$keychain" >/dev/null
+          /usr/bin/security unlock-keychain -p "$password" "$keychain" >/dev/null
+          /usr/bin/security import "$private/cert.p12" -k "$keychain" -P "$CERT_PASSWORD" -T /usr/bin/codesign >/dev/null
+          /usr/bin/security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+          /usr/bin/security list-keychains -d user -s "$keychain"
+          rm "$private/cert.p12"
+          unset CERT_P12 CERT_PASSWORD password
+          identity="$(/usr/bin/security find-identity -p codesigning "$keychain" | awk '/^[[:space:]]*[0-9]+\)/ { count++; value=$2 } END { if (count == 1) print value }')"
+          [[ "$identity" =~ ^[a-fA-F0-9]{40}$ ]]
+          expected="$(jq -er '.certificateFingerprint' "$RUNNER_TEMP/thin-arm64/release-input.json")"
+          normalized="$(printf '%s' "$identity" | tr '[:upper:]' '[:lower:]')"
+          test "$normalized" = "$expected"
+          printf 'SIGN_IDENTITY=%s\n' "$identity" >> "$GITHUB_ENV"
+      - name: Build and verify canonical universal ZIP and DMG
+        working-directory: app
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/electron-macos-release"
+          node --import tsx scripts/package-macos-release.ts \
+            --arm64-app "$RUNNER_TEMP/extracted-arm64/OpenWhisper.app" \
+            --x64-app "$RUNNER_TEMP/extracted-x64/OpenWhisper.app" --output "$output" \
+            > "$RUNNER_TEMP/macos-release-result.json"
+          cd "$output"
+          /usr/bin/shasum -a 256 OpenWhisper-macOS.dmg OpenWhisper-macOS.zip > SHA256SUMS
+          /usr/bin/shasum -a 256 -c SHA256SUMS
+          printf '{"status":"PASS","version":"%s","sourceCommit":"%s","architecture":"universal","updateConfigured":true}\n' "$VERSION" "$GITHUB_SHA" > OpenWhisper-macOS-release.json
+      - name: Restore keychain and remove signing material
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          private="$RUNNER_TEMP/mac-signing-private"
+          failed=0
+          if test -d "$private"; then
+            previous=()
+            if test -f "$private/previous-keychains"; then
+              while IFS= read -r path; do previous+=("$path"); done < "$private/previous-keychains"
+            fi
+            if ((${#previous[@]})); then /usr/bin/security list-keychains -d user -s "${previous[@]}" >/dev/null || failed=1; fi
+            if test -e "$private/signing.keychain-db"; then /usr/bin/security delete-keychain "$private/signing.keychain-db" >/dev/null || failed=1; fi
+            rm -f "$private/cert.p12" || failed=1
+            test ! -e "$private/signing.keychain-db" && test ! -e "$private/cert.p12" || failed=1
+          fi
+          exit "$failed"
+      - name: Upload canonical universal Mac artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OpenWhisper-electron-macOS-v${{ inputs.version }}
+          path: |
+            ${{ runner.temp }}/electron-macos-release/OpenWhisper-macOS.dmg
+            ${{ runner.temp }}/electron-macos-release/OpenWhisper-macOS.zip
+            ${{ runner.temp }}/electron-macos-release/SHA256SUMS
+            ${{ runner.temp }}/electron-macos-release/OpenWhisper-macOS-release.json
+          if-no-files-found: error
+          retention-days: 14
