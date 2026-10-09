@@ -1,25 +1,77 @@
 import { spawnSync } from "node:child_process";
 import { totalmem } from "node:os";
 import { resolve } from "node:path";
+import { z } from "zod";
 import { validateMacBundleMetadata } from "./build-selection.js";
 import type { BuildIdentity } from "../contracts/build-identity.js";
 import { StableMigrationError } from "../contracts/stable-migration.js";
 import { legacyMacosMigrationContextSchema, type LegacyMacosMigrationContext } from "../services/legacy-macos-data.js";
 import { parseModelCatalog, recommendationsFor } from "../core/model-catalog.js";
 
+const bundleSignals = ["SIGTERM", "SIGKILL", "SIGABRT", "SIGSEGV", "SIGBUS", "SIGILL"] as const;
+const bundleFailureSchema = z.strictObject({
+  code: z.enum(["signature-timeout", "signature-output-limit", "signature-spawn", "signature-signal", "signature-exit",
+    "metadata-timeout", "metadata-output-limit", "metadata-spawn", "metadata-signal", "metadata-exit", "metadata-json", "metadata-mismatch"]),
+  status: z.number().int().min(0).max(255).nullable(), signal: z.enum([...bundleSignals, "other"]).nullable(),
+  elapsedMs: z.number().int().min(0).max(20_000),
+}).readonly();
+type BundleFailure = z.infer<typeof bundleFailureSchema>;
+type BundleToolResult = Readonly<{ status: unknown; signal: unknown; error?: unknown }>;
+
+/** Owned diagnostics contain no tool output, arguments, paths or exception messages. */
+export class MacBundleAdmissionError extends Error {
+  readonly observation: BundleFailure;
+  constructor(observation: unknown) {
+    const admitted = bundleFailureSchema.parse(observation);
+    super(admitted.code); this.name = "MacBundleAdmissionError"; this.observation = admitted;
+  }
+}
+function bundleFailure(code: BundleFailure["code"], result: BundleToolResult, elapsedMs: number): MacBundleAdmissionError {
+  return new MacBundleAdmissionError({ code,
+    status: typeof result.status === "number" && Number.isInteger(result.status) && result.status >= 0 && result.status <= 255 ? result.status : null,
+    signal: result.signal == null ? null : bundleSignals.find((signal) => signal === result.signal) ?? "other",
+    // Synchronous tool observation only; this cap never changes the tool deadline.
+    elapsedMs: Number.isFinite(elapsedMs) ? Math.max(0, Math.min(20_000, Math.floor(elapsedMs))) : 0 });
+}
+/** Pure result classification; success retains the existing error/status gate exactly. */
+export function macBundleToolFailure(tool: "signature" | "metadata", result: BundleToolResult, elapsedMs: number): MacBundleAdmissionError | undefined {
+  if (!result.error && result.status === 0) return undefined;
+  let code: unknown;
+  try { if (result.error instanceof Error && "code" in result.error) code = result.error.code; }
+  catch { /* Unreadable exception details remain a generic fixed spawn failure. */ }
+  const reason = result.error ? code === "ETIMEDOUT" ? "timeout" : code === "ENOBUFS" ? "output-limit" : "spawn"
+    : result.signal ? "signal" : "exit";
+  return bundleFailure(`${tool}-${reason}`, result, elapsedMs);
+}
+/** Formatter revalidates the closed fields; structural lookalikes and altered observations stay generic. */
+export function readMacBundleFailure(error: unknown): BundleFailure | undefined {
+  try {
+    if (error instanceof MacBundleAdmissionError) {
+      const value = bundleFailureSchema.safeParse(error.observation); if (value.success) return value.data;
+    }
+  } catch { /* Never reveal unreadable exception fields. */ }
+  return undefined;
+}
+
 /** Inspect only the selected package. This verifies its ad-hoc validation signature, not release-key continuity. */
 export function verifyMacApplicationBundle(identity: BuildIdentity, version: string, executable: string): void {
   if (process.platform !== "darwin") throw new Error("Mac bundle admission requires Darwin.");
   const bundle = resolve(executable, "../../..");
+  const signatureStarted = performance.now();
   const signature = spawnSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle],
     { encoding: "utf8", shell: false, timeout: 10_000, maxBuffer: 1024 * 1024 });
-  if (signature.error || signature.status !== 0) throw new Error("The Mac package signature is invalid.");
+  const signatureFailure = macBundleToolFailure("signature", signature, performance.now() - signatureStarted);
+  if (signatureFailure) throw signatureFailure;
+  const metadataStarted = performance.now();
   const info = spawnSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", `${bundle}/Contents/Info.plist`],
     { encoding: "utf8", shell: false, timeout: 5000, maxBuffer: 1024 * 1024 });
-  if (info.error || info.status !== 0) throw new Error("The Mac package metadata is unavailable.");
+  const metadataFailure = macBundleToolFailure("metadata", info, performance.now() - metadataStarted);
+  if (metadataFailure) throw metadataFailure;
   let metadata: unknown;
-  try { metadata = JSON.parse(info.stdout); } catch { throw new Error("The Mac package metadata is invalid."); }
-  validateMacBundleMetadata(identity, version, metadata);
+  try { metadata = JSON.parse(info.stdout); }
+  catch { throw bundleFailure("metadata-json", info, performance.now() - metadataStarted); }
+  try { validateMacBundleMetadata(identity, version, metadata); }
+  catch { throw bundleFailure("metadata-mismatch", info, performance.now() - metadataStarted); }
 }
 
 export interface MacosLoginFact { readonly requested: boolean; readonly pending: boolean;

@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { prepareStableProfile, prepareStableProfileStorage, resolveStableProfile, stableProfileSchema, validateStableProfile, type StableProfile } from "../src/services/stable-profile.js";
 import { formatBootstrapFailure, observeBootstrapLoginStatus, type ApplicationBootstrapStage, type ApplicationBootstrapLoginStatus } from "../src/main/stable-profile-startup.js";
 import { StableMigrationError } from "../src/contracts/stable-migration.js";
+import { MacBundleAdmissionError } from "../src/main/macos-stable-admission.js";
 
 test("bootstrap diagnostics preserve closed worker categories without exception or stage content", () => {
   const prefix = "OpenWhisper could not initialize its application profile.";
@@ -24,6 +25,20 @@ test("bootstrap diagnostics preserve closed worker categories without exception 
     `${prefix} stage=mac-context code=BOOTSTRAP_FAILED login=unavailable`);
   assert.equal(formatBootstrapFailure(privateText as ApplicationBootstrapStage, new Error(privateText)),
     `${prefix} stage=bootstrap code=BOOTSTRAP_FAILED login=not-observed`);
+});
+
+test("bootstrap emits only owned closed Mac bundle observations without error output or private fields", () => {
+  const prefix = "OpenWhisper could not initialize its application profile.", privateText = "/Users/owned/private transcript device and tool stderr";
+  const error = new MacBundleAdmissionError({ code: "signature-timeout", status: null, signal: "SIGTERM", elapsedMs: 10_000 });
+  Object.assign(error, { message: privateText, stack: privateText, stderr: privateText, argv: [privateText] });
+  assert.equal(formatBootstrapFailure("mac-bundle", error),
+    `${prefix} stage=mac-bundle code=MAC_BUNDLE_FAILED login=not-observed bundle=signature-timeout status=unavailable signal=SIGTERM elapsed_ms=10000`);
+  for (const altered of [Object.assign(new Error(privateText), { observation: error.observation }), { observation: error.observation },
+    new Error("signature-timeout")]) {
+    assert.equal(formatBootstrapFailure("mac-bundle", altered), `${prefix} stage=mac-bundle code=BOOTSTRAP_FAILED login=not-observed`);
+  }
+  Reflect.set(error, "observation", { ...error.observation, stderr: privateText });
+  assert.equal(formatBootstrapFailure("mac-bundle", error), `${prefix} stage=mac-bundle code=BOOTSTRAP_FAILED login=not-observed`);
 });
 
 function fixture(run: (home: string, root: string) => void): void {

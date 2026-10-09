@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { macosLoginFact, macosMigrationContext, verifyMacApplicationBundle } from "../src/main/macos-stable-admission.js";
+import { MacBundleAdmissionError, macBundleToolFailure, readMacBundleFailure, macosLoginFact, macosMigrationContext, verifyMacApplicationBundle } from "../src/main/macos-stable-admission.js";
 import { StableMigrationError } from "../src/contracts/stable-migration.js";
 import { legacyMacosMigrationContextSchema } from "../src/services/legacy-macos-data.js";
 
@@ -50,4 +50,45 @@ test("invalid Mac hardware and language facts cannot create a migration context"
 test("portable bundle admission refuses before invoking any Mac system tool", { skip: process.platform === "darwin" }, () => {
   assert.throws(() => verifyMacApplicationBundle({ version: 1, kind: "stable", appId: "io.github.whisperfree", productName: "OpenWhisper" },
     "0.3.0", "/never-read/OpenWhisper.app/Contents/MacOS/OpenWhisper"), /requires Darwin/);
+});
+
+
+test("Mac bundle tool failures distinguish timeouts output limits exit and signal without tool contents", () => {
+  const privateText = "/Users/owned/private bundle transcript device stderr";
+  for (const tool of ["signature", "metadata"] as const) {
+    assert.equal(macBundleToolFailure(tool, { status: 0, signal: null }, 1), undefined);
+    const cases = [
+      { reason: "timeout", error: Object.assign(new Error(privateText), { code: "ETIMEDOUT" }), status: null, signal: "SIGTERM" },
+      { reason: "output-limit", error: Object.assign(new Error(privateText), { code: "ENOBUFS" }), status: null, signal: "SIGTERM" },
+      { reason: "spawn", error: Object.assign(new Error(privateText), { code: privateText }), status: null, signal: null },
+      { reason: "exit", error: undefined, status: 2, signal: null },
+      { reason: "signal", error: undefined, status: null, signal: "SIGKILL" },
+    ] as const;
+    for (const result of cases) {
+      const failure = macBundleToolFailure(tool, result, 10_001.9);
+      assert.ok(failure instanceof MacBundleAdmissionError);
+      assert.deepEqual(readMacBundleFailure(failure), { code: `${tool}-${result.reason}`, status: result.status,
+        signal: result.signal, elapsedMs: 10_001 });
+      assert.ok(Object.isFrozen(failure.observation)); assert.ok(!JSON.stringify(failure.observation).includes(privateText));
+    }
+  }
+});
+
+test("Mac bundle observations cap durations and refuse arbitrary metadata and altered error fields", () => {
+  const privateText = "/Users/owned/private-path raw exception output";
+  const error = new Error(privateText); Object.defineProperty(error, "code", { get() { throw new Error(privateText); } });
+  const failure = macBundleToolFailure("signature", { error, status: privateText, signal: privateText }, 30_000);
+  assert.ok(failure); assert.deepEqual(readMacBundleFailure(failure),
+    { code: "signature-spawn", status: null, signal: "other", elapsedMs: 20_000 });
+  for (const elapsedMs of [-1, Infinity, NaN]) assert.equal(macBundleToolFailure("metadata", { status: 1, signal: null }, elapsedMs)?.observation.elapsedMs, 0);
+  for (const code of ["metadata-json", "metadata-mismatch"] as const) {
+    const observed = { code, status: 0, signal: null, elapsedMs: 1 };
+    assert.deepEqual(readMacBundleFailure(new MacBundleAdmissionError(observed)), observed);
+    for (const changes of [{ code: privateText }, { status: 256 }, { signal: privateText }, { elapsedMs: 20_001 }, { stderr: privateText }]) {
+      assert.throws(() => new MacBundleAdmissionError({ ...observed, ...changes }));
+    }
+  }
+  assert.equal(readMacBundleFailure({ observation: failure.observation }), undefined);
+  Object.defineProperty(failure, "observation", { get() { throw new Error(privateText); } });
+  assert.equal(readMacBundleFailure(failure), undefined);
 });

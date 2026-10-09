@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { developmentRecordingDescriptorSchema } from "../src/main/development-recording-descriptor.js";
 import { SPEECH_ENTRY_FILES } from "../src/services/speech-entry-graph.js";
-import { parseMacPackageSmokeArguments, validateUniversalMacPackageMetadata } from "./fixtures/mac-package-metadata.js";
+import { classifyMacPublisherFixtureResult, parseMacPackageSmokeArguments, validateUniversalMacPackageMetadata } from "./fixtures/mac-package-metadata.js";
 const artifact = { bytes: 123, sha256: "a".repeat(64) };
 function descriptor(architecture: "arm64" | "x64") {
   return developmentRecordingDescriptorSchema.parse({ version: 1, platform: "darwin", architecture,
@@ -42,6 +42,7 @@ test("actual V2 and indexed originals agree on both architectures while final si
   for (const architecture of ["arm64", "x64"] as const) {
     const input = fixture(); input.host.architecture = architecture;
     const result = validateUniversalMacPackageMetadata(input);
+    assert.equal(result.signingMode, "ad-hoc");
     assert.equal(result.recordingDescriptor.architecture, architecture);
     assert.deepEqual(result.recordingDescriptor, input.receipt.signedRecording.architectures[architecture]);
   }
@@ -60,8 +61,45 @@ test("missing or swapped originals and source, identity, version or descriptor m
     { ...original, source: { ...original.source, modified: true } },
     { ...original, host: { platform: "linux", architecture: "arm64" } },
     { ...original, receipt: { ...original.receipt, updateAuthority: true } },
+    { ...original, receipt: { ...original.receipt, signingMode: undefined } },
+    { ...original, receipt: { ...original.receipt, signingMode: "unknown" } },
     { ...original, receipt: { ...original.receipt, signedRecording: { ...original.receipt.signedRecording,
       architectures: { ...original.receipt.signedRecording.architectures, x64: { ...original.receipt.signedRecording.architectures.x64, architecture: "arm64" } } } } },
   ];
   for (const input of cases) assert.throws(() => validateUniversalMacPackageMetadata(input));
+});
+test("publisher fixture limitation requires the admitted ad-hoc mode and the exact universal self refusal", () => {
+  const original = fixture();
+  const metadata = validateUniversalMacPackageMetadata(original);
+  assert.equal(validateUniversalMacPackageMetadata({ ...original, receipt: { ...original.receipt,
+    signingMode: "persistent-validation" } }).signingMode, "persistent-validation");
+  const knownRefusal = { accepted: false, code: "INVALID_SIGNATURE", osStatus: -67050 };
+  assert.equal(classifyMacPublisherFixtureResult({ fixture: "self", packageFormat: "universal",
+    signingMode: metadata.signingMode, result: knownRefusal }), "UNAVAILABLE");
+  for (const [packageFormat, signingMode] of [["thin", "ad-hoc"], ["thin", "persistent-validation"],
+    ["universal", "persistent-validation"]] as const) {
+    assert.throws(() => classifyMacPublisherFixtureResult({ fixture: "self", packageFormat, signingMode, result: knownRefusal }));
+  }
+  for (const result of [{ ...knownRefusal, osStatus: -67062 }, { ...knownRefusal, osStatus: null },
+    { ...knownRefusal, code: "CURRENT_SIGNATURE_UNAVAILABLE" }, { accepted: false, code: null, osStatus: null }]) {
+    assert.throws(() => classifyMacPublisherFixtureResult({ fixture: "self", packageFormat: "universal", signingMode: "ad-hoc", result }));
+  }
+});
+test("measured publisher success remains success in every format and signing mode", () => {
+  for (const packageFormat of ["thin", "universal"] as const) for (const signingMode of ["ad-hoc", "persistent-validation"] as const) {
+    const context = { packageFormat, signingMode, result: { accepted: true, code: null, osStatus: null } };
+    assert.equal(classifyMacPublisherFixtureResult({ ...context, fixture: "self" }), "ACCEPTED");
+    assert.equal(classifyMacPublisherFixtureResult({ ...context, fixture: "real-package", selfAvailability: "UNAVAILABLE" }), "ACCEPTED");
+    assert.throws(() => classifyMacPublisherFixtureResult({ ...context, fixture: "self",
+      result: { accepted: true, code: "INVALID_SIGNATURE", osStatus: -67050 } }));
+  }
+});
+test("actual ZIP publisher unavailability requires the previously measured exact self limitation", () => {
+  const context = { packageFormat: "universal", signingMode: "ad-hoc", fixture: "real-package",
+    result: { accepted: false, code: "INVALID_SIGNATURE", osStatus: -67050 } } as const;
+  assert.equal(classifyMacPublisherFixtureResult({ ...context, selfAvailability: "UNAVAILABLE" }), "UNAVAILABLE");
+  assert.throws(() => classifyMacPublisherFixtureResult({ ...context, selfAvailability: "ACCEPTED" }));
+  assert.throws(() => classifyMacPublisherFixtureResult({ ...context, selfAvailability: "UNAVAILABLE",
+    result: { accepted: false, code: "INVALID_BUNDLE", osStatus: -67050 } }));
+  assert.throws(() => classifyMacPublisherFixtureResult({ ...context, selfAvailability: "UNAVAILABLE", signingMode: "persistent-validation" }));
 });

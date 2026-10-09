@@ -1,4 +1,5 @@
 import { Worker } from "node:worker_threads";
+import { readMacBundleFailure } from "./macos-stable-admission.js";
 import { stableMigrationFailureSchema, stableMigrationReplySchema, type StableMigrationReply } from "../contracts/stable-migration.js";
 import { resolveStableProfile, stableProfileInputSchema, stableMacosMigrationRequestSchema, validateStableProfile, type StableProfile } from "../services/stable-profile.js";
 
@@ -22,7 +23,9 @@ export function formatBootstrapFailure(stage: ApplicationBootstrapStage, error: 
   catch { /* Unreadable exception fields stay generic. */ }
   const category = stableMigrationFailureSchema.safeParse(code);
   const selectedLogin = login === "not-observed" ? login : observeBootstrapLoginStatus(login);
-  return `OpenWhisper could not initialize its application profile. stage=${selectedStage} code=${category.success ? category.data : "BOOTSTRAP_FAILED"} login=${selectedLogin}`;
+  const bundle = readMacBundleFailure(error);
+  return `OpenWhisper could not initialize its application profile. stage=${selectedStage} code=${bundle ? "MAC_BUNDLE_FAILED" : category.success ? category.data : "BOOTSTRAP_FAILED"} login=${selectedLogin}` +
+    (bundle ? ` bundle=${bundle.code} status=${bundle.status ?? "unavailable"} signal=${bundle.signal ?? "none"} elapsed_ms=${bundle.elapsedMs}` : "");
 }
 
 /** Select only after the host's packaged stable identity is verified. Never runs in Dev bootstrap. */

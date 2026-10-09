@@ -56,5 +56,20 @@ export function validateUniversalMacPackageMetadata(input: {
   }
   const selected = selectDevelopmentRecordingDescriptor(actual, input.host);
   return { sourceVersion: receipt.sourceVersion, runtimeVersion: receipt.runtimeVersion, applicationBuild: identity,
-    source: receipt.source, recordingDescriptor: selected };
+    source: receipt.source, recordingDescriptor: selected, signingMode: receipt.signingMode };
+}
+
+/** Only the producer-admitted ad-hoc universal fixture has this known publisher limitation. */
+export function classifyMacPublisherFixtureResult(input: {
+  readonly packageFormat: "thin" | "universal"; readonly signingMode: "ad-hoc" | "persistent-validation";
+  readonly result: { readonly accepted: boolean; readonly code: string | null; readonly osStatus: number | null };
+} & ({ readonly fixture: "self" } | { readonly fixture: "real-package"; readonly selfAvailability: "ACCEPTED" | "UNAVAILABLE" })) {
+  if (input.result.accepted) {
+    assert.deepEqual(input.result, { accepted: true, code: null, osStatus: null });
+    return "ACCEPTED" as const;
+  }
+  assert.equal(input.packageFormat, "universal"); assert.equal(input.signingMode, "ad-hoc");
+  if (input.fixture === "real-package") assert.equal(input.selfAvailability, "UNAVAILABLE");
+  assert.deepEqual(input.result, { accepted: false, code: "INVALID_SIGNATURE", osStatus: -67050 });
+  return "UNAVAILABLE" as const;
 }

@@ -15,13 +15,42 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | Plan and architecture | Reviewed plan, repository research answers and issue/PR review recorded | Keep decisions aligned with final implementation |
 | Shared interface and services | Existing design, strict TS bridge, isolated Dev profile, settings, models/history and localized shared-owner tray actions; sandboxed recording overlay connected | Native tray presentation, assembled Mac overlay and remaining platform behaviors |
 | Linux dictation | CPU recognition, clipboard/history, Retry/Discard and original cleanup pass in exact Dev/stable packages with private virtual audio. The installed stable package also passes migration, command control, autostart and permanent-target restart | Accelerated inference; an earlier final-Quit hang did not reproduce and remains unclassified |
-| macOS dictation | Actual Intel/Apple Silicon Dev packages pass sandbox, signed utilities, CPU recognition of public audio, shortcut setup/removal and original Quit. Normal stable packages pass migration, edited-state restart and clean exits at b892d86 | Physical microphone/TCC, actual target insertion and device changes; Metal selection remains open |
+| macOS dictation | Actual Intel/Apple Silicon thin Dev and Stable packages pass sandbox, signed utilities, CPU recognition of public audio, shortcut setup/removal, migration, edited-state restart and clean exits at 866c3a74 | Complete the Universal runtime checks; physical microphone/TCC, actual target insertion, device changes and Metal selection remain open |
 | Linux desktop integration | Owned stock KDE 5.27 native Wayland F8, binding Quit/crash recovery and paste into separate Wayland/XWayland editors pass. Genuine X11 shortcuts and all five no-display CLI commands pass, including installed stable autostart enable/disable and generated-target restart | Expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
-| Packaging and updates | Unchanged supervised Debian and AppImage pass all 18 runtime checks; the owned X11 rendering budget is corrected. Inactive consumers authenticate downloads and preserve the AppImage predecessor through handoff. Both Mac thin packages and universal construction pass | Confirm universal Mac runtime; connect installation/restart/rollback, installed Debian audit, persistent publisher continuity, authenticated Dev replacement, DMG and release signing; retain earlier resource failures separately |
+| Packaging and updates | Unchanged supervised Debian and AppImage pass all 18 runtime checks; the owned X11 rendering budget is corrected. Inactive consumers authenticate downloads and preserve the AppImage predecessor through handoff. Both Mac thin packages and Universal construction pass; ARM Universal startup and Intel ad-hoc update-fixture checks still fail | Complete Universal Mac runtime; connect installation/restart/rollback, installed Debian audit, persistent publisher continuity, authenticated Dev replacement, DMG and release signing; retain earlier resource failures separately |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 ## Current package checkpoint
+
+In [normal CI 37889109350](https://github.com/juferdinand/OpenWhisper/actions/runs/37889109350),
+both thin Mac jobs and Universal construction pass at actual synthetic producer
+`866c3a74`, distinct from API head `38d607e1`. Both Universal consumers now
+prepare the checksum-pinned public audio successfully. ARM launches the normal
+app but exits during `mac-bundle` admission with a generic bootstrap failure;
+the specific tool or metadata cause is not established. Intel initializes the
+packaged UI and sandbox, then fails the self-update signature expectation with
+`INVALID_SIGNATURE` / `-67050`. Neither result proves the remaining Universal
+CPU/recording/quit checks. The existing production all-architecture publisher
+requirement remains mandatory; ad-hoc fixture evidence does not establish
+persistent-certificate update continuity.
+
+The reviewed source increment adds fixed, content-free bundle failure categories
+without changing admission requirements or tool deadlines. The owned Mac test
+uses the producer's admitted signing mode: only the exact Universal ad-hoc
+`INVALID_SIGNATURE` / `-67050` self and real-ZIP results can be recorded as
+publisher acceptance unavailable. It still runs real ZIP extraction, hostile
+archive refusals and cleanup, then ordinary application acceptance. Thin and
+persistent-validation packages require successful publisher acceptance; all
+unexpected results fail. Production update verification is unchanged. Actual
+Universal application results require the next normal CI.
+
+This source increment passes strict typing, the normal application/shared-UI
+build and 1,236 tests in 18.42 seconds:
+1,278 total, zero failures and 42 explicit native/opt-in skips. These source
+checks are separate from actual packaged Mac acceptance.
+
+### Earlier fixture checkpoint
 
 Both thin Mac jobs and universal construction in
 [CI 37886541728](https://github.com/juferdinand/OpenWhisper/actions/runs/37886541728)
@@ -38,7 +67,7 @@ Fixture preparation now obtains the existing pinned speech source only when
 the sample is missing, without a compiler or app build. One independently
 reviewed cold private preparation passes in 1.30 seconds with exact model/WAV/
 Float32 checksums, original normal process closure and no native build outputs.
-Actual universal app startup still requires the next normal CI.
+The following normal CI results above supersede that missing-fixture boundary.
 
 The inactive Debian installed-target audit now authenticates the original
 download, reads a bounded inventory through the maintained typed archive

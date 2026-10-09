@@ -12,7 +12,7 @@ import { legacyMacosMigrationContextSchema } from "../src/services/legacy-macos-
 import { decodedLegacyMacosPlistSchema } from "../src/workers/macos-legacy-plist.js";
 import { pinnedRuntimeEnvironment } from "../scripts/runtime.js";
 import { macUpdateZip } from "./fixtures/mac-update-zip.js";
-import { parseMacPackageSmokeArguments, validateUniversalMacPackageMetadata } from "./fixtures/mac-package-metadata.js";
+import { classifyMacPublisherFixtureResult, parseMacPackageSmokeArguments, validateUniversalMacPackageMetadata } from "./fixtures/mac-package-metadata.js";
 
 // Stable selection changes only this launcher; the captured package must independently match.
 if (process.platform !== "darwin" || process.getuid?.() === 0 || process.env["GITHUB_ACTIONS"] !== "true" ||
@@ -48,7 +48,8 @@ const packageMetadata = packageFormat === "universal"
     recordingModule: sourceDescriptor.toString("utf8"), host: { platform: "darwin", architecture: process.arch },
   })
   : z.object({ architecture: z.literal(process.arch), sourceVersion: z.string().regex(/^\d+\.\d+\.\d+$/u),
-    runtimeVersion: z.literal("44.7.0"), applicationBuild: buildIdentitySchema }).parse(JSON.parse(await readFile(join(sourceBundle,
+    runtimeVersion: z.literal("44.7.0"), applicationBuild: buildIdentitySchema,
+    signingMode: z.enum(["ad-hoc", "persistent-validation"]) }).parse(JSON.parse(await readFile(join(sourceBundle,
       `Contents/Resources/notices/${stable ? "mac-stable-validation-package" : "mac-dev-package"}.json`), "utf8")) as unknown);
 assert.deepEqual(packageMetadata.applicationBuild, capturedBuild);
 
@@ -185,13 +186,16 @@ try {
     }
   }, candidate));
   const signatureCases: { name: "self" | "different-identity" | "unsigned" | "tampered"; result: Awaited<ReturnType<typeof verifyCandidate>> }[] = [];
-  signatureAdmission = { cases: signatureCases, flags: 25, architecture: process.arch,
+  const signatureContext = { flags: 25, architecture: process.arch, signingMode: packageMetadata.signingMode,
     scope: packageFormat === "universal"
-      ? "Actual running universal package requirement; ad-hoc owned fixtures only; no persistent 0.2.5 publisher or install authorization claim"
-      : "Actual running package requirement; ad-hoc owned fixtures only; no persistent 0.2.5 publisher, universal artifact or install authorization claim" };
+      ? "Actual running universal package requirement; captured signing mode; no persistent 0.2.5 publisher or install authorization claim"
+      : "Actual running package requirement; captured signing mode; no persistent 0.2.5 publisher, universal artifact or install authorization claim" };
+  signatureAdmission = { ...signatureContext, cases: signatureCases };
   stage = "update-signature-self";
   const selfSignature = await verifyCandidate(bundle); signatureCases.push({ name: "self", result: selfSignature });
-  assert.deepEqual(selfSignature, { accepted: true, code: null, osStatus: null });
+  const selfAvailability = classifyMacPublisherFixtureResult({ fixture: "self", packageFormat,
+    signingMode: packageMetadata.signingMode, result: selfSignature });
+  signatureAdmission = { ...signatureContext, cases: signatureCases, selfAvailability };
   const signatureRoot = join(evidence, "signature-candidates"); await mkdir(signatureRoot, { mode: 0o700 });
   const wrongRoot = join(signatureRoot, "different-identity"), tamperedRoot = join(signatureRoot, "tampered");
   for (const path of [wrongRoot, tamperedRoot]) await mkdir(path, { mode: 0o700 });
@@ -216,7 +220,9 @@ try {
   assert.deepEqual(await readFile(sourceDescriptorPath), sourceDescriptor);
   assert.deepEqual(await readFile(join(appPath, "dist/main/development-recording-build.js")), sourceDescriptor);
   execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], { env: environment, timeout: 15_000, stdio: "ignore" });
-  checks.push("Current running-app requirement accepts itself and rejects valid different ad-hoc identity, unsigned code and changed sealed resource");
+  checks.push(selfAvailability === "ACCEPTED"
+    ? "Current running-app requirement accepts itself and rejects valid different ad-hoc identity, unsigned code and changed sealed resource"
+    : "Producer-admitted universal ad-hoc self publisher acceptance is unavailable at INVALID_SIGNATURE/-67050; different identity, unsigned code and changed sealed resource are rejected");
   stage = "owned-update-archive-admission";
   const archiveRoot = join(evidence, "archive-candidates"), outside = join(archiveRoot, "outside");
   await mkdir(archiveRoot, { mode: 0o700 }); await mkdir(outside, { mode: 0o700 });
@@ -246,7 +252,8 @@ try {
     const packagedRequire = modules.createRequire(path.join(app.getAppPath(), "package.json"));
     const staging = packagedRequire(path.join(app.getAppPath(), "dist/services/update-staging.js")) as typeof import("../src/services/update-staging.js");
     const archive = packagedRequire(path.join(app.getAppPath(), "dist/services/macos-update-archive.js")) as typeof import("../src/services/macos-update-archive.js");
-    const results: { name: string; accepted: boolean; code: string | null; bytes: number; sameVersionRefused: boolean }[] = [];
+    const signature = packagedRequire(path.join(app.getAppPath(), "dist/services/macos-update-signature.js")) as typeof import("../src/services/macos-update-signature.js");
+    const results: { name: string; accepted: boolean; code: string | null; osStatus: number | null; bytes: number; sameVersionRefused: boolean }[] = [];
     for (const name of input.names) {
       const stageDirectory = await fs.mkdtemp(path.join(input.root, "download-"));
       const file = await fs.open(path.join(stageDirectory, "OpenWhisper-macOS.zip"),
@@ -282,13 +289,20 @@ try {
             expectedVersion: name === "wrong-version" ? "1.0.0" : input.version, currentVersion: "0.0.0" });
           assert.equal(extracted.version, input.version); assert.equal(path.basename(extracted.bundlePath), `${input.build.productName}.app`);
           assert.equal((await file.stat()).size, download.bytes);
-          results.push({ name, accepted: true, code: null, bytes: download.bytes, sameVersionRefused });
+          results.push({ name, accepted: true, code: null, osStatus: null, bytes: download.bytes, sameVersionRefused });
         } catch (error: unknown) {
-          if (!(error instanceof archive.MacosUpdateArchiveError)) throw error;
-          if (error.code === "CLEANUP_FAILED") { cleanupFailure = error; throw error; }
+          if (error instanceof signature.MacosUpdateSignatureError) {
+            if (name !== "real-package" || input.selfAvailability !== "UNAVAILABLE" ||
+              error.code !== "INVALID_SIGNATURE" || error.osStatus !== -67050) throw error;
+          } else {
+            if (!(error instanceof archive.MacosUpdateArchiveError)) throw error;
+            if (error.code === "CLEANUP_FAILED") { cleanupFailure = error; throw error; }
+          }
           assert.deepEqual(await fs.readdir(stageDirectory), ["OpenWhisper-macOS.zip"]);
           assert.equal((await file.stat()).size, download.bytes);
-          results.push({ name, accepted: false, code: error.code, bytes: download.bytes, sameVersionRefused });
+          results.push({ name, accepted: false, code: error.code,
+            osStatus: error instanceof signature.MacosUpdateSignatureError ? error.osStatus ?? null : null,
+            bytes: download.bytes, sameVersionRefused });
         }
       } finally {
         try {
@@ -310,16 +324,24 @@ try {
       await assert.rejects(fs.lstat(path.join(input.outside, "marker")), { code: "ENOENT" });
     }
     return results;
-  }, { root: archiveRoot, outside, names: [...archiveFixtures], build: capturedBuild, version: packageMetadata.sourceVersion });
+  }, { root: archiveRoot, outside, names: [...archiveFixtures], build: capturedBuild, version: packageMetadata.sourceVersion, selfAvailability });
+  const archiveContext = { cases: archiveResults, descriptor: "Original exclusively created descriptor inherited as fd3, positioned producer writes",
+    scope: "Actual packaged main and ditto ZIP; synthetic prior version0.0.0; captured signing mode; no persistent release publisher or installation claim" };
+  archiveAdmission = archiveContext;
   assert.equal(archiveResults.length, archiveFixtures.length);
-  assert.equal(archiveResults[0]?.accepted, true); assert.equal(archiveResults[0]?.sameVersionRefused, true);
+  const realPackage = archiveResults[0]; assert.ok(realPackage); assert.equal(realPackage.name, "real-package");
+  const publisherAvailability = classifyMacPublisherFixtureResult({ fixture: "real-package", packageFormat,
+    signingMode: packageMetadata.signingMode, selfAvailability,
+    result: { accepted: realPackage.accepted, code: realPackage.code, osStatus: realPackage.osStatus } });
+  assert.equal(realPackage.sameVersionRefused, true);
   assert.ok(archiveResults.slice(1).every((result) => result.accepted === false));
   assert.equal(archiveResults[1]?.code, "INVALID_BUNDLE");
   assert.deepEqual(await Promise.all(archiveFixtures.map((name) => frozenFile(join(archiveRoot, `${name}.zip`)))), archiveOriginals);
   assert.ok((await readdir(archiveRoot)).every((name) => !name.startsWith("download-")));
-  archiveAdmission = { cases: archiveResults, descriptor: "Original exclusively created descriptor inherited as fd3, positioned producer writes",
-    scope: "Actual packaged main and ditto ZIP; synthetic prior version0.0.0; ad-hoc running requirement; no persistent release publisher or installation claim" };
-  checks.push("Original fd3 Mac ZIP extraction accepts actual packaged app and refuses version, traversal, symlink and corrupt archives with complete owned cleanup");
+  archiveAdmission = { ...archiveContext, publisherAvailability };
+  checks.push(publisherAvailability === "ACCEPTED"
+    ? "Original fd3 Mac ZIP extraction accepts actual packaged app and refuses version, traversal, symlink and corrupt archives with complete owned cleanup"
+    : "Actual original-fd3 ZIP publisher acceptance is unavailable at the measured universal ad-hoc requirement; same-version and hostile archive refusals and complete owned cleanup pass");
   stage = "native-composition";
   const state = async () => appStateSchema.parse(await page!.evaluate(() => window.openwhisper!.invoke("get_state", {})));
   const initial = await state();

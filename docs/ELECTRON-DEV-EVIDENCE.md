@@ -1,5 +1,39 @@
 # Electron development evidence
 
+## Universal runtime boundaries after fixture preparation
+
+Original [CI 37889109350](https://github.com/juferdinand/OpenWhisper/actions/runs/37889109350)
+prints actual synthetic producer `866c3a74` (API head `38d607e1`). Both thin
+Dev/Stable package jobs and Universal construction pass. Both consumers prepare
+the pinned public audio. ARM launches PID 21784 but exits 1 during `mac-bundle`
+admission before UI initialization; its tool/metadata refusal is still
+unclassified. Intel initializes the packaged UI/sandbox, then returns
+`INVALID_SIGNATURE` / `-67050` at the ad-hoc self-update fixture. Ordinary
+Universal CPU, recording and Quit checks were not reached. The original failures
+remain separate from thin success, construction and fixture preparation.
+
+The retained original ARM and Intel logs have SHA-256
+`13fa3414fe9abd84f87f7cd234a438ca389c43f7b4056e1a69af97d20d1ae895` and
+`32907539eeb314fe2a48354297770dfeae84a8f9d00ac3098c4d0dd0563dfbed`,
+respectively. The Universal enclosing Actions artifact digest is not an inner
+ZIP checksum. No artifacts, secrets or user devices were accessed for the
+read-only observation. Production publisher checks are unchanged; persistent
+certificate continuity remains a separate required update gate.
+
+Independent source review passes the closed bundle diagnostic and the owned
+fixture correction. The Universal receipt already declares its signing mode;
+format alone grants no exception. Only the exact measured ad-hoc self limitation
+permits recording the same original-fd3 ZIP signature result as unavailable.
+Actual extraction, same-version refusal, all seven hostile archive fixtures,
+source preservation and cleanup still execute. Ordinary UI, native composition,
+CPU recognition, recording and original Quit remain required. No actual
+Universal runtime success is inferred from portable classifier tests.
+
+The combined source freeze passes strict typing, the application/shared-UI
+build and 1,236 tests in 18.42
+seconds: 1,278 total, zero failures and 42 explicit native/opt-in skips.
+Native and owned package observations above retain their original producers.
+
 ## Universal constructor and independent fixture preparation
 
 Original [CI 37886541728](https://github.com/juferdinand/OpenWhisper/actions/runs/37886541728)
