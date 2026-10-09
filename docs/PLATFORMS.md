@@ -1,14 +1,14 @@
 # Platform architecture
 
-The current public release is 0.2.5 and uses the original native hosts. The Electron application
-in `app/` is the replacement target for 0.3.0; its acceptance is still in progress. See
-[current status and evidence](ELECTRON-STATUS.md) before treating a candidate feature or package
-as supported.
+The published 0.2.5 release uses the original native hosts. This replacement branch's
+application source is the Electron app in `app/`. See [current status and evidence](ELECTRON-STATUS.md)
+for package and acceptance scope; the [immutable 0.2.5 source](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4)
+is the historical reference for those native hosts.
 
-| Platform | Public release | Replacement target |
+| Platform | Published 0.2.5 release | Replacement branch |
 | --- | --- | --- |
-| macOS 14+ | 0.2.5 native app | Electron with native capture, platform adapters, signed update path; acceptance pending |
-| Linux x86_64 | 0.2.5 AppImage and Debian package | Electron AppImage and Debian package; acceptance pending |
+| macOS 14+ | 0.2.5 native app | Electron app; see current status for evidence and limits |
+| Linux x86_64 | 0.2.5 AppImage and Debian package | Electron app; see current status for evidence and limits |
 | Windows | None | Not implemented; tracked by [issue #35](https://github.com/juferdinand/OpenWhisper/issues/35) |
 
 ## Electron source layout

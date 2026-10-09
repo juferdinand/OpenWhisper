@@ -32,6 +32,10 @@ test("failed native tool diagnostics retain the exact boundary while redacting p
   assert.match(diagnostic.stderr, /malformed load command/u); assert.doesNotMatch(diagnostic.stderr, /private|aaaa|token|\u001b/u);
   const overflow = macUniversalToolFailure("/usr/bin/otool", { status: null, signal: "SIGTERM", stderr: "x".repeat(20_000) }, [], path);
   assert.equal(overflow.category, "tool-signal"); assert.equal(overflow.signal, "SIGTERM"); assert.equal(overflow.stderr.length, 4096); assert.equal(overflow.stderrTruncated, true);
+  const archiveFailure = macUniversalToolFailure("/usr/bin/tar", { status: 1, signal: null, stderr: "tar: /private/owned/OpenWhisper.zip: invalid archive" },
+    ["-x", "-f", "/private/owned/OpenWhisper.zip", "-C", "/private/owned/stage", "--no-same-owner"]);
+  assert.equal(archiveFailure.tool, "/usr/bin/tar"); assert.equal(archiveFailure.category, "tool-exit"); assert.equal(archiveFailure.exit, 1);
+  assert.doesNotMatch(archiveFailure.stderr, /private|OpenWhisper\.zip|stage/u);
   for (const stderr of [null, undefined]) {
     const failedSpawn = macUniversalToolFailure("/usr/bin/otool", { status: null, signal: null, error: new Error("private spawn path /home/user"), stderr }, [], path);
     assert.equal(failedSpawn.category, "tool-spawn"); assert.equal(failedSpawn.tool, "/usr/bin/otool"); assert.equal(failedSpawn.exit, null);

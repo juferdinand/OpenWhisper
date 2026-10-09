@@ -48,9 +48,10 @@ the app requires no account or subscription.
 - `app/data/` contains the model catalog, schemas, and multilingual test vectors.
 - `app/native/` contains checksum-pinned native speech and focused platform bindings. Prefer the
   existing Electron/Node APIs or typed adapters before adding native code.
-- `macos/` and `linux/` retain the 0.2.5 native hosts during migration. Their source and evidence
-  are historical references, not the implementation location for Electron work. The immutable
-  0.2.5 source is [commit d69b43bf6e7017c61089e117e79af34f57f297c4](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4).
+- The obsolete `macos/` and `linux/` hosts are removed from this replacement branch. Their
+  historical source and evidence remain at [the immutable 0.2.5 commit](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4).
+  Exact updater and desktop reference inputs used by current tests live in
+  `app/tests/fixtures/legacy-linux/`, with their hashes and provenance.
 - `VERSION` is the project version. Keep it, Electron and UI manifests, and lockfiles aligned.
 
 ## Development commands

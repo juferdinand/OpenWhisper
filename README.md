@@ -18,7 +18,7 @@ and the [migration plan](docs/ELECTRON-MIGRATION.md).
 
 | Platform | Public release | Electron replacement |
 | --- | --- | --- |
-| macOS 14+ | 0.2.5 DMG and ZIP | 0.3.0 acceptance in progress; physical microphone, permission, insertion, and update coverage remain open |
+| macOS 14+ | 0.2.5 DMG and ZIP | 0.3.0 automated package/update checks pass; physical microphone, permission and insertion acceptance remain open |
 | Linux x86_64 | 0.2.5 AppImage and Debian package | 0.3.0 acceptance in progress; see [Linux status](docs/LINUX.md) |
 | Windows | None | Not implemented; tracked by [issue #35](https://github.com/juferdinand/OpenWhisper/issues/35) |
 

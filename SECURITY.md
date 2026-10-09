@@ -35,7 +35,7 @@ real microphone or the user's desktop/input devices.
 
 ## Known legacy Linux dependency advisory
 
-The retained 0.2.5 Linux host locks `glib 0.18.5` through Tauri 2 / GTK 3. It is affected by
+The published 0.2.5 Linux host locks `glib 0.18.5` through Tauri 2 / GTK 3. It is affected by
 [RUSTSEC-2024-0429 / GHSA-wrw7-89jp-8q8g](https://rustsec.org/advisories/RUSTSEC-2024-0429.html):
 `VariantStrIter` has undefined behavior and can dereference a null pointer in optimized builds.
 The upstream fix is in `glib >=0.20`, outside GTK 3's dependency range; see the
@@ -44,8 +44,10 @@ The upstream fix is in `glib >=0.20`, outside GTK 3's dependency range; see the
 A source search found no calls to the affected API in OpenWhisper or its resolved dependencies
 outside glib's own implementation, documentation, and tests. That is limited evidence, not proof
 of unreachability. The GitHub alert remains open and must not be dismissed as harmless. The
-Electron host has a separate dependency graph, but the legacy release remains available until
-replacement and retirement gates complete. The immutable
+Electron host has a separate dependency graph, and this replacement branch removes the old
+Cargo manifests. That does not fix the already published 0.2.5 binary or authorize dismissal
+of its advisory. The legacy release remains available until replacement acceptance and
+publication complete. The immutable
 [0.2.5 source snapshot](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4)
 preserves the affected dependency lock.
 

@@ -210,10 +210,11 @@ The concrete cleanup order is:
    names. Group ordinary tests alongside the corresponding feature hierarchy.
 3. P6 source relocation is implemented: the renderer/assets/locales are in `app/ui/`,
    and catalog/fixtures are in `app/data/`. The Electron renderer uses only the typed
-   preload bridge. Legacy Swift/Tauri host retirement remains gated on package/runtime
-   acceptance; retain its historical sources until those gates pass.
-4. Remaining work includes manifest/entry graphs, CI caches, version tooling, installers,
-   release inputs and final documentation. Validate fresh packages; imports compiling alone
+   preload bridge. The basic package/runtime and actual Mac successor handoff gates now pass;
+   the replacement branch removes the obsolete Swift/Tauri hosts and Cargo manifests.
+   Immutable 0.2.5 sources and hash-pinned historical test fixtures preserve reference inputs.
+4. Manifest/entry graphs, CI caches, version tooling, installers and release inputs now use
+   `app/`. Validate the final revision's packages before acceptance; imports compiling alone
    do not establish package correctness.
 
 Use small interfaces for genuine platform/process boundaries and stateful
@@ -232,8 +233,23 @@ removing obsolete descriptions. Keep AGENTS/CLAUDE synchronized and concise.
 Renovate discovers the application and renderer npm manifests without a second npm
 manager. Its custom whisper.cpp manager watches `app/native/whisper-source.json`;
 human review must check the tag, revision, archive checksum, headers and both speech
-APIs. Keep automerge disabled. Retain Cargo/Tauri-specific rules until those legacy
-manifests are removed with the host retirement gates.
+APIs. Keep automerge disabled. The removed Cargo manifests no longer need a Cargo manager
+or the GTK/Tauri dependency constraint. The pinned Tauri CLI in the npm toolchain remains
+only as the existing Linux signature tool, with the same key and version checks.
+
+The bounded post-functionality Luna audit on 2026-10-09 reviewed source/test feature
+folders, the renderer and release tools. The current feature/platform boundaries are
+coherent; small contracts and fixed worker entries retain their separate runtime roles.
+Two focused structural follow-ups remain in #36: split the large `main/index.ts` startup
+closure into cohesive feature composition functions, and split the renderer's tab views
+from `app/ui/src/main.ts`. Preserve explicit dependencies, DOM behavior and existing test
+coverage; no abstract service hierarchy or broad file shuffle is required.
+
+The audit also found a release-staging path check that accepted a symlinked output parent;
+the bounded correction requires a canonical parent before staging. The current status
+document replaces its chronological diary with milestone results and immutable history
+links. Vocabulary matching on very long transcripts is a performance follow-up, not a
+reason to add an arbitrary vocabulary or recording limit without measurement.
 
 The renderer invokes a fixed schema-derived command map, never arbitrary command strings,
 shell commands or paths. Validate sender frame/origin, arguments, responses and events;
@@ -468,12 +484,12 @@ because of a host change. Transfer concrete defects, not stale implementation wo
 capability is intentionally excluded later, keep its requirement as a documented gap rather than
 calling it fixed or declaring full desktop support.
 
-## Open engineering questions to resolve through probes
+## Original engineering questions and remaining acceptance
 
-The native binding choice/packaged ABI, Mac TCC attribution and self-signed login-item continuity,
-Wayland focus-free overlay primitive, no-UI CLI runtime, strict old-client signature compatibility
-and supervised exec lifecycle remain unproven. They are explicit implementation gates above,
-not reasons to ask for broad permission or to promise unsupported behavior. Retain failed-probe
-evidence and choose a tested replacement before retiring its old path. Any actual user-only
-acceptance blocker is reported with a concrete package and focused steps after independently
+At plan approval, native bindings/packaged ABI, Mac TCC and login-item continuity, Wayland
+overlay behavior, no-UI CLI, old-client signatures and supervised exec still required probes.
+The [current milestone record](ELECTRON-STATUS.md) distinguishes their passing automated scopes
+from remaining physical-Mac, expanded desktop and final release coverage. Keep original criteria
+and failed-probe evidence without presenting resolved questions as current blockers. Report an
+actual user-only acceptance blocker with a concrete package and focused steps after independently
 runnable checks complete.

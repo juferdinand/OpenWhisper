@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmod, cp, lstat, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -51,6 +51,13 @@ test("publication rejects incomplete builder outputs before staging any public a
     await assert.rejects(validateReleasePublication({ root, version: "0.3.0", commit, macosDirectory, linuxDirectory, outputDirectory }),
       { message: "RELEASE_ARTIFACT_SET_MISMATCH" });
     await assert.rejects(lstat(outputDirectory), { code: "ENOENT" });
+
+    const linkedParent = join(temporary, "linked-output-parent");
+    await symlink(root, linkedParent, "dir");
+    const linkedOutput = join(linkedParent, "assets");
+    await assert.rejects(validateReleasePublication({ root, version: "0.3.0", commit, macosDirectory, linuxDirectory, outputDirectory: linkedOutput }),
+      { message: "RELEASE_OUTPUT_PARENT_UNSAFE" });
+    await assert.rejects(lstat(join(root, "assets")), { code: "ENOENT" });
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }

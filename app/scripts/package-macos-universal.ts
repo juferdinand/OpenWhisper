@@ -66,7 +66,7 @@ async function inventory(root: string): Promise<Map<string, Item>> {
   await visit(root); return result;
 }
 function inventoryEqual(a: Map<string, Item>, b: Map<string, Item>): boolean { return same([...a].sort(), [...b].sort()); }
-const toolSchema = z.enum(["/usr/bin/codesign", "/usr/bin/otool", "/usr/bin/ditto", "/usr/bin/plutil"]);
+const toolSchema = z.enum(["/usr/bin/codesign", "/usr/bin/otool", "/usr/bin/ditto", "/usr/bin/plutil", "/usr/bin/tar"]);
 const failureSchema = z.strictObject({ version: z.literal(1), status: z.literal("FAIL"), category: z.enum(["tool-exit", "tool-signal", "tool-spawn", "construction"]),
   tool: toolSchema.nullable(), nativePath: z.string().max(1024).nullable(), exit: z.number().int().nullable(),
   signal: z.string().regex(/^SIG[A-Z0-9]{1,12}$/u).nullable(), stderr: z.string().max(4096), stderrTruncated: z.boolean() });
@@ -95,8 +95,8 @@ export function macUniversalFailureDiagnostic(error: unknown): ToolFailure {
   return error instanceof MacUniversalToolError ? error.diagnostic : failureSchema.parse({ version: 1, status: "FAIL", category: "construction",
     tool: null, nativePath: null, exit: null, signal: null, stderr: "", stderrTruncated: false });
 }
-function tool(command: Tool, args: readonly string[], nativePath: string | null = null): string {
-  const result = spawnSync(command, [...args], { shell: false, encoding: "utf8", timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });
+function tool(command: Tool, args: readonly string[], nativePath: string | null = null, environment?: NodeJS.ProcessEnv): string {
+  const result = spawnSync(command, [...args], { ...(environment ? { env: environment } : {}), shell: false, encoding: "utf8", timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });
   if (result.error || result.status !== 0 || result.signal !== null) throw new MacUniversalToolError(macUniversalToolFailure(command, result, args, nativePath));
   return result.stdout;
 }
@@ -314,7 +314,8 @@ export async function packageMacUniversal(options: MacUniversalOptions): Promise
   const archive = join(options.output, constructionMode === "release" ? "OpenWhisper-macOS.zip" :
     `OpenWhisper-validation-macOS-universal_${stage.input.arm64.version}_${stage.input.arm64.source.commit.slice(0, 12)}.zip`);
   tool("/usr/bin/ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", directory, archive]);
-  const extracted = join(options.output, "archive-check"); tool("/usr/bin/ditto", ["-x", "-k", archive, extracted]);
+  const extracted = join(options.output, "archive-check"); await mkdir(extracted, { mode: 0o700 });
+  tool("/usr/bin/tar", ["-x", "-f", archive, "-C", extracted, "--no-same-owner"], null, { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" });
   const bundle = join(extracted, "OpenWhisper.app"); tool("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--all-architectures", bundle]);
   await verifyMacUniversalCopy(directory, bundle);
   return { directory, archive, sha256: (await digest(archive)).sha256 };

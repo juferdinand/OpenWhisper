@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { copyFile, lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
@@ -104,6 +104,7 @@ export async function validateReleasePublication(options: ValidateReleasePublica
   const macosDirectory = resolve(options.macosDirectory), linuxDirectory = resolve(options.linuxDirectory), outputDirectory = resolve(options.outputDirectory);
   if (outputDirectory === root || outputDirectory.startsWith(`${root}/`)) throw new Error("RELEASE_OUTPUT_MUST_BE_OUTSIDE_SOURCE");
   if (macosDirectory === outputDirectory || linuxDirectory === outputDirectory) throw new Error("RELEASE_OUTPUT_DIRECTORY_COLLISION");
+  if (await realpath(dirname(outputDirectory)) !== dirname(outputDirectory)) throw new Error("RELEASE_OUTPUT_PARENT_UNSAFE");
 
   await Promise.all([
     requireExactFiles(macosDirectory, [...macFiles, "OpenWhisper-macOS-release.json", "SHA256SUMS"]),

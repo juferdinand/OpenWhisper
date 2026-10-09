@@ -55,8 +55,8 @@ Oversized content is rejected rather than shortened. These preview bounds do not
 recording duration. Replies must contain a completed assistant text response; truncated
 answers, tool calls, refusals and unexpected control characters are rejected.
 
-The [shared profile schema](../shared/local-processing.schema.json) and
-[endpoint/profile/response vectors](../shared/local-processing-vectors.json) retain PR17's
+The [profile schema](../app/data/local-processing.schema.json) and
+[endpoint/profile/response vectors](../app/data/local-processing-vectors.json) retain PR17's
 contract. Runtime schemas additionally validate UTF-8 bytes. Optional preferences live in
 the Dev profile's `config/settings/local-processing.json` with mode `0600`, outside ordinary
 preferences. Invalid saved content is preserved while disabled defaults are used in memory;

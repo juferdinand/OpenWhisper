@@ -13,7 +13,6 @@
   "enabledManagers": [
     "github-actions",
     "custom.regex",
-    "cargo",
     "npm"
   ],
   "customManagers": [
@@ -45,16 +44,6 @@
       "prBodyNotes": [
         "Review upstream release notes and Whisper/Parakeet API changes. Update the tag, pinned commit, and source archive SHA256 in app/native/whisper-source.json; keep checksum verification enabled and run the native speech and package checks on macOS and Linux."
       ]
-    },
-    {
-      "description": "GTK must match Tauri/Wry GTK 3 types. Revisit this range with the host dependency chain; the known glib advisory remains tracked in SECURITY.md.",
-      "matchManagers": [
-        "cargo"
-      ],
-      "matchPackageNames": [
-        "gtk"
-      ],
-      "allowedVersions": "<0.19"
     },
     {
       "description": "Keep the Ubuntu 22.04 packaging baseline and macOS 15 universal-build environment until a separate runner migration is validated.",
