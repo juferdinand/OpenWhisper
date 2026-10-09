@@ -26,6 +26,7 @@ const payload = resolve(fileURLToPath(new URL("./", import.meta.url)));
 const packaged = process.env.OPENWHISPER_PACKAGE_DIRECTORY === "/payload/package";
 const stablePackage = process.env.OPENWHISPER_STABLE_PACKAGE === "1";
 const installedDebian = process.env.OPENWHISPER_INSTALLED_DEBIAN === "1";
+const supervisedLaunch = process.env.OPENWHISPER_SUPERVISED_LAUNCH === "1";
 const appImage = process.env.OPENWHISPER_APPIMAGE === "1";
 const appImageStartupOnly = process.env.OPENWHISPER_APPIMAGE_STARTUP_ONLY === "1";
 const appImageAdmission = appImage && process.env.OPENWHISPER_APPIMAGE_ADMISSION === "1";
@@ -35,6 +36,7 @@ const sourcePackageRoot = packaged ? "/payload/package/resources/app" : join(pay
 const sourceExecutable = packaged ? `/payload/package/${stablePackage ? "openwhisper" : "openwhisper-dev"}` : join(sourcePackageRoot, "node_modules/electron/dist/electron");
 let packageRoot = installedDebian ? "/opt/openwhisper/resources/app" : sourcePackageRoot;
 let executable = installedDebian ? "/opt/openwhisper/openwhisper" : sourceExecutable;
+let debianLaunchTarget = supervisedLaunch && installedDebian ? "/opt/openwhisper/openwhisper-launch" : executable;
 const installPackage = process.env.OPENWHISPER_INSTALL_PACKAGE === "1";
 const stockKde = process.env.OPENWHISPER_STOCK_KDE === "1";
 const kdeLifecycle = process.env.OPENWHISPER_KDE_LIFECYCLE === "1";
@@ -52,7 +54,7 @@ let startupStderr = Buffer.alloc(0), startupStderrBytes = 0, startupRetentionEna
 let startupPhase: "launch" | "context-evaluation" | "runtime-owner" | "resource-identity" | "initial-ui" = "launch";
 let startupIds: { launcherPid: number | null; mainPid: number | null; runtimePid: number | null } = { launcherPid: null, mainPid: null, runtimePid: null };
 const appOwners: { original: ChildProcess; closed: Promise<void>; closeObserved: boolean; termination: "quit" | "crash" | null;
-  quitEvents: ("before-quit" | "will-quit")[]; image?: { mainPid: number; runtimePid: number; temporary: string;
+  quitEvents: ("before-quit" | "will-quit")[]; supervisor?: { pid: number; guiPid: number; parentPid: number; socket: true; noncePresent: true } | undefined; image?: { mainPid: number; runtimePid: number; temporary: string;
     processes: Map<number, ImageProcess>; resources: Record<string, string> } | undefined }[] = [];
 type ImageProcess = { pid: number; ppid: number; pgid: number; role: "runtime" | "extracted" | "supervisor" };
 let lastState: Readonly<{ status: string; recordingAvailable: boolean; recoveryAvailable: boolean; elapsed: number; progress: number;
@@ -123,6 +125,7 @@ async function assertInstalledPackage(source = "/payload/package", installed = "
 }
 async function main(): Promise<void> {
   assert.equal(process.platform, "linux"); assert.equal(process.arch, "x64"); assert.equal(process.getuid?.(), 1000);
+  if (supervisedLaunch) assert.ok(packaged && stablePackage && nativeX11 && (installedDebian !== appImage) && !appImageStartupOnly);
   assert.equal(process.versions.node, "24.21.0");
   assert.equal(sha(await readFile(process.execPath)), "7fde7b8afa198da66257f42ee2001d874c7355631e6d1579a5fb5ef1f246df4c");
   assert.equal(sha(await readFile(executable)), "10a14d05c6ff4f94075cfb3eeb6ed6571be33ebcc08cbd675b5ce9ff84706564");
@@ -212,12 +215,20 @@ async function main(): Promise<void> {
     for (let depth = 0; depth < 16; depth++) for (const process of processes) if (descendants.has(process.ppid)) descendants.add(process.pid);
     for (const process of processes.filter((process) => descendants.has(process.pid))) {
       let path: string; try { path = await readlink(`/proc/${process.pid}/exe`); } catch { continue; }
-      const role = path === permanentImage ? "runtime" : path.startsWith(`${imageTemporary}/`) ? "extracted" : "supervisor";
+      const role = supervisedLaunch && appOwners.some((owner) => owner.supervisor?.pid === process.pid) ? "supervisor"
+        : path === permanentImage ? "runtime" : path.startsWith(`${imageTemporary}/`) ? "extracted" : "supervisor";
       records.set(process.pid, { ...process, role });
     }
   };
+  const assertSupervisedClosed = async (owner: (typeof appOwners)[number]) => {
+    assert.ok(owner.supervisor && owner.closeObserved);
+    assert.equal(owner.original.exitCode, 0); assert.equal(owner.original.signalCode, null);
+    for (const pid of [owner.supervisor.pid, owner.supervisor.guiPid]) await assert.rejects(lstat(`/proc/${pid}`), { code: "ENOENT" });
+    await writeFile(join(evidence, `supervisor-close-${appOwners.indexOf(owner)}.json`), JSON.stringify({ ...owner.supervisor,
+      originalNormalClose: true, allObservedPidsAbsent: true, updateAuthority: false, restartReceiptSent: false }), { mode: 0o600 });
+  };
   const assertImageClosed = async (owner: (typeof appOwners)[number]) => {
-    assert.ok(owner.image && owner.closeObserved); assert.equal(owner.original.exitCode, 0); assert.equal(owner.original.signalCode, null);
+    assert.ok(owner.image && owner.closeObserved); if (supervisedLaunch) await assertSupervisedClosed(owner); assert.equal(owner.original.exitCode, 0); assert.equal(owner.original.signalCode, null);
     for (const pid of owner.image.processes.keys()) await assert.rejects(lstat(`/proc/${pid}`), { code: "ENOENT" });
     await assert.rejects(lstat(owner.image.temporary), { code: "ENOENT" }); assert.deepEqual(await readdir(imageTemporary), []);
     await writeFile(join(evidence, `appimage-close-${appOwners.indexOf(owner)}.json`), JSON.stringify({ launcherPid: owner.original.pid,
@@ -301,11 +312,12 @@ async function main(): Promise<void> {
     assert.equal(current.mode & 0o777, stablePackage ? 0o644 : 0o600); assert.equal(sha(await readFile(modelPath)), sha(model));
   };
   const autostartPath = join(config, "autostart/io.github.whisperfree.desktop");
-  const autostartExec = appImageAdmission ? `"${imageLauncher}" "${permanentImage}"` : '"/opt/openwhisper/openwhisper"';
+  const autostartExec = appImageAdmission ? `"${imageLauncher}" "${permanentImage}"` : supervisedLaunch ? '"/opt/openwhisper/openwhisper-launch"' : '"/opt/openwhisper/openwhisper"';
   const enabledAutostart = `[Desktop Entry]\nType=Application\nName=OpenWhisper\nComment=Free, local dictation\nExec=${autostartExec}\nIcon=io.github.whisperfree\nStartupWMClass=io.github.whisperfree\nTerminal=false\n`;
-  const legacyAutostart = enabledAutostart.replace(`Exec=${autostartExec}`, `Exec=env APPIMAGE_EXTRACT_AND_RUN=1 "${permanentImage}"`);
+  const legacyAutostart = enabledAutostart.replace(`Exec=${autostartExec}`, supervisedLaunch && installedDebian
+    ? 'Exec="/opt/openwhisper/openwhisper"' : `Exec=env APPIMAGE_EXTRACT_AND_RUN=1 "${permanentImage}"`);
   let legacyAutostartIdentity: Awaited<ReturnType<typeof lstat>> | undefined;
-  if (appImageAdmission) {
+  if (appImageAdmission || supervisedLaunch && installedDebian) {
     await mkdir(dirname(autostartPath), { mode: 0o700 }); await writeFile(autostartPath, legacyAutostart, { mode: 0o600 });
     legacyAutostartIdentity = await lstat(autostartPath);
   }
@@ -474,7 +486,7 @@ async function main(): Promise<void> {
         JSON.stringify({ processes: processes.stdout, pids, maximum, memory }), { mode: 0o600 })).catch(() => {});
   }, 10_000);
   try {
-    application = await _electron.launch({ executablePath: appImage ? imageAdapter : executable,
+    application = await _electron.launch({ executablePath: appImage ? imageAdapter : supervisedLaunch && installedDebian ? debianLaunchTarget : executable,
       args: [...(packaged ? [] : [packageRoot]), ...(stablePackage ? [] : ["--dev", "--dev-profile", profileRoot]),
         ...(kdeWaylandOverlay ? ["--experimental-wayland-overlay"] : []),
         ...(stockKde ? [kdeOverlay ? "--ozone-platform=x11" : "--ozone-platform=wayland"] : nativeX11 ? ["--ozone-platform=x11"] : [])],
@@ -482,7 +494,7 @@ async function main(): Promise<void> {
   } finally { clearTimeout(startupWatch); }
   const original = application.process();
   const owner = { original, closed: Promise.resolve(), closeObserved: false, termination: null as "quit" | "crash" | null,
-    quitEvents: [] as ("before-quit" | "will-quit")[], image: undefined as (typeof appOwners)[number]["image"] };
+    quitEvents: [] as ("before-quit" | "will-quit")[], supervisor: undefined as (typeof appOwners)[number]["supervisor"], image: undefined as (typeof appOwners)[number]["image"] };
   original.stdout?.on("data", (bytes: Buffer) => { diagnostics.stdoutBytes += bytes.length; });
   owner.closed = new Promise<void>((accept) => original.once("close", () => { owner.closeObserved = true; appCloseObserved = true; accept(); }));
   appOwners.push(owner); appOriginalClose = owner.closed;
@@ -520,11 +532,35 @@ async function main(): Promise<void> {
       }
     }
   });
+  if (supervisedLaunch) {
+    const actual = await application.evaluate(({ app }) => {
+      const fs = process.getBuiltinModule("fs"); if (!fs) throw new Error("OWNED_SUPERVISOR_FS_UNAVAILABLE");
+      return { guiPid: process.pid, supervisorPid: process.ppid, executable: process.execPath, appPath: app.getAppPath(),
+        socket: fs.fstatSync(3).isSocket(), noncePresent: /^[a-f0-9]{64}$/u.test(process.env["OPENWHISPER_RESTART_NONCE"] ?? ""),
+        version: process.env["OPENWHISPER_RESTART_VERSION"] };
+    });
+    assert.equal(actual.socket, true); assert.equal(actual.noncePresent, true); assert.equal(actual.version, "0.3.0");
+    assert.notEqual(actual.guiPid, actual.supervisorPid);
+    for (const pid of [actual.guiPid, actual.supervisorPid]) assert.equal((await lstat(`/proc/${pid}`)).uid, 1000);
+    assert.equal(await readlink(`/proc/${actual.supervisorPid}/exe`), actual.executable);
+    const argvBytes = await readFile(`/proc/${actual.supervisorPid}/cmdline`); assert.ok(argvBytes.length <= 64 * 1024);
+    const argv = argvBytes.toString("utf8").split("\0");
+    assert.equal(argv[0], actual.executable); assert.equal(argv[1], join(actual.appPath, "dist/cli/linux-supervisor-bootstrap.js"));
+    const environment = await readFile(`/proc/${actual.supervisorPid}/environ`); assert.ok(environment.length <= 64 * 1024);
+    assert.ok(environment.toString("utf8").split("\0").includes("ELECTRON_RUN_AS_NODE=1"));
+    const raw = await readFile(`/proc/${actual.supervisorPid}/stat`, "utf8"); assert.ok(raw.length <= 4096);
+    const parent = raw.slice(raw.lastIndexOf(")") + 2).trim().split(/\s+/u)[1]; assert.ok(parent && /^[0-9]+$/u.test(parent));
+    if (installedDebian) { assert.equal(actual.executable, "/opt/openwhisper/openwhisper"); assert.equal(actual.supervisorPid, original.pid); }
+    owner.supervisor = { pid: actual.supervisorPid, guiPid: actual.guiPid, parentPid: Number(parent), socket: true, noncePresent: true };
+    await writeFile(join(evidence, `supervisor-owner-${appOwners.length - 1}.json`), JSON.stringify({ ...owner.supervisor,
+      moduleMatches: true, executableMatches: true, sameUid: true, version: actual.version, updateAuthority: false }), { mode: 0o600 });
+  }
   if (appImage) {
     startupPhase = "context-evaluation";
     const actual = await application.evaluate(({ app }) => ({ mainPid: process.pid, runtimePid: process.ppid, appPath: app.getAppPath(),
       executable: process.execPath, appImage: process.env["APPIMAGE"], appDir: process.env["APPDIR"], temporary: process.env["TMPDIR"],
       noCleanup: process.env["NO_CLEANUP"] }));
+    if (supervisedLaunch) { assert.ok(owner.supervisor); assert.equal(actual.runtimePid, owner.supervisor.pid); actual.runtimePid = owner.supervisor.parentPid; }
     startupIds = { launcherPid: original.pid ?? null, mainPid: actual.mainPid, runtimePid: actual.runtimePid };
     assert.equal(actual.appImage, permanentImage); assert.equal(actual.noCleanup, undefined); assert.ok(actual.temporary && actual.appDir);
     assert.equal(dirname(actual.temporary), imageTemporary); assert.match(basename(actual.temporary), /^openwhisper-appimage\.[A-Za-z0-9]+$/u);
@@ -549,6 +585,7 @@ async function main(): Promise<void> {
     assert.equal(sha(await readFile(executable)), sha(await readFile(sourceExecutable)));
     owner.image = { mainPid: actual.mainPid, runtimePid: actual.runtimePid, temporary: actual.temporary, resources, processes: new Map() };
     await observeImageProcesses(original.pid!, owner.image.processes);
+    if (supervisedLaunch) { const node = owner.image.processes.get(owner.supervisor!.pid); assert.ok(node); node.role = "supervisor"; }
     assert.equal(owner.image.processes.get(actual.runtimePid)?.role, "runtime"); assert.equal(owner.image.processes.get(actual.mainPid)?.role, "extracted");
     await writeFile(join(evidence, `appimage-owner-${appOwners.length - 1}.json`), JSON.stringify({ ...actual, launcherPid: original.pid,
       processes: [...owner.image.processes.values()], resources, autostartAdmission: appImageAdmission ? "NOT_YET_QUERIED" : "UNAVAILABLE", updateAuthority: false }), { mode: 0o600 });
@@ -612,7 +649,16 @@ async function main(): Promise<void> {
     assert.equal(initial.development_build, undefined); assert.equal(initial.preferences.setup_completed, true);
     assert.deepEqual(initial.history, legacyHistory); assert.equal(initial.recovery_available, true); await assertStableOriginals();
   }
-  if (installedDebian) {
+  if (installedDebian && supervisedLaunch) {
+    await checkpoint("installed-supervisor-legacy-autostart-read-only-startup");
+    assert.equal(initial.launch_at_login_available, true); assert.equal(initial.preferences.launch_at_login, true); assert.equal(await persistedLogin(), true);
+    await focusRefresh(); assert.equal((await state()).preferences.launch_at_login, true);
+    assert.equal(await readFile(autostartPath, "utf8"), legacyAutostart);
+    const unchanged = await lstat(autostartPath); assert.equal(unchanged.dev, legacyAutostartIdentity!.dev); assert.equal(unchanged.ino, legacyAutostartIdentity!.ino);
+    assert.equal(unchanged.mtimeMs, legacyAutostartIdentity!.mtimeMs); assert.equal(unchanged.ctimeMs, legacyAutostartIdentity!.ctimeMs);
+    await assertStableOriginals(); startupAutostartReadOnly = true;
+    checks.push("supervised Debian startup/focus preserve exact legacy bare-ELF desktop request until explicit UI change");
+  } else if (installedDebian) {
     await checkpoint("installed-autostart-read-only-startup");
     assert.equal(initial.launch_at_login_available, true); assert.equal(initial.preferences.launch_at_login, false);
     assert.equal(initial.macos?.launch_at_login_pending ?? false, false); assert.equal(await persistedLogin(), true);
@@ -690,7 +736,7 @@ async function main(): Promise<void> {
     const before = application ? await application.evaluate(({ BrowserWindow }) => ({ pid: process.pid, windows: BrowserWindow.getAllWindows().length })) : undefined;
     await assertControlStorage();
     const started = performance.now();
-    const request = execute(appImage ? imageLauncher : executable, [...(appImage ? [permanentImage] : []), "--control", command], { env: controlEnvironment, timeout: 8000, maxBuffer: 32 * 1024 });
+    const request = execute(appImage ? imageLauncher : supervisedLaunch && installedDebian ? debianLaunchTarget : executable, [...(appImage ? [permanentImage] : []), "--control", command], { env: controlEnvironment, timeout: 8000, maxBuffer: 32 * 1024 });
     const original = request.child, pid = original.pid; assert.ok(pid);
     const imageProcesses = new Map<number, ImageProcess>(); let imageObserving = appImage;
     const imageObservation = appImage ? (async () => { while (imageObserving) { await observeImageProcesses(pid, imageProcesses); await delay(25); } })() : undefined;
@@ -795,7 +841,7 @@ async function main(): Promise<void> {
   if (installedDebian || appImageAdmission) {
     await checkpoint("installed-autostart-ui-enable");
     const checkbox = page.locator('[data-pref="launch_at_login"]'); await expect(checkbox).toBeEnabled();
-    if (appImageAdmission) {
+    if (appImageAdmission || supervisedLaunch && installedDebian) {
       await expect(checkbox).toBeChecked(); await checkbox.uncheck();
       await until(async () => !(await state()).preferences.launch_at_login && !(await persistedLogin())); await assertAutostart(false);
     } else await expect(checkbox).not.toBeChecked();
@@ -1677,14 +1723,14 @@ async function main(): Promise<void> {
       try { await Promise.race([firstClosing, new Promise<never>((_, reject) => { firstTimer = setTimeout(() => reject(new Error("OWNED_APP_CLOSE_TIMEOUT")), 10_000); })]); }
       finally { if (firstTimer) clearTimeout(firstTimer); }
       await assertImageClosed(appOwners.at(-1)!);
-    } else { await application.close(); await appOriginalClose; }
+    } else { await application.close(); await appOriginalClose; if (supervisedLaunch) await assertSupervisedClosed(appOwners.at(-1)!); }
     assert.equal(appOwners.at(-1)!.closeObserved, true); application = undefined; page = undefined;
     if (installedDebian) {
       await assertAutostart(true);
       // Closed fixture form only: do not execute a shell or reuse production parsing.
       const lines = (await readFile(autostartPath, "utf8")).split("\n").filter((line) => line.startsWith("Exec="));
-      assert.equal(lines.length, 1); const target = /^Exec="(\/opt\/openwhisper\/openwhisper)"$/u.exec(lines[0]!);
-      assert.ok(target); executable = target[1]!; generatedExecRestart = true;
+      assert.equal(lines.length, 1); const target = (supervisedLaunch ? /^Exec="(\/opt\/openwhisper\/openwhisper-launch)"$/u : /^Exec="(\/opt\/openwhisper\/openwhisper)"$/u).exec(lines[0]!);
+      assert.ok(target); if (supervisedLaunch) debianLaunchTarget = target[1]!; else executable = target[1]!; generatedExecRestart = true;
     }
     if (appImageAdmission) {
       await assertAutostart(true);
@@ -1774,6 +1820,7 @@ async function main(): Promise<void> {
     assert.equal(sha(await readFile(permanentImage)), imageExpectedSha);
     assert.equal(sha(await readFile(imageLauncher)), "ea17d105cc470ba5bc23d9e503b2e344b7b78ac2772655a8700d582d84a57fe1");
   }
+  if (supervisedLaunch && !appImage) await assertSupervisedClosed(quitOwner);
   application = undefined;
   if (packaged) { await packageCommand("status", true); checks.push("absent package owner refuses no-display CLI without activation, profile creation or residual process"); }
   await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", checks, architecture: process.arch, uid: process.getuid?.(),
@@ -1782,6 +1829,8 @@ async function main(): Promise<void> {
     nativeInMain: false, security,
     sourceScope: "owned-generated-PipeWire-Pulse-monitor-only", fixtureSha256: sha(publicSpeech),
     ...(nativeX11 ? { nativeX11: true, nativeCapture: true, escapePreserved: true, holdStaleReleaseSafe: true, clearedKeyInactive: true } : {}),
+    ...(supervisedLaunch ? { supervisedLaunch: true, supervisorOwnersVerified: appOwners.every((owner) => !!owner.supervisor),
+      supervisorOriginalsClosed: appOwners.every((owner) => owner.closeObserved), updateAuthority: false } : {}),
     ...(packaged ? { packagedApplication: true, packageAppPath: packageRoot, executable, packageControl: { allCommands: true, noDisplay: true,
       profileAbsent: true, absentOwnerRefused: true, processesClosed: true } } : {}),
     ...(appImage ? { appImageRuntime: true, secondaryResourcesSurvived, appImageAdmission: appImageAdmission ? "AVAILABLE" : "UNAVAILABLE",

@@ -144,17 +144,24 @@ unixTest("cancellation during a retained write waits for its settlement before o
   finally { release.accept(); }
   await rejection; assert.equal(closes, 1); assert.deepEqual(await readdir(input.cacheDirectory), []);
 }));
-unixTest("idle cancellation retains a pending original body read and total expiry retains a pending sync", async () => fixture(async (input) => {
+unixTest("idle cancellation retains a pending original body read and total expiry retains a pending sync", async (t) => fixture(async (input) => {
   const body = deferred<void>(), transport = new FakeTransport([{ ...response(), bodyGate: body.promise }]); let settled = false;
   const rejection = assert.rejects(downloadUpdateCandidate({ ...input, limits: { idleMs: 20 } }, { transport: () => transport }), failure("TIMEOUT"))
     .then(() => { settled = true; });
-  await until(() => transport.closes === 1); assert.equal(settled, false); assert.equal((await readdir(input.cacheDirectory)).length, 1);
-  body.accept(); await rejection; assert.deepEqual(await readdir(input.cacheDirectory), []);
-  const entered = deferred<void>(), sync = deferred<void>(); let file: FileHandle | undefined;
+  try { await until(() => transport.closes === 1); assert.equal(settled, false); assert.equal((await readdir(input.cacheDirectory)).length, 1); }
+  finally { body.accept(); await rejection; }
+  assert.deepEqual(await readdir(input.cacheDirectory), []);
+  const entered = deferred<void>(), sync = deferred<void>(); let file: FileHandle | undefined, syncSettled = false;
+  // Advance the deadline only after the retained phase; filesystem latency cannot skip its entry signal.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const timed = assert.rejects(downloadUpdateCandidate({ ...input, limits: { totalMs: 20 } }, { transport: () => new FakeTransport([response()]),
-    async sync(original) { file = original; entered.accept(); await sync.promise; await original.sync(); } }), failure("TIMEOUT"));
-  await entered.promise; await new Promise((accept) => { setTimeout(accept, 35); }); assert.ok(file && (await file.stat()).isFile());
-  sync.accept(); await timed; assert.deepEqual(await readdir(input.cacheDirectory), []);
+    async sync(original) { file = original; entered.accept(); await sync.promise; await original.sync(); } }), failure("TIMEOUT"))
+    .then(() => { syncSettled = true; });
+  try {
+    await Promise.race([entered.promise, timed.then(() => { assert.fail("Download settled before entering the retained sync phase."); })]);
+    t.mock.timers.tick(20); await turn(); assert.equal(syncSettled, false); assert.ok(file && (await file.stat()).isFile());
+  } finally { sync.accept(); try { await timed; } finally { t.mock.timers.reset(); } }
+  assert.deepEqual(await readdir(input.cacheDirectory), []);
 }));
 unixTest("a failed original close exposes the same retained cleanup obligation and preserves the staged bytes", async () => fixture(async (input) => {
   let originalClose: (() => Promise<void>) | undefined, closes = 0, file: FileHandle | undefined;

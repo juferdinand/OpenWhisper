@@ -30,13 +30,35 @@ const stablePackage = packaged && args[9] === "--stable-package";
 const installedDebian = stablePackage && args[10] === "--debian-package";
 const appImage = stablePackage && args[10] === "--appimage-bundle";
 const appImageStartupOnly = appImage && args[12] === "--appimage-startup-only";
-const appImageAdmission = appImage && args[12] === "--appimage-admission";
-if (args.length !== (appImageStartupOnly || appImageAdmission ? 13 : installedDebian || appImage ? 12 : packaged ? installPackage || stablePackage ? 10 : 9 : copiedNode ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
+const supervisedLaunch = stablePackage && (installedDebian || appImage) && args[12] === "--supervised-launch";
+const appImageAdmission = appImage && (args[12] === "--appimage-admission" || supervisedLaunch);
+if (args.length !== (supervisedLaunch ? 17 : appImageStartupOnly || appImageAdmission ? 13 : installedDebian || appImage ? 12 : packaged ? installPackage || stablePackage ? 10 : 9 : copiedNode ? 7 : 6) || args[0] !== "--output" || args[2] !== "--artifacts-root" || args[4] !== "--fixtures"
     || process.platform !== "linux" || process.arch !== "x64" || process.getuid?.() === 0) throw new Error("INVALID_EXECUTION");
 const output = absolute.parse(args[1]), planning = absolute.parse(args[3]), fixtures = absolute.parse(args[5]);
 const packageDirectory = packaged ? absolute.parse(args[8]) : undefined;
 const debianPackage = installedDebian ? absolute.parse(args[11]) : undefined;
 const appImageBundle = appImage ? absolute.parse(args[11]) : undefined;
+const artifactSchema = z.strictObject({ bytes: z.number().int().nonnegative().max(1024 * 1024 * 1024), sha256: z.string().regex(/^[a-f0-9]{64}$/u) });
+const supervisorInputSchema = z.strictObject({ version: z.literal(1), classification: z.literal("OWNED_SUPERVISOR_RUNTIME_INPUT"),
+  source: z.strictObject({ commit: z.literal("2ce4a2285bf90de15fe9294bfa1c30630d1ab8bc"), modified: z.literal(false) }),
+  packageDirectory: absolute, packageFiles: z.record(z.string(), artifactSchema),
+  packageModes: z.record(z.string(), z.number().int().min(0).max(0o7777)),
+  debian: z.strictObject({ path: absolute, ...artifactSchema.shape }),
+  appImage: z.strictObject({ directory: absolute, receiptSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    image: z.strictObject({ path: absolute, ...artifactSchema.shape }), launcher: z.strictObject({ path: absolute, ...artifactSchema.shape }) }) });
+let supervisorInput: z.infer<typeof supervisorInputSchema> | undefined, supervisorReceiptBytes: Buffer | undefined;
+let supervisorReceiptPath: string | undefined, supervisorReceiptSha256: string | undefined;
+if (supervisedLaunch) {
+  assert.equal(args[13], "--producer-receipt"); assert.equal(args[15], "--producer-sha256");
+  supervisorReceiptPath = absolute.parse(args[14]); supervisorReceiptSha256 = z.string().regex(/^[a-f0-9]{64}$/u).parse(args[16]);
+  const file = await lstat(supervisorReceiptPath); assert.ok(file.isFile() && !file.isSymbolicLink() && file.size <= 8 * 1024 * 1024);
+  supervisorReceiptBytes = await readFile(supervisorReceiptPath);
+  assert.equal(createHash("sha256").update(supervisorReceiptBytes).digest("hex"), supervisorReceiptSha256);
+  supervisorInput = supervisorInputSchema.parse(JSON.parse(supervisorReceiptBytes.toString("utf8")) as unknown);
+  assert.equal(supervisorInput.packageDirectory, packageDirectory);
+  assert.ok(Object.keys(supervisorInput.packageFiles).length <= 20_000 && Object.keys(supervisorInput.packageModes).length <= 25_000);
+}
+
 for (const path of [planning, fixtures]) {
   const directory = await lstat(path); assert.ok(directory.isDirectory() && !directory.isSymbolicLink());
   assert.ok(output !== path && !output.startsWith(`${path}/`) || (path === planning &&
@@ -73,11 +95,13 @@ if (packageDirectory) {
   const directory = await lstat(packageDirectory); assert.ok(directory.isDirectory() && !directory.isSymbolicLink());
   assert.ok(output !== packageDirectory && !output.startsWith(`${packageDirectory}/`) && !packageDirectory.startsWith(`${output}/`));
   packageBefore = await inventory(packageDirectory, "", installedDebian || appImage ? packageModes : undefined);
+  if (supervisorInput) { assert.deepEqual(packageBefore, supervisorInput.packageFiles); assert.deepEqual(packageModes, supervisorInput.packageModes); }
   await cp(packageDirectory, join(payload, "package"), { recursive: true, errorOnExist: true, force: false });
   assert.deepEqual(await inventory(join(payload, "package")), packageBefore);
   distBefore = await inventory(join(app, "dist"));
   applicationBuild = parseApplicationBuildModule(await readFile(join(app, "dist/main/application-build.js"), "utf8"));
   assert.equal(applicationBuild.kind, stablePackage ? "stable" : "development");
+  if (supervisorInput) assert.deepEqual(JSON.parse(await readFile(join(app, "dist/resources/development-build.json"), "utf8")), supervisorInput.source);
   const module: unknown = await import(pathToFileURL(join(app, "dist/main/development-recording-build.js")).href);
   original = z.object({ DEVELOPMENT_RECORDING_BUILD: developmentRecordingDescriptorSchema }).parse(module).DEVELOPMENT_RECORDING_BUILD;
   descriptor = original;
@@ -93,6 +117,7 @@ if (packageDirectory) {
     const archive = await lstat(debianPackage); assert.ok(archive.isFile() && !archive.isSymbolicLink());
     assert.ok(!debianPackage.startsWith(`${output}/`));
     debianBefore = await describe(debianPackage);
+    if (supervisorInput) { assert.equal(debianPackage, supervisorInput.debian.path); assert.deepEqual(debianBefore, { bytes: supervisorInput.debian.bytes, sha256: supervisorInput.debian.sha256 }); }
     const source = z.strictObject({ commit: z.union([z.string().regex(/^[a-f0-9]{40}$/u), z.literal("source")]), modified: z.boolean() })
       .parse(JSON.parse(await readFile(join(app, "dist/resources/development-build.json"), "utf8")));
     const version = (await readFile(join(app, "dist/resources/VERSION"), "utf8")).trim();
@@ -145,8 +170,12 @@ let appImageFilename: string | undefined;
 if (appImageBundle) {
   const directory = await lstat(appImageBundle); assert.ok(directory.isDirectory() && !directory.isSymbolicLink());
   assert.ok(!output.startsWith(`${appImageBundle}/`) && !appImageBundle.startsWith(`${output}/`));
+  if (supervisorInput) {
+    assert.equal(appImageBundle, supervisorInput.appImage.directory);
+    assert.equal((await describe(join(appImageBundle, "receipt.json"))).sha256, supervisorInput.appImage.receiptSha256);
+  }
   const receipt = z.object({ classification: z.literal("UNSIGNED_CONSTRUCTION_ONLY"), sourceDirectory: z.literal(packageDirectory!),
-    applicationProducer: z.strictObject({ commit: z.literal(appImageAdmission ? "340dee3fb60cbf5abf6819553d9b575848919305" : "b892d861921fd51c6a1de2e35c987a0bd620ac9b"), modified: z.literal(false) }),
+    applicationProducer: z.strictObject({ commit: z.literal(supervisorInput ? supervisorInput.source.commit : appImageAdmission ? "340dee3fb60cbf5abf6819553d9b575848919305" : "b892d861921fd51c6a1de2e35c987a0bd620ac9b"), modified: z.literal(false) }),
     image: appImageAdmission ? z.object({ bytes: z.number().int().positive().max(512 * 1024 * 1024), sha256: z.string().regex(/^[a-f0-9]{64}$/u) })
       : z.object({ bytes: z.literal(119441912), sha256: z.literal("5307c99c5d8f603fbf8ed937d8688dc24181509163cdfc365552dd9bd5eb5069") }),
     launcher: z.object({ sha256: z.literal("ea17d105cc470ba5bc23d9e503b2e344b7b78ac2772655a8700d582d84a57fe1") }),
@@ -158,12 +187,15 @@ if (appImageBundle) {
   assert.ok(packageBefore);
   assert.deepEqual(Object.fromEntries(Object.entries(receipt.sourceInventory).filter(([, entry]) => entry.type === "file")
     .map(([name, entry]) => [name, { bytes: entry.bytes, sha256: entry.sha256 }])), packageBefore);
+  if (supervisorInput) assert.deepEqual(Object.fromEntries(Object.entries(receipt.sourceInventory).map(([name, entry]) => [name, entry.mode])), packageModes);
   await mkdir(join(payload, "appimage"), { mode: 0o700 });
   for (const [source, target, expected] of [
     [appImageFilename, "OpenWhisper.AppImage", receipt.image],
     ["openwhisper-launch", "openwhisper-launch", receipt.launcher],
   ] as const) {
-    const path = join(appImageBundle, source), file = await lstat(path); assert.ok(file.isFile() && !file.isSymbolicLink());
+    const path = join(appImageBundle, source), file = await lstat(path);
+    if (supervisorInput) { const frozen = target === "OpenWhisper.AppImage" ? supervisorInput.appImage.image : supervisorInput.appImage.launcher;
+      assert.equal(path, frozen.path); assert.deepEqual(await describe(path), { bytes: frozen.bytes, sha256: frozen.sha256 }); } assert.ok(file.isFile() && !file.isSymbolicLink());
     assert.equal(file.mode & 0o7777, 0o755); const bytes = await describe(path); assert.equal(bytes.sha256, expected.sha256);
     await cp(path, join(payload, "appimage", target), { errorOnExist: true, force: false });
     assert.deepEqual(await describe(join(payload, "appimage", target)), bytes);
@@ -256,6 +288,7 @@ try {
   frozen = await inventory(payload);
   await writeFile(join(output, "assembly.json"), JSON.stringify({ image: IMAGE, sources, originalDescriptor: original, descriptor,
     originalDist: distBefore, payload: frozen,
+    ...(supervisorInput ? { supervisedInput: { receiptPath: supervisorReceiptPath, receiptSha256: supervisorReceiptSha256, source: supervisorInput.source, scope: "ORDINARY_BOOTSTRAP_ONLY_NO_UPDATE_AUTHORITY" } } : {}),
     ...(packageDirectory ? { packageInput: { directory: packageDirectory, files: packageBefore, capturedDescriptorPreserved: true,
       installedRuntime: installPackage, stableRuntime: stablePackage, applicationBuild } } : {}),
     ...(appImageInput ? { appImageInput: { ...appImageInput, directory: appImageBundle, scope: "UNSIGNED_OWNED_RUNTIME_ONLY" } } : {}),
@@ -267,7 +300,7 @@ try {
     portalFixture: portalFixture ? { compilerImage, binary: await describe(join(payload, "owned-bus/owned-portal")) } : null,
     ...(copiedNode ? { nodeRuntime: { sourceImage: compilerImage, ...await describe(join(payload, "node")) } } : {}),
     seccomp: { path: seccomp, ...await describe(seccomp) },
-    scope: appImage ? appImageAdmission ? "Fresh captured340 AppImage admission and private UI autostart/generated Exec restarts; no FUSE, actual login session, host installation, update authority or public release claim."
+    scope: supervisedLaunch ? "Fresh frozen2ce4 ordinary supervisor/package/CPU/CLI/autostart/PID/fd3 normal-close checks; no update authority or public release claim." : appImage ? appImageAdmission ? "Fresh captured340 AppImage admission and private UI autostart/generated Exec restarts; no FUSE, actual login session, host installation, update authority or public release claim."
       : "Immutable AppImage through its exact private installed launcher; no FUSE, host installation, autostart/update admission or public release claim." : installedDebian ? "Exact Debian installed in disposable container /opt/openwhisper; normal stable UI autostart and generated Exec target restart with private Xvfb/Pulse; no actual login session, host installation or release claim."
       : stablePackage ? "Normal stable package migration/shared UI/CPU recording against private Xvfb/Pulse with actual XTEST native X11 keys; no host profile, installation or release claim."
       : nativeX11 ? "Normal Dev UI against private Xvfb with actual XTEST native X11 keys; no compositor, portal fixture or synthetic signals."
@@ -321,8 +354,15 @@ try {
     const expected = Object.fromEntries(Object.entries(packageBefore).map(([path, artifact]) => [`opt/openwhisper/${path}`, artifact]));
     const desktop = "[Desktop Entry]\nType=Application\nName=OpenWhisper\nComment=Local dictation validation package\nExec=/opt/openwhisper/openwhisper\nIcon=io.github.whisperfree\nTerminal=false\nCategories=AudioVideo;Audio;\nStartupWMClass=io.github.whisperfree\n";
     const desktopPath = "usr/share/applications/io.github.whisperfree.desktop";
-    assert.equal(await readFile(join(archiveRoot, desktopPath), "utf8"), desktop);
-    expected[desktopPath] = { bytes: Buffer.byteLength(desktop), sha256: createHash("sha256").update(desktop).digest("hex") };
+    const expectedDesktop = supervisedLaunch ? desktop.replace("Exec=/opt/openwhisper/openwhisper\n", "Exec=/opt/openwhisper/openwhisper-launch\n") : desktop;
+    assert.equal(await readFile(join(archiveRoot, desktopPath), "utf8"), expectedDesktop);
+    expected[desktopPath] = { bytes: Buffer.byteLength(expectedDesktop), sha256: createHash("sha256").update(expectedDesktop).digest("hex") };
+    if (supervisedLaunch) {
+      const legacy = '#!/bin/sh\nexec /opt/openwhisper/openwhisper-launch "$@"\n';
+      assert.equal(await readFile(join(archiveRoot, "usr/bin/openwhisper-desktop"), "utf8"), legacy);
+      assert.equal((await lstat(join(archiveRoot, "usr/bin/openwhisper-desktop"))).mode & 0o7777, 0o755);
+      expected["usr/bin/openwhisper-desktop"] = { bytes: Buffer.byteLength(legacy), sha256: createHash("sha256").update(legacy).digest("hex") };
+    }
     expected["usr/share/icons/hicolor/256x256/apps/io.github.whisperfree.png"] = await describe(join(app, "dist/ui/app-icon.png"));
     expected["usr/share/doc/io-github-whisperfree/copyright"] = packageBefore["notices/OpenWhisper-LICENSE"]!;
     expected["DEBIAN/control"] = await describe(join(archiveRoot, "DEBIAN/control"));
@@ -361,7 +401,7 @@ try {
     "--output", "/tmp/owned-desktop", "--timeout", "180", "--", "/payload/node", "/payload/driver.mjs"]
     : nativeX11 ? ["OPENWHISPER_NATIVE_X11=1", ...(packaged ? ["OPENWHISPER_PACKAGE_DIRECTORY=/payload/package"] : []),
       ...(installPackage ? ["OPENWHISPER_INSTALL_PACKAGE=1"] : []), ...(stablePackage ? ["OPENWHISPER_STABLE_PACKAGE=1"] : []),
-      ...(installedDebian ? ["OPENWHISPER_INSTALLED_DEBIAN=1"] : []), ...(appImage ? ["OPENWHISPER_APPIMAGE=1"] : []),
+      ...(installedDebian ? ["OPENWHISPER_INSTALLED_DEBIAN=1"] : []), ...(supervisedLaunch ? ["OPENWHISPER_SUPERVISED_LAUNCH=1"] : []), ...(appImage ? ["OPENWHISPER_APPIMAGE=1"] : []),
       ...(appImageAdmission ? ["OPENWHISPER_APPIMAGE_ADMISSION=1", `OPENWHISPER_APPIMAGE_SHA256=${appImageInput!.image.sha256}`] : []),
       ...(appImageStartupOnly ? ["OPENWHISPER_APPIMAGE_STARTUP_ONLY=1"] : []), "/payload/node", "/payload/driver.mjs"]
     : ["/opt/node/bin/node", "/payload/driver.mjs"];
@@ -384,6 +424,7 @@ try {
       holdStaleReleaseSafe: z.literal(true), clearedKeyInactive: z.literal(true), clipboardConfirmed: z.literal(true), historyConfirmed: z.literal(true),
       ...(installPackage ? { installedRuntime: z.literal(true), installation: z.object({ embeddedNode: z.literal(true), profileInitiallyAbsent: z.literal(true),
         descriptorPreserved: z.literal(true), existingDestinationRefused: z.literal(true), originalApplicationAlive: z.literal(true), stableSentinelUnchanged: z.literal(true) }) } : {}),
+      ...(supervisedLaunch ? { supervisedLaunch: z.literal(true), supervisorOwnersVerified: z.literal(true), supervisorOriginalsClosed: z.literal(true) } : {}),
       ...(stablePackage ? { stableRuntime: z.literal(true), stableMigration: z.object({ legacyRetry: z.literal(true), cpuFallback: z.literal(true),
         editedStateRetained: z.literal(true), discardNotReplayed: z.literal(true), originalsPreserved: z.literal(true), devSentinelUnchanged: z.literal(true), devControlAbsent: z.literal(true) }) } : {}),
       ...(appImage ? { appImageRuntime: z.literal(true), secondaryResourcesSurvived: z.literal(true), appImageAdmission: z.literal(appImageAdmission ? "AVAILABLE" : "UNAVAILABLE"),
@@ -402,6 +443,10 @@ try {
   if (packageDirectory) {
     const returned = join(output, "returned-package"); await required(["cp", "-a", `${container}:/payload/package`, returned]);
     assert.deepEqual(await inventory(returned), packageBefore); assert.deepEqual(await inventory(packageDirectory), packageBefore);
+    if (supervisorReceiptBytes) {
+      assert.deepEqual(await readFile(supervisorReceiptPath!), supervisorReceiptBytes);
+      const modes: Record<string, number> = {}; assert.deepEqual(await inventory(packageDirectory, "", modes), packageBefore); assert.deepEqual(modes, packageModes);
+    }
   }
   if (debianPackage) {
     const installed = join(output, "returned-installed-package"), modes: Record<string, number> = {};
@@ -413,6 +458,7 @@ try {
   if (appImageBundle && appImageInput) {
     assert.ok(appImageFilename); assert.deepEqual(await describe(join(appImageBundle, appImageFilename)), appImageInput.image);
     assert.deepEqual(await describe(join(appImageBundle, "openwhisper-launch")), appImageInput.launcher);
+    if (supervisorInput) assert.equal((await describe(join(appImageBundle, "receipt.json"))).sha256, supervisorInput.appImage.receiptSha256);
   }
   result = "PASS";
 } finally {

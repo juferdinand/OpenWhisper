@@ -1,5 +1,58 @@
 # Electron development evidence
 
+## AppImage transaction and fresh supervised package checkpoint
+
+An independently reviewed inactive AppImage consumer authenticates both the
+original borrowed download and its private adjacent copy, then uses retained
+descriptors for publication, rollback and commit. Six opt-in private-filesystem
+checks pass with real pinned signed 0.2.5 bytes; fixed-home launch admission and
+faults are synthetic. No image runs or installed application changes. A later
+focused case covers completed-then-reported-failed rename/publication. Initial
+foreign-destination failure exposed unclosed descriptors; terminal failure now
+closes both while preserving the backup and foreign destination. The corrected
+run has zero failures. Full source checks pass 1200 tests in 17.81 seconds with
+38 explicit skips, strict typing and ordinary app/shared-UI build.
+
+All six unchanged cases also pass in actual Electron 44.7.0 / Node 24.21.0,
+30.56 seconds, without failures/skips or stderr. The unchanged historical
+b892d861 Dev9 executable runs a separate bundled fixture in an isolated UID1000
+namespace. Original PID 13 exits 0 and disappears; descriptors return from 23 to
+23, private stages empty, and the namespace is removed. All 1263 original package
+files, signed assets, fixture/runtime bytes and modes match before/after. Idle
+sentinel teardown exits 137 after test exit 0. No AppImage or GUI is executed;
+this is consumer compatibility evidence, not packaged installation/restart.
+
+Fresh clean `2ce4a228` Ubuntu22 Debian/AppImage construction passes 13 ELF checks,
+archive/layout/notices and companion/legacy desktop checks. Two initial Docker
+copy/ownership failures precede the package CLI; corrected construction reuses
+the same unchanged source/native output. Initial AppImage passive extraction
+fails before process creation because the cached tool is missing from PATH;
+separate verification with that exact inventoried extractor passes against the
+unchanged image. Original failures, producer inventories and closed namespaces
+remain retained rather than relabeled as successful original attempts.
+
+One fresh supervised Debian runtime proves the original supervisor/GUI chain,
+fd3 socket and nonce presence without restart authority. Nine checks pass through
+CPU recovery/delivery, native X11 and explicit companion autostart. Later CLI
+Start exits 1 with `Session bus unavailable`, after an earlier successful Status.
+The opening adapter rejects before owner resolution. The cgroup reaches its
+256-process/thread cap once, without OOM; causal native/thread diagnostics are
+missing. [Issue #37](https://github.com/juferdinand/OpenWhisper/issues/37) retains
+that distinction. Cleanup requests normal app close without forced termination;
+servers close and the namespace disappears. The final per-PID successful-Quit
+assertion was not reached. No retry or AppImage runtime follows. This is partial
+failed container acceptance.
+
+Original [CI 37879018935](https://github.com/juferdinand/OpenWhisper/actions/runs/37879018935)
+passes ARM Dev/Stable at producer `51952cfcf4c77a4d70cf8b54ccc503ff8bab5803`,
+distinct from API head `2ce4a228`. Intel exceeds its 12-minute limit during the next
+update-download timeout test; universal dependencies skip. A delayed-write
+reproduction proves its unreachable sync-entry fixture race, while the original
+pending subphase remains inferred. The reviewed test-only correction uses mock
+deadline advancement after entry and finally settles held effects. Twelve
+focused cases pass; one explicit cached-asset case skips. No production deadline
+changes or CI reruns occur. Actual universal success remains open.
+
 ## Linux supervised package entry and original universal provenance refusal
 
 The fixed Linux bootstrap uses only the packaged Stable build/version/layout;

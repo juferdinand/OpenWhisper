@@ -1,5 +1,24 @@
 # Owned normal Linux Dev recording
 
+For the clean `2ce4a2285bf90de15fe9294bfa1c30630d1ab8bc` supervisor packages,
+append `--supervised-launch --producer-receipt /absolute/frozen-producer.json
+--producer-sha256 <exact-64-hex-sha256>` after the Stable Debian or AppImage arguments.
+The independently frozen producer receipt binds the source commit, complete package
+file hashes and modes, Debian archive, AppImage construction receipt, image and permanent
+launcher. The runner refuses mismatches before copying inputs and rechecks original inputs
+after execution. The harness is a separate test increment from the packaged source.
+
+This explicit mode launches the actual Debian companion or permanent AppImage launcher.
+It checks the original GUI, Node supervisor and AppImage runtime process chain, the exact
+bootstrap module and ELF, the inherited socket, current version and nonce presence without
+recording the nonce. Ordinary Quit must close every original process and extraction resource.
+Direct control commands must retain their early isolated path. The Debian legacy bare-ELF
+autostart entry remains unchanged on startup; explicit UI enable replaces it with the companion.
+The existing recording, recovery and cleanup sequence remains. This proves ordinary supervised
+startup and shutdown; it does not send a restart receipt, replace a package, enable updates or
+claim host installation, a login session or release acceptance. Historical b892 and 340 modes
+retain their own inputs and behavior.
+
 For the fresh clean `340dee3fb60cbf5abf6819553d9b575848919305` AppImage candidate,
 append `--appimage-admission` after `--stable-package --appimage-bundle /absolute/bundle`.
 The ordinary older AppImage mode retains its original b892 package pins and unavailable

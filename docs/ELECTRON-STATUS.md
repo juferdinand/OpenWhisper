@@ -18,7 +18,7 @@ incomplete; the table distinguishes runnable behavior from remaining replacement
 | macOS dictation | Actual Intel/Apple Silicon Dev packages pass sandbox, signed utilities, CPU recognition of public audio, shortcut setup/removal and original Quit. Normal stable packages pass migration, edited-state restart and clean exits at b892d86 | Physical microphone/TCC, actual target insertion and device changes; Metal selection remains open |
 | Linux desktop integration | Owned stock KDE 5.27 native Wayland F8, binding Quit/crash recovery and paste into separate Wayland/XWayland editors pass. Genuine X11 shortcuts and all five no-display CLI commands pass, including installed stable autostart enable/disable and generated-target restart | Expanded named-desktop, GNOME consent, wlroots, modifier/mouse, layout and overlay stacking coverage is deferred to follow-up tickets |
 | Optional model communication | Isolated manual local-model preview port exists | Complete the remaining agreed provider/workflow scope separately; ordinary dictation remains independent |
-| Packaging and updates | Fresh Ubuntu22 AppImage passes permanent-launch admission, autostart and the complete owned runtime. Debian metadata consumer passes in actual embedded Node; original-file downloads, signatures and Mac ZIP roundtrips pass. Fixed Linux supervisor/package starters are implemented; the first actual universal Mac constructor refuses dirty build provenance | Fresh supervised Linux package runtime; actual universal construction/runtime, installation/restart/rollback, persistent publisher continuity, authenticated Dev replacement, DMG and release signing |
+| Packaging and updates | Fresh supervised Debian reaches actual CPU dictation, recovery, X11 and autostart; a later command fails session-bus admission. Inactive Debian/AppImage consumers authenticate original downloads; private AppImage swap/rollback checks pass. Mac thin packages pass on ARM; Intel's latest test run times out | Resolve the fresh Linux command failure; complete supervised AppImage and universal Mac runtime; connect installation/restart/rollback, persistent publisher continuity, authenticated Dev replacement, DMG and release signing |
 | Final replacement | Isolated branch and draft PR preserve the installed application | User acceptance, merge, remove obsolete Swift/Rust hosts/builds, release 0.3.0 |
 
 ## Current package checkpoint
@@ -35,9 +35,45 @@ No installer or main restart writer is activated. Eighteen focused supervisor
 cases and eleven bootstrap/packaging cases pass; one host archive-tool case
 skips. Independent review fixes exit-to-pipe closure and monotonic deadline
 gaps. The combined source passes typing, normal app/shared-UI build and1198 tests
-in17.66 seconds, with34 explicit native/opt-in skips and zero failures. Actual
-new supervised packages remain to be built and exercised; earlier immutable
-runtime results below do not establish that new behavior.
+in17.66 seconds, with34 explicit native/opt-in skips and zero failures.
+
+Fresh exact-clean `2ce4a228` Ubuntu22 packages now pass native ABI, archive,
+notices, launcher and desktop checks. Their first supervised Debian runtime
+passes nine checks, including actual GUI/supervisor ownership, fd3, CPU dictation,
+recovery, clipboard/history, X11 and autostart. A later CLI Start fails with
+`Session bus unavailable`; original Status had passed. The opening adapter
+rejects before owner resolution. The namespace reaches its 256-process/thread
+cap once; causation remains unproven and is tracked in
+[issue #37](https://github.com/juferdinand/OpenWhisper/issues/37). Cleanup requests
+ordinary app close without forced termination and closes private services;
+the final per-PID successful-Quit assertion was not reached. This failed run is
+retained without a retry. Its cause and remaining runtime checks are open. Supervised AppImage runtime
+has not run. Earlier immutable runtime results remain separate producers.
+
+The inactive AppImage consumer independently authenticates an adjacent private
+copy, retains the exact predecessor and supports explicit commit or rollback.
+Six opt-in checks use pinned original signed 0.2.5 bytes in a disposable home;
+launch admission and filesystem faults are synthetic, and no image is executed.
+A focused final fault check also passes completed-then-reported-failed rename
+and publication. Foreign destinations survive, retained backups remain private,
+and both owned descriptors close on terminal restoration failure. Independent
+review passes. The combined source passes typing, app/shared-UI build and 1200
+tests in 17.81 seconds, zero failures and 38 explicit skips. The same unchanged
+six cases also pass in actual Electron 44.7.0 / Node 24.21.0, using the unchanged
+historical Dev9 executable and a separately bundled fixture. Descriptor counts,
+private stages and namespace cleanup pass. This proves adapter compatibility,
+not packaged updater activation; installer/restart wiring remains inactive.
+
+Original [CI 37879018935](https://github.com/juferdinand/OpenWhisper/actions/runs/37879018935)
+passes ARM Dev/Stable checks at actual synthetic producer
+`51952cfcf4c77a4d70cf8b54ccc503ff8bab5803` (API head `2ce4a228`). Intel reaches
+the update-download timeout fixture, then exceeds its 12-minute job limit;
+universal construction/runtime are skipped. A delayed-write reproduction
+confirms that the fixture's total deadline can expire before its awaited sync
+entry. Only this test changes: advance its mock clock after entry and settle
+held effects in finally. Twelve focused cases pass, one cached-asset case
+explicitly skips, and independent review passes. The original precise pending
+subphase was not logged; subsequent CI still must confirm the correction.
 
 Both original thin jobs in
 [CI 37876878846](https://github.com/juferdinand/OpenWhisper/actions/runs/37876878846)
