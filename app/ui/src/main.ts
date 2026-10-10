@@ -26,6 +26,8 @@ let contentKey = "";
 let shellKey = "";
 let renderedTab: Tab | undefined;
 let setupStep = -1;
+const SETUP_STEP_COUNT = 7;
+const SETUP_MODEL_STEP = 1;
 let focusSetupTitle = false;
 const expandedModelFamilies = new Set<string>();
 let preferenceQueue = Promise.resolve();
@@ -209,6 +211,9 @@ async function recoverState(): Promise<boolean> {
 // Send only the edited fields. Serializing writes also keeps delayed host replies in order.
 async function savePreferences(changes: PreferencePatch): Promise<boolean> {
   pendingPreferences++;
+  document
+    .querySelectorAll<HTMLButtonElement>(".setup-navigation button")
+    .forEach((button) => (button.disabled = true));
   const saved = enqueueWrite(preferenceQueue, async () => {
     try {
       state = await invoke("save_preferences", { changes });
@@ -219,7 +224,10 @@ async function savePreferences(changes: PreferencePatch): Promise<boolean> {
       return false;
     } finally {
       pendingPreferences--;
-      if (!pendingPreferences) render();
+      if (!pendingPreferences) {
+        if (tab === "setup") contentKey = "";
+        render();
+      }
     }
   });
   preferenceQueue = saved.next;
@@ -272,7 +280,12 @@ function syncPreferenceControls() {
   const vocabulary = document.querySelector<HTMLTextAreaElement>("#vocabulary");
   if (vocabulary && !dirty) vocabulary.value = state.preferences.vocabulary;
   const recognition = document.querySelector("#recognition-backend");
-  if (recognition) recognition.textContent = recognitionModeStatus();
+  if (recognition) {
+    recognition.textContent =
+      tab === "setup" && setupStep === 0
+        ? setupRecognitionModeStatus()
+        : recognitionModeStatus();
+  }
 }
 function recordingUnavailableMessage(): string {
   switch (state.recording_unavailable_reason) {
@@ -326,10 +339,44 @@ function recognitionModeStatus(): string {
   });
 }
 
-function recognitionModeControl(): string {
+function setupRecognitionModeStatus(): string {
   const cpu = state.cpu_device ?? t("CPU processor");
-  const gpu = state.gpu_device ?? t("Vulkan GPU");
-  return `<fieldset class="compute-mode" aria-label="${esc(t("Recognition mode"))}"><label><input type="radio" name="gpu-mode" data-pref="gpu" value="false" ${state.preferences.gpu ? "" : "checked"}><span><strong>${esc(t("CPU"))}</strong><small>${esc(cpu)}</small></span></label><label><input type="radio" name="gpu-mode" data-pref="gpu" value="true" ${state.preferences.gpu ? "checked" : ""} ${state.gpu_supported ? "" : "disabled"}><span><strong>${esc(t("GPU"))}</strong><small>${esc(gpu)}</small></span></label></fieldset><p class="secondary" id="recognition-backend">${esc(recognitionModeStatus())}</p>`;
+  if (!state.gpu_supported) {
+    return t(
+      "GPU recognition is unavailable in this build. CPU remains available: {device}",
+      { device: cpu },
+    );
+  }
+  if (!state.gpu_checked) return t("Checking GPU hardware …");
+  if (state.gpu_fallback) {
+    return t("GPU recognition failed; using CPU: {device}", { device: cpu });
+  }
+  if (!state.gpu_available) {
+    return t(
+      "No compatible GPU was detected. Recognition uses the CPU: {device}",
+      { device: cpu },
+    );
+  }
+  if (state.preferences.gpu) {
+    return t("GPU selected. Vulkan device detected: {device}", {
+      device: state.gpu_device ?? t("GPU device"),
+    });
+  }
+  return t("CPU selected; Vulkan GPU available: {device}", {
+    device: state.gpu_device ?? t("GPU device"),
+  });
+}
+
+function recognitionModeControl(setup = false): string {
+  const cpu = state.cpu_device ?? t("CPU processor");
+  const gpu = state.gpu_device ?? t(setup ? "GPU device" : "Vulkan GPU");
+  const gpuAvailable =
+    state.gpu_supported === true &&
+    state.gpu_checked === true &&
+    state.gpu_available;
+  const gpuDisabled = setup ? !gpuAvailable : !state.gpu_supported;
+  const status = setup ? setupRecognitionModeStatus() : recognitionModeStatus();
+  return `<fieldset class="compute-mode" aria-label="${esc(t("Recognition mode"))}"><label><input type="radio" name="gpu-mode" data-pref="gpu" value="false" ${state.preferences.gpu ? "" : "checked"}><span><strong>${esc(t("CPU"))}</strong><small>${esc(cpu)}</small></span></label><label><input type="radio" name="gpu-mode" data-pref="gpu" value="true" ${state.preferences.gpu ? "checked" : ""} ${gpuDisabled ? "disabled" : ""}><span><strong>${esc(t("GPU"))}</strong><small>${esc(gpu)}</small></span></label></fieldset><p class="secondary" id="recognition-backend">${esc(status)}</p>`;
 }
 
 const microphoneIcon =
@@ -650,6 +697,13 @@ function render() {
   if (tab === "setup") {
     const panels = [
       {
+        title: t("Choose recognition hardware"),
+        detail: t(
+          "Choose CPU or GPU for recognition. The next step suggests models for your selection.",
+        ),
+        content: recognitionModeControl(true),
+      },
+      {
         title: t("Download a speech model"),
         detail: t(
           "Choose a model family to see its variants. Recommendations use your current CPU/GPU mode; all models remain available.",
@@ -719,7 +773,7 @@ function render() {
     ];
     const modelRequired =
       !hasInstalledSelectedModel() &&
-      (setupStep === 0 || setupStep === panels.length - 1);
+      (setupStep === SETUP_MODEL_STEP || setupStep === panels.length - 1);
     const navigation = (welcome: boolean) => {
       const permissionFlowActive =
         portalBusy ||
@@ -727,9 +781,14 @@ function render() {
         state.shortcut_configuring ||
         state.recording_shortcut ||
         state.macos?.recording_shortcut === true;
-      const disabled = permissionFlowActive ? "disabled" : "";
+      const disabled =
+        permissionFlowActive || pendingPreferences > 0 ? "disabled" : "";
       const primaryDisabled =
-        permissionFlowActive || (!welcome && modelRequired) ? "disabled" : "";
+        permissionFlowActive ||
+        pendingPreferences > 0 ||
+        (!welcome && modelRequired)
+          ? "disabled"
+          : "";
       return `<footer class="setup-navigation">${welcome ? "" : `<button class="setup-back" data-setup-back ${disabled}>${esc(t("Back"))}</button>`}<span></span>${welcome || setupStep < panels.length - 1 ? `<button class="setup-primary" data-setup-next ${primaryDisabled}>${esc(t("Continue"))}</button>` : `<button class="setup-primary" data-command="complete_setup" ${primaryDisabled}>${esc(t("Finish setup"))}</button>`}</footer>`;
     };
     if (setupStep < 0) {
@@ -741,7 +800,7 @@ function render() {
         (_, index) =>
           `<span${index === setupStep ? ' class="current"' : ""}></span>`,
       ).join("");
-      content.innerHTML = `<section class="setup-card" aria-labelledby="setup-title"><div class="setup-card-body"><div class="setup-segments" aria-hidden="true">${progress}</div><div class="setup-progress" role="status">${esc(t("Step {step} of 6", { step: setupStep + 1 }))}</div><h1 id="setup-title" tabindex="-1">${esc(panel.title)}</h1><p class="setup-intro">${esc(panel.detail)}</p><div class="setup-panel-content">${panel.content}</div>${modelRequired ? `<p class="setup-footnote setup-model-required" role="status">${esc(t("Download and select a model to continue."))}</p>` : ""}${setupStep === panels.length - 1 ? `<p class="setup-footnote">${esc(t("You can change permissions, shortcuts, and recording preferences in General at any time."))}</p>` : ""}</div>${navigation(false)}</section>`;
+      content.innerHTML = `<section class="setup-card" aria-labelledby="setup-title"><div class="setup-card-body"><div class="setup-segments" aria-hidden="true">${progress}</div><div class="setup-progress" role="status">${esc(t("Step {step} of {total}", { step: setupStep + 1, total: panels.length }))}</div><h1 id="setup-title" tabindex="-1">${esc(panel.title)}</h1><p class="setup-intro">${esc(panel.detail)}</p><div class="setup-panel-content">${panel.content}</div>${modelRequired ? `<p class="setup-footnote setup-model-required" role="status">${esc(t("Download and select a model to continue."))}</p>` : ""}${setupStep === panels.length - 1 ? `<p class="setup-footnote">${esc(t("You can change permissions, shortcuts, and recording preferences in General at any time."))}</p>` : ""}</div>${navigation(false)}</section>`;
     }
     if (focusSetupTitle) {
       content.querySelector<HTMLElement>("#setup-title")?.focus();
@@ -1133,11 +1192,12 @@ function render() {
   content
     .querySelector<HTMLButtonElement>("[data-setup-next]")
     ?.addEventListener("click", () => {
-      if (setupStep === 0 && !hasInstalledSelectedModel()) {
+      if (setupStep === SETUP_MODEL_STEP && !hasInstalledSelectedModel()) {
         notice("Download and select a model to continue.");
         return;
       }
-      setupStep = Math.min(setupStep + 1, 5);
+      if (pendingPreferences > 0) return;
+      setupStep = Math.min(setupStep + 1, SETUP_STEP_COUNT - 1);
       focusSetupTitle = true;
       contentKey = "";
       render();
@@ -1145,6 +1205,7 @@ function render() {
   content
     .querySelector<HTMLButtonElement>("[data-setup-back]")
     ?.addEventListener("click", () => {
+      if (pendingPreferences > 0) return;
       setupStep = Math.max(setupStep - 1, -1);
       focusSetupTitle = true;
       contentKey = "";

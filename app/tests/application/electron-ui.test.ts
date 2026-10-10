@@ -242,8 +242,17 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     page = await app.firstWindow();
     currentPage = page;
     await expect(page.locator(".setup-logo")).toBeVisible();
-    for (let step = 0; step < 6; step++) {
+    for (let step = 0; step < 7; step++) {
       await page.locator("[data-setup-next]").click();
+      if (step === 0) {
+        await expect(page.getByRole("heading", { name: "Choose recognition hardware", exact: true })).toBeVisible();
+        await expect(page.getByText("Step 1 of 7", { exact: true })).toBeVisible();
+        await expect(page.locator('input[name="gpu-mode"][value="false"]')).toBeChecked();
+        await expect(page.locator('input[name="gpu-mode"][value="true"]')).toBeDisabled();
+      } else if (step === 1) {
+        await expect(page.getByRole("heading", { name: "Download a speech model", exact: true })).toBeVisible();
+        await expect(page.getByText("Step 2 of 7", { exact: true })).toBeVisible();
+      }
     }
     await page.locator('[data-command="complete_setup"]').click();
     await expect.poll(async () => validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.setup_completed).toBe(true);

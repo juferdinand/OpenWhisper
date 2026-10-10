@@ -25,7 +25,7 @@ new SVG logo variants for the frontend.
 | Transcript-centered recording view | Use the existing final transcript and real recording state, elapsed time and audio level |
 | Model drawer and CPU/GPU information | Use the authoritative catalog, actual download progress, selected preference, detected devices and fallback state |
 | Collapsible history rail | Restyle the current bounded text list with full-text copy and clear controls |
-| Setup and settings | Reorganize the existing controls; preserve all six setup steps and platform capability checks |
+| Setup and settings | Choose recognition hardware before the model, then preserve microphone, language, output, permission and shortcut controls and platform capability checks |
 | Floating recording controls | Apply the same visual language while preserving host-specific availability and usable main-window fallback |
 | Local model preview | Retain the existing optional Dev-only manual preview; do not advertise stable chat functionality |
 
@@ -36,8 +36,12 @@ state. A live recording waveform indicates input level, not live transcription.
 
 ## Implementation increments
 
-1. **Setup first.** Start with the welcome/language screen, then present the six existing
-   setup steps individually. Preserve the real model, microphone, language, output,
+1. **Setup first.** Start with the welcome/language screen, then present seven setup steps:
+   recognition hardware, model, microphone, speech language, output, permissions and trigger.
+   Show the detected CPU/GPU names and persist the selected recognition mode before showing
+   its model recommendations. GPU selection requires a compatible detected device and a
+   supported host backend; keep CPU available when that capability is absent.
+   Preserve the real model, microphone, language, output,
    permission and shortcut controls, including optional fallback paths. Start a fresh,
    isolated Dev profile for owner review; no installation is needed.
    Require a fully installed, selected speech model before advancing from model selection

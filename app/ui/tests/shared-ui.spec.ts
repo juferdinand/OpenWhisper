@@ -443,6 +443,7 @@ async function start(
           auto_check_updates: true,
         },
         models,
+        recommended_models: ["base", "parakeet-v3-q4"],
         installed: ["base"],
         microphones: ["default"],
         session: platform === "linux" ? "Wayland" : "macOS",
@@ -490,7 +491,12 @@ async function start(
         }
         if (command === "get_state") {
           const saved = await host.loadTestPreferences();
-          if (saved) state.preferences = saved;
+          if (saved) {
+            state.preferences = saved;
+            state.recommended_models = saved.gpu
+              ? ["large-v3-turbo-q5_0", "parakeet-v3-q8"]
+              : ["base", "parakeet-v3-q4"];
+          }
           const initial = JSON.parse(JSON.stringify(state));
           if (initialStateRace) {
             state.status = "recording";
@@ -507,6 +513,10 @@ async function start(
             await new Promise((resolve) => setTimeout(resolve, host.saveDelay));
           if (host.rejectSave) throw new Error("Could not save settings");
           Object.assign(state.preferences, args.changes);
+          if (Object.hasOwn(args.changes, "gpu"))
+            state.recommended_models = args.changes.gpu
+              ? ["large-v3-turbo-q5_0", "parakeet-v3-q8"]
+              : ["base", "parakeet-v3-q4"];
         }
         if (command === "save_settings") state.preferences = args.preferences;
         if (command === "complete_setup")
@@ -1076,8 +1086,154 @@ for (const platform of ["linux", "macos"] as const) {
       window.publishState();
     });
     await expect(page.locator("#record-control")).toBeHidden();
+    const cpuDevice =
+      platform === "macos"
+        ? "Synthetic macOS test CPU"
+        : "Synthetic Linux test CPU";
+    const gpuDevice = "Synthetic Vulkan test GPU";
+    await page.evaluate(
+      ({ cpuDevice, platform }) => {
+        Object.assign(window.testState, {
+          cpu_device: cpuDevice,
+          gpu_device: null,
+          gpu_supported: false,
+          gpu_checked: platform === "macos",
+          gpu_available: false,
+          gpu_fallback: false,
+          recommended_models: ["base", "parakeet-v3-q4"],
+        });
+        window.publishState();
+      },
+      { cpuDevice, platform },
+    );
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await expect(page.getByText("Step 1 of 6", { exact: true })).toBeVisible();
+    await expect(page.getByText("Step 1 of 7", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Choose recognition hardware" }),
+    ).toBeVisible();
+    const cpuMode = page.locator('input[name="gpu-mode"][value="false"]');
+    const gpuMode = page.locator('input[name="gpu-mode"][value="true"]');
+    await expect(cpuMode).toBeChecked();
+    await expect(gpuMode).toBeDisabled();
+    await expect(page.getByText(cpuDevice, { exact: true })).toBeVisible();
+    if (platform === "macos") {
+      await expect(
+        page.getByText(
+          `GPU recognition is unavailable in this build. CPU remains available: ${cpuDevice}`,
+          { exact: true },
+        ),
+      ).toBeVisible();
+    } else {
+      await page.evaluate(
+        ({ cpuDevice, gpuDevice }) => {
+          Object.assign(window.testState, {
+            cpu_device: cpuDevice,
+            gpu_device: gpuDevice,
+            gpu_supported: true,
+            gpu_checked: false,
+            gpu_available: false,
+          });
+          window.publishState();
+        },
+        { cpuDevice, gpuDevice },
+      );
+      await expect(gpuMode).toBeDisabled();
+      await expect(
+        page.getByText("Checking GPU hardware …", { exact: true }),
+      ).toBeVisible();
+      await page.evaluate(() => window.publishState());
+      await expect(
+        page.getByText("Checking GPU hardware …", { exact: true }),
+      ).toBeVisible();
+      await page.evaluate(() => {
+        window.testState.gpu_checked = true;
+        window.publishState();
+      });
+      await expect(
+        page.getByText(
+          `No compatible GPU was detected. Recognition uses the CPU: ${cpuDevice}`,
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await expect(gpuMode).toBeDisabled();
+      await page.evaluate(() => window.publishState());
+      await expect(
+        page.getByText(
+          `No compatible GPU was detected. Recognition uses the CPU: ${cpuDevice}`,
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await page.evaluate(
+        ({ gpuDevice }) => {
+          window.testState.gpu_available = true;
+          window.testState.gpu_device = gpuDevice;
+          window.publishState();
+        },
+        { gpuDevice },
+      );
+      await expect(gpuMode).toBeEnabled();
+      await expect(
+        page.getByText(`CPU selected; Vulkan GPU available: ${gpuDevice}`, {
+          exact: true,
+        }),
+      ).toBeVisible();
+
+      await page.evaluate(() => {
+        const host = window as any;
+        host.rejectSave = true;
+        host.saveDelay = 50;
+      });
+      await gpuMode.check();
+      await expect(
+        page.getByRole("button", { name: "Continue", exact: true }),
+      ).toBeDisabled();
+      await expect(
+        page.getByRole("button", { name: "Back", exact: true }),
+      ).toBeDisabled();
+      await expect(cpuMode).toBeChecked();
+      await expect(gpuMode).not.toBeChecked();
+      await expect(
+        page.getByRole("button", { name: "Continue", exact: true }),
+      ).toBeEnabled();
+      await expect(
+        page.getByText("Step 1 of 7", { exact: true }),
+      ).toBeVisible();
+
+      await page.evaluate(() => {
+        const host = window as any;
+        host.rejectSave = false;
+        host.saveDelay = 180;
+      });
+      await gpuMode.check();
+      await expect(
+        page.getByRole("button", { name: "Continue", exact: true }),
+      ).toBeDisabled();
+      await expect(
+        page.getByText("Step 1 of 7", { exact: true }),
+      ).toBeVisible();
+      await expect
+        .poll(() => page.evaluate(() => window.testState.preferences.gpu))
+        .toBe(true);
+      await expect(
+        page.getByRole("button", { name: "Continue", exact: true }),
+      ).toBeEnabled();
+      await expect(
+        page.getByText(`GPU selected. Vulkan device detected: ${gpuDevice}`, {
+          exact: true,
+        }),
+      ).toBeVisible();
+    }
+    await page.setViewportSize({ width: 740, height: 560 });
+    await page.screenshot({
+      path: `test-results/${platform}-setup-hardware-minimum.png`,
+    });
+    await page.setViewportSize({ width: 960, height: 680 });
+    await page.screenshot({
+      path: `test-results/${platform}-setup-hardware.png`,
+    });
+    await page.setViewportSize({ width: 740, height: 560 });
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(page.getByText("Step 2 of 7", { exact: true })).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Download a speech model" }),
     ).toBeVisible();
@@ -1124,30 +1280,35 @@ for (const platform of ["linux", "macos"] as const) {
       page.locator('[data-model-family="parakeet"]'),
     ).toHaveJSProperty("open", true);
     await expect(page.locator(".setup-model-family .model-row")).toHaveCount(9);
-    await page.evaluate(() => {
-      window.testState.recommended_models = ["small", "parakeet-v3-q4"];
-      window.publishState();
-    });
     const whisperFamily = page.locator('[data-model-family="whisper"]');
     const parakeetFamily = page.locator('[data-model-family="parakeet"]');
     await expect(whisperFamily).toHaveJSProperty("open", true);
     await expect(parakeetFamily).toHaveJSProperty("open", true);
+    const recommendedWhisperId =
+      platform === "linux" ? "large-v3-turbo-q5_0" : "base";
+    const otherWhisperId = platform === "linux" ? "base" : "small";
+    const recommendedParakeetId =
+      platform === "linux" ? "parakeet-v3-q8" : "parakeet-v3-q4";
     await expect(
       whisperFamily
         .locator(".model-row")
-        .filter({ hasText: "Whisper Small" })
+        .filter({
+          has: page.locator(`[data-select="${recommendedWhisperId}"]`),
+        })
         .getByText("Starting recommendation"),
     ).toBeVisible();
     await expect(
       whisperFamily
         .locator(".model-row")
-        .filter({ hasText: "Whisper Base" })
+        .filter({ has: page.locator(`[data-select="${otherWhisperId}"]`) })
         .getByText("Starting recommendation"),
     ).toHaveCount(0);
     await expect(
       parakeetFamily
         .locator(".model-row")
-        .filter({ hasText: "Parakeet TDT v3 (compact)" })
+        .filter({
+          has: page.locator(`[data-select="${recommendedParakeetId}"]`),
+        })
         .getByText("Starting recommendation"),
     ).toBeVisible();
     await parakeetFamily.locator("summary").click();
@@ -1186,7 +1347,7 @@ for (const platform of ["linux", "macos"] as const) {
       (button as HTMLButtonElement).disabled = false;
       (button as HTMLButtonElement).click();
     });
-    await expect(page.getByText("Step 1 of 6", { exact: true })).toBeVisible();
+    await expect(page.getByText("Step 2 of 7", { exact: true })).toBeVisible();
     await setupContinue.evaluate((button) => {
       (button as HTMLButtonElement).disabled = true;
     });
@@ -1252,8 +1413,24 @@ for (const platform of ["linux", "macos"] as const) {
       page.getByRole("heading", { name: microphoneHeading }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Back", exact: true }).click();
-    await expect(page.getByText("Step 1 of 6", { exact: true })).toBeVisible();
+    await expect(page.getByText("Step 2 of 7", { exact: true })).toBeVisible();
     await expect(whisperFamily).toHaveJSProperty("open", true);
+    await expect(baseModel.getByText("Active", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await expect(page.getByText("Step 1 of 7", { exact: true })).toBeVisible();
+    if (platform === "linux") {
+      await expect(gpuMode).toBeChecked();
+      await expect(cpuMode).not.toBeChecked();
+      await expect
+        .poll(() => page.evaluate(() => window.testState.preferences.gpu))
+        .toBe(true);
+    } else {
+      await expect(cpuMode).toBeChecked();
+      await expect(gpuMode).toBeDisabled();
+    }
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(page.getByText("Step 2 of 7", { exact: true })).toBeVisible();
+    await expect(baseModel.getByText("Active", { exact: true })).toBeVisible();
 
     const smallModel = page
       .locator(".model-row")
@@ -1263,7 +1440,7 @@ for (const platform of ["linux", "macos"] as const) {
       .poll(() => page.evaluate(() => window.testState.preferences.model))
       .toBe("small");
     await expect(smallModel.getByText("Active", { exact: true })).toBeVisible();
-    await expect(page.getByText("Step 1 of 6", { exact: true })).toBeVisible();
+    await expect(page.getByText("Step 2 of 7", { exact: true })).toBeVisible();
     await expect(setupContinue).toBeEnabled();
     await baseModel.getByRole("button", { name: "Use", exact: true }).click();
     await expect(baseModel.getByText("Active", { exact: true })).toBeVisible();
@@ -1506,6 +1683,9 @@ for (const platform of ["linux", "macos"] as const) {
     await expect
       .poll(() => page.evaluate(() => window.testState.preferences.model))
       .toBe("base");
+    await expect
+      .poll(() => page.evaluate(() => window.testState.preferences.gpu))
+      .toBe(platform === "linux");
     expect(
       await page.evaluate(() => window.calls.map((call) => call.command)),
     ).not.toContain("download_model");
@@ -1598,6 +1778,7 @@ for (const platform of ["linux", "macos"] as const) {
     await page.setViewportSize({ width: 740, height: 560 });
     await page.getByRole("button", { name: "Weiter", exact: true }).click();
     const titles = [
+      "Erkennungshardware auswählen",
       "Sprachmodell herunterladen",
       platform === "macos" ? "Mikrofonzugriff erlauben" : "Mikrofon wählen",
       "Sprache wählen",
@@ -1607,7 +1788,7 @@ for (const platform of ["linux", "macos"] as const) {
     ];
     for (const [index, title] of titles.entries()) {
       await expect(
-        page.getByText(`Schritt ${index + 1} von 6`, { exact: true }),
+        page.getByText(`Schritt ${index + 1} von 7`, { exact: true }),
       ).toBeVisible();
       if (title) {
         await expect(
@@ -1621,7 +1802,7 @@ for (const platform of ["linux", "macos"] as const) {
           .locator("main")
           .evaluate((e) => e.scrollWidth <= e.clientWidth),
       ).toBe(true);
-      if (index === 0) {
+      if (index === 1) {
         await page.screenshot({
           path: `test-results/${platform}-setup-model-de-minimum.png`,
         });
@@ -1633,7 +1814,7 @@ for (const platform of ["linux", "macos"] as const) {
       }
       await page
         .getByRole("button", {
-          name: index === 5 ? "Einrichtung abschließen" : "Weiter",
+          name: index === 6 ? "Einrichtung abschließen" : "Weiter",
           exact: true,
         })
         .click();
