@@ -1,22 +1,24 @@
 # OpenWhisper roadmap
 
-Remaining priorities include Linux desktop acceptance. New integrations start with optional
-language-model communication, followed by speech output, then structured
-Obsidian notes. Ordinary dictation remains independent of these services. These are planned features,
-not current capabilities or promised release dates. Start with [README.md](../README.md) for
-installation and current behavior.
+The next product milestone is the [frontend redesign for existing features](UI-REDESIGN.md),
+followed by optional AI text processing and Windows support. Continue concrete Linux reliability
+and acceptance work alongside these milestones. Within optional integrations, language-model
+communication precedes speech output, then structured Obsidian notes. Ordinary dictation remains
+independent of these services. These are planned features, not current capabilities or promised
+release dates. Start with [README.md](../README.md) for installation and current behavior.
 
 ## Delivery order
 
 | Stage | Deliverable | Completion evidence |
 | --- | --- | --- |
-| 1 | Linux installation, desktop acceptance, and clearer platform boundaries | Verified installer tests; package/session reports with passed, failed, skipped, and manual checks; accurate support matrix |
+| 1 | Frontend redesign for existing dictation features | Responsive recording/transcript, models, history and settings; existing behavior preserved; renderer regressions and owner review |
 | 2 | Optional LM Studio/Ollama communication | Explicitly send text to a chosen provider/model, preview the result, cancel safely, and preserve the input on failure |
-| 3 | Optional speech output and short spoken conversations | Speak reviewed model replies with interruption and reliable microphone/playback separation |
-| 4 | Structured Obsidian output | Review and save a model-structured note to a selected vault on both hosts, preserving the original dictation |
+| 3 | Windows platform support | Platform adapters, packaged installation and automated dictation/update evidence; no support claim from a build alone |
+| Later | Optional speech output and short spoken conversations | Speak reviewed model replies with interruption and reliable microphone/playback separation |
+| Later | Structured Obsidian output | Review and save a model-structured note to a selected vault on both hosts, preserving the original dictation |
 | Later | Configurable coding-agent and other actions | Previewed input, approved destination, structured results, and user control over execution |
 
-Linux reliability and acceptance work can continue alongside provider development. Deliver
+Linux reliability and acceptance work continues alongside product development. Deliver
 new integrations one stage at a time: model communication before TTS, then Obsidian.
 Agent actions depend on the provider and workflow contracts; conversation mode depends on
 cancellation and structured results. Prepare isolated branches, automated evidence, and focused

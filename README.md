@@ -152,6 +152,7 @@ export all keychain identities or commit signing material.
 - [Release signing](docs/SIGNING.md)
 - [Security policy](SECURITY.md)
 - [Local model communication preview](docs/LOCAL_MODELS.md)
+- [Frontend redesign plan](docs/UI-REDESIGN.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Report an issue](https://github.com/juferdinand/OpenWhisper/issues)
 
