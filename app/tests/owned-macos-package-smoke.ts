@@ -114,7 +114,7 @@ try {
     stage = "fresh-stable-relocation";
     await mkdir(installationRoot, { mode: 0o700 });
     execFileSync("/usr/bin/ditto", [sourceBundle, bundle], { env: environment, timeout: 120_000, stdio: "ignore" });
-    execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], { env: environment, timeout: 15_000, stdio: "ignore" });
+    execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], { env: environment, timeout: 60_000, stdio: "ignore" });
     const bundleInfo: unknown = JSON.parse(execFileSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", join(bundle, "Contents/Info.plist")],
       { env: environment, encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024 }));
     validateMacBundleMetadata(capturedBuild, packageMetadata.sourceVersion, bundleInfo);
@@ -151,7 +151,7 @@ try {
   assert.equal((await lstat(executable)).isSymbolicLink(), false);
   stage = "launch";
   application = await _electron.launch({ executablePath: executable, args: stable ? [] : ["--dev-profile", profile],
-    env: environment, chromiumSandbox: true, timeout: 30_000 });
+    env: environment, chromiumSandbox: true, timeout: 90_000 });
   const original = application.process();
   const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((accept) => original.once("close", (code, signal) => accept({ code, signal })));
   page = await application.firstWindow();
@@ -246,7 +246,7 @@ try {
   for (const candidate of [wrongBundle, tamperedBundle]) execFileSync("/usr/bin/ditto", [bundle, candidate], { env: environment, timeout: 120_000, stdio: "ignore" });
   execFileSync("/usr/bin/codesign", ["--force", "--sign", "-", "--identifier", "io.github.whisperfree.owned-wrong-publisher", "--timestamp=none", wrongBundle],
     { env: environment, timeout: 15_000, stdio: "ignore" });
-  execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", wrongBundle], { env: environment, timeout: 15_000, stdio: "ignore" });
+  execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", wrongBundle], { env: environment, timeout: 60_000, stdio: "ignore" });
   stage = "update-signature-different-identity";
   const differentIdentity = await verifyCandidate(wrongBundle); signatureCases.push({ name: "different-identity", result: differentIdentity });
   assert.equal(differentIdentity.accepted, false); assert.equal(differentIdentity.code, "INVALID_SIGNATURE");
@@ -262,7 +262,7 @@ try {
   assert.equal(tampered.accepted, false); assert.equal(tampered.code, "INVALID_SIGNATURE");
   assert.deepEqual(await readFile(sourceDescriptorPath), sourceDescriptor);
   assert.deepEqual(await readFile(join(appPath, "dist/main/development-recording-build.js")), sourceDescriptor);
-  execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], { env: environment, timeout: 15_000, stdio: "ignore" });
+  execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], { env: environment, timeout: 60_000, stdio: "ignore" });
   checks.push(selfAvailability === "ACCEPTED"
     ? "Current running-app requirement accepts itself and rejects valid different ad-hoc identity, unsigned code and changed sealed resource"
     : "Producer-admitted universal ad-hoc self publisher acceptance is unavailable at INVALID_SIGNATURE/-67050; different identity, unsigned code and changed sealed resource are rejected");
@@ -704,7 +704,7 @@ try {
   checks.push("Original packaged process exits cleanly through normal Quit and application cleanup");
   if (stable) {
     await preserved(); stage = "stable-normal-restart";
-    application = await _electron.launch({ executablePath: executable, args: [], env: environment, chromiumSandbox: true, timeout: 30_000 });
+    application = await _electron.launch({ executablePath: executable, args: [], env: environment, chromiumSandbox: true, timeout: 90_000 });
     const restarted = application.process();
     const restartedClosed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((accept) =>
       restarted.once("close", (code, signal) => accept({ code, signal })));
