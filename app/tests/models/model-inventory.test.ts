@@ -140,7 +140,10 @@ test("lease validation detects replacement and same-length edits while retaining
   await assert.rejects(service.remove("custom"), fail("LEASED"));
   await lease.release(Promise.resolve());
   const next = await service.acquire("custom", { gpu: false });
-  await unlink(path); await installed(ctx.directory, "custom.bin", Buffer.from("another!"));
+  // Keep the replacement inode alive while the original inode is still linked so
+  // filesystems cannot immediately recycle its identity after unlink.
+  const replacement = await installed(ctx.directory, "replacement.bin", Buffer.from("another!"));
+  await unlink(path); await rename(replacement, path);
   await assert.rejects(next.validate(), fail("MODEL_CHANGED")); await next.release(Promise.resolve());
 }));
 

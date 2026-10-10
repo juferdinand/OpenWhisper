@@ -67,6 +67,30 @@ test("Opening and status are read-only; explicit enable, reopen and disable pres
   assert.equal(await filesystem.readFile(sentinel, "utf8"), "keep saved opt-ins/data");
 }));
 
+test("Development autostart uses its own desktop identity and pins the explicit private profile", { skip: !supported }, async () => fixture(async (input) => {
+  const profile = join(input.root, "private-dev-profile"), stableEntry = input.entry;
+  const devEntry = join(input.configHome, "autostart/io.github.whisperfree.dev.desktop");
+  const dev = await LinuxAutostart.open({ appId: "io.github.whisperfree.dev", configHome: input.configHome,
+    configDirs: input.configDirs, executable: input.executable, launchArguments: ["--dev-profile", profile] });
+  const stableBefore = desktop(input.executable);
+  assert.deepEqual(await dev.status(), { requested: false });
+  await assert.rejects(filesystem.lstat(dirname(devEntry)), { code: "ENOENT" });
+  await write(stableEntry, stableBefore);
+  await dev.set(true);
+  assert.equal(await filesystem.readFile(devEntry, "utf8"), ["[Desktop Entry]", "Type=Application", "Name=OpenWhisper Dev",
+    "Comment=Free, local dictation", `Exec=${linuxAutostartArgument(input.executable)} --dev-profile ${linuxAutostartArgument(profile)}`,
+    "Icon=io.github.whisperfree.dev", "StartupWMClass=io.github.whisperfree.dev", "Terminal=false", ""].join("\n"));
+  assert.deepEqual(await dev.status(), { requested: true });
+  assert.equal(await filesystem.readFile(stableEntry, "utf8"), stableBefore);
+  await dev.set(false);
+  assert.deepEqual(await dev.status(), { requested: false });
+  assert.equal(await filesystem.readFile(stableEntry, "utf8"), stableBefore);
+  await assert.rejects(LinuxAutostart.open({ appId: "io.github.whisperfree.dev", configHome: input.configHome,
+    configDirs: input.configDirs, executable: input.executable }), category("UNAVAILABLE"));
+  await assert.rejects(LinuxAutostart.open({ appId: "io.github.whisperfree.dev", configHome: input.configHome,
+    configDirs: input.configDirs, executable: input.executable, launchArguments: ["--dev-profile", "/a=b"] }), category("UNSAFE_PATH"));
+}));
+
 test("Effective XDG precedence reads system entries and user Hidden overrides without altering system data", { skip: !supported }, async () => fixture(async (input) => {
   const first = join(input.configDirs[0]!, "autostart/io.github.whisperfree.desktop"), second = join(input.configDirs[1]!, "autostart/io.github.whisperfree.desktop");
   await write(first, desktop(input.executable)); await write(second, desktop(input.executable, "Hidden=true\n"));

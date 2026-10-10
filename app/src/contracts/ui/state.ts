@@ -15,6 +15,9 @@ const utf8 = (limit: number) => z.string().max(limit).refine(
   { message: "String exceeds the supported UTF-8 byte length" },
 );
 const label = utf8(1024);
+export const hardwareDeviceNameSchema = utf8(256).refine(
+  (value) => value.length > 0 && value === value.trim() && !/\p{Cc}/u.test(value),
+);
 // Imported macOS models retain their file's Unicode/space-containing basename. Hosts resolve
 // identifiers against their model inventory; the renderer cannot supply an arbitrary path.
 const modelId = utf8(1024).min(1).refine(
@@ -44,12 +47,13 @@ export const nonEmptySnippetSchema = snippetSchema.refine(
   { message: "Snippet trigger is empty", path: ["trigger"] },
 );
 
+export const nativeMouseButtonSchema = z.number().int().refine(
+  (value) => value === 2 || (value >= 8 && value <= 31),
+);
 // These are host-owned serialized profiles, not renderer authority to bind native input.
 export const nativeTriggerSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("key"), key: z.number().int().min(1).max(0x3fffffff) }),
-  z.strictObject({ kind: z.literal("mouse"), button: z.number().int().refine(
-    (value) => value === 2 || (value >= 8 && value <= 31),
-  ) }),
+  z.strictObject({ kind: z.literal("mouse"), button: nativeMouseButtonSchema }),
 ]);
 export type NativeTrigger = z.infer<typeof nativeTriggerSchema>;
 export const x11TriggerSchema = z.strictObject({
@@ -163,11 +167,14 @@ export const appStateSchema = z.strictObject({
   paste_ready: z.boolean(),
   paste_configuring: z.boolean().optional(),
   gpu_available: z.boolean(),
+  gpu_checked: z.boolean().optional(),
   gpu_supported: z.boolean().optional(),
-  gpu_device: label.nullable().optional(),
+  cpu_device: hardwareDeviceNameSchema.nullable().optional(),
+  gpu_device: hardwareDeviceNameSchema.nullable().optional(),
   gpu_fallback: z.boolean().optional(),
   recovery_available: z.boolean().optional(),
   overlay_available: z.boolean().optional(),
+  overlay_unavailable_reason: z.enum(["unsupported", "runtime"]).optional(),
   download: modelId.nullable(),
   progress: fraction,
   // A finite safe integer is a wire constraint, not an automatic recording cutoff.
@@ -177,6 +184,7 @@ export const appStateSchema = z.strictObject({
   model_directory: utf8(4096),
   profile: z.literal("development").optional(),
   recording_available: z.boolean().optional(),
+  recording_unavailable_reason: z.enum(["host", "audio", "model", "permission"]).optional(),
   local_processing: localProcessingProfileSchema.optional(),
   local_processing_invalid_profile: z.boolean().optional(),
 }).refine(
@@ -260,6 +268,7 @@ export const commandInputSchemas = {
   cancel_shortcut: noArgs,
   clear_shortcut: noArgs,
   desktop_shortcut: noArgs,
+  capture_mouse_trigger: z.strictObject({ button: nativeMouseButtonSchema }),
   enable_paste: noArgs,
   disable_paste: noArgs,
   allow_microphone: noArgs,
@@ -295,6 +304,7 @@ export const commandOutputSchemas = {
   cancel_shortcut: actionResult,
   clear_shortcut: actionResult,
   desktop_shortcut: actionResult,
+  capture_mouse_trigger: actionResult,
   enable_paste: actionResult,
   disable_paste: actionResult,
   allow_microphone: actionResult,

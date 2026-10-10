@@ -34,6 +34,8 @@ export async function buildDevelopmentRecording(): Promise<void> {
     throw new Error("The recording development build requires Linux or macOS.");
   }
   const speech = await buildNativeSpeech({ backend: "cpu" });
+  const vulkanSpeech = process.platform === "linux" && process.arch === "x64"
+    ? await buildNativeSpeech({ backend: "vulkan" }) : undefined;
   if (process.platform === "darwin") {
     await buildMacCapture();
     await buildMacRetirementProduction();
@@ -47,19 +49,32 @@ export async function buildDevelopmentRecording(): Promise<void> {
   const captureName = process.platform === "darwin" ? "openwhisper_macos_capture.node" : "openwhisper_capture.node";
   const speechFile = join(speechDirectory, "openwhisper_speech.node"), captureFile = join(captureDirectory, captureName);
   await cp(speech.binding, speechFile);
+  const vulkanFile = vulkanSpeech ? join(root, "dist/native/speech/vulkan/openwhisper_speech.node") : undefined;
+  if (vulkanSpeech && vulkanFile) {
+    if (vulkanSpeech.manifest.speech.revision !== speech.manifest.speech.revision ||
+        vulkanSpeech.manifest.speech.sha256 !== speech.manifest.speech.sha256 ||
+        vulkanSpeech.manifest.platform !== speech.manifest.platform ||
+        vulkanSpeech.manifest.architecture !== speech.manifest.architecture) {
+      throw new Error("CPU and Vulkan speech artifacts must use the same pinned source and host.");
+    }
+    await mkdir(join(root, "dist/native/speech/vulkan"), { recursive: true });
+    await cp(vulkanSpeech.binding, vulkanFile);
+  }
   await cp(join(root, "dist/native", captureName), captureFile);
   const entry = await bundleEntry(process.platform === "darwin" ? "macos-capture-entry" : "capture-entry");
   const platformServices = process.platform === "linux" ? {
     entry: await digest(await bundleEntry("platform-entry")), bus: await digest(join(root, "dist/native/openwhisper_linux_bus.node")),
   } : undefined;
   const graph = await buildSpeechEntryGraph(root), speechDigest = await digest(speechFile);
+  const speechEntries = [{ backend: "cpu" as const, ...speechDigest },
+    ...(vulkanFile ? [{ backend: "vulkan" as const, ...await digest(vulkanFile) }] : [])];
   const descriptor = developmentRecordingDescriptorSchema.parse({
     version: 1, platform: process.platform, architecture: process.arch,
     capture: await digest(captureFile), captureEntry: await digest(entry),
     ...(platformServices ? { platformServices } : { retirement: await digest(join(root, "dist/native/openwhisper_macos_retirement.node")) }),
     speech: { version: 1, platform: process.platform, architecture: process.arch, napiVersion: 8,
       speechRevision: speech.manifest.speech.revision, speechSourceSha256: speech.manifest.speech.sha256,
-      entries: [{ backend: "cpu", ...speechDigest }] }, speechEntryGraph: graph.graph,
+      entries: speechEntries }, speechEntryGraph: graph.graph,
   });
   // Compile a typed, captured record into the fixed module imported by main.
   await build({ stdin: { contents: `export const DEVELOPMENT_RECORDING_BUILD: unknown = ${JSON.stringify(descriptor)};`,

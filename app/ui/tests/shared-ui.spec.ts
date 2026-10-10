@@ -22,7 +22,8 @@ declare global {
       elapsed: number;
       level: number;
     }): void;
-    calls: { command: string }[];
+    publishNavigate(tab: string): void;
+    calls: { command: string; args?: unknown }[];
   }
 }
 
@@ -52,6 +53,170 @@ test("pending keyboard permission exposes translated Cancel and sends only revoc
   await expect(page.locator('[data-portal="enable_paste"]')).toHaveText(
     "Erlauben",
   );
+});
+
+test("Linux overlay availability distinguishes unsupported protocol from missing runtime and translates both", async ({
+  page,
+}) => {
+  await start(page, "linux");
+  await page.getByRole("button", { name: "General", exact: true }).click();
+  await page.evaluate(() => {
+    window.testState.overlay_available = false;
+    window.testState.overlay_unavailable_reason = "unsupported";
+    window.publishState();
+  });
+  const unsupported =
+    "This Wayland compositor does not support layer-shell recording controls. Use the main window controls.";
+  await expect(page.getByText(unsupported, { exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.preferences.ui_language = "de";
+    window.publishState();
+  });
+  await expect(
+    page.getByText(
+      "Dieser Wayland-Compositor unterstützt keine layer-shell-Aufnahmeanzeige. Verwende die Bedienelemente im Hauptfenster.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.preferences.ui_language = "en";
+    window.testState.overlay_unavailable_reason = "runtime";
+    window.publishState();
+  });
+  await expect(
+    page.getByText("Floating controls could not start.", { exact: false }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.preferences.ui_language = "de";
+    window.publishState();
+  });
+  await expect(
+    page.getByText(
+      "Die schwebenden Bedienelemente konnten nicht gestartet werden.",
+      { exact: false },
+    ),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.overlay_unavailable_reason = undefined;
+    window.publishState();
+  });
+  await expect(
+    page.getByText(
+      "Die schwebenden Bedienelemente sind nicht verfügbar. Verwende die Bedienelemente im Hauptfenster.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+});
+
+test("Linux recognition mode names devices and distinguishes selection, discovery, and GPU fallback", async ({
+  page,
+}) => {
+  await start(page, "linux");
+  await page.getByRole("button", { name: "General", exact: true }).click();
+  await page.evaluate(() => {
+    Object.assign(window.testState, {
+      gpu_supported: true,
+      gpu_checked: false,
+      gpu_available: false,
+      gpu_fallback: false,
+      cpu_device: "AMD Ryzen 7 5700G",
+    });
+    window.publishState();
+  });
+  const cpu = page.locator('input[name="gpu-mode"][value="false"]');
+  const gpu = page.locator('input[name="gpu-mode"][value="true"]');
+  await expect(cpu).toBeChecked();
+  await expect(
+    page.getByText("AMD Ryzen 7 5700G", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("CPU selected: AMD Ryzen 7 5700G", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await gpu.check();
+  await expect(gpu).toBeChecked();
+  await expect(
+    page.getByText("Checking GPU hardware …", { exact: true }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.gpu_device = "NVIDIA GeForce RTX 3060";
+    window.testState.gpu_checked = true;
+    window.testState.gpu_available = true;
+    window.publishState();
+  });
+  await expect(
+    page.getByText(
+      "GPU selected. Vulkan device detected: NVIDIA GeForce RTX 3060",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.gpu_fallback = true;
+    window.publishState();
+  });
+  await expect(
+    page.getByText(
+      "GPU recognition failed; this recording used the CPU: AMD Ryzen 7 5700G",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await cpu.check();
+  await expect(
+    page.getByText("CPU selected: AMD Ryzen 7 5700G", { exact: true }),
+  ).toBeVisible();
+});
+
+test("missing selected model gives a direct model download path and translates unavailable reasons", async ({
+  page,
+}) => {
+  await start(page, "linux");
+  await page.evaluate(() => {
+    Object.assign(window.testState, {
+      recording_available: false,
+      recording_unavailable_reason: "model",
+      installed: [],
+    });
+    window.publishState();
+  });
+  await expect(page.locator("#status-title")).toHaveText("Choose a model");
+  await expect(page.locator("#status")).toHaveText(
+    "Choose a speech model before recording.",
+  );
+  await expect(
+    page.getByRole("button", { name: "Start dictation", exact: true }),
+  ).toBeDisabled();
+  await page.locator("#vocabulary").fill("Unsaved vocabulary");
+  await page.locator("#record-unavailable-action").click();
+  await expect(page.locator("#notice")).toHaveText(
+    "Save or discard your changes before switching tabs or language.",
+  );
+  await expect(page.locator("#vocabulary")).toHaveValue("Unsaved vocabulary");
+  await page.locator("[data-discard]").click();
+  await page.locator("#record-unavailable-action").click();
+  await expect(
+    page.getByRole("button", { name: "Models", exact: true }),
+  ).toHaveClass(/selected/);
+  await expect(page.locator('[data-download="base"]')).toHaveText("Download");
+
+  await page.evaluate(() => {
+    window.testState.recording_unavailable_reason = "permission";
+    window.testState.preferences.ui_language = "de";
+    window.publishState();
+  });
+  await expect(page.locator("#status-title")).toHaveText(
+    "Aufnahme nicht verfügbar",
+  );
+  await expect(page.locator("#status")).toHaveText(
+    "Mikrofonzugriff ist erforderlich. Prüfe die Berechtigungen in den allgemeinen Einstellungen.",
+  );
+  await expect(page.locator("#record-unavailable-action")).toHaveText(
+    "Einstellungen öffnen",
+  );
+  await page.locator("#record-unavailable-action").click();
+  await expect(
+    page.getByRole("button", { name: "Allgemein", exact: true }),
+  ).toHaveClass(/selected/);
 });
 
 test("Linux keyboard-only setup suppresses button defaults and restores normal input after Cancel", async ({
@@ -173,6 +338,8 @@ test("saved Linux recordings can be retried or discarded without starting captur
     const host = window as any;
     host.testState.status = "error";
     host.testState.recovery_available = true;
+    host.testState.recording_available = false;
+    host.testState.recording_unavailable_reason = "audio";
     host.testState.message =
       "An unfinished recording is saved. Retry transcription or discard it.";
     host.publishState();
@@ -180,9 +347,12 @@ test("saved Linux recordings can be retried or discarded without starting captur
   await expect(
     page.getByRole("button", { name: "Start dictation", exact: true }),
   ).toHaveCount(0);
-  await page
-    .getByRole("button", { name: "Retry transcription", exact: true })
-    .click();
+  const retry = page.getByRole("button", {
+    name: "Retry transcription",
+    exact: true,
+  });
+  await expect(retry).toBeEnabled();
+  await retry.click();
   await expect
     .poll(() => page.evaluate(() => (window as any).calls.at(-1).command))
     .toBe("retry_transcription");
@@ -307,6 +477,9 @@ async function start(
         for (const callback of callbacks.get("recording_telemetry") ?? [])
           callback(payload);
       };
+      const publishNavigate = (tab: string) => {
+        for (const callback of callbacks.get("navigate") ?? []) callback(tab);
+      };
       const invoke = async (command: string, args: any = {}) => {
         host.calls.push({ command, args });
         if (command === "enable_paste" && host.rejectPortal) {
@@ -350,6 +523,14 @@ async function start(
             version: "0.2.2",
           });
         if (command === "install_update") state.updates.status = "downloading";
+        if (command === "download_model") {
+          state.download = args.id;
+          state.progress = 0;
+        }
+        if (command === "cancel_download") {
+          state.download = null;
+          state.progress = 0;
+        }
         if (command === "enable_shortcut") {
           if (platform === "macos") state.macos.recording_shortcut = true;
           else if (state.native_shortcuts) state.recording_shortcut = true;
@@ -379,6 +560,7 @@ async function start(
       host.testState = state;
       host.publishState = publish;
       host.publishTelemetry = publishTelemetry;
+      host.publishNavigate = publishNavigate;
       host.openwhisper = {
         async invoke(command: CommandName, args: unknown) {
           const result = await invoke(command, args);
@@ -470,36 +652,83 @@ test("recording telemetry follows the newest full state and ignores stale genera
 });
 
 for (const platform of ["linux", "macos"] as const) {
-  test(`${platform}: floating recorder shows a long-running timer and stop/cancel actions`, async ({
+  test(`${platform}: floating recorder keeps translated timers and actions separate from status copy`, async ({
     page,
   }) => {
     await page.setViewportSize({ width: 340, height: 64 });
     await start(page, platform, true);
     await expect(page.locator("aside")).toHaveCount(0);
-    await page.evaluate(() => {
-      const w = window as any;
-      Object.assign(w.testState, {
-        status: "recording",
-        elapsed: 126,
-        level: 0.5,
+    for (const language of ["en", "de"] as const) {
+      for (const elapsed of [14, 126, 36_617]) {
+        await page.evaluate(
+          ({ language, elapsed }) => {
+            Object.assign(window.testState, {
+              status: "recording",
+              elapsed,
+              level: 0.5,
+            });
+            window.testState.preferences.ui_language = language;
+            window.publishState();
+          },
+          { language, elapsed },
+        );
+        const time = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
+        await expect(page.locator("#record-label")).toHaveText(
+          `${language === "en" ? "Recording" : "Aufnahme"} · ${time}`,
+        );
+        await expect(page.locator(".record-copy")).toBeHidden();
+        await expect(page.locator("#record-unavailable-action")).toBeHidden();
+        await expect(page.locator("#record")).toBeInViewport();
+        await expect(page.locator("#cancel")).toBeInViewport();
+        const geometry = await page
+          .locator("#record-control")
+          .evaluate((control) => {
+            const bars = control
+              .querySelector(".audio-mark")!
+              .getBoundingClientRect();
+            const label = control.querySelector("#record-label")!;
+            const text = label.getBoundingClientRect();
+            const record = control
+              .querySelector("#record")!
+              .getBoundingClientRect();
+            const cancel = control
+              .querySelector("#cancel")!
+              .getBoundingClientRect();
+            return {
+              barsEnd: bars.right,
+              textStart: text.left,
+              textEnd: text.right,
+              cancelStart: cancel.left,
+              recordEnd: record.right,
+              textFits: label.scrollWidth <= label.clientWidth,
+            };
+          });
+        expect(geometry.barsEnd).toBeLessThanOrEqual(geometry.textStart);
+        expect(geometry.textEnd).toBeLessThanOrEqual(geometry.cancelStart);
+        expect(geometry.recordEnd).toBeLessThanOrEqual(geometry.cancelStart);
+        expect(geometry.textFits).toBe(true);
+      }
+      await page.screenshot({
+        path: `test-results/${platform}-${language}-recording-overlay.png`,
+        omitBackground: true,
       });
-      w.publishState();
-    });
-    await expect(page.locator("#record-label")).toHaveText("Recording · 2:06");
-    await expect(
-      page.getByRole("button", { name: "Discard recording" }),
-    ).toBeInViewport();
-    await page.screenshot({
-      path: `test-results/${platform}-recording-overlay.png`,
-      omitBackground: true,
-    });
+    }
     await page.locator("#record").click();
-    await page.getByRole("button", { name: "Discard recording" }).click();
+    await page.locator("#cancel").click();
     expect(
       await page.evaluate(() =>
         (window as any).calls.map((c: any) => c.command),
       ),
     ).toEqual(expect.arrayContaining(["toggle_recording", "cancel_recording"]));
+    await page.evaluate(() => {
+      window.testState.status = "idle";
+      window.testState.recording_available = false;
+      window.testState.recording_unavailable_reason = "model";
+      window.publishState();
+    });
+    await expect(page.locator("#record-unavailable-action")).toBeHidden();
+    await expect(page.locator("#cancel")).toBeHidden();
+    await expect(page.locator("#record")).toBeDisabled();
   });
 
   test(`${platform}: signed-file-compatible bundle, shared navigation and branding`, async ({
@@ -710,28 +939,148 @@ for (const platform of ["linux", "macos"] as const) {
     page,
   }) => {
     await start(page, platform, false, true);
+    const navigation = page.locator("nav button[data-tab]");
+    await expect(navigation).toHaveCount(1);
     await expect(
       page.getByRole("button", { name: "Setup", exact: true }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Get started in six steps" }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Models" })).toHaveCount(0);
+
+    await page.evaluate(() => {
+      const w = window as any;
+      w.testState.installed = [];
+      w.publishState();
+    });
+    const baseModel = page
+      .locator(".model-row")
+      .filter({ hasText: "Whisper Base" });
+    await baseModel.getByRole("button", { name: "Download" }).click();
+    await expect(baseModel.getByRole("progressbar")).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+      .toBe("download_model");
+    await page.evaluate(() => {
+      window.testState.progress = 0.42;
+      window.publishState();
+    });
+    await expect(baseModel.getByRole("progressbar")).toHaveJSProperty(
+      "value",
+      0.42,
+    );
+    await baseModel.getByRole("button", { name: "Cancel" }).click();
+    await expect(
+      baseModel.getByRole("button", { name: "Download" }),
+    ).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+      .toBe("cancel_download");
+
+    await page.evaluate(() => {
+      const w = window as any;
+      w.testState.installed = ["base", "small"];
+      w.publishState();
+    });
+    const smallModel = page
+      .locator(".model-row")
+      .filter({ hasText: "Whisper Small" });
+    await smallModel.getByRole("button", { name: "Use", exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(() => window.testState.preferences.model))
+      .toBe("small");
+    await expect(smallModel.getByText("Active", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Get started in six steps" }),
+    ).toBeVisible();
+
+    if (platform === "linux") {
+      await page.evaluate(() => {
+        window.testState.microphones = [
+          "Built-in microphone",
+          "USB microphone",
+        ];
+        window.publishState();
+      });
+      await page
+        .getByRole("combobox", { name: "Microphone" })
+        .selectOption("USB microphone");
+      await expect
+        .poll(() =>
+          page.evaluate(() => window.testState.preferences.microphone),
+        )
+        .toBe("USB microphone");
+      await expect(
+        page.getByRole("heading", { name: "Get started in six steps" }),
+      ).toBeVisible();
+    }
+
+    await page.evaluate(() => {
+      window.publishNavigate("models");
+    });
+    await expect(
+      page.getByRole("heading", { name: "Get started in six steps" }),
+    ).toBeVisible();
+    await expect(page.locator("nav button[data-tab]")).toHaveCount(1);
+
+    await page.locator('[data-ui-language="de"]').click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "de");
+    await expect(
+      page.getByRole("button", { name: "Einrichtung", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: "Einrichtung abschließen",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(page.locator("nav button[data-tab]")).toHaveCount(1);
+
     await page
-      .getByRole("button", { name: "Finish setup", exact: true })
+      .getByRole("button", { name: "Einrichtung abschließen", exact: true })
       .click();
     await expect(
-      page.getByRole("button", { name: "Setup", exact: true }),
+      page.getByRole("button", { name: "Einrichtung", exact: true }),
     ).toHaveCount(0);
+    await expect(page.locator("nav button[data-tab]")).toHaveCount(5);
+    await expect(page.getByRole("button", { name: "Allgemein" })).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Permissions", exact: true }),
+      page.getByRole("heading", { name: "Berechtigungen", exact: true }),
     ).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.testState.preferences.setup_completed),
+      )
+      .toBe(true);
     await page.reload();
     await expect(
-      page.getByRole("button", { name: "Setup", exact: true }),
+      page.getByRole("button", { name: "Einrichtung", exact: true }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("heading", { name: "Recording", exact: true }),
+      page.getByRole("heading", { name: "Aufnahme", exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Allow", exact: true }),
+      page.getByRole("button", { name: "Erlauben", exact: true }),
     ).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => window.testState.preferences.model))
+      .toBe("small");
+    if (platform === "linux") {
+      expect(
+        await page.evaluate(() => window.testState.preferences.microphone),
+      ).toBe("USB microphone");
+      await page.evaluate(() => {
+        window.testState.microphones = [
+          "Built-in microphone",
+          "USB microphone",
+        ];
+        window.publishState();
+      });
+      await expect(
+        page.getByRole("combobox", { name: "Mikrofon" }),
+      ).toHaveValue("USB microphone");
+    }
   });
   test(`${platform}: update controls show availability and prevent recording during installation`, async ({
     page,
@@ -767,8 +1116,24 @@ for (const platform of ["linux", "macos"] as const) {
     await start(page, platform, false, true);
     await page.setViewportSize({ width: 800, height: 560 });
     await page.locator('[data-ui-language="de"]').click();
+    await expect(
+      page.getByRole("heading", { name: "In sechs Schritten startklar" }),
+    ).toBeVisible();
+    expect(
+      await page
+        .locator("main")
+        .evaluate((e) => e.scrollWidth <= e.clientWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/${platform}-setup-german.png`,
+    });
+    await page
+      .getByRole("button", { name: "Einrichtung abschließen", exact: true })
+      .click();
+    await expect(page.getByRole("button", { name: "Einrichtung" })).toHaveCount(
+      0,
+    );
     for (const title of [
-      "Einrichtung",
       "Allgemein",
       "Modelle",
       "Textbausteine",
@@ -927,7 +1292,7 @@ for (const platform of ["linux", "macos"] as const) {
   });
 }
 
-test("Linux exposes the detected GPU and keeps the CPU choice independent of autostart", async ({
+test("Linux recognition mode selection remains independent of launch-at-login", async ({
   page,
 }) => {
   await start(page, "linux");
@@ -940,16 +1305,29 @@ test("Linux exposes the detected GPU and keeps the CPU choice independent of aut
     });
     w.publishState();
   });
-  const gpu = page.getByRole("checkbox", {
-    name: "Use GPU acceleration when available",
-  });
+  const gpu = page.locator('input[name="gpu-mode"][value="true"]');
   await gpu.check();
   await expect(
-    page.getByText("GPU · NVIDIA GeForce RTX 3060", { exact: true }),
+    page.getByText(
+      "GPU selected. Vulkan device detected: NVIDIA GeForce RTX 3060",
+      { exact: true },
+    ),
   ).toBeVisible();
   await expect(
     page.getByRole("checkbox", { name: "Launch at login", exact: true }),
   ).not.toBeChecked();
+  await page.evaluate(() => {
+    window.testState.launch_at_login_available = false;
+    window.publishState();
+  });
+  await expect(
+    page.getByRole("checkbox", { name: "Launch at login", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByText("Launch at login is unavailable in this installation.", {
+      exact: true,
+    }),
+  ).toBeVisible();
   await page.reload();
   await expect(gpu).toBeChecked();
   await expect(
@@ -1115,6 +1493,85 @@ test("Linux: native trigger capture blocks recording, cancels, and shows saved m
   await expect(
     page.getByRole("button", { name: "Set trigger …", exact: true }),
   ).toBeVisible();
+});
+
+test("Linux mouse setup commits matching middle, back and forward releases only during setup", async ({
+  page,
+  context,
+}) => {
+  await start(page, "linux");
+  await page.getByRole("button", { name: "General", exact: true }).click();
+  await page.evaluate(() => {
+    Object.assign(window.testState, {
+      native_shortcuts: true,
+      native_mouse: true,
+      native_middle_mouse: true,
+    });
+    window.publishState();
+  });
+  const input = await context.newCDPSession(page);
+  for (const [button, mask, expected] of [
+    ["middle", 4, 2],
+    ["back", 8, 8],
+    ["forward", 16, 9],
+  ] as const) {
+    await page
+      .getByRole("button", { name: "Set trigger …", exact: true })
+      .click();
+    const before = await page.evaluate(
+      () =>
+        window.calls.filter((call) => call.command === "capture_mouse_trigger")
+          .length,
+    );
+    await input.send("Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      x: 500,
+      y: 300,
+      button,
+      buttons: mask,
+      clickCount: 1,
+    });
+    expect(
+      await page.evaluate(
+        () =>
+          window.calls.filter(
+            (call) => call.command === "capture_mouse_trigger",
+          ).length,
+      ),
+    ).toBe(before);
+    await input.send("Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      x: 500,
+      y: 300,
+      button,
+      buttons: 0,
+      clickCount: 1,
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.calls
+              .filter((call) => call.command === "capture_mouse_trigger")
+              .at(-1)?.args,
+        ),
+      )
+      .toEqual({ button: expected });
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  }
+  const before = await page.evaluate(
+    () =>
+      window.calls.filter((call) => call.command === "capture_mouse_trigger")
+        .length,
+  );
+  await page.mouse.click(500, 300, { button: "middle" });
+  expect(
+    await page.evaluate(
+      () =>
+        window.calls.filter((call) => call.command === "capture_mouse_trigger")
+          .length,
+    ),
+  ).toBe(before);
 });
 
 test("Linux X11 fallback exposes explicit keyboard setup and session paste without portals", async ({

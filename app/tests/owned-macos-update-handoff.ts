@@ -36,7 +36,7 @@ const run = (command: string, argv: readonly string[], timeout = 15_000): string
   return `${result.stdout ?? ""}${result.stderr ?? ""}`;
 };
 const versionFrom = (bundle: string): string => run("/usr/bin/plutil", ["-extract", "CFBundleShortVersionString", "raw", "-o", "-", join(bundle, "Contents/Info.plist")]).trim();
-const currentVersion = versionFrom(sourceBundle); assert.equal(currentVersion, "0.3.0");
+const currentVersion = versionFrom(sourceBundle); assert.equal(currentVersion, "0.3.1");
 const source = z.object({ commit: z.string().regex(/^[a-f0-9]{40}$/u), modified: z.literal(false) });
 const sourceInfo = source.parse(JSON.parse(await readFile(join(sourceBundle, "Contents/Resources/app/dist/resources/development-build.json"), "utf8")) as unknown);
 assert.equal(sourceInfo.commit, expectedSourceCommit);
@@ -59,11 +59,11 @@ assert.equal(currentMetadata.updateConfigured, true);
 run("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--all-architectures", sourceBundle], 30_000);
 const successorRoot = join(evidence, "successor-check"); await mkdir(successorRoot, { mode: 0o700 });
 run("/usr/bin/ditto", ["-x", "-k", successorArchive, successorRoot], 120_000);
-const successorBundle = join(successorRoot, "OpenWhisper.app"); assert.equal(versionFrom(successorBundle), "0.3.1");
+const successorBundle = join(successorRoot, "OpenWhisper.app"); assert.equal(versionFrom(successorBundle), "0.3.2");
 const successorSource = source.parse(JSON.parse(await readFile(join(successorBundle, "Contents/Resources/app/dist/resources/development-build.json"), "utf8")) as unknown);
 assert.match(successorSource.commit, /^[a-f0-9]{40}$/u); assert.notEqual(successorSource.commit, sourceInfo.commit);
 assert.equal(successorSource.commit, expectedSuccessorCommit);
-assert.equal((await readFile(join(successorBundle, "Contents/Resources/app/dist/resources/VERSION"), "utf8")).trim(), "0.3.1");
+assert.equal((await readFile(join(successorBundle, "Contents/Resources/app/dist/resources/VERSION"), "utf8")).trim(), "0.3.2");
 run("/usr/bin/codesign", ["--verify", "--deep", "--strict", successorBundle], 30_000);
 const installationRoot = join(evidence, "Installation Slot"), bundle = join(installationRoot, "OpenWhisper.app");
 await mkdir(installationRoot, { mode: 0o700 }); run("/usr/bin/ditto", [sourceBundle, bundle], 120_000);
@@ -90,7 +90,7 @@ try {
   page = await application.firstWindow(); await expect(page.locator(".sidebar-brand strong")).toHaveText("OpenWhisper", { timeout: 20_000 });
   assert.equal(page.url(), "app://openwhisper/index.html");
   const state = async () => appStateSchema.parse(await page!.evaluate(() => window.openwhisper!.invoke("get_state", {})));
-  const before = await state(); assert.equal(before.version, "0.3.0"); assert.equal(before.updates.configured, true);
+  const before = await state(); assert.equal(before.version, "0.3.1"); assert.equal(before.updates.configured, true);
   assert.equal(before.macos?.updates_configured, true); assert.equal(before.preferences.setup_completed, false);
   await page.evaluate(() => window.openwhisper!.invoke("complete_setup", {}));
   await page.evaluate(() => window.openwhisper!.invoke("save_preferences", { changes: {
@@ -128,7 +128,7 @@ try {
   const successorExecutable = join(bundle, "Contents/MacOS/OpenWhisper");
   const successorPid = await waitForSuccessor(successorExecutable, originalPid);
   assert.notEqual(successorPid, originalPid);
-  const installedVersion = versionFrom(bundle); assert.equal(installedVersion, "0.3.1");
+  const installedVersion = versionFrom(bundle); assert.equal(installedVersion, "0.3.2");
   const installedBuild = source.parse(JSON.parse(await readFile(join(bundle, "Contents/Resources/app/dist/resources/development-build.json"), "utf8")) as unknown);
   assert.deepEqual(installedBuild, successorSource);
   const installedIdentity = parseApplicationBuildModule(await readFile(join(bundle, "Contents/Resources/app/dist/main/application-build.js"), "utf8"));
@@ -144,28 +144,28 @@ try {
   stage = "normal-successor-inspector-start";
   await assertInspectorPortVacant(); process.kill(successorPid, "SIGUSR1");
   const observedSuccessor = await waitForInspectorSuccessor({ executable: successorExecutable, appPath: join(bundle, "Contents/Resources/app"),
-    sourceCommit: successorSource.commit, version: "0.3.1", expectedPid: successorPid, uid: process.getuid!(), quitReceipt, quitNonce,
+    sourceCommit: successorSource.commit, version: "0.3.2", expectedPid: successorPid, uid: process.getuid!(), quitReceipt, quitNonce,
     vocabulary: preferences.vocabulary }, (nextStage) => { stage = nextStage; });
   assert.equal(observedSuccessor.pid, successorPid); assert.equal(observedSuccessor.executable, successorExecutable);
   assert.equal(observedSuccessor.uid, process.getuid!()); assert.equal(observedSuccessor.argv.some((argument) => forbiddenRuntimeArgument.test(argument)), false);
-  assert.equal(observedSuccessor.appPath, join(bundle, "Contents/Resources/app")); assert.equal(observedSuccessor.version, "0.3.1");
+  assert.equal(observedSuccessor.appPath, join(bundle, "Contents/Resources/app")); assert.equal(observedSuccessor.version, "0.3.2");
   assert.equal(observedSuccessor.sourceCommit, successorSource.commit);
   assert.equal(observedSuccessor.state.preferences.setup_completed, true);
   assert.equal(observedSuccessor.state.preferences.vocabulary, preferences.vocabulary);
-  assert.equal(observedSuccessor.state.updates.configured, true); assert.equal(observedSuccessor.state.version, "0.3.1");
+  assert.equal(observedSuccessor.state.updates.configured, true); assert.equal(observedSuccessor.state.version, "0.3.2");
   await waitForPidExit(successorPid);
   const quit = z.object({ pid: z.int().positive(), exitCode: z.int(), nonce: z.string().uuid() })
     .parse(JSON.parse(await readFile(quitReceipt, "utf8")) as unknown);
   assert.deepEqual(quit, { pid: successorPid, exitCode: 0, nonce: quitNonce });
   for (const pid of successorPids) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
   assert.deepEqual(await readFile(preferencesPath), preferenceBytes);
-  result = { status: "PASS", stage, harnessCommit, producerCommit: expectedSourceCommit, oldVersion: "0.3.0", successorVersion: installedVersion,
+  result = { status: "PASS", stage, harnessCommit, producerCommit: expectedSourceCommit, oldVersion: "0.3.1", successorVersion: installedVersion,
     oldSourceCommit: sourceInfo.commit, successorSourceCommit: installedBuild.commit,
     originalMainPid: originalPid, originalOwnedPids, successorPid, successorOwnedPids: successorPids,
     originalProcessExit: exit, preferences: { setupCompleted: retainedPreferences.setup_completed,
       vocabularySha256: createHash("sha256").update(retainedPreferences.vocabulary).digest("hex"), byteIdentical: true },
     migrationFilesByteIdentical: true, ordinarySuccessorQuit: "Electron app.quit() receipt exit code 0; all recorded PIDs absent",
-    scope: "Actual persistent same-identity Universal 0.3.0 predecessor to private arm64 0.3.1 successor install on an Apple Silicon runner through the normal main coordinator, real native-owner retirement, filesystem transaction and fixed-path relaunch; successor is arm64 thin only; 0.2.5 is publisher-continuity oracle only; offline fixture feed/download, no microphone, physical input, notarization, production HTTPS feed or release." };
+    scope: "Actual persistent same-identity Universal 0.3.1 predecessor to private arm64 0.3.2 successor install on an Apple Silicon runner through the normal main coordinator, real native-owner retirement, filesystem transaction and fixed-path relaunch; successor is arm64 thin only; 0.2.5 is publisher-continuity oracle only; offline fixture feed/download, no microphone, physical input, notarization, production HTTPS feed or release." };
 } finally {
   if (application) await application.close().catch(() => {});
   await writeFile(join(evidence, "result.json"), `${JSON.stringify({ ...result, stage }, null, 2)}\n`, { mode: 0o600 });

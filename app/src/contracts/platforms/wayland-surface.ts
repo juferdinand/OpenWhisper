@@ -12,6 +12,8 @@ const surfaceRegionSchema = z.strictObject({
 }).refine((region) => region.x + region.width <= WIDTH && region.y + region.height <= HEIGHT);
 export const surfaceRegionsSchema = z.array(surfaceRegionSchema).max(2);
 export type SurfaceRegion = z.infer<typeof surfaceRegionSchema>;
+const surfaceUnavailableReasonSchema = z.enum(["unsupported", "runtime"]);
+export type SurfaceUnavailableReason = z.infer<typeof surfaceUnavailableReasonSchema>;
 
 // Check IHDR before allowing a native decoder to allocate an image.
 export function isSurfacePng(png: Uint8Array): boolean {
@@ -31,7 +33,8 @@ export const surfaceHostMessageSchema = z.discriminatedUnion("type", [
 ]);
 
 export const surfaceReplySchema = z.discriminatedUnion("type", [
-  z.strictObject({ type: z.literal("ready"), supported: z.boolean() }),
+  z.strictObject({ type: z.literal("ready"), supported: z.boolean(), reason: surfaceUnavailableReasonSchema.optional() })
+    .refine((reply) => reply.supported ? reply.reason === undefined : reply.reason !== undefined),
   z.strictObject({ type: z.literal("painted"), sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), visible: z.boolean() }),
   z.strictObject({ type: z.literal("pointer"), sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
     action: z.enum(["move", "down", "up", "leave"]),

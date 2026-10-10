@@ -2,7 +2,7 @@ import { z } from "zod";
 import { preferencesSchema } from "../../contracts/ui/state.js";
 import { speechModelSchema, type SpeechModel } from "../../workers/speech/native-speech.js";
 import { RecordingEffectError, safeRecordingEffectError } from "../../workers/recording/recording-effects-protocol.js";
-import type { BackendSpeechJob, BackendSupervisor } from "./backend-supervisor.js";
+import type { BackendSelection, BackendSpeechJob, BackendSupervisor } from "./backend-supervisor.js";
 import { ModelInventoryError, type ModelInventory, type ModelLease } from "../models/model-inventory.js";
 import type { SpeechClient } from "./speech-client.js";
 
@@ -51,6 +51,7 @@ export function createInventoryRecordingSpeechFactory(options: {
   readonly inventory: ModelInventory;
   readonly supervisor: BackendSupervisor;
   readonly selection: unknown;
+  readonly onBackendSelection?: (selection: BackendSelection) => void;
 }): RecordingSpeechFactory {
   const selected = selectionSchema.safeParse(options.selection);
   if (!selected.success || typeof options.supervisor !== "object" || options.supervisor === null) {
@@ -114,13 +115,23 @@ export function createInventoryRecordingSpeechFactory(options: {
       if (!matches(parsed.data, owner.lease)) throw new RecordingEffectError("OWNERSHIP_FAILED");
       owner.job = shared.createJob(owner.lease);
       const lease = owner.lease, job = owner.job;
+      let preparedSelection: BackendSelection | undefined;
       return Object.freeze({
         async transcribeWindow(model, samples, language, vocabulary, nextSignal) {
           if (owner.closing || shared.owner !== owner) throw new RecordingEffectError("CLOSED");
           if (shared.failed) throw shared.failed;
           const checked = speechModelSchema.safeParse(model);
           if (!checked.success || !matches(checked.data, lease)) throw new RecordingEffectError("OWNERSHIP_FAILED");
-          try { return await job.transcribeWindow(checked.data, samples, language, vocabulary, nextSignal); }
+          try {
+            if (!preparedSelection) {
+              const backend = await job.prepare(nextSignal);
+              preparedSelection = backend;
+              if (backend.requestedGpu) {
+                try { options.onBackendSelection?.(backend); } catch { /* Capability reporting cannot change inference ownership. */ }
+              }
+            }
+            return await job.transcribeWindow(checked.data, samples, language, vocabulary, nextSignal);
+          }
           catch (error: unknown) { throw failure(error); }
         },
         close: () => retire(owner),

@@ -531,7 +531,6 @@ async function main(): Promise<void> {
   try {
     application = await _electron.launch({ executablePath: appImage ? imageAdapter : supervisedLaunch && installedDebian ? debianLaunchTarget : executable,
       args: [...(packaged ? [] : [packageRoot]), ...(stablePackage ? [] : ["--dev", "--dev-profile", profileRoot]),
-        ...(kdeWaylandOverlay ? ["--experimental-wayland-overlay"] : []),
         ...(stockKde ? [kdeOverlay ? "--ozone-platform=x11" : "--ozone-platform=wayland"] : nativeX11 ? ["--ozone-platform=x11"] : [])],
       env: applicationEnvironment, chromiumSandbox: true, timeout: 30_000 });
   } finally { clearTimeout(startupWatch); }
@@ -583,7 +582,7 @@ async function main(): Promise<void> {
         version: process.env["OPENWHISPER_RESTART_VERSION"], protocolPresent: process.env["OPENWHISPER_UPDATE_PROTOCOL"] !== undefined,
         packageVersion: app.getVersion() };
     });
-    assert.equal(actual.socket, true); assert.equal(actual.packageVersion, "0.3.0");
+    assert.equal(actual.socket, true); assert.equal(actual.packageVersion, updateCheck ? "0.3.1" : "0.3.0");
     assert.equal(actual.noncePresent, !updateCheck); assert.equal(actual.version, updateCheck ? undefined : "0.3.0");
     assert.equal(actual.protocolPresent, false);
     assert.notEqual(actual.guiPid, actual.supervisorPid);
@@ -692,6 +691,15 @@ async function main(): Promise<void> {
   if (stablePackage) await until(async () => !!(await state()).recording_available && !!(await state()).recovery_available);
   await checkpoint("initial-state-and-zero-streams");
   const initial = await state(); assert.equal(initial.profile, stablePackage ? undefined : "development"); assert.equal(initial.recording_available, true);
+  if (!stablePackage) {
+    assert.equal(initial.preferences.setup_completed, false);
+    await expect(page.locator('nav button[data-tab="setup"]')).toBeVisible();
+    await expect(page.locator("nav button[data-tab]")).toHaveCount(1);
+    await expect(page.locator('nav button[data-tab="general"]')).toHaveCount(0);
+    await page.locator('[data-command="complete_setup"]').click();
+    await expect.poll(async () => (await state()).preferences.setup_completed).toBe(true);
+    checks.push("fresh Dev profile exposes Setup only until Finish setup persists completion");
+  }
   if (stablePackage) {
     assert.equal(initial.development_build, undefined); assert.equal(initial.preferences.setup_completed, true);
     assert.deepEqual(initial.history, legacyHistory); assert.equal(initial.recovery_available, true); await assertStableOriginals();
@@ -958,7 +966,6 @@ async function main(): Promise<void> {
   assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "", "Initialization and enumeration must open no recording stream.");
   await checkpoint("actual-ui-complete-setup");
   if (stockKde) await page.screenshot({ path: join(evidence, "initial-ui.png"), timeout: 5000 });
-  if (!stablePackage) await page.locator('[data-command="complete_setup"]').click();
   await page.locator('[data-tab="general"]').click();
   if (installedDebian || appImageAdmission) {
     await checkpoint("installed-autostart-ui-enable");

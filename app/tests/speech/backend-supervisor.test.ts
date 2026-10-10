@@ -191,6 +191,7 @@ function fixture(deadlines: Partial<{ startupMs: number; requestMs: number; clea
 // module instances. This models different mains without a production reset or
 // spawning a process; it is not evidence of actual process retirement.
 type Case = "manual" | "none" | "software" | "hardware" | "startup" | "inference" | "switch" |
+  "gpu-discovery" | "gpu-discovery-unavailable" | "gpu-discovery-integrity" |
   "cancel-open" | "cancel-verify" | "hung-admitted" | "hung-unadmitted" | "birth" | "uid" | "read-timeout" |
   "late-read-failure" | "wrong-nonce" | "extra-challenge" | "resource-extra" | "resource-backend" |
   "resource-failure" | "generic-open" | "terminal-open" | "invalid-ready" | "zombie" | "absent" | "invalid-input" |
@@ -248,11 +249,47 @@ for (const [name, discovery, detection] of [["none", null, "none"], ["software",
 
 test("hardware metadata authorizes a GPU request without claiming GPU execution", async () => {
   const f = fixture(), main = await fresh("hardware", f.bindings), job = main.createJob(f.lease(true, "parakeet"));
-  assert.deepEqual(await job.prepare(), { backend: "vulkan", requestedGpu: true, gpu: true, detection: "device" });
+  assert.deepEqual(await job.prepare(), { backend: "vulkan", requestedGpu: true, gpu: true, detection: "device",
+    gpuDevice: "Owned hardware-category fixture" });
   assert.equal(new Set(f.owners[0]?.challenges).size, 2);
   await job.transcribeWindow({ ...baseModel, family: "parakeet" }, samples, "auto", "private prompt not supported by Parakeet");
   const request = f.requests.find((value) => value.command === "transcribe");
   assert.ok(request?.command === "transcribe"); assert.equal(request.model.gpu, true); assert.equal(request.vocabulary, ""); await job.close();
+});
+
+test("GPU capability discovery is supervised, bounded, and requires no model lease or inference", async () => {
+  const f = fixture(), main = await fresh("gpu-discovery", f.bindings);
+  assert.ok(main.discoverGpu);
+  assert.deepEqual(await main.discoverGpu(), { backend: "vulkan", requestedGpu: true, gpu: true, detection: "device",
+    gpuDevice: "Owned hardware-category fixture" });
+  assert.deepEqual(f.verifies, ["vulkan"]);
+  assert.equal(f.events.includes("validate-lease"), false);
+  assert.equal(f.requests.some((request) => request.command === "transcribe"), false);
+  assert.deepEqual(f.requests.filter((request) => request.command === "discover").map((request) => request.command), ["discover"]);
+  assert.equal(f.owners[0]?.readSettled, true);
+  assert.equal(f.owners[0]?.level, "reaped");
+  const job = main.createJob(f.lease(false));
+  assert.equal((await job.prepare()).gpu, false);
+  await job.close();
+});
+
+test("an unavailable Vulkan worker can retire before manual CPU recording starts", async () => {
+  const f = fixture(); f.controls.noOwner = "vulkan";
+  const main = await fresh("gpu-discovery-unavailable", f.bindings);
+  assert.ok(main.discoverGpu);
+  assert.equal((await main.discoverGpu()).detection, "unavailable");
+  const job = main.createJob(f.lease(false));
+  assert.equal((await job.prepare()).backend, "cpu");
+  await job.close();
+});
+
+test("a failed GPU discovery integrity check cannot advertise a reusable CPU allocation", async () => {
+  const f = fixture(); f.controls.verifyFailure = "INTEGRITY_FAILED";
+  const main = await fresh("gpu-discovery-integrity", f.bindings);
+  assert.ok(main.discoverGpu);
+  await assert.rejects(main.discoverGpu(), failure("INTEGRITY_FAILED"));
+  assert.throws(() => main.createJob(f.lease(false)), failure("INTEGRITY_FAILED"));
+  assert.equal(f.owners.length, 0);
 });
 
 test("empty device metadata is an invalid reply and never a hardware or CPU fallback claim", async () => {

@@ -13,7 +13,7 @@ the app requires no account or subscription.
 
 ## Delivery and acceptance
 
-- The current release is Electron 0.3.0 for macOS and Linux. Consult [release status](docs/ELECTRON-STATUS.md)
+- The current release is Electron 0.3.1 for macOS and Linux. Consult [release status](docs/ELECTRON-STATUS.md)
   for tested scope and limitations; do not claim untested desktop, device, or distribution coverage.
 - Work in an isolated branch/worktree, keep changes reviewable, and run focused checks while
   editing. Run the required common checks once for a complete increment. Prepare functional
@@ -115,7 +115,7 @@ and document individual runtime/system-tool exceptions in `app/knip.jsonc`.
 
 ## Releases and security
 
-The 0.3.0 Electron app uses persistent macOS and Linux signing identities. The original 0.2.5
+Electron releases use persistent macOS and Linux signing identities. The original 0.2.5
 app's GUI updater has not been demonstrated to update to Electron; document manual installation
 when describing that transition. Do not claim data migration without evidence for that exact path.
 

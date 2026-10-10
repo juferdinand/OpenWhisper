@@ -31,7 +31,7 @@ assert.equal(run("/usr/bin/git", ["status", "--porcelain"]), "");
 const current = (await readFile(resolve(root, "../VERSION"), "utf8")).trim();
 const version = z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u).parse(current);
 const fields = version.split(".").map(Number); const successor = `${fields[0]}.${fields[1]}.${fields[2]! + 1}`;
-assert.equal(version, "0.3.0"); assert.equal(successor, "0.3.1");
+assert.equal(version, "0.3.1"); assert.equal(successor, "0.3.2");
 
 const nativePaths = ["native/macos-capture/build/arm64/openwhisper_macos_capture.node",
   "native/macos-retirement/build-production/arm64/openwhisper_macos_retirement.node", "native/build-cpu/openwhisper_speech.node"];

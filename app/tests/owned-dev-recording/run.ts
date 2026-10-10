@@ -43,7 +43,7 @@ const appImageBundle = appImage ? absolute.parse(args[11]) : undefined;
 const artifactSchema = z.strictObject({ bytes: z.number().int().nonnegative().max(1024 * 1024 * 1024), sha256: z.string().regex(/^[a-f0-9]{64}$/u) });
 const updateInputSchema = z.strictObject({ version: z.literal(1), classification: z.literal("CANONICAL_STABLE_VALIDATION_ONLY"),
   source: z.strictObject({ commit: z.string().regex(/^[a-f0-9]{40}$/u), modified: z.literal(false) }),
-  sourceVersion: z.literal("0.3.0"), files: z.record(z.string(), artifactSchema),
+  sourceVersion: z.literal("0.3.1"), files: z.record(z.string(), artifactSchema),
   modes: z.record(z.string(), z.number().int().min(0).max(0o7777)) });
 let updateInput: z.infer<typeof updateInputSchema> | undefined;
 const supervisorInputSchema = z.strictObject({ version: z.literal(1), classification: z.literal("OWNED_SUPERVISOR_RUNTIME_INPUT"),

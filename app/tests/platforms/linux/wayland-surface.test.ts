@@ -23,7 +23,7 @@ function fixture() {
     pump() { calls.push("pump"); if (failPump) throw new Error("Inert failure."); },
     close() { calls.push("close"); if (failClose) throw new Error("Inert failure."); },
   };
-  const surface = new WaylandSurface((reply) => replies.push(reply), (emit) => { pointer = emit; return native; });
+  const surface = new WaylandSurface((reply) => replies.push(reply), (emit) => { pointer = emit; return { status: "available", native }; });
   return { surface, replies, calls, pointer: (action: "move" | "down" | "up" | "leave", x = 10, y = 12) => pointer({ action, x, y }),
     failApply: () => { failApply = true; }, failVisibility: () => { failVisibility = true; },
     failPump: () => { failPump = true; }, failClose: () => { failClose = true; } };
@@ -54,6 +54,8 @@ test("surface replies exclude nonfinite or out of bounds pointer coordinates", (
   }
   assert.equal(surfaceReplySchema.safeParse({ type: "pointer", sequence: 1, action: "up", x: WIDTH, y: HEIGHT }).success, true);
   assert.equal(surfaceHostMessageSchema.safeParse({ type: "close", arbitrary: true }).success, false);
+  assert.equal(surfaceReplySchema.safeParse({ type: "ready", supported: false }).success, false);
+  assert.equal(surfaceReplySchema.safeParse({ type: "ready", supported: false, reason: "runtime" }).success, true);
 });
 
 test("visibility cannot map before a frame and pointers use the applied frame sequence", () => {
@@ -115,12 +117,21 @@ test("visibility failure is categorized after the frame was applied", () => {
 
 test("unsupported surface never maps and closes normally", () => {
   const replies: SurfaceReply[] = [];
-  const surface = new WaylandSurface((reply) => replies.push(reply), () => null);
+  const surface = new WaylandSurface((reply) => replies.push(reply), () => ({ status: "unavailable", reason: "unsupported" }));
   surface.receive({ type: "visibility", visible: true });
   surface.receive({ type: "frame", sequence: 1, png: png(), regions });
   assert.equal(surface.isSupported, false);
+  assert.equal(surface.unavailableReason, "unsupported");
   surface.receive({ type: "close" });
-  assert.deepEqual(replies, [{ type: "ready", supported: false }, { type: "closed" }]);
+  assert.deepEqual(replies, [{ type: "ready", supported: false, reason: "unsupported" }, { type: "closed" }]);
+});
+
+test("surface runtime failures are not mislabeled as compositor protocol support", () => {
+  const replies: SurfaceReply[] = [];
+  const surface = new WaylandSurface((reply) => replies.push(reply), () => ({ status: "unavailable", reason: "runtime" }));
+  assert.equal(surface.isSupported, false);
+  assert.equal(surface.unavailableReason, "runtime");
+  assert.deepEqual(replies, [{ type: "ready", supported: false, reason: "runtime" }]);
 });
 
 test("failed native close does not claim successful cleanup or permit more work", () => {

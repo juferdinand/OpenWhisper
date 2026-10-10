@@ -18,18 +18,26 @@ function developmentPreferences(): Preferences {
   });
 }
 
-function enforcePolicy(preferences: Preferences, development: boolean): void {
-  if (development && (preferences.launch_at_login || preferences.auto_check_updates)) {
+function enforcePolicy(preferences: Preferences, development: boolean, allowDevelopmentAutostart: boolean): void {
+  if (development && (preferences.auto_check_updates || (preferences.launch_at_login && !allowDevelopmentAutostart))) {
     throw new Error("Automatic startup and stable updates are unavailable in development.");
   }
 }
 
+export interface PreferenceStoreOptions { readonly allowDevelopmentAutostart?: boolean }
+
 /** Serialized patches retain the latest host state. Saving opt-ins never starts services. */
 export class PreferenceStore {
-  private constructor(private readonly state: PrivateStateStore<Preferences>, private readonly development: boolean) {}
+  private constructor(private readonly state: PrivateStateStore<Preferences>, private readonly development: boolean,
+    private readonly allowDevelopmentAutostart: boolean) {}
 
-  static async open(profile: HostProfile): Promise<PreferenceStore> {
+  static async open(profile: HostProfile, options: PreferenceStoreOptions = {}): Promise<PreferenceStore> {
     const development = profile.appId === "io.github.whisperfree.dev";
+    const allowDevelopmentAutostart = options.allowDevelopmentAutostart === true;
+    if (options.allowDevelopmentAutostart !== undefined && typeof options.allowDevelopmentAutostart !== "boolean") {
+      throw new Error("Preferences are unsafe, invalid or unavailable.");
+    }
+    if (allowDevelopmentAutostart && !development) throw new Error("Development autostart is unavailable for this profile.");
     if (development) prepareHostProfile(profile);
     else validateStableProfile(profile);
     let state: PrivateStateStore<Preferences>;
@@ -39,8 +47,8 @@ export class PreferenceStore {
       state = await PrivateStateStore.open(join(profile.paths.settings, "preferences.json"),
         preferencesSchema, developmentPreferences(), MAX_UI_REQUEST_BYTES, { requireExisting: !development });
     } catch { throw new Error("Preferences are unsafe, invalid or unavailable."); }
-    enforcePolicy(state.snapshot(), development);
-    return new PreferenceStore(state, development);
+    enforcePolicy(state.snapshot(), development, allowDevelopmentAutostart);
+    return new PreferenceStore(state, development, allowDevelopmentAutostart);
   }
 
   snapshot(): Preferences { return this.state.snapshot(); }
@@ -64,7 +72,7 @@ export class PreferenceStore {
   private update(changes: PreferencePatch | Pick<Preferences, "setup_completed"> | Pick<Preferences, "native_trigger"> | Pick<Preferences, "x11_trigger"> | Pick<Preferences, "macos_shortcut">): Promise<Preferences> {
     return this.state.update((current) => {
       const preferences = preferencesSchema.parse({ ...current, ...changes });
-      enforcePolicy(preferences, this.development);
+      enforcePolicy(preferences, this.development, this.allowDevelopmentAutostart);
       return preferences;
     });
   }

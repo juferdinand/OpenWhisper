@@ -4,6 +4,7 @@ import { controlStatusSchema, ControlCaptureLeaseError, type ControlCaptureLease
 import { developmentArtifactSchema } from "../../services/development/development-artifact.js";
 import { linuxApplicationIdSchema, portalShortcutStateSchema } from "../../platforms/linux/shared/portal-shortcuts.js";
 import { kdeKeySchema } from "../../platforms/linux/kde/keyboard.js";
+import { nativeMouseButtonSchema } from "../../contracts/ui/state.js";
 import { portalPasteStateSchema } from "../../platforms/linux/shared/portal-paste.js";
 import { controlWireStatusTextSchema, parseControlStatus } from "../../platforms/linux/shared/control-status.js";
 
@@ -18,6 +19,8 @@ export const platformRequestSchema = z.discriminatedUnion("command", [
   z.strictObject({ ...envelope, command: z.literal("shortcut"), action: z.enum(["enable", "configure", "clear", "cancel", "mode"]), hold: z.boolean() }),
   z.strictObject({ ...envelope, command: z.literal("bind-key"), key: kdeKeySchema, hold: z.boolean() }),
   z.strictObject({ ...envelope, command: z.literal("prepare-key"), windowId: z.int().min(1).max(0xffffffff).optional(), hold: z.boolean().optional() }),
+  z.strictObject({ ...envelope, command: z.literal("bind-mouse"), button: nativeMouseButtonSchema, hold: z.boolean() }),
+  z.strictObject({ ...envelope, command: z.literal("prepare-mouse"), button: nativeMouseButtonSchema }),
   z.strictObject({ ...envelope, command: z.literal("paste-permission"), action: z.enum(["enable", "clear"]) }),
   z.strictObject({ ...envelope, command: z.literal("paste") }),
   z.strictObject({ ...envelope, command: z.literal("shutdown") }),
@@ -33,6 +36,8 @@ export const platformReplySchema = z.discriminatedUnion("ok", [
     z.strictObject({ command: z.literal("shortcut"), state: portalShortcutStateSchema }),
     z.strictObject({ command: z.literal("bind-key"), state: portalShortcutStateSchema }),
     z.strictObject({ command: z.literal("prepare-key"), state: portalShortcutStateSchema }),
+    z.strictObject({ command: z.literal("bind-mouse"), state: portalShortcutStateSchema }),
+    z.strictObject({ command: z.literal("prepare-mouse"), state: portalShortcutStateSchema }),
     z.strictObject({ command: z.literal("paste-permission"), state: portalPasteStateSchema }),
     z.strictObject({ command: z.literal("paste"), accepted: z.boolean() }),
     z.strictObject({ command: z.literal("shutdown") }),

@@ -4,7 +4,7 @@ import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { z } from "zod";
 import type { RecordingRequest } from "../core/recording/recording.js";
-import { initializeBackendSupervisor, type BackendSupervisor, type RetirementBoundary } from "../services/speech/backend-supervisor.js";
+import { initializeBackendSupervisor, type BackendSelection, type BackendSupervisor, type RetirementBoundary } from "../services/speech/backend-supervisor.js";
 import { prepareLinuxSpeechRetirement, type LinuxSpeechRetirementAllocation } from "../services/speech/linux-speech-retirement.js";
 import type { ModelInventory } from "../services/models/model-inventory.js";
 import { createInventoryRecordingSpeechFactory } from "../services/speech/recording-speech.js";
@@ -38,6 +38,7 @@ interface Owner {
   allocation?: RetirementAllocation; boundary?: RetirementBoundary; generation: number;
   closing?: Promise<void>; failed?: Error; exited: boolean;
 }
+interface GpuSelectionState { readonly supported: boolean; readonly checked: boolean; readonly available: boolean; readonly fallback: boolean; readonly device: string | null }
 const fail = (code = "Recording could not complete.") => new Error(code);
 const sourceDiscoveryStages = ["checked-pulse", "artifact", "allocation-fork", "spawn-ready", "native-query", "retirement"] as const;
 const sourceDiscoveryCodeSchema = z.union([recordingHostErrorSchema, z.literal("INTEGRITY_FAILED"), z.literal("FAILED")]);
@@ -79,11 +80,16 @@ export class DevelopmentRecordingHost {
   private readonly receipts = new DeliveryReceiptCache();
   private closed = false;
   private lastSourceDiscoveryFailure: SourceDiscoveryFailure | undefined;
+  private gpuChecked = false;
+  private gpuAvailable = false;
+  private gpuFallback = false;
+  private gpuDevice: string | null = null;
   private constructor(private readonly root: string, private readonly descriptor: DevelopmentRecordingDescriptor,
     private readonly inventory: ModelInventory, private readonly supervisor: BackendSupervisor,
     private readonly prepareRetirement: (pid: number, epoch: string) => RetirementAllocation,
     private readonly options: { readonly recoveryPath: string; readonly delivery: DeliveryBoundary;
       readonly sourceDiscoveryFailure?: (failure: SourceDiscoveryFailure) => void;
+      readonly gpuSelection?: (selection: GpuSelectionState) => void;
       readonly snapshot: (snapshot: SnapshotReply["snapshot"]) => void; readonly progress: (progress: ProgressReply) => void }) {}
 
   static async open(root: string, descriptor: DevelopmentRecordingDescriptor, inventory: ModelInventory,
@@ -128,7 +134,8 @@ export class DevelopmentRecordingHost {
     const epoch = randomUUID();
     const effects = selection ? new MainRecordingEffects({ epoch, platform: mac ? "macos" : "linux", receipts: this.receipts,
       delivery: this.options.delivery, speech: createInventoryRecordingSpeechFactory({ inventory: this.inventory,
-        supervisor: this.supervisor, selection: { id: selection.id, gpu: false } }) }) : undefined;
+        supervisor: this.supervisor, selection: { id: selection.id, gpu: selection.request.model.gpu },
+        onBackendSelection: (backend) => this.reportGpuBackendSelection(backend) }) }) : undefined;
     let acceptSpawn!: (pid: number) => void, rejectSpawn!: (error: Error) => void;
     const spawned = new Promise<number>((accept, reject) => { acceptSpawn = accept; rejectSpawn = reject; });
     let acceptReady!: (pid: number) => void, rejectReady!: (error: Error) => void;
@@ -167,7 +174,13 @@ export class DevelopmentRecordingHost {
         if (reply.kind === "ready") { if (reply.pid !== child.pid) rejectReady(fail()); else acceptReady(reply.pid); return; }
         if (reply.kind === "snapshot") { owner.snapshot = reply.snapshot; owner.generation = Math.max(owner.generation, reply.snapshot.generation);
           if (!owner.closing) this.options.snapshot(reply.snapshot); return; }
-        if (reply.kind === "progress") { if (!owner.closing) this.options.progress(reply); return; }
+        if (reply.kind === "progress") {
+          if (!owner.closing) {
+            if (reply.gpuFallback) this.reportAdaptiveGpuFallback();
+            this.options.progress(reply);
+          }
+          return;
+        }
         if (reply.kind === "recovery-removed") {
           if (this.descriptor.platform !== "linux") { owner.failed ??= fail(); return; }
           const acknowledgement = this.confirmRemoval(owner, reply);
@@ -255,12 +268,49 @@ export class DevelopmentRecordingHost {
   }
   async configure(input: { readonly id: string; readonly request: RecordingRequest; readonly server?: string; readonly source?: string }): Promise<void> {
     if (this.owner) await this.retire(this.owner);
+    this.gpuFallback = false;
+    this.reportGpuState();
     const owner = await this.allocate(input);
     try {
       const reply = await this.request(owner, { command: "configure", capture: this.descriptor.capture, request: input.request,
         ...(this.descriptor.platform === "linux" ? { server: input.server, source: input.source, recoveryPath: this.options.recoveryPath } : {}) });
       if (reply.kind !== "control" || !reply.reply.ok) throw fail();
     } catch (error: unknown) { await this.retire(owner); throw error; }
+  }
+  async discoverGpu(): Promise<BackendSelection> {
+    if (!this.supportsGpu() || !this.supervisor.discoverGpu) throw fail();
+    const selection = await this.supervisor.discoverGpu();
+    if (!selection.requestedGpu) throw fail();
+    this.gpuChecked = true;
+    this.gpuAvailable = selection.gpu && selection.detection === "device";
+    this.gpuFallback = false;
+    this.gpuDevice = selection.gpuDevice ?? null;
+    this.reportGpuState();
+    return selection;
+  }
+  private supportsGpu(): boolean {
+    return this.descriptor.platform === "linux" && this.descriptor.architecture === "x64" &&
+      this.descriptor.speech.entries.some((entry) => entry.backend === "vulkan");
+  }
+  private reportGpuState(): void {
+    if (!this.supportsGpu()) return;
+    try { this.options.gpuSelection?.({ supported: true, checked: this.gpuChecked,
+      available: this.gpuAvailable, fallback: this.gpuFallback, device: this.gpuDevice }); }
+    catch { /* UI state cannot affect recording ownership. */ }
+  }
+  private reportGpuBackendSelection(selection: BackendSelection): void {
+    if (!this.supportsGpu() || !selection.requestedGpu) return;
+    this.gpuChecked = true;
+    this.gpuAvailable = selection.gpu && selection.detection === "device";
+    this.gpuFallback = !selection.gpu;
+    if (selection.gpuDevice) this.gpuDevice = selection.gpuDevice;
+    this.reportGpuState();
+  }
+  private reportAdaptiveGpuFallback(): void {
+    if (!this.supportsGpu()) return;
+    this.gpuChecked = true;
+    this.gpuFallback = true;
+    this.reportGpuState();
   }
   async command(command: Exclude<Command, "configure" | "enumerate-sources">, expected?: RecordingIdentity): Promise<RecordingIdentity> {
     const owner = this.owner;

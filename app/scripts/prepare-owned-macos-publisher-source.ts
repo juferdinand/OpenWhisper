@@ -39,7 +39,7 @@ const archives = [...listing.filter((name) => name.endsWith(".zip")), ...package
 assert.equal(archives.length, 1); assert.equal(listing.filter((name) => name.endsWith(".bundle")).length, 1);
 const sourceReceipt = z.object({ status: z.literal("PASS"), originalCommit: z.string().regex(/^[a-f0-9]{40}$/u),
   parentCommit: z.string().regex(/^[a-f0-9]{40}$/u), changedFiles: z.array(z.string()),
-  successorCommit: z.string().regex(/^[a-f0-9]{40}$/u), originalVersion: z.literal("0.3.0"), successorVersion: z.literal("0.3.1") })
+  successorCommit: z.string().regex(/^[a-f0-9]{40}$/u), originalVersion: z.literal("0.3.1"), successorVersion: z.literal("0.3.2") })
   .parse(JSON.parse(await readFile(join(packet, "successor-source.json"), "utf8")) as unknown);
 assert.equal(sourceReceipt.originalCommit, process.env["GITHUB_SHA"]);
 assert.equal(sourceReceipt.parentCommit, process.env["GITHUB_SHA"]);
@@ -54,8 +54,8 @@ assert.equal(run("/usr/bin/git", ["cat-file", "-t", sourceReceipt.successorCommi
 assert.equal(run("/usr/bin/git", ["rev-parse", `${sourceReceipt.successorCommit}^`], workspace).trim(), process.env["GITHUB_SHA"]);
 const changedFiles = run("/usr/bin/git", ["diff-tree", "--no-commit-id", "--name-only", "-r", sourceReceipt.successorCommit], workspace).trim().split("\n").sort();
 assert.deepEqual(changedFiles, ["VERSION", "app/package-lock.json", "app/package.json"]);
-assert.equal(run("/usr/bin/git", ["show", `${sourceReceipt.successorCommit}^:VERSION`], workspace).trim(), "0.3.0");
-assert.equal(run("/usr/bin/git", ["show", `${sourceReceipt.successorCommit}:VERSION`], workspace).trim(), "0.3.1");
+assert.equal(run("/usr/bin/git", ["show", `${sourceReceipt.successorCommit}^:VERSION`], workspace).trim(), "0.3.1");
+assert.equal(run("/usr/bin/git", ["show", `${sourceReceipt.successorCommit}:VERSION`], workspace).trim(), "0.3.2");
 const source = join(output, "source");
 run("/usr/bin/git", ["worktree", "add", "--detach", source, sourceReceipt.successorCommit], workspace);
 try {
@@ -67,7 +67,7 @@ try {
   const producer = z.object({ commit: z.string().regex(/^[a-f0-9]{40}$/u), modified: z.literal(false) })
     .parse(JSON.parse(await readFile(join(appRoot, "dist/resources/development-build.json"), "utf8")) as unknown);
   assert.equal(producer.commit, sourceReceipt.successorCommit);
-  assert.equal((await readFile(join(appRoot, "dist/resources/VERSION"), "utf8")).trim(), "0.3.1");
+  assert.equal((await readFile(join(appRoot, "dist/resources/VERSION"), "utf8")).trim(), "0.3.2");
   await cp(join(appRoot, "dist"), join(source, "app/dist"), { recursive: true, force: false, errorOnExist: true });
   const notices = join(bundleApp, "Contents/Resources/notices");
   const cpuManifest = await readFile(join(notices, "speech-cpu-unsigned-build.json"));
@@ -87,7 +87,7 @@ try {
   assert.equal(run("/usr/bin/git", ["rev-parse", "HEAD"], source).trim(), sourceReceipt.successorCommit);
   assert.equal(run("/usr/bin/git", ["status", "--porcelain"], source), "");
   await writeFile(join(output, "source-path.json"), `${JSON.stringify({ source, successorCommit: sourceReceipt.successorCommit,
-    archiveSha256: packageReceipt.sha256, version: "0.3.1", packageType: "same-source private stable validation" })}\n`, { flag: "wx", mode: 0o600 });
+    archiveSha256: packageReceipt.sha256, version: "0.3.2", packageType: "same-source private stable validation" })}\n`, { flag: "wx", mode: 0o600 });
 } catch (error: unknown) {
   run("/usr/bin/git", ["worktree", "remove", "--force", source], workspace); throw error;
 }

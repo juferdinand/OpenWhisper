@@ -64,8 +64,9 @@ export interface BackendSelection {
   readonly backend: ResourceBackend;
   readonly requestedGpu: boolean;
   readonly gpu: boolean;
-  /** Capability category only. A device name is not logged or returned. */
+  /** Capability category. The optional name is returned only for a selected physical device. */
   readonly detection: "none" | "software" | "device" | "unavailable";
+  readonly gpuDevice?: string;
 }
 export type BackendLease = Pick<ModelLease, "model" | "validate">;
 export interface BackendSpeechJob {
@@ -73,7 +74,11 @@ export interface BackendSpeechJob {
   transcribeWindow(model: SpeechModel, samples: Float32Array, language: string, vocabulary: string, signal?: AbortSignal): Promise<string>;
   close(): Promise<void>;
 }
-export interface BackendSupervisor { createJob(lease: BackendLease): BackendSpeechJob }
+export interface BackendSupervisor {
+  createJob(lease: BackendLease): BackendSpeechJob;
+  /** Bounded no-model capability check. Implementations may omit it in test adapters. */
+  discoverGpu?(): Promise<BackendSelection>;
+}
 export class BackendSupervisorError extends Error {
   constructor(readonly code: "INVALID_INPUT" | "BACKEND_UNAVAILABLE") { super(`Backend supervisor: ${code}.`); }
 }
@@ -145,6 +150,7 @@ function bounded<T>(operation: Promise<T>, ms: number, code: SpeechFailureCode, 
 class MainBackendSupervisor implements BackendSupervisor {
   private readonly allocation = new SpeechAllocation();
   private readonly effects: BackendEffects;
+  private gpuDiscovery?: Promise<BackendSelection>;
   constructor(readonly host: Host, readonly catalog: object, effects: BackendEffects, readonly deadlines: Deadlines) {
     this.effects = Object.freeze({ verify: effects.verify.bind(effects), open: effects.open.bind(effects) });
   }
@@ -190,14 +196,18 @@ class MainBackendSupervisor implements BackendSupervisor {
       if (requestedGpu && this.host.platform === "darwin") throw new BackendSupervisorError("BACKEND_UNAVAILABLE");
       let detection: BackendSelection["detection"] = "none";
       if (requestedGpu) {
-        const gpu = this.openContext("vulkan", lease); current = gpu;
+        const gpu = this.openContext("vulkan", () => lease.validate()); current = gpu;
         try {
           await this.admitContext(gpu, signal);
           const device = await this.client(gpu).gpuDevice(signal);
           active(signal);
           if (device !== null && (device.trim().length === 0 || /\p{Cc}/u.test(device))) throw worker("INVALID_REPLY");
           detection = device === null ? "none" : /\b(?:lavapipe|llvmpipe|swiftshader|software|cpu)\b/iu.test(device) ? "software" : "device";
-          if (detection === "device") { gpu.selection = Object.freeze({ backend: "vulkan", requestedGpu, gpu: true, detection }); return gpu; }
+          if (detection === "device") {
+            const gpuDevice = device && device.trim().length <= 256 ? device.trim() : undefined;
+            gpu.selection = Object.freeze({ backend: "vulkan", requestedGpu, gpu: true, detection,
+              ...(gpuDevice ? { gpuDevice } : {}) }); return gpu;
+          }
         } catch (error: unknown) {
           if (error instanceof SpeechWorkerError && (error.code === "INTEGRITY_FAILED" || error.code === "TEARDOWN_FAILED")) throw error;
           if (error instanceof SpeechWorkerError && error.code === "CANCELLED") {
@@ -210,7 +220,7 @@ class MainBackendSupervisor implements BackendSupervisor {
         }
         if (current) { await this.closeContext(gpu); current = undefined; }
       }
-      active(signal); const cpu = this.openContext("cpu", lease); current = cpu;
+      active(signal); const cpu = this.openContext("cpu", () => lease.validate()); current = cpu;
       try {
         await this.admitContext(cpu, signal);
         cpu.selection = Object.freeze({ backend: "cpu", requestedGpu, gpu: false, detection });
@@ -250,12 +260,46 @@ class MainBackendSupervisor implements BackendSupervisor {
       },
     });
   }
-  private openContext(backend: ResourceBackend, lease: BackendLease): Context {
+  discoverGpu(): Promise<BackendSelection> {
+    if (this.host.platform !== "linux" || this.host.architecture !== "x64") {
+      return Promise.reject(new BackendSupervisorError("BACKEND_UNAVAILABLE"));
+    }
+    this.gpuDiscovery ??= this.discoverGpuOnce();
+    return this.gpuDiscovery;
+  }
+  private async discoverGpuOnce(): Promise<BackendSelection> {
+    let context: Context | undefined;
+    let detection: BackendSelection["detection"] = "unavailable";
+    let gpuDevice: string | undefined;
+    try {
+      context = this.openContext("vulkan", async () => {});
+      await this.admitContext(context, context.startup.signal);
+      const device = await bounded(this.client(context).gpuDevice(context.startup.signal), this.deadlines.startupMs,
+        "TIMEOUT", context.startup.signal, () => context?.startup.abort());
+      if (device !== null && (device.trim().length === 0 || /\p{Cc}/u.test(device))) throw worker("INVALID_REPLY");
+      detection = device === null ? "none" : /\b(?:lavapipe|llvmpipe|swiftshader|software|cpu)\b/iu.test(device) ? "software" : "device";
+      if (detection === "device" && device && device.trim().length <= 256) gpuDevice = device.trim();
+    } catch (error: unknown) {
+      if (error instanceof SpeechWorkerError && (error.code === "INTEGRITY_FAILED" || error.code === "TEARDOWN_FAILED" || error.code === "CANCELLED")) {
+        if (context) await this.closeContext(context);
+        throw error;
+      }
+      if (!(error instanceof SpeechWorkerError) || !eligible.has(error.code)) {
+        if (context) await this.closeContext(context);
+        throw error;
+      }
+      detection = "unavailable";
+    }
+    if (context) await this.closeContext(context);
+    return Object.freeze({ backend: detection === "device" ? "vulkan" : "cpu", requestedGpu: true,
+      gpu: detection === "device", detection, ...(gpuDevice ? { gpuDevice } : {}) });
+  }
+  private openContext(backend: ResourceBackend, validate: () => Promise<void>): Context {
     const epoch = randomUUID(), token = this.allocation.reserve(epoch);
     const context: Context = { token, epoch, startup: new AbortController(), openAttempted: false, notCreated: false, invalidAdmission: false, admitted: false };
     this.allocation.attach(token, context);
     context.transaction = this.allocation.retain(Promise.resolve().then(async () => {
-      context.validation = this.allocation.retain(Promise.resolve().then(() => lease.validate()));
+      context.validation = this.allocation.retain(Promise.resolve().then(validate));
       try { await context.validation; }
       catch { throw this.allocation.poison("INTEGRITY_FAILED", context.validation); }
       active(context.startup.signal);

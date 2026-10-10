@@ -114,7 +114,7 @@ try {
     stage = "fresh-stable-relocation";
     await mkdir(installationRoot, { mode: 0o700 });
     execFileSync("/usr/bin/ditto", [sourceBundle, bundle], { env: environment, timeout: 120_000, stdio: "ignore" });
-    execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], { env: environment, timeout: 15_000, stdio: "ignore" });
+    execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], { env: environment, timeout: 60_000, stdio: "ignore" });
     const bundleInfo: unknown = JSON.parse(execFileSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", join(bundle, "Contents/Info.plist")],
       { env: environment, encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024 }));
     validateMacBundleMetadata(capturedBuild, packageMetadata.sourceVersion, bundleInfo);
@@ -142,7 +142,7 @@ try {
     stage = "fresh-dev-installation";
     installation = z.object({ installationRoot: z.literal(installationRoot), application: z.literal(bundle),
       executable: z.literal(executable), profile: z.literal(profile), desktopFile: z.null(), sourceDigest: z.string().regex(/^[a-f0-9]{64}$/u),
-      version: z.literal("0.3.0"), launchArguments: z.tuple([z.literal("--dev-profile"), z.literal(profile)]) }).parse(JSON.parse(
+      version: z.literal("0.3.1"), launchArguments: z.tuple([z.literal("--dev-profile"), z.literal(profile)]) }).parse(JSON.parse(
         execFileSync(sourceExecutable, installArguments, { env: installEnvironment, encoding: "utf8", timeout: 120_000, maxBuffer: 256 * 1024 })));
     await assert.rejects(lstat(profile), { code: "ENOENT" });
     checks.push("Embedded Node CLI copies and verifies a fresh signed Dev app, preserving source inputs and leaving the explicit profile nonexistent");
@@ -151,13 +151,22 @@ try {
   assert.equal((await lstat(executable)).isSymbolicLink(), false);
   stage = "launch";
   application = await _electron.launch({ executablePath: executable, args: stable ? [] : ["--dev-profile", profile],
-    env: environment, chromiumSandbox: true, timeout: 30_000 });
+    env: environment, chromiumSandbox: true, timeout: 90_000 });
   const original = application.process();
   const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((accept) => original.once("close", (code, signal) => accept({ code, signal })));
   page = await application.firstWindow();
   await expect(page.locator(".sidebar-brand strong")).toHaveText(capturedBuild.productName, { timeout: 15_000 });
   assert.equal(page.url(), "app://openwhisper/index.html");
   const state = async () => appStateSchema.parse(await page!.evaluate(() => window.openwhisper!.invoke("get_state", {})));
+  const finishSetupIfNeeded = async (setupPage: Page) => {
+    const current = await state();
+    if (current.preferences.setup_completed) return;
+    await expect(setupPage.locator('nav button[data-tab="setup"]')).toBeVisible();
+    await expect(setupPage.locator("nav button[data-tab]")).toHaveCount(1);
+    await expect(setupPage.locator('nav button[data-tab="general"]')).toHaveCount(0);
+    await setupPage.locator('[data-command="complete_setup"]').click();
+    await expect.poll(async () => (await state()).preferences.setup_completed).toBe(true);
+  };
   if (packageMetadata.updateConfigured) {
     stage = "owned-update-preference";
     const before = await state();
@@ -237,7 +246,7 @@ try {
   for (const candidate of [wrongBundle, tamperedBundle]) execFileSync("/usr/bin/ditto", [bundle, candidate], { env: environment, timeout: 120_000, stdio: "ignore" });
   execFileSync("/usr/bin/codesign", ["--force", "--sign", "-", "--identifier", "io.github.whisperfree.owned-wrong-publisher", "--timestamp=none", wrongBundle],
     { env: environment, timeout: 15_000, stdio: "ignore" });
-  execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", wrongBundle], { env: environment, timeout: 15_000, stdio: "ignore" });
+  execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", wrongBundle], { env: environment, timeout: 60_000, stdio: "ignore" });
   stage = "update-signature-different-identity";
   const differentIdentity = await verifyCandidate(wrongBundle); signatureCases.push({ name: "different-identity", result: differentIdentity });
   assert.equal(differentIdentity.accepted, false); assert.equal(differentIdentity.code, "INVALID_SIGNATURE");
@@ -253,7 +262,7 @@ try {
   assert.equal(tampered.accepted, false); assert.equal(tampered.code, "INVALID_SIGNATURE");
   assert.deepEqual(await readFile(sourceDescriptorPath), sourceDescriptor);
   assert.deepEqual(await readFile(join(appPath, "dist/main/development-recording-build.js")), sourceDescriptor);
-  execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], { env: environment, timeout: 15_000, stdio: "ignore" });
+  execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], { env: environment, timeout: 60_000, stdio: "ignore" });
   checks.push(selfAvailability === "ACCEPTED"
     ? "Current running-app requirement accepts itself and rejects valid different ad-hoc identity, unsigned code and changed sealed resource"
     : "Producer-admitted universal ad-hoc self publisher acceptance is unavailable at INVALID_SIGNATURE/-67050; different identity, unsigned code and changed sealed resource are rejected");
@@ -391,6 +400,11 @@ try {
   assert.equal(initial.macos?.shortcut_toggle_only, true, "The Mac recording descriptor must be active.");
   assert.equal(initial.status, "idle"); assert.deepEqual(initial.installed, stable ? ["tiny"] : []); assert.equal(initial.microphones.length, 0);
   assert.equal(initial.preferences.macos_shortcut ?? null, null);
+  if (!initial.preferences.setup_completed) {
+    await expect(page.locator('nav button[data-tab="setup"]')).toBeVisible();
+    await expect(page.locator("nav button[data-tab]")).toHaveCount(1);
+    await expect(page.locator('nav button[data-tab="general"]')).toHaveCount(0);
+  }
   checks.push("Normal production main factory initializes from signed packaged retirement/native descriptors");
   if (stable) {
     stage = "stable-native-context";
@@ -448,6 +462,7 @@ try {
       legacyModelSha256: originals?.[1]?.sha256, preferenceWrites: "owned JSON only; no CFPreferences writes",
       readiness: "ordinary packaged main reached UI after its pre-ready profile guard" };
     stage = "stable-migrated-ui";
+    await finishSetupIfNeeded(page);
     await page.locator('[data-tab="snippets"]').click();
     await expect(page.locator('#snippet-form [name="trigger"]')).toHaveValue(ownedSnippet.trigger);
     await expect(page.locator('#snippet-form [name="expansion"]')).toHaveValue(ownedSnippet.expansion);
@@ -455,6 +470,7 @@ try {
     await expect(page.locator('[data-delete="tiny"]')).toBeVisible();
     checks.push("Normal stable migration agrees actual empty native domain, real login/hardware/language defaults, exact raw snippets backup and legacy Tiny inventory");
   }
+  if (!stable) await finishSetupIfNeeded(page);
   if (!stable) {
     stage = "existing-installation-refusal";
     const refused = spawnSync(sourceExecutable, installArguments, { env: installEnvironment, encoding: "utf8", shell: false,
@@ -688,7 +704,7 @@ try {
   checks.push("Original packaged process exits cleanly through normal Quit and application cleanup");
   if (stable) {
     await preserved(); stage = "stable-normal-restart";
-    application = await _electron.launch({ executablePath: executable, args: [], env: environment, chromiumSandbox: true, timeout: 30_000 });
+    application = await _electron.launch({ executablePath: executable, args: [], env: environment, chromiumSandbox: true, timeout: 90_000 });
     const restarted = application.process();
     const restartedClosed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((accept) =>
       restarted.once("close", (code, signal) => accept({ code, signal })));

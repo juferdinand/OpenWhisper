@@ -29,13 +29,16 @@ async function reached(predicate: () => boolean): Promise<void> {
   throw new Error("Expected owned synthetic stage was not reached.");
 }
 function fixture(count = 976000, options: { readonly gpu?: boolean; readonly gpuAvailable?: boolean;
-  readonly family?: "whisper" | "parakeet"; readonly infer?: Infer; readonly chunkSize?: number } = {}) {
+  readonly family?: "whisper" | "parakeet"; readonly infer?: Infer; readonly chunkSize?: number;
+  readonly repeatChunk?: Float32Array } = {}) {
   const request = recordingRequestSchema.parse({ model: { path: "/owned/model.bin",
     family: options.family ?? "whisper", gpu: options.gpu ?? false }, language: "yue",
     vocabulary: "Kubernetes", snippets: [] });
   const chunks: Float32Array[] = [];
   for (let start = 0; start < count; start += options.chunkSize ?? 16384) {
-    chunks.push(new Float32Array(Math.min(options.chunkSize ?? 16384, count - start)).fill(0.2));
+    const length = Math.min(options.chunkSize ?? 16384, count - start);
+    chunks.push(options.repeatChunk && length === options.repeatChunk.length
+      ? options.repeatChunk : new Float32Array(length).fill(0.2));
   }
   const audio: PreparedAudio = Object.freeze({ generation: 1, attempt: 1, sampleRate: 16000,
     sampleCount: count, chunks: Object.freeze(chunks) });
@@ -117,6 +120,50 @@ test("late failure retries only unfinished coverage and keeps its smaller maximu
   assert.equal(f.rawParts.length, 1);
   assert.deepEqual(f.rawParts[0], [" part1 ", " part3 ", " part4 ", " part5 "]);
   assert.ok(f.progress.every((value) => Object.isFrozen(value) && !value.gpuFallback));
+});
+
+test("61-minute memo survives bounded retry and cancellation through its final transcript", async () => {
+  const second = new Float32Array(SAMPLE_RATE).fill(0.2);
+  const count = 61 * 60 * SAMPLE_RATE + 17;
+  let successfulCoverage = 0;
+  const f = fixture(count, { chunkSize: SAMPLE_RATE, repeatChunk: second,
+    infer: async (_model, samples) => {
+      if (f.inference.length === 3) throw new SpeechWorkerError("NATIVE_FAILED");
+      successfulCoverage += samples.length;
+      if (samples.at(-1) === 0.75) return "final captured tail";
+      return `memo part ${f.inference.length}`;
+    } });
+  f.audio.chunks.at(-1)?.fill(0.75);
+  const result = await new AdaptiveSpeechBoundary(f.effects).transcribe(f.audio, f.request, f.context);
+
+  assert.equal(f.audio.sampleCount, count);
+  assert.equal(successfulCoverage, count);
+  assert.ok(f.inference.every((call) => call.length <= MAX_WINDOW_SAMPLES));
+  assert.equal(f.plans[3]?.start, f.plans[2]?.start);
+  assert.equal(f.plans[3]?.maximum, Math.floor((f.plans[2]?.maximum ?? 0) / 2));
+  assert.equal(f.progress.at(-1)?.completedSamples, count);
+  assert.ok(result.text.endsWith("final captured tail"));
+  assert.ok(f.rawParts.at(-1)?.at(-1)?.includes("final captured tail"));
+
+  const held = deferred<string>();
+  const cancellation = new AbortController();
+  const context = { generation: 1, attempt: 2, signal: cancellation.signal };
+  let inferenceStarted = false;
+  const effects: AdaptiveSpeechEffects = { ...f.effects, infer: { transcribeWindow: async (_model, samples) => {
+    assert.ok(samples.length <= MAX_WINDOW_SAMPLES);
+    inferenceStarted = true;
+    return await held.promise;
+  } } };
+  const pending = new AdaptiveSpeechBoundary(effects).transcribe({ ...f.audio, attempt: 2 }, f.request, context);
+  const cancelled = assert.rejects(pending, code("CANCELLED"));
+  await reached(() => inferenceStarted);
+  cancellation.abort();
+  await cancelled;
+  held.resolve("late discarded inference");
+  await nextTurn();
+  assert.equal(f.progress.at(-1)?.completedSamples, count);
+  assert.equal(f.audio.sampleCount, count);
+  assert.equal(f.audio.chunks.at(-1)?.at(-1), 0.75);
 });
 
 for (const failure of ["START_FAILED", "WORKER_FAILED", "TIMEOUT", "NATIVE_FAILED"] as const) {

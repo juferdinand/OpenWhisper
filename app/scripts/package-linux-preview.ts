@@ -242,6 +242,7 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
     `Package: ${packageName}`, `Version: ${version}`, "Architecture: amd64", "Section: utils", "Priority: optional",
     "Maintainer: OpenWhisper Contributors <noreply@openwhisper.invalid>", `Installed-Size: ${installedSize}`,
     `Depends: libc6 (>= ${libcFloor}), libstdc++6, libgcc-s1, libgtk-3-0, libnss3, libnspr4, libasound2, libgbm1, libdrm2, libx11-6, libx11-xcb1, libxcb1, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxrandr2, libxkbcommon0, libdbus-1-3, libatomic1, libpulse0, libsystemd0`,
+    "Recommends: libgtk-layer-shell0, libvulkan1",
     `Description: ${identity.productName} ${releaseConstruction ? "stable Linux package" : stable ? "stable-profile validation package" : "isolated Electron preview"}`,
     releaseConstruction ? " Stable package construction; release signatures and feed publication are separate steps." :
       stable ? " Unsigned validation package; no public release or stable update channel." : " Unsigned development package with a separate Dev identity and data profile.", "",

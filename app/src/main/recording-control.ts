@@ -3,6 +3,23 @@ import { ControlCaptureLeaseError, type ControlCaptureLease, type ControlCapture
 import type { RecordingIdentity } from "./development-recording-host.js";
 import { MAX_CONTROL_ELAPSED } from "../platforms/linux/shared/control-status.js";
 import type { ControlWireStatus } from "../core/recording/control.js";
+import type { AppState } from "../contracts/ui/state.js";
+
+/** Report the prerequisite that blocks Start without opening an audio device. */
+export function recordingUnavailableReason(input: {
+  readonly host: boolean; readonly model: boolean; readonly busy: boolean;
+  readonly recovery: boolean; readonly mac: boolean; readonly microphoneAllowed: boolean;
+  readonly audioServer: boolean;
+}): AppState["recording_unavailable_reason"] {
+  if (!input.host) return "host";
+  if (input.busy) return undefined;
+  if (!input.model) return "model";
+  // Retrying a stopped recording must not require a connected microphone/server.
+  if (input.recovery) return undefined;
+  if (input.mac && !input.microphoneAllowed) return "permission";
+  if (!input.mac && !input.audioServer) return "audio";
+  return undefined;
+}
 
 interface RecordingControlOwner {
   currentIdentity(): RecordingIdentity | undefined;

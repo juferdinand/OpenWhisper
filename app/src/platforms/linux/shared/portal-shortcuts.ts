@@ -14,6 +14,7 @@ export const linuxApplicationIdSchema = z.enum(["io.github.whisperfree.dev", "io
 export type LinuxApplicationId = z.infer<typeof linuxApplicationIdSchema>;
 export const portalShortcutStateSchema = z.strictObject({ available: z.boolean(), configuring: z.boolean(),
   label: z.string().max(1024).nullable(), nativeAvailable: z.boolean().default(false), nativeKey: z.int().nullable().default(null),
+  nativeMouse: z.boolean().default(false), nativeMiddleMouse: z.boolean().default(false), nativeMouseButton: z.int().nullable().default(null),
   nativeX11: z.boolean().optional(), x11Trigger: x11TriggerSchema.nullable().optional(),
   result: z.enum(["NONE", "ENABLED", "UNASSIGNED", "CANCELLED", "ENDED", "FAILED", "CONFLICT", "CONFIGURE_UNAVAILABLE"]) });
 export type PortalShortcutState = z.infer<typeof portalShortcutStateSchema>;

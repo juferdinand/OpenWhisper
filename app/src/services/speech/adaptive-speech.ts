@@ -29,7 +29,7 @@ export interface SpeechProgress {
   readonly gpuFallback: boolean;
 }
 export interface AdaptiveSpeechEffects {
-  /** Detected runtime capability, not a claim that the initial CPU addon supports GPU. */
+  /** Permission to request GPU inference; the main-owned supervisor probes a real device before selecting Vulkan. */
   readonly gpuAvailable: boolean;
   /** SpeechClient owns disposal and confirmed reap before its next request. */
   readonly infer: Pick<SpeechClient, "transcribeWindow">;

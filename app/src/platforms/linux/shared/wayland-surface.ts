@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import type { LibraryHandle } from "koffi";
 import { kdeRecordingSurfaceNamespace } from "../kde/recording-surface.js";
 import { HEIGHT, WIDTH, surfaceHostMessageSchema, surfaceReplySchema,
-  type SurfaceRegion, type SurfaceReply } from "../../../contracts/platforms/wayland-surface.js";
+  type SurfaceRegion, type SurfaceReply, type SurfaceUnavailableReason } from "../../../contracts/platforms/wayland-surface.js";
 
 type SurfacePointer = Extract<SurfaceReply, { type: "pointer" }>;
 type FailureStage = Extract<SurfaceReply, { type: "failed" }>["stage"];
@@ -12,7 +12,10 @@ export interface SurfaceNative {
   pump(): void;
   close(): void;
 }
-export type SurfaceNativeFactory = (pointer: (event: Omit<SurfacePointer, "type" | "sequence">) => void) => SurfaceNative | null;
+type SurfaceNativeResult =
+  | { status: "available"; native: SurfaceNative }
+  | { status: "unavailable"; reason: SurfaceUnavailableReason };
+export type SurfaceNativeFactory = (pointer: (event: Omit<SurfacePointer, "type" | "sequence">) => void) => SurfaceNativeResult;
 
 // This seam keeps IPC/lifetime tests inert; the default factory only runs inside
 // the dedicated utility entry, never in the Electron main process.
@@ -23,15 +26,19 @@ export class WaylandSurface {
   private visible = false;
   private closed = false;
   private failed = false;
+  readonly unavailableReason: SurfaceUnavailableReason | undefined;
 
   constructor(private readonly reply: (message: SurfaceReply) => void, factory: SurfaceNativeFactory = createNativeSurface) {
-    this.native = factory((event) => {
+    const result = factory((event) => {
       if (!this.closed && this.visible && this.sequence !== undefined) {
         const message = surfaceReplySchema.parse({ type: "pointer", sequence: this.sequence, ...event });
         this.reply(message);
       }
     });
-    this.reply({ type: "ready", supported: this.native !== null });
+    this.native = result.status === "available" ? result.native : null;
+    this.unavailableReason = result.status === "unavailable" ? result.reason : undefined;
+    this.reply(this.native ? { type: "ready", supported: true }
+      : { type: "ready", supported: false, reason: this.unavailableReason ?? "runtime" });
   }
 
   get isClosed(): boolean { return this.closed; }
@@ -103,7 +110,7 @@ function loadKoffi(): Koffi {
   return value as Koffi;
 }
 
-function createNativeSurface(emitPointer: Parameters<SurfaceNativeFactory>[0]): SurfaceNative | null {
+function createNativeSurface(emitPointer: Parameters<SurfaceNativeFactory>[0]): SurfaceNativeResult {
   let closePartial: (() => void) | undefined;
   try {
     const ffi = loadKoffi();
@@ -165,7 +172,8 @@ function createNativeSurface(emitPointer: Parameters<SurfaceNativeFactory>[0]): 
     const rectangle = ffi.struct({ x: "int", y: "int", width: "int", height: "int" });
     const regionCall = cairo.func("cairo_region_create_rectangles", "void *", [ffi.pointer(rectangle), "int"]);
     const makeRegion: NativeCall = (...args) => { const result: unknown = regionCall(...args); return result; };
-    if (!integer(f.init(null, null)) || !integer(f.supported())) return null;
+    if (!integer(f.init(null, null))) return { status: "unavailable", reason: "runtime" };
+    if (!integer(f.supported())) return { status: "unavailable", reason: "unsupported" };
 
     const window = pointer(f.newWindow(0));
     f.refSink(window);
@@ -251,7 +259,7 @@ function createNativeSurface(emitPointer: Parameters<SurfaceNativeFactory>[0]): 
         if (typeof error[0] === "bigint" && error[0] !== 0n) f.errorFree(error[0]);
       }
     };
-    return {
+    return { status: "available", native: {
       applyFrame(png, inputRegions) {
         if (closed) throw new Error("Surface closed.");
         const next = decode(png), previous = currentImage;
@@ -272,9 +280,9 @@ function createNativeSurface(emitPointer: Parameters<SurfaceNativeFactory>[0]): 
         if (callbackFailed) throw new Error("Surface callback unavailable.");
       },
       close,
-    };
+    } };
   } catch {
     try { closePartial?.(); } catch { /* Original utility exit remains the final cleanup boundary. */ }
-    return null;
+    return { status: "unavailable", reason: "runtime" };
   }
 }

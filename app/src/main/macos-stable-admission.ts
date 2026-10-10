@@ -58,8 +58,9 @@ export function verifyMacApplicationBundle(identity: BuildIdentity, version: str
   if (process.platform !== "darwin") throw new Error("Mac bundle admission requires Darwin.");
   const bundle = resolve(executable, "../../..");
   const signatureStarted = performance.now();
+  // Cold Intel runners can take longer to verify every nested slice in a universal bundle.
   const signature = spawnSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle],
-    { encoding: "utf8", shell: false, timeout: 15_000, maxBuffer: 1024 * 1024 });
+    { encoding: "utf8", shell: false, timeout: 60_000, maxBuffer: 1024 * 1024 });
   const signatureFailure = macBundleToolFailure("signature", signature, performance.now() - signatureStarted);
   if (signatureFailure) throw signatureFailure;
   const metadataStarted = performance.now();

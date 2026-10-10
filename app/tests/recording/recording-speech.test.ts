@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setImmediate } from "node:timers/promises";
 import test from "node:test";
-import type { BackendLease, BackendSpeechJob, BackendSupervisor } from "../../src/services/speech/backend-supervisor.js";
+import type { BackendLease, BackendSelection, BackendSpeechJob, BackendSupervisor } from "../../src/services/speech/backend-supervisor.js";
 import { ModelInventory, type ModelLease } from "../../src/services/models/model-inventory.js";
 import { prepareDevelopmentProfile, resolveDevelopmentProfile } from "../../src/services/settings/profiles.js";
 import { createInventoryRecordingSpeechFactory } from "../../src/services/speech/recording-speech.js";
@@ -40,18 +40,21 @@ async function fixture(run: (ctx: {
 }
 function backend() {
   let created = 0, inferred = 0, closed = 0;
+  let prepared = 0;
+  let selected: BackendSelection = { backend: "cpu", requestedGpu: false, gpu: false, detection: "none" };
   let closing: () => Promise<void> = () => Promise.resolve();
   let creating: ((lease: BackendLease) => void) | undefined;
   let infer: () => Promise<string> = async () => "Inert result";
   const supervisor: BackendSupervisor = { createJob(lease) {
     created++; creating?.(lease);
-    return { prepare: async () => ({ backend: "cpu", requestedGpu: false, gpu: false, detection: "none" }),
+    return { prepare: async () => { prepared++; return selected; },
       transcribeWindow: async () => { inferred++; return infer(); },
       close: () => { closed++; return closing(); } } satisfies BackendSpeechJob;
   } };
-  return { supervisor, counts: () => ({ created, inferred, closed }),
+  return { supervisor, counts: () => ({ created, prepared, inferred, closed }),
     close: (hook: typeof closing) => { closing = hook; },
     create: (hook: NonNullable<typeof creating>) => { creating = hook; },
+    selection: (value: typeof selected) => { selected = value; },
     inference: (hook: typeof infer) => { infer = hook; } };
 }
 function instrument(inventory: ModelInventory, wrap: (lease: ModelLease) => ModelLease | Promise<ModelLease>) {
@@ -72,7 +75,7 @@ test("real private lease blocks deletion until the exact original job close fulf
   assert.equal(passed, stop.promise); await assert.rejects(factory.open(model, signal()), fails("BUSY"));
   await assert.rejects(inventory.remove("tiny"), { code: "LEASED" });
   stop.resolve(); await first; await inventory.remove("tiny");
-  assert.deepEqual(b.counts(), { created: 1, inferred: 1, closed: 1 });
+  assert.deepEqual(b.counts(), { created: 1, prepared: 1, inferred: 1, closed: 1 });
 }));
 
 test("captured ID and no-GPU-elevation are checked on opening and every delegated window", async () => fixture(async ({ inventory, model }) => {
@@ -91,11 +94,36 @@ test("captured ID and no-GPU-elevation are checked on opening and every delegate
 }));
 
 test("a captured GPU selection permits lower CPU windows without changing the host selection", async () => fixture(async ({ inventory, model }) => {
-  const b = backend();
-  const factory = createInventoryRecordingSpeechFactory({ inventory, supervisor: b.supervisor, selection: { id: "tiny", gpu: true } });
-  const client = await factory.open({ ...model, gpu: true }, signal());
+  const b = backend(), reports: unknown[] = [];
+  b.selection({ backend: "vulkan", requestedGpu: true, gpu: true, detection: "device" });
+  const reporting = createInventoryRecordingSpeechFactory({ inventory, supervisor: b.supervisor,
+    selection: { id: "tiny", gpu: true }, onBackendSelection: (selection) => { reports.push(selection); } });
+  const client = await reporting.open({ ...model, gpu: true }, signal());
   await infer(client, { ...model, gpu: true }); await infer(client, model);
-  assert.equal(b.counts().inferred, 2); await client.close();
+  assert.equal(b.counts().inferred, 2);
+  assert.deepEqual(reports, [{ backend: "vulkan", requestedGpu: true, gpu: true, detection: "device" }]);
+  assert.equal(b.counts().prepared, 1); await client.close();
+}));
+
+test("manual CPU inference prepares only CPU and never reports a GPU probe", async () => fixture(async ({ inventory, model }) => {
+  const b = backend(), reports: unknown[] = [];
+  const factory = createInventoryRecordingSpeechFactory({ inventory, supervisor: b.supervisor,
+    selection: { id: "tiny", gpu: false }, onBackendSelection: (selection) => { reports.push(selection); } });
+  const client = await factory.open(model, signal());
+  assert.equal(await infer(client, model), "Inert result");
+  assert.equal(b.counts().prepared, 1); assert.deepEqual(reports, []);
+  await client.close(); await inventory.remove("tiny");
+}));
+
+test("requested GPU selection reports bounded CPU fallback without exposing device metadata", async () => fixture(async ({ inventory, model }) => {
+  const b = backend(), reports: BackendSelection[] = [];
+  b.selection({ backend: "cpu", requestedGpu: true, gpu: false, detection: "unavailable" });
+  const factory = createInventoryRecordingSpeechFactory({ inventory, supervisor: b.supervisor,
+    selection: { id: "tiny", gpu: true }, onBackendSelection: (selection) => { reports.push(selection); } });
+  const client = await factory.open({ ...model, gpu: true }, signal());
+  assert.equal(await infer(client, { ...model, gpu: true }), "Inert result");
+  assert.deepEqual(reports, [{ backend: "cpu", requestedGpu: true, gpu: false, detection: "unavailable" }]);
+  await client.close(); await inventory.remove("tiny");
 }));
 
 test("cancelled accepted acquisition retains its real lease and prevents a replacement factory", async () => fixture(async ({ inventory, model }) => {
@@ -154,7 +182,7 @@ test("pure job-construction refusal releases a pre-process lease without claimin
   const b = backend(); b.create(() => { throw { code: "INVALID_INPUT" }; });
   const factory = createInventoryRecordingSpeechFactory({ inventory, supervisor: b.supervisor, selection: { id: "tiny", gpu: false } });
   await assert.rejects(factory.open(model, signal()), fails("OWNERSHIP_FAILED"));
-  assert.deepEqual(b.counts(), { created: 1, inferred: 0, closed: 0 }); await inventory.remove("tiny");
+  assert.deepEqual(b.counts(), { created: 1, prepared: 0, inferred: 0, closed: 0 }); await inventory.remove("tiny");
 }));
 
 test("native integrity remains terminal and original inventory binding cannot be replaced", async () => fixture(async ({ inventory, model, secondInventory }) => {
