@@ -3,11 +3,11 @@
 The [migration plan](ELECTRON-MIGRATION.md) defines replacement and acceptance gates.
 The default build starts **OpenWhisper Dev** with the Electron-only renderer in `app/ui/`,
 a schema-validated sandboxed bridge and private settings/session directories. An explicit
-CPU recording build connects the shared controls to native capture and clipboard output on
-Linux and macOS. The target version is **0.3.0**; see [current status](ELECTRON-STATUS.md).
-The default lightweight preview leaves recording disabled. The CPU Dev supports explicit
-Linux F8 setup and optional keyboard-only paste; autostart and stable updates remain disabled.
-It does not replace the released 0.2.5 application or establish desktop/speech parity.
+recording build connects the shared controls to native capture and clipboard output on
+Linux and macOS. See [current release status](ELECTRON-STATUS.md).
+The default lightweight preview leaves recording disabled. Recording Dev supports explicit
+Linux trigger setup and optional keyboard-only paste; autostart and stable updates remain disabled.
+It does not replace the installed application or establish desktop/speech parity.
 The About view shows the Dev build's source commit and whether the checkout was modified;
 the Models view exposes the selected private model directory.
 
@@ -69,21 +69,18 @@ idle-overlay preference is enabled. Built-in non-activating presentation is enab
 macOS and X11, including an explicitly selected XWayland backend. The owned KDE XWayland
 test covers actual pointer Cancel without moving keyboard focus.
 
-Native Wayland uses the main recording control for now: Electron's
-[inactive-show API is unsupported there](https://www.electronjs.org/docs/latest/api/browser-window#winshowinactive),
-and the real KDE probe lost focus. The known unsafe path is guarded, without globally
-forcing XWayland. A native layer-shell surface using shared renderer output remains
-required by the full migration plan; GNOME needs usable fallback controls.
-
-The isolated `--experimental-wayland-overlay` switch tests a strict TypeScript
-GTK/layer-shell utility that paints the existing offscreen shared renderer.
-On stock KDE 5.27, its dock role passes actual pointer Cancel/Stop and foreground
-editor keyboard delivery without refocusing. That role stacks below active
-fullscreen and keep-above windows; those cases and other compositors remain
-open, so the prototype is not enabled by default. See the
+On native Wayland, OpenWhisper uses a GTK layer-shell utility to paint the same
+offscreen shared renderer without taking keyboard focus. It starts automatically
+in Wayland sessions when the compositor advertises layer-shell support. If the
+protocol is unsupported or the GTK runtime cannot start, Settings explains the
+cause and the main recording controls remain available. This does not force
+XWayland. The owned KDE 5.27 dock-role test verifies pointer Cancel/Stop and
+foreground editor keyboard delivery without refocusing. The dock role stacks below
+active fullscreen and keep-above windows; other compositors and stacking cases are
+not established by that test. See the
 [exact owned evidence](https://github.com/juferdinand/OpenWhisper/blob/122d68e4e029dbfebb8b9157ac53ab316687ebb8/docs/ELECTRON-DEV-EVIDENCE.md).
 
-## Linux CPU recording Dev build
+## Linux recording Dev build
 
 Build and start the normal shared UI with recording explicitly enabled:
 
@@ -101,7 +98,11 @@ dependency graph; the runtime does not refresh expected hashes from whatever fil
 These development descriptors are integrity checks, not release signing or publisher identity.
 
 In **Models**, download a catalog model or import a local compatible `.bin` file into the
-private Dev inventory. Select CPU and clipboard output. Choose a microphone in **General**,
+private Dev inventory. Linux x86_64 recording builds include Vulkan and CPU backends from the
+same checksum-pinned speech source. GPU availability is checked when recognition starts;
+an unavailable or failed GPU falls back to CPU. Choosing CPU explicitly never probes or uses
+the GPU. Vulkan requires the distribution's loader and a compatible driver; Debian packages
+recommend `libvulkan1`. Select clipboard output. Choose a microphone in **General**,
 or leave the system default; the current concrete default is resolved on each Start. Opening
 settings and enumerating devices does not open an audio stream. Start/Stop and Cancel use
 the shared controls. The speech engine runs in a separately supervised utility, with retained
@@ -129,11 +130,16 @@ On KDE with a running KWin/KGlobalAccel service, **General → Set trigger** cap
 a keyboard key or chord inside the window. Release the selected key to confirm;
 Escape, Cancel or window focus loss leave the existing binding in place. Conflicts
 are refused. Registration is session-only and begins after explicit setup, with
-the selected profile saved privately. A saved Dev profile does not bind on startup.
-Modifier-only keys use toggle mode; direct mouse support is not yet ported. A private
-recovery journal precedes registration and only dead owners can be recovered.
+the selected profile saved privately and restored after completed setup on subsequent starts.
+Modifier-only keys use toggle mode. On supported KDE 6 Wayland sessions, mouse setup also
+accepts extra buttons, plus the middle button on Plasma 6.3+. It requires KWin's loaded
+button-rebinding plugin and a verified, action-free F19 or F24 keyboard surrogate. Existing
+button mappings and shortcut conflicts are refused. Use **Remove trigger** before choosing
+a different mouse button. The session lease restores the original empty mapping on removal
+or shutdown, preserves later user edits, and recovers a dead owner's lease on startup.
+A private recovery journal precedes registration and only dead owners can be recovered.
 Explicit setup recovers a crashed session action before asking for the next key,
-so KDE cannot consume that key first. Startup itself leaves the journal untouched.
+so KDE cannot consume that key first.
 **Remove trigger** releases the owned action. The normal stock KDE F8 setup,
 toggle dictation, held-key/GUI cancellation, Quit with an active binding and
 same-profile crash recovery paths have owned runtime evidence.

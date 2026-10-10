@@ -54,7 +54,7 @@ jobs:
       - name: Install pinned Electron runtime
         working-directory: app
         run: npm run setup
-      - name: Build the stable Linux application with portable CPU recording
+      - name: Build the stable Linux application with Vulkan and portable CPU recording
         working-directory: app
         run: npm run build -- --stable --recording
       - name: Confirm build preserved the committed source tree

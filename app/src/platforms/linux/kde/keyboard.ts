@@ -77,6 +77,17 @@ export class KdeKeyboard {
     await keyboard.probe(); return keyboard;
   }
   state(): KdeKeyboardState { return { ...this.current }; }
+  holdMode(): boolean { return this.hold; }
+  async canBind(input: number): Promise<boolean> {
+    const key = kdeKeySchema.parse(input);
+    if (this.closed || this.cleanupFailed) throw new BusFailure("TEARDOWN_FAILED");
+    if (!this.owner) await this.probe(); const owner = this.owner;
+    if (!owner || !this.current.available) throw new BusFailure("REMOTE_ERROR");
+    await this.recover(owner);
+    const available = await this.call(owner, "globalShortcutAvailable", "(ai)s", "b", [sequence(key), text("")]);
+    if (available[0]?.type !== "b") throw new BusFailure("INVALID_FRAME");
+    return available[0].value;
+  }
   private publish(changes: Partial<KdeKeyboardState>): void { this.current = { ...this.current, ...changes }; this.changed(this.state()); }
   private async probe(): Promise<void> {
     if (this.closed || this.bus.isClosed) return;

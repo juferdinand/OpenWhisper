@@ -1,6 +1,6 @@
 # OpenWhisper
 
-**Press. Speak. Keep writing. Local dictation for macOS and Linux.**
+**Press. Speak. Keep writing. Local dictation for macOS 14+ and Linux x86_64.**
 
 [![CI](https://github.com/juferdinand/OpenWhisper/actions/workflows/ci.yml/badge.svg)](https://github.com/juferdinand/OpenWhisper/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -19,11 +19,15 @@ source and evidence remain available as an immutable reference.
 | Platform | Current release | Notes |
 | --- | --- | --- |
 | macOS 14+ | 0.3.0 DMG and ZIP | Self-signed and not Apple-notarized; see [signing](docs/SIGNING.md) |
-| Linux x86_64 | 0.3.0 AppImage and Debian package | Automated evidence and boundaries in [Linux status](docs/LINUX.md) |
+| Linux x86_64 | 0.3.0 AppImage and Debian package | Scoped KDE Wayland and X11 checks; see [Linux status](docs/LINUX.md) |
 | Windows | None | Not implemented; tracked by [issue #35](https://github.com/juferdinand/OpenWhisper/issues/35) |
 
 The immutable [0.2.5 source snapshot](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4)
 preserves the legacy hosts and their historical evidence.
+
+Linux release evidence covers owned KDE Plasma 5.27 Wayland and X11 profiles, plus a package
+transition on one Kubuntu 24 baseline. Other desktop and distribution combinations require
+their own validation; package availability does not establish blanket compatibility.
 
 ## Features
 
@@ -32,9 +36,16 @@ vocabulary correction, snippets, history, a shared settings interface, and Engli
 interface translations. Platform integrations and validation differ; consult the applicable
 [Linux evidence](docs/LINUX.md) and [platform overview](docs/PLATFORMS.md).
 
+Optional LM Studio and Ollama text processing is available only as a manual preview in the
+isolated Electron Dev build; it is not part of the 0.3.0 release. Speech output and structured
+Obsidian notes are planned integrations, with prerequisites and delivery order in the
+[roadmap](docs/ROADMAP.md).
+
 Recording continues until you stop or cancel it. Audio remains in memory while recording, so
 longer sessions use more RAM. Model downloads require a network connection. Recognition runs
-locally and can work offline once a model is present.
+locally and can work offline once a model is present. A failed model download must be started
+again; the app does not resume partial downloads. It checks the complete file's size and SHA-256
+against the download server's metadata before installing it.
 
 ## Installation
 

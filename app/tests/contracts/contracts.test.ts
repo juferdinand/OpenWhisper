@@ -63,7 +63,7 @@ test("schema-derived command maps cover all current renderer actions", async () 
     "enable_paste", "disable_paste", "enable_shortcut", "desktop_shortcut", "clear_shortcut",
     "retry_transcription", "discard_recovery", "toggle_recording", "cancel_recording", "check_updates", "install_update",
   ]) assert.doesNotThrow(() => validateCommandName(name));
-  assert.equal(Object.keys(commandInputSchemas).length, 31);
+  assert.equal(Object.keys(commandInputSchemas).length, 32);
   assert.deepEqual(Object.keys(commandOutputSchemas).sort(), Object.keys(commandInputSchemas).sort());
 });
 
@@ -79,6 +79,12 @@ test("unknown commands, shell/path authority and extra arguments are rejected", 
   assert.throws(() => validateCommandInput("download_model", { id: "../../model" }));
   assert.throws(() => validateCommandInput("download_model", { id: "..\\model" }));
   assert.throws(() => validateCommandInput("download_model", { id: "" }));
+});
+
+test("mouse trigger capture accepts only bounded supported buttons", () => {
+  for (const button of [2, 8, 9, 31]) assert.deepEqual(validateCommandInput("capture_mouse_trigger", { button }), { button });
+  for (const button of [-1, 0, 1, 3, 7, 32, 2.5, "8"]) assert.throws(() => validateCommandInput("capture_mouse_trigger", { button }));
+  assert.throws(() => validateCommandInput("capture_mouse_trigger", { button: 8, command: "exec" }));
 });
 
 test("validated preference patches preserve text and reject host-owned fields", () => {

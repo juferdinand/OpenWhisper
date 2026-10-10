@@ -61,6 +61,16 @@ test("authorized main command validates the request and response", async () => {
   assert.equal(calls, 1);
 });
 
+test("mouse capture is bounded and cannot be invoked by the recording overlay", async () => {
+  const buttons: number[] = [];
+  const bridge = dispatcher({ capture_mouse_trigger: ({ button }) => { buttons.push(button); } });
+  failure(await bridge.dispatch({ sender: overlay, serializedRequest: request("capture_mouse_trigger", { button: 8 }) }), "FORBIDDEN_COMMAND");
+  failure(await bridge.dispatch({ sender: main, serializedRequest: request("capture_mouse_trigger", { button: 0 }) }), "INVALID_REQUEST");
+  assert.deepEqual(buttons, []);
+  assert.deepEqual(await bridge.dispatch({ sender: main, serializedRequest: request("capture_mouse_trigger", { button: 8 }) }), { ok: true, value: null });
+  assert.deepEqual(buttons, [8]);
+});
+
 test("typed preference handler receives only the validated patch", async () => {
   let received: PreferencePatch | undefined;
   const bridge = dispatcher({ save_preferences: ({ changes }) => {

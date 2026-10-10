@@ -27,6 +27,7 @@ let shellKey = "";
 let renderedTab: Tab | undefined;
 let preferenceQueue = Promise.resolve();
 let pendingPreferences = 0;
+let mouseTriggerCandidate: number | undefined;
 let processingQueue = Promise.resolve();
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const overlay =
@@ -392,7 +393,9 @@ function render() {
       state.macos,
       state.updates,
       state.overlay_available,
+      state.overlay_unavailable_reason,
       state.gpu_supported,
+      state.gpu_checked,
       state.gpu_available,
       state.gpu_device,
       state.gpu_fallback,
@@ -641,7 +644,15 @@ function render() {
             )
           : row(
               t("Floating recording indicator"),
-              `<span class="warning">${esc(t("Not supported by this desktop"))}</span>`,
+              `<span class="warning">${esc(
+                t(
+                  state.overlay_unavailable_reason === "runtime"
+                    ? "Floating controls could not start. Check the GTK 3 and gtk-layer-shell runtime libraries, then restart OpenWhisper. Use the main window controls meanwhile."
+                    : state.overlay_unavailable_reason === "unsupported"
+                      ? "This Wayland compositor does not support layer-shell recording controls. Use the main window controls."
+                      : "Floating controls are unavailable. Use the main window controls.",
+                ),
+              )}</span>`,
             )) +
           toggle(
             t("Launch at login"),
@@ -696,11 +707,13 @@ function render() {
                 t(
                   !state.gpu_supported
                     ? "GPU support is not included in this build. Install a current Linux package."
-                    : state.gpu_fallback
-                      ? "The GPU could not complete recognition. The recording was processed on the CPU."
-                      : !state.gpu_available
-                        ? "No compatible GPU detected. CPU recognition remains available. Check your Vulkan driver and restart the app."
-                        : "Vulkan acceleration is available. Recoverable GPU errors fall back to the CPU.",
+                    : state.gpu_checked === false
+                      ? "GPU availability is checked when recognition starts."
+                      : state.gpu_fallback
+                        ? "The GPU could not complete recognition. The recording was processed on the CPU."
+                        : !state.gpu_available
+                          ? "No compatible GPU detected. CPU recognition remains available. Check your Vulkan driver and restart the app."
+                          : "Vulkan acceleration is available. Recoverable GPU errors fall back to the CPU.",
                 ),
               )}</p>`),
         isMac()
@@ -1090,6 +1103,46 @@ for (const name of ["keydown", "keyup"] as const)
     },
     { capture: true },
   );
+// Capture buttons only in explicit setup. Normal browser navigation and primary
+// clicks (including Cancel) keep their normal behavior outside this setup.
+for (const name of ["mousedown", "mouseup", "auxclick"] as const)
+  window.addEventListener(
+    name,
+    (event) => {
+      if (
+        overlay ||
+        !event.isTrusted ||
+        !state?.recording_shortcut ||
+        !state.native_mouse
+      )
+        return;
+      const button =
+        event.button === 1
+          ? 2
+          : event.button === 3
+            ? 8
+            : event.button === 4
+              ? 9
+              : undefined;
+      if (button === undefined) return;
+      event.preventDefault();
+      if (name === "mousedown") mouseTriggerCandidate = button;
+      else if (name === "mouseup" && mouseTriggerCandidate === button) {
+        mouseTriggerCandidate = undefined;
+        void invoke("capture_mouse_trigger", { button }).catch(() =>
+          notice(
+            t(
+              "Shortcut setup or recording failed. Window recording remains usable.",
+            ),
+          ),
+        );
+      }
+    },
+    { capture: true },
+  );
+window.addEventListener("blur", () => {
+  mouseTriggerCandidate = undefined;
+});
 function snippetRow(s?: Snippet) {
   return `<div class="snippet-row" data-id="${esc(s?.id ?? crypto.randomUUID())}"><input class="switch" type="checkbox" name="enabled" aria-label="${esc(t("Enable snippet"))}" ${!s || s.enabled ? "checked" : ""}><input name="trigger" aria-label="${esc(t("When I say"))}" placeholder="${esc(t("When I say …"))}" value="${esc(s?.trigger ?? "")}" maxlength="128"><span>→</span><textarea name="expansion" aria-label="${esc(t("Insert"))}" placeholder="${esc(t("… insert"))}" rows="2">${esc(s?.expansion ?? "")}</textarea><button type="button" data-remove aria-label="${esc(t("Remove snippet"))}">×</button></div>`;
 }
@@ -1108,6 +1161,7 @@ async function start() {
     await listen("state", (event) => {
       receivedStateEvent = true;
       state = event.payload;
+      if (!state.recording_shortcut) mouseTriggerCandidate = undefined;
       render();
     });
     await listen("recording_telemetry", (event) => {

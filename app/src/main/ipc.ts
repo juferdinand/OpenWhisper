@@ -181,6 +181,7 @@ export function createUiDispatcher(options: {
     cancel_shortcut: route("cancel_shortcut", handlers.cancel_shortcut),
     clear_shortcut: route("clear_shortcut", handlers.clear_shortcut),
     desktop_shortcut: route("desktop_shortcut", handlers.desktop_shortcut),
+    capture_mouse_trigger: route("capture_mouse_trigger", handlers.capture_mouse_trigger),
     enable_paste: route("enable_paste", handlers.enable_paste),
     disable_paste: route("disable_paste", handlers.disable_paste),
     allow_microphone: route("allow_microphone", handlers.allow_microphone),

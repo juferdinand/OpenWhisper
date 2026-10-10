@@ -245,16 +245,13 @@ globally. The failed native Wayland probe is retained: Electron's built-in inact
 show cannot preserve focus there, so that overlay path stays guarded pending the
 separate native layer-shell requirement.
 
-Use `--stock-kde-wayland-overlay` for the native Wayland surface case. This mode
-passes the application's explicit `--experimental-wayland-overlay` switch.
-Earlier runs failed the post-click Electron main-window focus check on the pinned
-stock KWin desktop; Cancel itself and exact native pixel matching were verified,
-while Stop/recognition was not reached. The revised case measures actual foreground
-editor keyboard delivery, as described below. With KWin's dock role, case2 passes
-all four markers, actual Cancel/Stop and recognition in 28.50 seconds. DockLayer
-stacks below keep-above/fullscreen windows, which this case does not validate.
-Normal Dev does not enable this prototype by default. This mode
-does not enable inner XWayland or change the app's Wayland backend. The same
+Use `--stock-kde-wayland-overlay` for the native Wayland surface case. This selects
+the private KWin test profile only; the driver launches the normal app without a
+feature flag and without enabling inner XWayland. With KWin's dock role, the case
+passes all four foreground-editor keyboard markers, actual pointer Cancel/Stop,
+recognition, and clipboard confirmation without refocusing. DockLayer stacks below
+keep-above/fullscreen windows, which this case does not validate. Earlier failed
+probes are retained as historical evidence and are not the current result. The same
 trusted, sandboxed overlay renderer stays offscreen; the owned GTK/layer-shell
 utility paints its frames with keyboard mode NONE. The driver identifies that
 original utility and its loaded libraries, reads the actual compositor output

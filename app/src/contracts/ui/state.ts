@@ -44,12 +44,13 @@ export const nonEmptySnippetSchema = snippetSchema.refine(
   { message: "Snippet trigger is empty", path: ["trigger"] },
 );
 
+export const nativeMouseButtonSchema = z.number().int().refine(
+  (value) => value === 2 || (value >= 8 && value <= 31),
+);
 // These are host-owned serialized profiles, not renderer authority to bind native input.
 export const nativeTriggerSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("key"), key: z.number().int().min(1).max(0x3fffffff) }),
-  z.strictObject({ kind: z.literal("mouse"), button: z.number().int().refine(
-    (value) => value === 2 || (value >= 8 && value <= 31),
-  ) }),
+  z.strictObject({ kind: z.literal("mouse"), button: nativeMouseButtonSchema }),
 ]);
 export type NativeTrigger = z.infer<typeof nativeTriggerSchema>;
 export const x11TriggerSchema = z.strictObject({
@@ -163,11 +164,13 @@ export const appStateSchema = z.strictObject({
   paste_ready: z.boolean(),
   paste_configuring: z.boolean().optional(),
   gpu_available: z.boolean(),
+  gpu_checked: z.boolean().optional(),
   gpu_supported: z.boolean().optional(),
   gpu_device: label.nullable().optional(),
   gpu_fallback: z.boolean().optional(),
   recovery_available: z.boolean().optional(),
   overlay_available: z.boolean().optional(),
+  overlay_unavailable_reason: z.enum(["unsupported", "runtime"]).optional(),
   download: modelId.nullable(),
   progress: fraction,
   // A finite safe integer is a wire constraint, not an automatic recording cutoff.
@@ -260,6 +263,7 @@ export const commandInputSchemas = {
   cancel_shortcut: noArgs,
   clear_shortcut: noArgs,
   desktop_shortcut: noArgs,
+  capture_mouse_trigger: z.strictObject({ button: nativeMouseButtonSchema }),
   enable_paste: noArgs,
   disable_paste: noArgs,
   allow_microphone: noArgs,
@@ -295,6 +299,7 @@ export const commandOutputSchemas = {
   cancel_shortcut: actionResult,
   clear_shortcut: actionResult,
   desktop_shortcut: actionResult,
+  capture_mouse_trigger: actionResult,
   enable_paste: actionResult,
   disable_paste: actionResult,
   allow_microphone: actionResult,

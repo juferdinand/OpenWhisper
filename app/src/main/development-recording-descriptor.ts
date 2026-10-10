@@ -15,9 +15,13 @@ export const developmentRecordingDescriptorSchema = z.discriminatedUnion("platfo
   z.strictObject({ ...common, platform: z.literal("linux"), platformServices: developmentPlatformDescriptorSchema.optional() }),
   z.strictObject({ ...common, platform: z.literal("darwin"), retirement: developmentArtifactSchema }),
 ]).superRefine((value, context) => {
+  const backends = value.speech.entries.map((entry) => entry.backend);
+  const cpuOnly = backends.length === 1 && backends[0] === "cpu";
+  const cpuVulkan = value.platform === "linux" && value.architecture === "x64" &&
+    backends.length === 2 && backends[0] === "cpu" && backends[1] === "vulkan";
   if (value.speech.platform !== value.platform || value.speech.architecture !== value.architecture ||
-    value.speech.entries.length !== 1 || value.speech.entries[0]?.backend !== "cpu") {
-    context.addIssue({ code: "custom", message: "The development recording slice requires the matching CPU build." });
+    !(cpuOnly || cpuVulkan)) {
+    context.addIssue({ code: "custom", message: "The development recording slice requires its matching CPU and optional Vulkan builds." });
   }
 }).readonly();
 export type DevelopmentRecordingDescriptor = z.infer<typeof developmentRecordingDescriptorSchema>;

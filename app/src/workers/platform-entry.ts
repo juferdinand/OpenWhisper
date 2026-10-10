@@ -1,7 +1,7 @@
 import { BusFailure, LinuxBus, openLinuxBus } from "../platforms/linux/shared/bus.js";
 import { ControlServiceError, DevControlService } from "../platforms/linux/shared/control.js";
 import type { ControlCapturePort } from "../core/recording/control.js";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { verifyDevelopmentLinuxBusArtifact } from "../services/development/development-artifact.js";
@@ -104,7 +104,7 @@ port.on("message", (message) => {
           if (captureClient) {
             shortcuts = await DesktopShortcuts.create(ownedBus, capture, (state) => {
               port.postMessage({ version: 1, type: "shortcuts", state });
-            }, journal, appId); current();
+            }, journal, appId, request.kdeLeasePath ? join(dirname(request.kdeLeasePath), "kde-mouse-lease.json") : undefined); current();
           }
           paste = await PortalPaste.create(ownedBus, (state) => port.postMessage({ version: 1, type: "paste-state", state }), undefined,
             () => {
@@ -136,6 +136,18 @@ port.on("message", (message) => {
         if (!shortcuts) return { version: 1, id: request.id, ok: false, code: "UNAVAILABLE" };
         await shortcuts.prepareKeyCapture(request.windowId, request.hold);
         return { version: 1, id: request.id, ok: true, value: { command: "prepare-key", state: shortcuts.state() } };
+      }
+      case "bind-mouse": {
+        if (!shortcuts) return { version: 1, id: request.id, ok: false, code: "UNAVAILABLE" };
+        void shortcuts.bindMouse(request.button, request.hold).catch(() => {
+          if (shortcuts) port.postMessage({ version: 1, type: "shortcuts", state: shortcuts.state() });
+        });
+        return { version: 1, id: request.id, ok: true, value: { command: "bind-mouse", state: shortcuts.state() } };
+      }
+      case "prepare-mouse": {
+        if (!shortcuts) return { version: 1, id: request.id, ok: false, code: "UNAVAILABLE" };
+        await shortcuts.prepareMouseCapture(request.button);
+        return { version: 1, id: request.id, ok: true, value: { command: "prepare-mouse", state: shortcuts.state() } };
       }
       case "paste-permission": {
         if (!paste) return { version: 1, id: request.id, ok: false, code: "UNAVAILABLE" };

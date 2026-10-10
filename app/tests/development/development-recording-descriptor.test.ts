@@ -33,6 +33,20 @@ test("V1 thin Mac and Linux descriptors remain unchanged and select only their m
   assert.deepEqual(selectDevelopmentRecordingDescriptor(withPlatform, { platform: "linux", architecture: "x64" }), withPlatform);
 });
 
+test("Vulkan is optional only for the x64 Linux development recording slice", () => {
+  const linux = descriptor("linux", "x64");
+  const withVulkan = { ...linux, speech: { ...linux.speech,
+    entries: [...linux.speech.entries, { backend: "vulkan" as const, ...artifact }] } };
+  assert.deepEqual(developmentRecordingDescriptorSchema.parse(withVulkan), withVulkan);
+  for (const invalid of [
+    { ...descriptor("linux", "arm64"), speech: { ...descriptor("linux", "arm64").speech,
+      entries: [{ backend: "cpu" as const, ...artifact }, { backend: "vulkan" as const, ...artifact }] } },
+    { ...descriptor("darwin", "x64"), speech: { ...descriptor("darwin", "x64").speech,
+      entries: [{ backend: "cpu" as const, ...artifact }, { backend: "vulkan" as const, ...artifact }] } },
+    { ...linux, speech: { ...linux.speech, entries: [{ backend: "vulkan" as const, ...artifact }, { backend: "cpu" as const, ...artifact }] } },
+  ]) assert.throws(() => developmentRecordingDescriptorSchema.parse(invalid));
+});
+
 test("Darwin V2 validates both branches and returns only the requested readonly V1", () => {
   const input = universal(), parsed = darwinUniversalRecordingDescriptorSchema.parse(input);
   assert.ok(Object.isFrozen(parsed) && Object.isFrozen(parsed.architectures));

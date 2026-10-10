@@ -1,7 +1,7 @@
 import { utilityProcess, type BrowserWindow, type NativeImage, type UtilityProcess } from "electron";
 import {
   WIDTH, HEIGHT, MAX_PNG_BYTES, surfaceRegionsSchema, surfaceReplySchema,
-  type SurfaceReply,
+  type SurfaceReply, type SurfaceUnavailableReason,
 } from "../contracts/platforms/wayland-surface.js";
 
 type SurfaceFailure = "startup-timeout" | "image-size" | "png-size" | "invalid-reply" | "frame-mismatch" |
@@ -35,6 +35,7 @@ export class WaylandRecordingOverlay {
   private acceptReady!: (supported: boolean) => void;
   private readonly ready = new Promise<boolean>((accept) => { this.acceptReady = accept; });
   private supported = false;
+  private unavailableReasonValue: SurfaceUnavailableReason | undefined;
   private exitObserved = false;
   private closing = false;
   private closeTask: Promise<void> | undefined;
@@ -89,6 +90,7 @@ export class WaylandRecordingOverlay {
   }
 
   get available(): boolean { return this.supported && !this.closing && !this.exitObserved; }
+  get unavailableReason(): SurfaceUnavailableReason | undefined { return this.unavailableReasonValue; }
 
   async start(): Promise<boolean> {
     this.startupTimer = setTimeout(() => { this.acceptReady(false); this.fail("startup-timeout"); }, 3000);
@@ -116,7 +118,9 @@ export class WaylandRecordingOverlay {
   private receive(reply: SurfaceReply): void {
     if (reply.type === "ready") {
       if (this.closing) return;
-      this.supported = reply.supported; this.acceptReady(reply.supported); return;
+      this.supported = reply.supported;
+      this.unavailableReasonValue = reply.supported ? undefined : reply.reason ?? "runtime";
+      this.acceptReady(reply.supported); return;
     }
     if (reply.type === "failed") { this.fail(`native-${reply.stage}`); return; }
     if (reply.type === "closed") return; // Only original exit confirms retirement.
@@ -151,6 +155,7 @@ export class WaylandRecordingOverlay {
   private fail(code: SurfaceFailure): void {
     if (this.closing) return;
     console.error(`OpenWhisper Wayland overlay failed: ${code}`);
+    this.unavailableReasonValue = "runtime";
     this.supported = false; this.pending = undefined; this.acceptReady(false);
     if (!this.renderer.isDestroyed()) this.renderer.webContents.stopPainting();
     this.unavailable();

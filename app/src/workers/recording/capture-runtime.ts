@@ -154,7 +154,7 @@ export class CaptureRuntime {
           if (this.halted || this.closing) {
             await this.coordinator?.cancel(); throw new CaptureRuntimeError("CLOSED");
           }
-          const adaptive = new AdaptiveSpeechBoundary(createUtilitySpeechEffects({ gpuAvailable: false,
+          const adaptive = new AdaptiveSpeechBoundary(createUtilitySpeechEffects({ gpuAvailable: true,
             infer: this.effects.infer(context), progress: (value) => { this.emit({ kind: "progress", ...value }); } }));
           return adaptive.transcribe(audio, selected, context);
         } },

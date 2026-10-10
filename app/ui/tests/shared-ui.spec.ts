@@ -22,7 +22,7 @@ declare global {
       elapsed: number;
       level: number;
     }): void;
-    calls: { command: string }[];
+    calls: { command: string; args?: unknown }[];
   }
 }
 
@@ -52,6 +52,102 @@ test("pending keyboard permission exposes translated Cancel and sends only revoc
   await expect(page.locator('[data-portal="enable_paste"]')).toHaveText(
     "Erlauben",
   );
+});
+
+test("Linux overlay availability distinguishes unsupported protocol from missing runtime and translates both", async ({
+  page,
+}) => {
+  await start(page, "linux");
+  await page.getByRole("button", { name: "General", exact: true }).click();
+  await page.evaluate(() => {
+    window.testState.overlay_available = false;
+    window.testState.overlay_unavailable_reason = "unsupported";
+    window.publishState();
+  });
+  const unsupported =
+    "This Wayland compositor does not support layer-shell recording controls. Use the main window controls.";
+  await expect(page.getByText(unsupported, { exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.preferences.ui_language = "de";
+    window.publishState();
+  });
+  await expect(
+    page.getByText(
+      "Dieser Wayland-Compositor unterstützt keine layer-shell-Aufnahmeanzeige. Verwende die Bedienelemente im Hauptfenster.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.preferences.ui_language = "en";
+    window.testState.overlay_unavailable_reason = "runtime";
+    window.publishState();
+  });
+  await expect(
+    page.getByText("Floating controls could not start.", { exact: false }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.preferences.ui_language = "de";
+    window.publishState();
+  });
+  await expect(
+    page.getByText(
+      "Die schwebenden Bedienelemente konnten nicht gestartet werden.",
+      { exact: false },
+    ),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.overlay_unavailable_reason = undefined;
+    window.publishState();
+  });
+  await expect(
+    page.getByText(
+      "Die schwebenden Bedienelemente sind nicht verfügbar. Verwende die Bedienelemente im Hauptfenster.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+});
+
+test("Linux GPU status distinguishes an unchecked device from an observed fallback", async ({
+  page,
+}) => {
+  await start(page, "linux");
+  await page.getByRole("button", { name: "General", exact: true }).click();
+  await page.evaluate(() => {
+    Object.assign(window.testState, {
+      gpu_supported: true,
+      gpu_checked: false,
+      gpu_available: false,
+      gpu_fallback: false,
+    });
+    window.testState.preferences.gpu = true;
+    window.publishState();
+  });
+  await expect(
+    page.getByText("GPU availability is checked when recognition starts.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.gpu_checked = true;
+    window.publishState();
+  });
+  await expect(
+    page.getByText("No compatible GPU detected.", { exact: false }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.gpu_available = true;
+    window.publishState();
+  });
+  await expect(
+    page.getByText("Vulkan acceleration is available.", { exact: false }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.gpu_fallback = true;
+    window.publishState();
+  });
+  await expect(
+    page.getByText("The GPU could not complete recognition.", { exact: false }),
+  ).toBeVisible();
 });
 
 test("Linux keyboard-only setup suppresses button defaults and restores normal input after Cancel", async ({
@@ -1115,6 +1211,85 @@ test("Linux: native trigger capture blocks recording, cancels, and shows saved m
   await expect(
     page.getByRole("button", { name: "Set trigger …", exact: true }),
   ).toBeVisible();
+});
+
+test("Linux mouse setup commits matching middle, back and forward releases only during setup", async ({
+  page,
+  context,
+}) => {
+  await start(page, "linux");
+  await page.getByRole("button", { name: "General", exact: true }).click();
+  await page.evaluate(() => {
+    Object.assign(window.testState, {
+      native_shortcuts: true,
+      native_mouse: true,
+      native_middle_mouse: true,
+    });
+    window.publishState();
+  });
+  const input = await context.newCDPSession(page);
+  for (const [button, mask, expected] of [
+    ["middle", 4, 2],
+    ["back", 8, 8],
+    ["forward", 16, 9],
+  ] as const) {
+    await page
+      .getByRole("button", { name: "Set trigger …", exact: true })
+      .click();
+    const before = await page.evaluate(
+      () =>
+        window.calls.filter((call) => call.command === "capture_mouse_trigger")
+          .length,
+    );
+    await input.send("Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      x: 500,
+      y: 300,
+      button,
+      buttons: mask,
+      clickCount: 1,
+    });
+    expect(
+      await page.evaluate(
+        () =>
+          window.calls.filter(
+            (call) => call.command === "capture_mouse_trigger",
+          ).length,
+      ),
+    ).toBe(before);
+    await input.send("Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      x: 500,
+      y: 300,
+      button,
+      buttons: 0,
+      clickCount: 1,
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.calls
+              .filter((call) => call.command === "capture_mouse_trigger")
+              .at(-1)?.args,
+        ),
+      )
+      .toEqual({ button: expected });
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  }
+  const before = await page.evaluate(
+    () =>
+      window.calls.filter((call) => call.command === "capture_mouse_trigger")
+        .length,
+  );
+  await page.mouse.click(500, 300, { button: "middle" });
+  expect(
+    await page.evaluate(
+      () =>
+        window.calls.filter((call) => call.command === "capture_mouse_trigger")
+          .length,
+    ),
+  ).toBe(before);
 });
 
 test("Linux X11 fallback exposes explicit keyboard setup and session paste without portals", async ({

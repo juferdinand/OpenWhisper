@@ -531,7 +531,6 @@ async function main(): Promise<void> {
   try {
     application = await _electron.launch({ executablePath: appImage ? imageAdapter : supervisedLaunch && installedDebian ? debianLaunchTarget : executable,
       args: [...(packaged ? [] : [packageRoot]), ...(stablePackage ? [] : ["--dev", "--dev-profile", profileRoot]),
-        ...(kdeWaylandOverlay ? ["--experimental-wayland-overlay"] : []),
         ...(stockKde ? [kdeOverlay ? "--ozone-platform=x11" : "--ozone-platform=wayland"] : nativeX11 ? ["--ozone-platform=x11"] : [])],
       env: applicationEnvironment, chromiumSandbox: true, timeout: 30_000 });
   } finally { clearTimeout(startupWatch); }

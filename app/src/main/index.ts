@@ -47,6 +47,7 @@ import { modifierOnly } from "../platforms/linux/kde/keyboard.js";
 import { buildTrayMenu } from "./tray-menu.js";
 import { overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "./recording-overlay.js";
 import { WaylandRecordingOverlay } from "./wayland-recording-overlay.js";
+import type { SurfaceUnavailableReason } from "../contracts/platforms/wayland-surface.js";
 import { MacosShortcut } from "./macos-shortcut.js";
 import { MacosPaste } from "./macos-paste.js";
 import { MacosAutostart } from "./macos-autostart.js";
@@ -192,6 +193,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     catch (error: unknown) { console.error(formatSourceDiscoveryFailure({ stage: "checked-pulse", code: "FAILED" })); throw error; }
   };
   let host: DevelopmentRecordingHost | undefined;
+  let gpuSelection = {
+    supported: descriptor?.platform === "linux" && descriptor.speech.entries.some((entry) => entry.backend === "vulkan"),
+    checked: false, available: false, fallback: false,
+  };
   let configured = false;
   let recordingControl = false, cancelRequested = false;
   let recordingOperation: Promise<unknown> | undefined;
@@ -209,6 +214,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     package: identity.kind === "stable" ? process.platform === "darwin" ? "macos" : "deb" : "development" };
   let overlay: BrowserWindow | undefined, overlayReady = false;
   let waylandOverlay: WaylandRecordingOverlay | undefined;
+  let overlayUnavailableReason: SurfaceUnavailableReason | undefined;
   let tray: Tray | undefined, trayKey = "";
   let macShortcut: MacosShortcut | undefined;
   let recording = recordingSnapshotSchema.parse({ phase: "idle", generation: 0, elapsedMs: 0, level: 0,
@@ -299,6 +305,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   if (descriptor) {
     host = await DevelopmentRecordingHost.open(resolve(distribution, ".."), descriptor, inventory, {
       recoveryPath: profile.paths.recovery,
+      gpuSelection: (selection) => { gpuSelection = selection; notify(); },
       sourceDiscoveryFailure: (failure) => { console.error(formatSourceDiscoveryFailure(failure)); },
       snapshot: (value) => {
         const previous = recording;
@@ -388,11 +395,14 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       shortcut_portal: shortcut.available, paste_portal: pasteState.available, shortcut: macShortcutState?.label ?? shortcut.label,
       native_shortcuts: macShortcutState?.available ?? shortcut.nativeAvailable,
       shortcut_configuring: shortcut.configuring && !shortcut.nativeX11,
-      native_x11: shortcut.nativeX11 ?? false, native_paste: !!macPaste, native_mouse: false, native_middle_mouse: false,
+      native_x11: shortcut.nativeX11 ?? false, native_paste: !!macPaste,
+      native_mouse: shortcut.nativeMouse ?? false, native_middle_mouse: shortcut.nativeMiddleMouse ?? false,
       recording_shortcut: (macShortcutState?.configuring ?? false) || !!keyCapture || !!shortcut.nativeX11 && shortcut.configuring,
-      paste_ready: macPaste ? accessibilityAllowed : pasteState.ready, paste_configuring: pasteState.configuring, gpu_available: false, gpu_supported: false,
-      gpu_device: null, gpu_fallback: identity.kind === "stable" && preferenceSnapshot.gpu, recovery_available: recording.recoveryAvailable,
+      paste_ready: macPaste ? accessibilityAllowed : pasteState.ready, paste_configuring: pasteState.configuring,
+      gpu_available: gpuSelection.available, gpu_supported: gpuSelection.supported, gpu_checked: gpuSelection.checked,
+      gpu_device: null, gpu_fallback: preferenceSnapshot.gpu && gpuSelection.fallback, recovery_available: recording.recoveryAvailable,
       overlay_available: !!overlay && !overlay.isDestroyed() && (!waylandOverlay || waylandOverlay.available),
+      ...(overlayUnavailableReason ? { overlay_unavailable_reason: overlayUnavailableReason } : {}),
       download, progress: download ? downloadProgress : inferenceProgress,
       elapsed: Math.min(Number.MAX_SAFE_INTEGER, Math.floor(recording.elapsedMs / 1000)), level: recording.level,
       recording_generation: recording.generation,
@@ -444,8 +454,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     ...(process.env["WAYLAND_DISPLAY"] ? { waylandDisplay: process.env["WAYLAND_DISPLAY"] } : {}),
     ozonePlatform: app.commandLine.getSwitchValue("ozone-platform"),
   });
-  // The owned prototype still fails post-click focus retention on stock KWin.
-  const nativeWaylandOverlay = app.commandLine.hasSwitch("experimental-wayland-overlay") && process.platform === "linux" && !inactiveOverlay &&
+  const nativeWaylandOverlay = process.platform === "linux" && !inactiveOverlay &&
     (!!process.env["WAYLAND_DISPLAY"] || process.env["XDG_SESSION_TYPE"] === "wayland" ||
       app.commandLine.getSwitchValue("ozone-platform") === "wayland");
   if (inactiveOverlay || nativeWaylandOverlay) {
@@ -462,10 +471,15 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         void waylandOverlay?.close().catch(() => {}); notify();
       });
       if (nativeWaylandOverlay) {
-        waylandOverlay = new WaylandRecordingOverlay(overlay, join(distribution, "workers/wayland-surface-entry.js"), () => notify());
-        if (!await waylandOverlay.start()) overlay.destroy();
+        waylandOverlay = new WaylandRecordingOverlay(overlay, join(distribution, "workers/wayland-surface-entry.js"), () => {
+          overlayUnavailableReason = waylandOverlay?.unavailableReason ?? "runtime"; notify();
+        });
+        if (!await waylandOverlay.start()) {
+          overlayUnavailableReason = waylandOverlay.unavailableReason ?? "runtime"; overlay.destroy();
+        }
       }
     } catch {
+      if (nativeWaylandOverlay) overlayUnavailableReason = waylandOverlay?.unavailableReason ?? "runtime";
       if (overlay && !overlay.isDestroyed()) overlay.destroy();
       console.error("OpenWhisper Dev could not create its recording overlay.");
     }
@@ -511,11 +525,12 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     if (configured && host?.isConfigured()) return;
     if (!host) throw new Error("Recording unavailable.");
     const selected = preferences.snapshot(), model = installed.find((item) => item.model.id === selected.model);
-    if (!model || selected.output !== "clipboard" && !(selected.output === "paste" && (descriptor?.platform === "linux" || macPaste)) || selected.gpu && identity.kind === "development") {
+    if (!model || selected.output !== "clipboard" && !(selected.output === "paste" && (descriptor?.platform === "linux" || macPaste))) {
       throw new Error("Choose an installed model and supported output.");
     }
     // Recovery may be transcribed with the microphone disconnected; resolve sources only on Start.
-    const request = recordingRequestSchema.parse({ model: { path: join(profile.paths.models, model.model.file), family: model.model.family, gpu: false },
+    const request = recordingRequestSchema.parse({ model: { path: join(profile.paths.models, model.model.file), family: model.model.family,
+      gpu: selected.gpu && gpuSelection.supported },
       language: selected.language, vocabulary: selected.vocabulary, snippets: selected.snippets });
     await host.configure({ id: model.model.id, request,
       ...(macRecording ? {} : { server: audioServer ?? `unix:${join(process.env.XDG_RUNTIME_DIR ?? profile.paths.locks, "pulse/native")}`,
@@ -578,11 +593,16 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
             CONFLICT: "This trigger conflicts with an existing desktop shortcut. Choose another trigger.",
             CONFIGURE_UNAVAILABLE: "Change this shortcut in your desktop's settings. Its current binding remains active.",
             FAILED: "Shortcut setup or recording failed. Window recording remains usable." };
-          message = (value.nativeKey !== null || value.x11Trigger) && value.result === "ENABLED" ? "" : messages[value.result];
+          message = (value.nativeKey !== null || value.nativeMouseButton !== null && value.nativeMouseButton !== undefined || value.x11Trigger) && value.result === "ENABLED" ? "" : messages[value.result];
           const savedTrigger = preferences.snapshot().native_trigger;
-          if (value.nativeKey !== null && value.result === "ENABLED" &&
+          if (value.nativeKey !== null && value.result === "ENABLED" && !value.configuring &&
               (savedTrigger?.kind !== "key" || savedTrigger.key !== value.nativeKey)) {
             void preferences.saveNativeTrigger({ kind: "key", key: value.nativeKey }).then(notify,
+              () => { message = "The action could not be completed. Stopped recordings are kept for retry."; notify(); });
+          }
+          if (value.nativeMouseButton !== null && value.nativeMouseButton !== undefined && value.result === "ENABLED" && !value.configuring &&
+              (savedTrigger?.kind !== "mouse" || savedTrigger.button !== value.nativeMouseButton)) {
+            void preferences.saveNativeTrigger({ kind: "mouse", button: value.nativeMouseButton }).then(notify,
               () => { message = "The action could not be completed. Stopped recordings are kept for retry."; notify(); });
           }
           if (value.x11Trigger && value.result === "ENABLED" &&
@@ -597,6 +617,16 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           cleanupSerialize: <T>(operation: () => Promise<T>) => withRecordingControl(operation, true),
           available: () => !shutdownInProgress && updateReserved !== "install" && !keyCapture && !!audioServer && installed.some((item) => item.model.id === preferences.snapshot().model) }),
       }, new AbortController().signal);
+      const savedTrigger = preferences.snapshot().native_trigger;
+      if (preferences.snapshot().setup_completed && !shortcut.nativeX11 && savedTrigger) {
+        try {
+          if (savedTrigger.kind === "key" && shortcut.nativeAvailable) {
+            await platformHost.bindKey(savedTrigger.key, preferences.snapshot().hold_to_record);
+          } else if (savedTrigger.kind === "mouse" && shortcut.nativeMouse) {
+            await platformHost.bindMouse(savedTrigger.button, preferences.snapshot().hold_to_record);
+          }
+        } catch { message = "Shortcut setup or recording failed. Window recording remains usable."; }
+      }
     } catch { message = "Desktop command control is not available. Window recording remains usable."; }
   }
   const shortcutAction = (command: "enable" | "configure" | "clear" | "cancel"): Promise<void> => recordingAction(async () => {
@@ -811,7 +841,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         if (changes.output && changes.output !== "clipboard" && !(changes.output === "paste" && (descriptor?.platform === "linux" || macPaste))) {
           throw new Error("The recording build does not support this output.");
         }
-        if (changes.gpu) throw new Error("The recording build uses CPU inference.");
+        if (changes.gpu && !gpuSelection.supported) throw new Error("GPU support is not included in this build.");
         if (macRecording && changes.hold_to_record) throw new Error("Regular keyboard shortcuts use toggle mode in this build.");
         if (changes.hold_to_record && shortcut.nativeKey !== null && modifierOnly(shortcut.nativeKey)) {
           throw new Error("Modifier-only KDE triggers use toggle mode.");
@@ -862,6 +892,15 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       desktop_shortcut: () => shortcutAction("configure"),
       clear_shortcut: () => shortcutAction("clear"),
       cancel_shortcut: () => shortcutAction("cancel"),
+      capture_mouse_trigger: ({ button }) => recordingAction(async () => {
+        if (!keyCapture || !shortcut.nativeMouse || !platformHost || !window?.isFocused() ||
+            recording.busy || recording.recoveryAvailable || shutdownInProgress) {
+          throw new Error("Mouse trigger setup is unavailable.");
+        }
+        if (button === 2 && !shortcut.nativeMiddleMouse) throw new Error("Middle mouse triggers require KDE Plasma 6.3 or newer.");
+        keyCapture = undefined; contents.setIgnoreMenuShortcuts(false);
+        await platformHost.bindMouse(button, preferences.snapshot().hold_to_record);
+      }),
       enable_paste: () => recordingAction(async () => {
         if (macPaste) {
           accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(true);

@@ -45,6 +45,27 @@ npm run setup --prefix app
 make linux
 ```
 
+## Source fixes after 0.3.0
+
+[Issue #43](https://github.com/juferdinand/OpenWhisper/issues/43) restores Vulkan plus a manual
+CPU choice in Linux x86_64 recording builds, enables the native Wayland recording surface on
+normal launches, and restores KDE mouse triggers. These changes require a new build; the
+published 0.3.0 packages do not contain them. Wayland controls need GTK 3, gtk-layer-shell and
+the compositor's layer-shell protocol. Runtime initialization failures and missing protocol
+support have distinct explanations; the main recording controls remain usable.
+
+KDE mouse triggers require KWin 6 Wayland, its loaded button-rebinding plugin, and an available
+action-free F19 or F24 key in the actual compositor keymap. Middle-button rebinding requires
+Plasma 6.3+. Conflicting mappings are refused, later edits are preserved, and temporary mappings
+are restored on removal, shutdown or dead-owner recovery. Remove the current trigger before
+choosing a different mouse button. A layout without a safe surrogate leaves mouse setup disabled.
+
+Owned checks cover the default overlay with Stop/Cancel and retained editor focus on KDE 5.27;
+mouse binding/cleanup on Arch and openSUSE KWin 6.7.5; and synthetic middle-button dispatch on
+Arch. The Fedora 43 fixture refused mouse binding because it lacked a safe surrogate. Injected
+side-button dispatch remains unproven in the nested fixture. Native CPU/Vulkan recognition of
+public test audio passed on one CachyOS host GPU; this does not establish every driver or model.
+
 Renderer checks:
 
 ```bash
