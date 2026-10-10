@@ -462,5 +462,14 @@
   "Text shortcuts": "Textkürzel",
   "Transcript": "Transkript",
   "Vocabulary": "Wörterbuch",
-  "Native": "Nativ"
+  "Native": "Nativ",
+  "Close": "Schließen",
+  "Parakeet": "Parakeet",
+  "Whisper": "Whisper",
+  "Speech model for Dictation": "Sprachmodell für Diktat",
+  "No model selected": "Kein Modell ausgewählt",
+  "Manage models": "Modelle verwalten",
+  "History is not saved.": "Der Verlauf wird nicht gespeichert.",
+  "Saved only on this device.": "Nur auf diesem Gerät gespeichert.",
+  "Microphone permission is required. Check Recording settings.": "Mikrofonzugriff ist erforderlich. Prüfe die Einstellungen unter „Aufnahme“."
 }

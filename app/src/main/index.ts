@@ -45,7 +45,7 @@ import { portalShortcutStateSchema } from "../platforms/linux/shared/portal-shor
 import { KdeKeyCapture } from "../platforms/linux/kde/key-capture.js";
 import { modifierOnly } from "../platforms/linux/kde/keyboard.js";
 import { buildTrayMenu } from "./tray-menu.js";
-import { overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "./recording-overlay.js";
+import { overlayWindowBounds, overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "./recording-overlay.js";
 import { WaylandRecordingOverlay } from "./wayland-recording-overlay.js";
 import type { SurfaceUnavailableReason } from "../contracts/platforms/wayland-surface.js";
 import { MacosShortcut } from "./macos-shortcut.js";
@@ -474,11 +474,12 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     { label: profile.productName, submenu: [{ role: "quit" }] },
     { role: "editMenu" },
   ]));
+  const workspaceArea = screen.getPrimaryDisplay().workArea;
   window = new BrowserWindow({
     frame: false,
     title: profile.productName,
-    width: 980, height: 740, minWidth: 740, minHeight: 560,
-    backgroundColor: "#141a21", show: false,
+    width: Math.min(1280, workspaceArea.width), height: Math.min(800, workspaceArea.height), minWidth: 740, minHeight: 560,
+    backgroundColor: "#121017", show: false,
     webPreferences: {
       preload: join(distribution, "preload/index.cjs"),
       sandbox: true, contextIsolation: true, nodeIntegration: false,
@@ -500,7 +501,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         { title: `${profile.productName} Recording`, preloadPath: join(distribution, "preload/index.cjs") });
       const area = screen.getPrimaryDisplay().workArea;
       overlay = new BrowserWindow({ ...options,
-        x: Math.floor(area.x + (area.width - 360) / 2), y: Math.floor(area.y + area.height - 88),
+        ...overlayWindowBounds(area),
         webPreferences: { ...options.webPreferences, webSecurity: true, devTools: false },
       });
       overlay.on("closed", () => {

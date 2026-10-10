@@ -28,7 +28,7 @@ dashboard cards in the dictation view. Keep the accepted seven-step setup flow.
 
 | Design element | First milestone |
 | --- | --- |
-| Dark purple surfaces, spacing, cards and visual hierarchy | Adapt to the shared renderer with bundled Inter; use the supplied logo in the new setup view |
+| Dark purple surfaces, spacing, cards and visual hierarchy | Match the reference with locally bundled Instrument Sans and Newsreader; retain Inter in the accepted setup and use the supplied logo |
 | Transcript-centered recording view | Use the existing final transcript and real recording state, elapsed time and audio level |
 | Model drawer and CPU/GPU information | Use the authoritative catalog, actual download progress, selected preference, detected devices and fallback state |
 | Collapsible history rail | Restyle the current bounded text list with full-text copy and clear controls |

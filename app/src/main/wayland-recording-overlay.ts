@@ -16,7 +16,7 @@ const CONTROL_REGIONS = `(() => ["record", "cancel"].flatMap((id) => {
       getComputedStyle(button).visibility !== "visible") return [];
   const rect = button.getBoundingClientRect();
   const x = Math.max(0, Math.floor(rect.x)), y = Math.max(0, Math.floor(rect.y));
-  const right = Math.min(360, Math.ceil(rect.right)), bottom = Math.min(64, Math.ceil(rect.bottom));
+  const right = Math.min(${WIDTH}, Math.ceil(rect.right)), bottom = Math.min(${HEIGHT}, Math.ceil(rect.bottom));
   return right > x && bottom > y ? [{x, y, width: right - x, height: bottom - y}] : [];
 }))()`;
 

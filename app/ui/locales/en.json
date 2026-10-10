@@ -462,5 +462,14 @@
   "Text shortcuts": "Text shortcuts",
   "Transcript": "Transcript",
   "Vocabulary": "Vocabulary",
-  "Native": "Native"
+  "Native": "Native",
+  "Close": "Close",
+  "Parakeet": "Parakeet",
+  "Whisper": "Whisper",
+  "Speech model for Dictation": "Speech model for Dictation",
+  "No model selected": "No model selected",
+  "Manage models": "Manage models",
+  "History is not saved.": "History is not saved.",
+  "Saved only on this device.": "Saved only on this device.",
+  "Microphone permission is required. Check Recording settings.": "Microphone permission is required. Check Recording settings."
 }

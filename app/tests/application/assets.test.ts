@@ -10,10 +10,15 @@ test("assets allow trusted main and overlay while refusing foreign paths and sym
   const outside = await mkdtemp(join(tmpdir(), "openwhisper-outside-"));
   try {
     await writeFile(join(root, "index.html"), "<div>Owned fixture</div>");
+    const fontBytes = new Uint8Array([0, 1, 0, 0]);
+    await writeFile(join(root, "bundled.ttf"), fontBytes);
     await writeFile(join(outside, "private.html"), "Never served");
     await symlink(join(outside, "private.html"), join(root, "linked.html"));
     assert.equal(new TextDecoder().decode((await readApplicationAsset(MAIN_URL, root)).bytes), "<div>Owned fixture</div>");
     assert.equal((await readApplicationAsset(OVERLAY_URL, root)).mediaType, "text/html; charset=utf-8");
+    const font = await readApplicationAsset("app://openwhisper/bundled.ttf", root);
+    assert.equal(font.mediaType, "font/ttf");
+    assert.deepEqual(font.bytes, fontBytes);
     for (const url of [
       "https://openwhisper/index.html", "app://other/index.html", "app://user@openwhisper/index.html",
       `${MAIN_URL}?unknown=1`, `${MAIN_URL}#fragment`, "app://openwhisper/linked.html",

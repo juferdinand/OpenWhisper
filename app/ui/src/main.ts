@@ -19,7 +19,7 @@ import {
 } from "../../src/contracts/ui/state.js";
 
 let state: State;
-type View = Tab | "dictation";
+type View = Tab | "dictation" | "recording";
 let tab: View = "dictation";
 let dirty = false;
 let portalBusy = false;
@@ -128,22 +128,22 @@ const microphoneControl = () => {
   );
   return `<select class="microphone-select" data-pref="microphone" aria-label="${esc(t("Microphone"))}">${option("", t("System default"), state.preferences.microphone)}${state.microphones.map((id) => option(id, labels.get(id) ?? id, state.preferences.microphone)).join("")}</select>`;
 };
-function modelRow(m: Model): string {
+function modelRow(m: Model, compact = false): string {
   const installed = state.installed.includes(m.id),
     selected = state.preferences.model === m.id && installed,
     downloading = state.download === m.id;
   const recommended = modelRecommendations().includes(m.id);
-  return `<div class="model-row ${selected ? "active-model" : ""}" data-model-id="${esc(m.id)}"><button class="model-radio" aria-label="${esc(t("Use {model}", { model: m.title }))}" aria-pressed="${selected}" data-select="${esc(m.id)}" ${!installed ? "disabled" : ""}><span></span></button><div class="model-description"><strong>${esc(m.title)}</strong>${recommended ? `<span class="recommendation">${esc(t("Starting recommendation"))}</span>` : ""}<p>${esc(m.size)} · ${esc(t(m.note))}</p></div><div class="model-buttons">${downloading ? `<progress aria-label="${esc(t("Download progress"))}" value="${state.progress}" max="1"></progress><button data-cancel-download>${esc(t("Cancel"))}</button>` : installed ? `${selected ? `<span class="success">${esc(t("Active"))}</span>` : `<button data-select="${esc(m.id)}">${esc(t("Use"))}</button>`}` : `<button data-download="${esc(m.id)}" ${state.download || ["downloading", "installing"].includes(state.updates.status) ? "disabled" : ""}>${esc(t("Download"))}</button>`}${installed && isMac() ? `<button data-delete="${esc(m.id)}" aria-label="${esc(t("Delete {model}", { model: m.title }))}" class="destructive">×</button>` : ""}</div></div>`;
+  return `<div class="model-row ${selected ? "active-model" : ""}" data-model-id="${esc(m.id)}" title="${esc(t(m.note))}"${compact ? ' data-compact="true"' : ""}><button class="model-radio" aria-label="${esc(t("Use {model}", { model: m.title }))}" aria-pressed="${selected}" data-select="${esc(m.id)}" ${!installed ? "disabled" : ""}><span></span></button><div class="model-description"><div class="model-title-row"><strong>${esc(m.title)}</strong>${recommended ? `<span class="recommendation">${esc(t("Starting recommendation"))}</span>` : ""}</div><span class="model-size">${esc(m.size)}</span><p class="model-note">${esc(t(m.note))}</p></div><div class="model-buttons">${downloading ? `<progress aria-label="${esc(t("Download progress"))}" value="${state.progress}" max="1"></progress><button data-cancel-download>${esc(t("Cancel"))}</button>` : installed ? `${selected ? `<span class="success">${esc(t("Active"))}</span>` : `<button data-select="${esc(m.id)}">${esc(t("Use"))}</button>`}` : `<button data-download="${esc(m.id)}" ${state.download || ["downloading", "installing"].includes(state.updates.status) ? "disabled" : ""}>${esc(t("Download"))}</button>`}${installed && isMac() ? `<button data-delete="${esc(m.id)}" aria-label="${esc(t("Delete {model}", { model: m.title }))}" class="destructive">×</button>` : ""}</div></div>`;
 }
 function modelDialogMarkup(): string {
   const families = [
-    ["parakeet", "NVIDIA Parakeet"],
-    ["whisper", "OpenAI Whisper"],
+    ["parakeet", "Parakeet"],
+    ["whisper", "Whisper"],
   ] as const;
   const models = state.models.filter(
     (model) => model.family === modelDrawerFamily,
   );
-  return `<div class="model-drawer-shell"><header class="model-drawer-heading"><div><span class="dictation-kicker">${esc(t("MODEL LIBRARY"))}</span><h2 id="model-drawer-title">${esc(t("Choose a speech model"))}</h2><p>${esc(t("Current recognition device: {device}", { device: recognitionHardwareStatus() }))}</p></div><button type="button" id="close-model-drawer" data-close-model-drawer aria-label="${esc(t("Close model chooser"))}">×</button></header><div class="model-drawer-families" role="group" aria-label="${esc(t("Model family"))}">${families.map(([family, label]) => `<button type="button" aria-pressed="${modelDrawerFamily === family}" data-drawer-family="${family}">${esc(t(label))}</button>`).join("")}</div><div id="model-drawer-notice" role="alert" hidden></div><div class="model-drawer-body">${models.map(modelRow).join("")}</div><footer class="model-drawer-footer">${isMac() ? `<button type="button" data-model-command="import_model">${esc(t("Import a model …"))}</button>` : ""}<button type="button" data-model-command="show_models_folder">${esc(t("Show in file manager"))}</button><button type="button" class="model-drawer-done" data-close-model-drawer>${esc(t("Done"))}</button></footer></div>`;
+  return `<div class="model-drawer-shell"><header class="model-drawer-heading" title="${esc(t("Current recognition device: {device}", { device: recognitionHardwareStatus() }))}"><div class="model-drawer-heading-top"><div><h2 id="model-drawer-title">${esc(t("Speech model for Dictation"))}</h2><p class="model-drawer-subtitle">${esc(t("Dictation"))}</p></div><button type="button" id="close-model-drawer" data-close-model-drawer>${esc(t("Close"))}</button></div><div class="model-drawer-families" role="group" aria-label="${esc(t("Model family"))}">${families.map(([family, label]) => `<button type="button" aria-pressed="${modelDrawerFamily === family}" data-drawer-family="${family}">${esc(t(label))}</button>`).join("")}</div></header><div id="model-drawer-notice" role="alert" hidden></div><div class="model-drawer-body">${models.map((model) => modelRow(model, true)).join("")}</div><footer class="model-drawer-footer">${isMac() ? `<button type="button" data-model-command="import_model">${esc(t("Import a model …"))}</button>` : ""}<button type="button" data-model-command="show_models_folder">${esc(t("Show in file manager"))}</button><button type="button" class="model-drawer-done" data-close-model-drawer>${esc(t("Done"))}</button></footer></div>`;
 }
 function modelDialogSemanticKey(): string {
   return JSON.stringify([
@@ -233,7 +233,7 @@ function syncModelDialog(force = false) {
         row?.querySelector<HTMLButtonElement>(".model-radio") ??
         undefined);
   }
-  if (!restore || restore.disabled) {
+  if (!restore || restore.disabled || restore.getClientRects().length === 0) {
     restore =
       dialog.querySelector<HTMLButtonElement>("#close-model-drawer") ??
       undefined;
@@ -389,7 +389,7 @@ function setupModelGroups(): string {
       const recommended = models.find((model) =>
         modelRecommendations().includes(model.id),
       );
-      return `<details class="setup-model-family" data-model-family="${family}" ${expandedModelFamilies.has(family) ? "open" : ""}><summary><span class="setup-family-name">${esc(t(label))}<small>${esc(recognitionHardwareStatus())}</small>${recommended ? `<small>${esc(t("Starting recommendation: {model}", { model: recommended.title }))}</small>` : `<small>${esc(t("No starting recommendation is available."))}</small>`}</span><span class="setup-family-chevron" aria-hidden="true">⌄</span></summary><div class="setup-family-models">${models.map(modelRow).join("")}</div></details>`;
+      return `<details class="setup-model-family" data-model-family="${family}" ${expandedModelFamilies.has(family) ? "open" : ""}><summary><span class="setup-family-name">${esc(t(label))}<small>${esc(recognitionHardwareStatus())}</small>${recommended ? `<small>${esc(t("Starting recommendation: {model}", { model: recommended.title }))}</small>` : `<small>${esc(t("No starting recommendation is available."))}</small>`}</span><span class="setup-family-chevron" aria-hidden="true">⌄</span></summary><div class="setup-family-models">${models.map((model) => modelRow(model)).join("")}</div></details>`;
     })
     .join("")}</div>`;
 }
@@ -535,9 +535,7 @@ function recordingUnavailableMessage(): string {
         "No audio input is available. Check your microphone and audio settings.",
       );
     case "permission":
-      return t(
-        "Microphone permission is required. Check permissions in General settings.",
-      );
+      return t("Microphone permission is required. Check Recording settings.");
     case "host":
       return t(
         "The recording service could not start. Restart OpenWhisper and try again.",
@@ -725,10 +723,15 @@ function renderShell() {
         '<div id="notice" role="alert" hidden></div><div id="record-control"></div>';
     return;
   }
-  const settingsTabs = tabs.filter(
-    ([id]) => !["dictation", "setup"].includes(id),
-  );
-  app.innerHTML = `${windowTitlebar()}<div id="notice" role="alert" hidden></div><div id="dictation-workspace" class="dictation-workspace"><div class="workspace-frame${historyRailOpen ? "" : " history-collapsed"}"><main id="dictation-content" class="dictation-main"></main><aside id="dictation-history" class="dictation-history history-rail" aria-label="${esc(t("Recent dictations"))}"></aside></div><div id="record-control"></div></div><dialog id="settings-dialog" aria-labelledby="page-title"><div class="settings-dialog-shell"><nav class="settings-dialog-nav" aria-label="${esc(t("Settings"))}">${settingsTabs.map(([id, title, path]) => `<button type="button" data-tab="${id}">${symbol(path)}<span>${esc(t(title))}</span></button>`).join("")}</nav><div class="settings-dialog-panel"><header class="settings-dialog-heading"><h1 id="page-title"></h1><div class="settings-dialog-heading-actions"><div class="language-switch" role="group" aria-label="${esc(t("Interface language"))}"><button type="button" data-ui-language="en" aria-pressed="${state.preferences.ui_language === "en"}">${esc(t("English"))}</button><button type="button" data-ui-language="de" aria-pressed="${state.preferences.ui_language === "de"}">Deutsch</button></div><button type="button" id="close-settings">${esc(t("Done"))}</button></div></header><div id="settings-notice" role="alert" hidden></div><div class="settings-dialog-scroll"><div class="settings-content"><div id="content"></div></div></div></div></div></dialog>${emptyModelDialog()}`;
+  const settingsTabs: [View, string][] = [
+    ["general", "General"],
+    ["recording", "Recording"],
+    ["models", "Models"],
+    ["snippets", "Snippets"],
+    ["history", "History"],
+    ["about", "About"],
+  ];
+  app.innerHTML = `${windowTitlebar()}<div id="notice" role="alert" hidden></div><div id="dictation-workspace" class="dictation-workspace"><div class="workspace-frame${historyRailOpen ? "" : " history-collapsed"}"><main id="dictation-content" class="dictation-main"></main><aside id="dictation-history" class="dictation-history history-rail" aria-label="${esc(t("History"))}"></aside></div><div id="record-control"></div></div><dialog id="settings-dialog" aria-labelledby="page-title"><div class="settings-dialog-shell"><nav class="settings-dialog-nav" aria-label="${esc(t("Settings"))}">${settingsTabs.map(([id, title]) => `<button type="button" data-tab="${id}">${esc(t(title))}</button>`).join("")}<small class="settings-dialog-version">OpenWhisper ${esc(state.version)}</small></nav><div class="settings-dialog-panel"><header class="settings-dialog-heading"><h1 id="page-title"></h1><button type="button" id="close-settings">${esc(t("Done"))}</button></header><div id="settings-notice" role="alert" hidden></div><div class="settings-dialog-scroll"><div class="settings-content"><div id="content"></div></div></div></div></div></dialog>${emptyModelDialog()}`;
   bindModelDialogShell();
   bindSettingsDialogShell();
   if (overlay)
@@ -772,7 +775,7 @@ app.addEventListener("click", (event) => {
       return;
     }
     settingsDialogOpener = button;
-    tab = button.dataset.settingsView as Tab;
+    tab = button.dataset.settingsView as View;
     pendingSettingsSection = button.dataset.settingsSection ?? "";
     contentKey = "";
     render();
@@ -843,6 +846,10 @@ function recordControl() {
       : recovery
         ? t("Retry transcription")
         : t("Start dictation");
+  const visibleText =
+    overlay && recording
+      ? `${Math.floor(state.elapsed / 60)}:${String(state.elapsed % 60).padStart(2, "0")}`
+      : text;
   const controls = document.querySelector<HTMLDivElement>("#record-control")!;
   const setupIdle =
     !state.preferences.setup_completed &&
@@ -870,9 +877,13 @@ function recordControl() {
           ]
         : []),
     ];
-    const outputControls = `<div class="record-output" role="group" aria-label="${esc(t("Output"))}">${outputModes.map(([value, label, fullLabel]) => `<button type="button" data-output="${value}" data-pref="output" aria-label="${esc(fullLabel)}" title="${esc(fullLabel)}" aria-pressed="${state.preferences.output === value}" ${recording || recovery ? "disabled" : ""}>${esc(label)}</button>`).join("")}</div>`;
+    const outputControls = `<div class="record-output" role="group" aria-label="${esc(t("Output"))}"><span class="record-output-label">${esc(t("Output"))}</span>${outputModes.map(([value, label, fullLabel]) => `<button type="button" data-output="${value}" data-pref="output" aria-label="${esc(fullLabel)}" title="${esc(fullLabel)}" aria-pressed="${state.preferences.output === value}" ${recording || recovery ? "disabled" : ""}>${esc(label)}</button>`).join("")}</div>`;
+    const overlayBars = Array.from(
+      { length: 36 },
+      (_, index) => `<i style="--wave-index:${index}"></i>`,
+    ).join("");
     controls.innerHTML = overlay
-      ? `<div class="record-actions"><div class="record-status"><div class="audio-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="general" hidden></button></div><span id="record-label"></span><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span></button></div>`
+      ? `<div class="record-actions"><div class="record-status"><div class="audio-mark" aria-hidden="true">${overlayBars}</div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="general" hidden></button></div><span id="record-label"></span><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span></button></div>`
       : `<div class="record-leading"><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><div class="record-status"><div class="audio-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="general" hidden></button></div></div><div class="record-center"><button id="record" class="capsule"><span id="record-symbol"></span></button><span id="record-label"></span></div>${outputControls}`;
     document
       .querySelector("#record")!
@@ -914,7 +925,9 @@ function recordControl() {
           return;
         }
         tab =
-          state.recording_unavailable_reason === "model" ? "models" : "general";
+          state.recording_unavailable_reason === "model"
+            ? "models"
+            : "recording";
         render();
       });
   }
@@ -940,8 +953,16 @@ function recordControl() {
     "--voice-level",
     String(0.2 + (state.level ?? 0) * 0.8),
   );
-  document.querySelector("#status-title")!.textContent = recordingStatusTitle();
-  document.querySelector("#record-label")!.textContent = text;
+  document.querySelector("#status-title")!.textContent = overlay
+    ? recording
+      ? ""
+      : busy
+        ? t("Transcribing …")
+        : recovery
+          ? t("Retry transcription")
+          : t("Start dictation")
+    : recordingStatusTitle();
+  document.querySelector("#record-label")!.textContent = visibleText;
   const cancel = document.querySelector<HTMLButtonElement>("#cancel")!;
   cancel.hidden = !recording && !recovery;
   cancel.setAttribute(
@@ -967,15 +988,17 @@ function recordControl() {
   unavailableAction.hidden =
     !unavailable || state.recording_unavailable_reason === "host";
   unavailableAction.dataset.goto =
-    state.recording_unavailable_reason === "model" ? "models" : "general";
+    state.recording_unavailable_reason === "model" ? "models" : "recording";
   unavailableAction.textContent = t(
     state.recording_unavailable_reason === "model"
       ? "Open models"
       : "Open settings",
   );
-  document.querySelector("#status")!.textContent = unavailable
-    ? recordingUnavailableMessage()
-    : t(state.message);
+  document.querySelector("#status")!.textContent = overlay
+    ? ""
+    : unavailable
+      ? recordingUnavailableMessage()
+      : t(state.message);
   syncDictationState();
 }
 
@@ -1017,6 +1040,7 @@ function renderWorkspace() {
     state.gpu_fallback,
     state.gpu_device,
     state.cpu_device,
+    state.preferences.keep_history,
     tab === "history",
     historyRailOpen,
   ]);
@@ -1050,8 +1074,13 @@ function renderWorkspace() {
           : state.recording_available === false
             ? t("Recording is unavailable")
             : t("Ready when you are");
-  main.innerHTML = `<div class="dictation-topline"><div class="dictation-title"><span class="dictation-kicker">${esc(t("LOCAL DICTATION"))}</span><h1>${esc(t("Dictation"))}</h1></div><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${recognitionHardwareStatus()}`)}" title="${esc(recognitionHardwareStatus())}"><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true">${Array.from({ length: 48 }, (_, i) => `<i style="--wave-index:${i}"></i>`).join("")}</div></section><section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptAvailable ? `<p class="transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</p>` : `<div class="dictation-empty"><p>${esc(t("Your final transcript will appear here after you stop dictating."))}</p></div>`}</div></section><section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-settings-view="models" class="dictation-feature-card"><span>${esc(t("Speech model"))}</span><strong>${esc(model?.title ?? t("Choose a model"))}</strong><small>${esc(mode)}</small></button><button type="button" data-settings-view="general" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span>${esc(t("Custom vocabulary"))}</span><strong>${esc(t("Vocabulary"))}</strong><small>${esc(t("Names and technical terms"))}</small></button><button type="button" data-settings-view="snippets" class="dictation-feature-card"><span>${esc(t("Text shortcuts"))}</span><strong>${esc(t("Snippets"))}</strong><small>${esc(t("Expand spoken phrases"))}</small></button></section>`;
-  rail.innerHTML = `<header class="dictation-history-heading"><div><span class="dictation-kicker">${esc(t("RECENT"))}</span><h2>${esc(t("Recent dictations"))}</h2></div><button id="toggle-history" type="button" aria-expanded="${historyRailOpen}" aria-controls="dictation-history-list" aria-label="${esc(t(historyRailOpen ? "Hide history" : "Show history"))}">${esc(t(historyRailOpen ? "Hide history" : "Show history"))}</button></header><div id="dictation-history-list" class="dictation-history-list" ${historyRailOpen ? "" : "hidden"}>${state.history.length ? historyRows() : `<p class="secondary">${esc(t("No dictations in history yet."))}</p>`}${state.history.length || state.transcript ? `<button type="button" data-clear-history id="clear-history-rail" class="destructive">${esc(t("Clear history"))}</button>` : ""}</div>`;
+  const recordingReady = state.recording_available !== false;
+  const modeTitle = recognitionHardwareStatus();
+  const railStatus = state.preferences.keep_history
+    ? t("Saved only on this device.")
+    : t("History is not saved.");
+  main.innerHTML = `<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true">${Array.from({ length: 64 }, (_, i) => `<i style="--wave-index:${i}"></i>`).join("")}</div></section><section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptAvailable ? `<p class="transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</p>` : `<div class="dictation-empty"><p>${esc(t("Your final transcript will appear here after you stop dictating."))}</p></div>`}</div></section><section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-settings-view="models" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="recording" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="snippets" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
+  rail.innerHTML = `<header class="dictation-history-heading"><div class="dictation-history-title"><h2>${esc(t("History"))}</h2><span class="dictation-history-count">${state.history.length}</span></div><button id="toggle-history" type="button" aria-expanded="${historyRailOpen}" aria-controls="dictation-history-list" aria-label="${esc(t(historyRailOpen ? "Hide history" : "Show history"))}">${esc(t(historyRailOpen ? "Hide history" : "Show history"))}</button></header><div id="dictation-history-list" class="dictation-history-list" ${historyRailOpen ? "" : "hidden"}>${state.history.length ? historyRows() : `<p class="secondary">${esc(t("No dictations in history yet."))}</p>`}${state.history.length || state.transcript ? `<button type="button" data-clear-history id="clear-history-rail" class="destructive">${esc(t("Clear history"))}</button>` : ""}</div><footer class="dictation-history-footer">${esc(railStatus)}</footer>`;
   main
     .querySelector<HTMLButtonElement>("#copy-dictation")
     ?.addEventListener("click", () => void command("copy_transcript"));
@@ -1119,16 +1148,24 @@ function render() {
   const nextKey = JSON.stringify(
     [
       tab,
-      tab === "general" ? null : state.status,
+      tab === "general" || tab === "recording" ? null : state.status,
       // Checkbox changes must not replace the focused row or move its click target.
       tab === "general"
         ? {
             ui_language: state.preferences.ui_language,
             setup_completed: state.preferences.setup_completed,
             model: state.preferences.model,
+            gpu: state.preferences.gpu,
             output: state.preferences.output,
           }
-        : state.preferences,
+        : tab === "recording"
+          ? {
+              ui_language: state.preferences.ui_language,
+              setup_completed: state.preferences.setup_completed,
+              model: state.preferences.model,
+              output: state.preferences.output,
+            }
+          : state.preferences,
       state.installed,
       state.microphones,
       state.microphone_labels,
@@ -1182,7 +1219,9 @@ function render() {
   if (overlay) return;
   if (tab !== "setup") {
     document.querySelector<HTMLElement>("#page-title")!.textContent = t(
-      tabs.find(([id]) => id === tab)![1],
+      tab === "recording"
+        ? "Recording"
+        : (tabs.find(([id]) => id === tab)?.[1] ?? "Settings"),
     );
   }
   const content = document.querySelector<HTMLDivElement>("#content")!;
@@ -1305,8 +1344,86 @@ function render() {
       focusSetupTitle = false;
     }
   } else if (tab === "general") {
+    const uiLanguage = `<div class="language-choice" role="group" aria-label="${esc(t("Interface language"))}"><button type="button" data-ui-language="en" aria-pressed="${p.ui_language === "en"}">English</button><button type="button" data-ui-language="de" aria-pressed="${p.ui_language === "de"}">Deutsch</button></div>`;
+    const systemDetails = isMac()
+      ? row(
+          t("System"),
+          `<span class="secondary">${esc(state.desktop)} · macOS</span>`,
+        )
+      : (state.native_x11
+          ? row(t("Native X11 triggers"), t("Available"))
+          : "") +
+        (state.native_paste ? row(t("Native X11 paste"), t("Available")) : "") +
+        row(
+          t("Desktop"),
+          `<span class="secondary">${esc(state.desktop)} · ${esc(state.session)}</span>`,
+        ) +
+        row(
+          t("Clipboard helper"),
+          state.clipboard_available
+            ? `<span class="success">${esc(t("Available"))}</span>`
+            : `<span class="warning">${esc(t("Install wl-clipboard (Wayland) or xclip (X11)"))}</span>`,
+        ) +
+        row(
+          t("Global shortcuts portal"),
+          state.shortcut_portal ? t("Available") : t("Unavailable"),
+        ) +
+        row(
+          t("Keyboard portal"),
+          state.paste_portal ? t("Available") : t("Unavailable"),
+        );
     content.innerHTML =
-      `<div class="settings-index" role="navigation" aria-label="${esc(t("Settings sections"))}"><button type="button" data-settings-section="settings-recording">${esc(t("Recording"))}</button><button type="button" data-settings-section="settings-permissions">${esc(t("Permissions"))}</button><button type="button" data-settings-section="settings-vocabulary">${esc(t("Custom vocabulary"))}</button><button type="button" data-settings-section="settings-output">${esc(t("Output"))}</button><button type="button" data-settings-section="settings-system">${esc(t("Appearance & system"))}</button></div>` +
+      section(
+        "",
+        row(t("Interface language"), uiLanguage) +
+          toggle(
+            t("Launch at login"),
+            "launch_at_login",
+            !!p.launch_at_login,
+            state.launch_at_login_available === false,
+          ) +
+          (state.launch_at_login_available === false
+            ? `<p class="secondary">${esc(t("Launch at login is unavailable in this installation."))}</p>`
+            : "") +
+          (state.macos?.launch_at_login_pending
+            ? `<div class="row approval"><span>${esc(t("Allow OpenWhisper in System Settings to finish enabling launch at login."))}</span><button data-command="open_login_settings">${esc(t("System Settings"))}</button></div>`
+            : ""),
+      ) +
+      section(
+        t("Recognition"),
+        (isMac()
+          ? row(
+              t("Recognition device"),
+              `<span class="secondary">${esc(recognitionHardwareStatus())}</span>`,
+            )
+          : recognitionModeControl()) +
+          row(
+            t("Speech model"),
+            `<button type="button" data-open-model-drawer>${esc(t("Manage models"))}</button>`,
+          ),
+      ) +
+      section(t("System"), systemDetails);
+  } else if (tab === "recording") {
+    const overlayControl =
+      isMac() || state.overlay_available
+        ? toggle(
+            t("Show overlay when idle"),
+            "show_idle_overlay",
+            !!p.show_idle_overlay,
+          )
+        : row(
+            t("Floating recording indicator"),
+            `<span class="warning">${esc(
+              t(
+                state.overlay_unavailable_reason === "runtime"
+                  ? "Floating controls could not start. Check the GTK 3 and gtk-layer-shell runtime libraries, then restart OpenWhisper. Use the main window controls meanwhile."
+                  : state.overlay_unavailable_reason === "unsupported"
+                    ? "This Wayland compositor does not support layer-shell recording controls. Use the main window controls."
+                    : "Floating controls are unavailable. Use the main window controls.",
+              ),
+            )}</span>`,
+          );
+    content.innerHTML =
       section(
         t("Recording"),
         row(t("Trigger"), shortcutButton()) +
@@ -1339,7 +1456,8 @@ function render() {
                 "play_sounds",
                 !!p.play_sounds,
               )
-            : ""),
+            : "") +
+          overlayControl,
         isMac()
           ? ""
           : t("Start and stop sounds are not yet available on Linux."),
@@ -1372,15 +1490,6 @@ function render() {
             : t(
                 "Keyboard access is needed for automatic pasting. Portal permission may need to be enabled again after restarting the app.",
               ),
-        "settings-permissions",
-      ) +
-      section(
-        t("Custom vocabulary"),
-        `<textarea id="vocabulary" rows="3" maxlength="8192" aria-label="${esc(t("Custom vocabulary"))}" placeholder="${esc(t("e.g. Kubernetes, Jira, SwiftUI, Grafana"))}">${esc(p.vocabulary)}</textarea><div class="edit-actions" id="vocabulary-actions" hidden><button id="save-vocabulary">${esc(t("Save"))}</button><button data-discard>${esc(t("Discard"))}</button></div>`,
-        t(
-          "Names and technical terms, separated by commas. Similar spellings are corrected after recognition with any model. Whisper models also receive these terms during recognition.",
-        ),
-        "settings-vocabulary",
       ) +
       section(
         t("Output"),
@@ -1409,102 +1518,32 @@ function render() {
         "settings-output",
       ) +
       section(
-        t("Appearance & system"),
-        (isMac() || state.overlay_available
-          ? toggle(
-              t("Show overlay when idle"),
-              "show_idle_overlay",
-              !!p.show_idle_overlay,
-            )
-          : row(
-              t("Floating recording indicator"),
-              `<span class="warning">${esc(
-                t(
-                  state.overlay_unavailable_reason === "runtime"
-                    ? "Floating controls could not start. Check the GTK 3 and gtk-layer-shell runtime libraries, then restart OpenWhisper. Use the main window controls meanwhile."
-                    : state.overlay_unavailable_reason === "unsupported"
-                      ? "This Wayland compositor does not support layer-shell recording controls. Use the main window controls."
-                      : "Floating controls are unavailable. Use the main window controls.",
-                ),
-              )}</span>`,
-            )) +
-          toggle(
-            t("Launch at login"),
-            "launch_at_login",
-            !!p.launch_at_login,
-            state.launch_at_login_available === false,
-          ) +
-          (state.launch_at_login_available === false
-            ? `<p class="secondary">${esc(t("Launch at login is unavailable in this installation."))}</p>`
-            : "") +
-          (state.macos?.launch_at_login_pending
-            ? `<div class="row approval"><span>${esc(t("Allow OpenWhisper in System Settings to finish enabling launch at login."))}</span><button data-command="open_login_settings">${esc(t("System Settings"))}</button></div>`
-            : "") +
-          (isMac()
-            ? row(
-                t("System"),
-                `<span class="secondary">${esc(state.desktop)} · macOS</span>`,
-              ) +
-              row(t("Recognition"), t("Metal GPU acceleration (CPU fallback)"))
-            : (state.native_x11
-                ? row(t("Native X11 triggers"), t("Available"))
-                : "") +
-              (state.native_paste
-                ? row(t("Native X11 paste"), t("Available"))
-                : "") +
-              row(
-                t("Desktop"),
-                `<span class="secondary">${esc(state.desktop)} · ${esc(state.session)}</span>`,
-              ) +
-              row(
-                t("Clipboard helper"),
-                state.clipboard_available
-                  ? `<span class="success">${esc(t("Available"))}</span>`
-                  : `<span class="warning">${esc(t("Install wl-clipboard (Wayland) or xclip (X11)"))}</span>`,
-              ) +
-              row(
-                t("Global shortcuts portal"),
-                state.shortcut_portal ? t("Available") : t("Unavailable"),
-              ) +
-              row(
-                t("Keyboard portal"),
-                state.paste_portal ? t("Available") : t("Unavailable"),
-              ) +
-              row(t("Recognition"), recognitionModeControl())),
-        isMac()
-          ? ""
-          : t(
-              "There is no fixed recording limit. Stop or cancel when you are finished.",
-            ),
-        "settings-system",
-      );
-    content
-      .querySelectorAll<HTMLButtonElement>("[data-settings-section]")
-      .forEach((button) =>
-        button.addEventListener("click", () => {
-          const target = document.getElementById(
-            button.dataset.settingsSection!,
-          );
-          target?.scrollIntoView({ block: "start" });
-        }),
+        t("Custom vocabulary"),
+        `<textarea id="vocabulary" rows="3" maxlength="8192" aria-label="${esc(t("Custom vocabulary"))}" placeholder="${esc(t("e.g. Kubernetes, Jira, SwiftUI, Grafana"))}">${esc(p.vocabulary)}</textarea><div class="edit-actions" id="vocabulary-actions" hidden><button id="save-vocabulary">${esc(t("Save"))}</button><button data-discard>${esc(t("Discard"))}</button></div>`,
+        t(
+          "Names and technical terms, separated by commas. Similar spellings are corrected after recognition with any model. Whisper models also receive these terms during recognition.",
+        ),
+        "settings-vocabulary",
       );
     const vocabulary =
-      document.querySelector<HTMLTextAreaElement>("#vocabulary")!;
-    vocabulary.oninput = () => {
-      dirty = true;
-      document.querySelector<HTMLElement>("#vocabulary-actions")!.hidden =
-        false;
-    };
-    document
-      .querySelector("#save-vocabulary")!
-      .addEventListener("click", () => {
-        void (async () => {
-          if (await savePreferences({ vocabulary: vocabulary.value })) {
-            dirty = false;
-            render();
-          }
-        })();
-      });
+      content.querySelector<HTMLTextAreaElement>("#vocabulary");
+    if (vocabulary) {
+      vocabulary.oninput = () => {
+        dirty = true;
+        content.querySelector<HTMLElement>("#vocabulary-actions")!.hidden =
+          false;
+      };
+      content
+        .querySelector("#save-vocabulary")
+        ?.addEventListener("click", () => {
+          void (async () => {
+            if (await savePreferences({ vocabulary: vocabulary.value })) {
+              dirty = false;
+              render();
+            }
+          })();
+        });
+    }
   } else if (tab === "models") {
     content.innerHTML =
       section(
@@ -1521,7 +1560,7 @@ function render() {
         "NVIDIA Parakeet",
         state.models
           .filter((m) => m.family === "parakeet")
-          .map(modelRow)
+          .map((model) => modelRow(model))
           .join(""),
         t(
           "25 European languages, including German, English, French, Spanish, Italian, Polish, Dutch, and Ukrainian. Detects the language automatically.",
@@ -1531,7 +1570,7 @@ function render() {
         "OpenAI Whisper",
         state.models
           .filter((m) => m.family === "whisper")
-          .map(modelRow)
+          .map((model) => modelRow(model))
           .join(""),
         t(
           "About 99 languages, including Chinese, Japanese, Korean, and Turkish. Supports a fixed language and custom vocabulary.",

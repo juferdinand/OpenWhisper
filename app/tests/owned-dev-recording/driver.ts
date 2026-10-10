@@ -13,6 +13,7 @@ import { resolveStableProfile } from "../../src/services/settings/stable-profile
 import { recoveryWavHeader } from "../../src/workers/recording/recovery.js";
 import { validateCommandOutput } from "../../src/contracts/ui/state.js";
 import type { DesktopBridge } from "../../src/contracts/ui/bridge.js";
+import { HEIGHT as OVERLAY_HEIGHT, WIDTH as OVERLAY_WIDTH } from "../../src/contracts/platforms/wayland-surface.js";
 import { recordingHostErrorSchema } from "../../src/workers/recording/recording-host-protocol.js";
 import { kdeJournalSchema } from "../../src/platforms/linux/kde/keyboard.js";
 import { parseApplicationBuildModule } from "../../src/contracts/application/build-identity.js";
@@ -981,6 +982,7 @@ async function main(): Promise<void> {
       : "ordinary shared UI enables the verified private fixed-name desktop entry at the permanent Debian executable; focus/status leave its identity and bytes unchanged");
   }
   await checkpoint("actual-ui-language");
+  await page.locator('[data-tab="recording"]').click();
   await page.locator('[data-pref="language"]').selectOption("en");
   await until(async () => (await state()).preferences.language === "en");
   await checkpoint("renderer-security");
@@ -1065,8 +1067,8 @@ async function main(): Promise<void> {
       assert.ok(overlayPage); const overlay = overlayPage;
       const outputBounds = kdeWaylandOverlay ? await application.evaluate(({ screen }) => screen.getPrimaryDisplay().bounds) : undefined;
       if (outputBounds) assert.deepEqual(outputBounds, { x: 0, y: 0, width: 1100, height: 750 });
-      const surfaceBounds = outputBounds ? { x: outputBounds.x + (outputBounds.width - 360) / 2,
-        y: outputBounds.y + outputBounds.height - 24 - 64, width: 360, height: 64 } : undefined;
+      const surfaceBounds = outputBounds ? { x: outputBounds.x + (outputBounds.width - OVERLAY_WIDTH) / 2,
+        y: outputBounds.y + outputBounds.height - 24 - OVERLAY_HEIGHT, width: OVERLAY_WIDTH, height: OVERLAY_HEIGHT } : undefined;
       let surfacePid: number | undefined;
       if (kdeWaylandOverlay) {
         await until(async () => {
@@ -1116,14 +1118,14 @@ async function main(): Promise<void> {
           await writeFile(join(evidence, name), Buffer.from(rendered.desktop), { mode: 0o600 });
           await writeFile(join(evidence, name.replace(/\.png$/u, "-surface.png")), Buffer.from(rendered.surface), { mode: 0o600 });
           if (matchTrustedFrame) {
-            assert.equal(rendered.reference.length, 360 * 64 * 4); assert.equal(rendered.bitmap.length, rendered.reference.length);
+            assert.equal(rendered.reference.length, OVERLAY_WIDTH * OVERLAY_HEIGHT * 4); assert.equal(rendered.bitmap.length, rendered.reference.length);
             let samples = 0, matched = 0;
-            for (let y = 1; y < 63; y++) for (let x = 1; x < 359; x++) {
-              const offset = (y * 360 + x) * 4;
+            for (let y = 1; y < OVERLAY_HEIGHT - 1; y++) for (let x = 1; x < OVERLAY_WIDTH - 1; x++) {
+              const offset = (y * OVERLAY_WIDTH + x) * 4;
               if (rendered.reference[offset + 3] !== 255) continue;
               let solid = true;
               for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-                const neighbor = ((y + dy) * 360 + x + dx) * 4;
+                const neighbor = ((y + dy) * OVERLAY_WIDTH + x + dx) * 4;
                 for (let channel = 0; channel < 4; channel++) if (rendered.reference[neighbor + channel] !== rendered.reference[offset + channel]) solid = false;
               }
               if (!solid) continue; samples++;
@@ -1559,7 +1561,7 @@ async function main(): Promise<void> {
       const bindAfterRestart = async () => {
         assert.ok(application && page);
         await checkpoint(`lifecycle-${appOwners.length}-focus-window`);
-        await page.locator('[data-tab="general"]').click();
+        await page.locator('[data-tab="recording"]').click();
         await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.focus());
         await until(async () => application!.evaluate(({ BrowserWindow }) => !!BrowserWindow.getAllWindows()[0]?.isFocused()));
         await checkpoint(`lifecycle-${appOwners.length}-capture-key`);

@@ -1,7 +1,8 @@
 import { z } from "zod";
 
-export const WIDTH = 360;
-export const HEIGHT = 64;
+// The 460 × 52 control keeps an eight-pixel transparent margin on every side.
+export const WIDTH = 476;
+export const HEIGHT = 68;
 export const MAX_PNG_BYTES = 131_072;
 
 const surfaceRegionSchema = z.strictObject({

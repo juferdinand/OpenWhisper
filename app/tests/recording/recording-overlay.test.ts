@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AppState } from "../../src/contracts/ui/state.js";
-import { overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "../../src/main/recording-overlay.js";
+import { overlayWindowBounds, overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "../../src/main/recording-overlay.js";
 
 function state(): AppState {
   return {
@@ -58,7 +58,7 @@ test("overlay starts hidden and cannot activate or resize the transparent floati
   assert.equal(options.transparent, true); assert.equal(options.frame, false);
   assert.equal(options.skipTaskbar, true); assert.equal(options.alwaysOnTop, true);
   assert.equal(options.resizable, false); assert.equal(options.hasShadow, false);
-  assert.equal(options.width, 360); assert.equal(options.height, 64);
+  assert.equal(options.width, 476); assert.equal(options.height, 68);
 });
 
 test("native Wayland renders the shared controls offscreen without mapping a BrowserWindow", () => {
@@ -68,6 +68,15 @@ test("native Wayland renders the shared controls offscreen without mapping a Bro
   assert.equal(options.webPreferences?.backgroundThrottling, false);
   assert.equal(options.webPreferences?.sandbox, true);
   assert.equal(options.webPreferences?.nodeIntegration, false);
+});
+
+test("overlay stays centered with a 24-pixel bottom inset on offset displays", () => {
+  for (const area of [{ x: 0, y: 0, width: 1920, height: 1080 },
+    { x: -1920, y: -100, width: 1920, height: 1080 }]) {
+    const bounds = overlayWindowBounds(area);
+    assert.equal(bounds.x + bounds.width / 2, area.x + area.width / 2);
+    assert.equal(area.y + area.height - bounds.y - bounds.height, 24);
+  }
 });
 
 test("overlay follows active recording and transcription then hides completed or failed phases", () => {

@@ -31,6 +31,7 @@ test("pending keyboard permission exposes translated Cancel and sends only revoc
   page,
 }) => {
   await start(page, "linux");
+  await selectSettingsTab(page, "recording");
   await page.evaluate(() => {
     window.testState.paste_ready = false;
     window.testState.paste_configuring = true;
@@ -59,7 +60,7 @@ test("Linux overlay availability distinguishes unsupported protocol from missing
   page,
 }) => {
   await start(page, "linux");
-  await selectSettingsTab(page, "general");
+  await selectSettingsTab(page, "recording");
   await page.evaluate(() => {
     window.testState.overlay_available = false;
     window.testState.overlay_unavailable_reason = "unsupported";
@@ -185,6 +186,7 @@ test("missing selected model gives a direct model download path and translates u
   );
   await expect(page.locator("#record")).toBeDisabled();
   await openSettings(page);
+  await selectSettingsTab(page, "recording");
   await page.locator("#vocabulary").fill("Unsaved vocabulary");
   await page.locator('.settings-dialog-nav [data-tab="models"]').click();
   await expect(page.locator("#settings-notice")).toHaveText(
@@ -210,14 +212,14 @@ test("missing selected model gives a direct model download path and translates u
     "Aufnahme nicht verfügbar",
   );
   await expect(page.locator("#status")).toHaveText(
-    "Mikrofonzugriff ist erforderlich. Prüfe die Berechtigungen in den allgemeinen Einstellungen.",
+    "Mikrofonzugriff ist erforderlich. Prüfe die Einstellungen unter „Aufnahme“.",
   );
   await expect(page.locator("#record-unavailable-action")).toHaveText(
     "Einstellungen öffnen",
   );
   await page.locator("#record-unavailable-action").click();
   await expect(
-    page.locator('.settings-dialog-nav [data-tab="general"]'),
+    page.locator('.settings-dialog-nav [data-tab="recording"]'),
   ).toHaveClass(/selected/);
 });
 
@@ -234,7 +236,7 @@ test("Linux keyboard-only setup suppresses button defaults and restores normal i
     host.testState.native_mouse = false;
     host.publishState();
   });
-  await selectSettingsTab(page, "general");
+  await selectSettingsTab(page, "recording");
   await page
     .getByRole("button", { name: "Set trigger …", exact: true })
     .click();
@@ -262,6 +264,7 @@ test("pending desktop consent exposes Cancel and keeps the trigger setup separat
   page,
 }) => {
   await start(page, "linux");
+  await selectSettingsTab(page, "recording");
   await page.evaluate(() => {
     const host = window as any;
     host.testState.shortcut_configuring = true;
@@ -706,6 +709,7 @@ async function selectSettingsTab(page: Page, tab: string) {
 
 async function setWorkspaceLanguage(page: Page, language: "en" | "de") {
   await openSettings(page);
+  await selectSettingsTab(page, "general");
   await page.locator(`[data-ui-language="${language}"]`).click();
   await expect(page.locator("html")).toHaveAttribute("lang", language);
   await closeSettings(page);
@@ -726,6 +730,7 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(opener).toBeFocused();
 
     await openSettings(page);
+    await selectSettingsTab(page, "recording");
     const vocabulary = page.locator("#vocabulary");
     await vocabulary.fill("Unsaved focused vocabulary");
     await page.evaluate(() => {
@@ -813,6 +818,7 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(page.locator("dialog#settings-dialog")).toBeVisible();
     await expect(page.locator(".settings-dialog-nav [data-tab]")).toHaveText([
       "General",
+      "Recording",
       "Models",
       "Snippets",
       "History",
@@ -820,10 +826,82 @@ for (const platform of ["linux", "macos"] as const) {
     ]);
     await closeSettings(page);
     await expect(page.locator("#dictation-timer")).toHaveText("0:00");
+    await expect(
+      page.locator("#open-model-drawer .model-pill-status"),
+    ).toBeVisible();
+    await expect(
+      page.locator("#open-model-drawer .model-pill-chevron"),
+    ).toBeVisible();
+    await expect(page.locator(".dictation-feature-card")).toHaveCount(3);
+    await expect(page.locator(".dictation-feature-heading strong")).toHaveText([
+      "Recognition",
+      "Vocabulary",
+      "Snippets",
+    ]);
+    await expect(page.locator(".record-output-label")).toHaveText("Output");
+    await expect(page.locator(".record-output [data-output]")).toHaveCount(
+      platform === "macos" ? 3 : 2,
+    );
+    await expect(page.locator(".dictation-history-title")).toContainText(
+      "History",
+    );
+    await expect(page.locator(".dictation-history-count")).toHaveText(/^\d+$/);
+    await expect(page.locator(".dictation-history-footer")).toBeVisible();
     await expect(page.locator("#copy-dictation")).toBeHidden();
     await expect(
-      page.locator(".dictation-feature-card strong").first(),
-    ).toHaveText("Whisper Base");
+      page.locator(".dictation-feature-description").first(),
+    ).toContainText("Whisper Base");
+    await page.evaluate(() => document.fonts.ready);
+    const workspaceFonts = await page.evaluate(() => {
+      const transcript = getComputedStyle(
+        document.querySelector(
+          ".dictation-transcript-body .transcript, .dictation-transcript-body .dictation-empty p",
+        )!,
+      );
+      const timer = getComputedStyle(
+        document.querySelector("#dictation-timer")!,
+      );
+      return {
+        body: getComputedStyle(document.body).fontFamily,
+        transcript: transcript.fontFamily,
+        transcriptSize: transcript.fontSize,
+        timer: timer.fontFamily,
+        loadedFamilies: Array.from(document.fonts)
+          .filter((font) => font.status === "loaded")
+          .map((font) => font.family),
+        loadedInstrumentSans: document.fonts.check(
+          '14px "OpenWhisper Instrument Sans"',
+        ),
+        loadedNewsreader: document.fonts.check('22px "OpenWhisper Newsreader"'),
+      };
+    });
+    expect(workspaceFonts.body).toContain("Instrument Sans");
+    expect(workspaceFonts.transcript).toContain("Newsreader");
+    expect(workspaceFonts.transcriptSize).toBe("22px");
+    expect(workspaceFonts.timer).toContain("Instrument Sans");
+    expect(workspaceFonts.loadedInstrumentSans).toBe(true);
+    expect(workspaceFonts.loadedNewsreader).toBe(true);
+    expect(workspaceFonts.loadedFamilies).toContain(
+      "OpenWhisper Instrument Sans",
+    );
+    expect(workspaceFonts.loadedFamilies).toContain("OpenWhisper Newsreader");
+
+    await selectSettingsTab(page, "general");
+    for (const section of ["Recognition", "System"])
+      await expect(
+        page.locator("#content").getByRole("heading", { name: section }),
+      ).toBeVisible();
+    await expect(
+      page.getByText("Launch at login", { exact: true }),
+    ).toBeVisible();
+    await selectSettingsTab(page, "recording");
+    await expect(page.locator("#settings-recording")).toBeVisible();
+    await expect(
+      page.locator("#content").getByRole("heading", { name: "Permissions" }),
+    ).toBeVisible();
+    await expect(page.locator("#settings-output")).toBeVisible();
+    await expect(page.locator("#settings-vocabulary")).toBeVisible();
+    await closeSettings(page);
     if (platform === "linux") {
       await page.evaluate(() => {
         Object.assign(window.testState, {
@@ -867,7 +945,7 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(modelDialog).toBeVisible();
     await expect(
       modelDialog.getByRole("heading", {
-        name: "Choose a speech model",
+        name: "Speech model for Dictation",
         exact: true,
       }),
     ).toBeVisible();
@@ -1128,6 +1206,8 @@ for (const platform of ["linux", "macos"] as const) {
             ),
             recordAspect: recordButton.width / recordButton.height,
             cancelLeftOfRecord: cancelButton.right <= recordButton.left,
+            outputLeft: output.left,
+            recordButtonRight: recordButton.right,
             outputRightOfRecord: output.left >= recordButton.right,
           };
         });
@@ -1150,7 +1230,10 @@ for (const platform of ["linux", "macos"] as const) {
         expect(geometry.recordAspect).toBeGreaterThanOrEqual(0.85);
         expect(geometry.recordAspect).toBeLessThanOrEqual(1.15);
         expect(geometry.cancelLeftOfRecord).toBe(true);
-        expect(geometry.outputRightOfRecord).toBe(true);
+        expect(
+          geometry.outputRightOfRecord,
+          JSON.stringify({ platform, language, viewport, ...geometry }),
+        ).toBe(true);
         await expect(page.locator(".dictation-transcript-body")).toContainText(
           "Synthetic long transcript.",
         );
@@ -1203,7 +1286,7 @@ for (const platform of ["linux", "macos"] as const) {
 }
 
 for (const platform of ["linux", "macos"] as const) {
-  test(`${platform}: floating recorder keeps translated timers and actions separate from status copy`, async ({
+  test(`${platform}: floating recorder keeps the waveform and timer visible at narrow and reference widths`, async ({
     page,
   }) => {
     await page.setViewportSize({ width: 340, height: 64 });
@@ -1238,9 +1321,7 @@ for (const platform of ["linux", "macos"] as const) {
           body: "rgba(0, 0, 0, 0)",
         });
         const time = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
-        await expect(page.locator("#record-label")).toHaveText(
-          `${language === "en" ? "Recording" : "Aufnahme"} · ${time}`,
-        );
+        await expect(page.locator("#record-label")).toHaveText(time);
         await expect(page.locator(".record-copy")).toBeHidden();
         await expect(page.locator("#record-unavailable-action")).toBeHidden();
         await expect(page.locator("#record")).toBeInViewport();
@@ -1329,7 +1410,7 @@ for (const platform of ["linux", "macos"] as const) {
           path: `test-results/${platform}-${language}-recording-overlay.png`,
           omitBackground: true,
         });
-        expect(geometry.bars).toHaveLength(5);
+        expect(geometry.bars).toHaveLength(36);
         for (const bar of geometry.bars) {
           expect(bar.width).toBeGreaterThan(0);
           expect(bar.height).toBeGreaterThan(0);
@@ -1360,6 +1441,59 @@ for (const platform of ["linux", "macos"] as const) {
         expect(geometry.textFits).toBe(true);
       }
     }
+    await page.setViewportSize({ width: 476, height: 68 });
+    const referenceCapsule = await page.evaluate(() => {
+      const capsule = document
+        .querySelector(".record-actions")!
+        .getBoundingClientRect();
+      const bars = Array.from(
+        document.querySelectorAll<HTMLElement>(".audio-mark i"),
+      ).map((bar) => {
+        const original = bar.style.pointerEvents;
+        bar.style.pointerEvents = "auto";
+        try {
+          const rect = bar.getBoundingClientRect();
+          return {
+            width: rect.width,
+            height: rect.height,
+            inside:
+              rect.left >= capsule.left &&
+              rect.right <= capsule.right &&
+              rect.top >= capsule.top &&
+              rect.bottom <= capsule.bottom,
+            hit:
+              document.elementFromPoint(
+                rect.left + rect.width / 2,
+                rect.top + rect.height / 2,
+              ) === bar,
+          };
+        } finally {
+          bar.style.pointerEvents = original;
+        }
+      });
+      const stop = document.querySelector("#record")!.getBoundingClientRect();
+      return {
+        capsuleWidth: capsule.width,
+        capsuleHeight: capsule.height,
+        stopRightInset: capsule.right - stop.right,
+        bars,
+      };
+    });
+    expect(referenceCapsule.capsuleWidth).toBeCloseTo(460, 0);
+    expect(referenceCapsule.capsuleHeight).toBeCloseTo(52, 0);
+    expect(referenceCapsule.stopRightInset).toBeGreaterThanOrEqual(8);
+    expect(referenceCapsule.stopRightInset).toBeLessThanOrEqual(10);
+    expect(referenceCapsule.bars).toHaveLength(36);
+    for (const bar of referenceCapsule.bars) {
+      expect(bar.width).toBeGreaterThan(0);
+      expect(bar.height).toBeGreaterThan(0);
+      expect(bar.inside).toBe(true);
+      expect(bar.hit).toBe(true);
+    }
+    await page.screenshot({
+      path: `test-results/${platform}-recording-overlay-reference-width.png`,
+      omitBackground: true,
+    });
     await page.locator("#record").click();
     await page.locator("#cancel").click();
     expect(
@@ -1457,6 +1591,9 @@ for (const platform of ["linux", "macos"] as const) {
       (model: { family: string }) => model.family === "parakeet",
     );
     await expect(body.locator(".model-row")).toHaveCount(whisperModels.length);
+    const firstModel = body.locator(".model-row").first();
+    await expect(firstModel.locator(".model-title-row strong")).toBeVisible();
+    await expect(firstModel.locator(".model-size")).toBeVisible();
     const whisperTab = dialog.locator('[data-drawer-family="whisper"]');
     const parakeetTab = dialog.locator('[data-drawer-family="parakeet"]');
     await expect(whisperTab).toHaveAttribute("aria-pressed", "true");
@@ -1485,7 +1622,7 @@ for (const platform of ["linux", "macos"] as const) {
     await page.locator(".dictation-change-model").click();
     await expect(
       dialog.getByRole("heading", {
-        name: "Sprachmodell auswählen",
+        name: "Sprachmodell für Diktat",
         exact: true,
       }),
     ).toBeVisible();
@@ -1545,13 +1682,22 @@ for (const platform of ["linux", "macos"] as const) {
       .poll(() => page.evaluate(() => window.testState.preferences.model))
       .toBe("tiny");
     await expect(dialog).toBeVisible();
+    const selectionFocus = await page.evaluate(() => {
+      const active = document.activeElement as HTMLElement | null;
+      return {
+        inside: !!document.querySelector("#model-drawer")?.contains(active),
+        tag: active?.tagName,
+        id: active?.id,
+        label: active?.getAttribute("aria-label"),
+        text: active?.textContent?.trim().slice(0, 60),
+      };
+    });
     expect(
-      await page.evaluate(() =>
-        document
-          .querySelector("#model-drawer")
-          ?.contains(document.activeElement),
-      ),
-    ).toBe(true);
+      selectionFocus,
+      JSON.stringify(selectionFocus).slice(0, 300),
+    ).toMatchObject({
+      inside: true,
+    });
 
     await page.locator('[data-download="small"]').click();
     await expect
@@ -1601,6 +1747,10 @@ for (const platform of ["linux", "macos"] as const) {
       "Models",
     );
     await expect(page.getByRole("heading", { name: "Models" })).toBeVisible();
+    const managedModel = page.locator("#content .model-row").first();
+    await expect(managedModel.locator(".model-title-row strong")).toBeVisible();
+    await expect(managedModel.locator(".model-size")).toBeVisible();
+    await expect(managedModel.locator(".model-note")).toBeVisible();
     await closeSettings(page);
     await page.locator(".dictation-change-model").click();
     await expect(
@@ -1766,51 +1916,38 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(history).toContainText("Noch keine Diktate im Verlauf.");
   });
 
-  test(`${platform}: General settings index reaches each section by keyboard`, async ({
+  test(`${platform}: Recording settings remain keyboard reachable and save vocabulary after navigation`, async ({
     page,
   }) => {
     await start(page, platform);
     await page.setViewportSize({ width: 1280, height: 800 });
-    await page.locator(".settings-content").evaluate((element) => {
-      element.scrollTop = 0;
-    });
-    await page.screenshot({ path: `test-results/${platform}-settings.png` });
     const trustedUrl = page.url();
-    for (const id of [
-      "settings-recording",
-      "settings-permissions",
-      "settings-vocabulary",
-      "settings-output",
-      "settings-system",
-    ]) {
-      const sectionButton = page.locator(
-        `.settings-index button[data-settings-section="${id}"]`,
-      );
-      await expect(sectionButton).toBeVisible();
-      await expect(sectionButton).toHaveRole("button");
-      await sectionButton.focus();
-      await expect(sectionButton).toBeFocused();
-      await page.keyboard.press("Enter");
-      await expect(page.locator(`#${id}`)).toBeInViewport();
-      expect(page.url()).toBe(trustedUrl);
-      if (id === "settings-vocabulary") {
-        const vocabulary = page.locator("#vocabulary");
-        await vocabulary.fill("OpenWhisper, Kubernetes");
-        await page.locator("#save-vocabulary").click();
-        await expect
-          .poll(() => page.evaluate(() => window.calls.at(-1)))
-          .toEqual({
-            command: "save_preferences",
-            args: { changes: { vocabulary: "OpenWhisper, Kubernetes" } },
-          });
-        await expect
-          .poll(() =>
-            page.evaluate(() => window.testState.preferences.vocabulary),
-          )
-          .toBe("OpenWhisper, Kubernetes");
-        expect(page.url()).toBe(trustedUrl);
-      }
-    }
+    await page.screenshot({ path: `test-results/${platform}-settings.png` });
+    const recordingTab = page.locator(
+      '.settings-dialog-nav [data-tab="recording"]',
+    );
+    await recordingTab.focus();
+    await page.keyboard.press("Enter");
+    await expect(recordingTab).toHaveAttribute("aria-current", "page");
+    await expect(page.locator("#settings-recording")).toBeVisible();
+    await expect(page.locator("#settings-output")).toBeVisible();
+    const vocabulary = page.locator("#vocabulary");
+    await vocabulary.scrollIntoViewIfNeeded();
+    await vocabulary.focus();
+    await expect(vocabulary).toBeFocused();
+    await expect(vocabulary).toBeInViewport();
+    await vocabulary.fill("OpenWhisper, Kubernetes");
+    await page.locator("#save-vocabulary").click();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)))
+      .toEqual({
+        command: "save_preferences",
+        args: { changes: { vocabulary: "OpenWhisper, Kubernetes" } },
+      });
+    await expect
+      .poll(() => page.evaluate(() => window.testState.preferences.vocabulary))
+      .toBe("OpenWhisper, Kubernetes");
+    expect(page.url()).toBe(trustedUrl);
   });
 
   test(`${platform}: signed-file-compatible bundle, shared navigation and branding`, async ({
@@ -1830,6 +1967,7 @@ for (const platform of ["linux", "macos"] as const) {
     await openSettings(page);
     await expect(page.locator(".settings-dialog-nav button")).toHaveText([
       "General",
+      "Recording",
       "Models",
       "Snippets",
       "History",
@@ -1854,7 +1992,8 @@ for (const platform of ["linux", "macos"] as const) {
       await page.evaluate(() =>
         Array.from(document.fonts).some(
           (font) =>
-            font.family === "OpenWhisper Inter" && font.status === "loaded",
+            font.family === "OpenWhisper Instrument Sans" &&
+            font.status === "loaded",
         ),
       ),
     ).toBe(true);
@@ -1866,6 +2005,7 @@ for (const platform of ["linux", "macos"] as const) {
     page,
   }) => {
     await start(page, platform);
+    await selectSettingsTab(page, "recording");
     await page
       .getByRole("textbox", { name: "Custom vocabulary", exact: true })
       .fill("WhisperFree, Kubernetes");
@@ -1917,6 +2057,7 @@ for (const platform of ["linux", "macos"] as const) {
         });
         for (const tab of [
           "General",
+          "Recording",
           "Models",
           "Snippets",
           "History",
@@ -2021,6 +2162,7 @@ test("macOS retains native trigger capture, model import, and update actions", a
   page,
 }) => {
   await start(page, "macos");
+  await selectSettingsTab(page, "recording");
   await page
     .getByRole("button", { name: "Set trigger …", exact: true })
     .click();
@@ -2078,6 +2220,7 @@ for (const platform of ["linux", "macos"] as const) {
       page.getByRole("button", { name: "Einrichtung", exact: true }),
     ).toHaveCount(0);
     await openSettings(page);
+    await selectSettingsTab(page, "general");
     await page.locator('[data-ui-language="en"]').click();
     await expect(
       page.getByRole("heading", { name: "Dictation", exact: true }),
@@ -2771,9 +2914,10 @@ for (const platform of ["linux", "macos"] as const) {
       .click();
     await expect(page.locator("dialog#settings-dialog")).toBeHidden();
     await expect(page.locator(".settings-dialog-nav [data-tab]")).toHaveCount(
-      5,
+      6,
     );
     await openSettings(page);
+    await selectSettingsTab(page, "general");
     await page.locator('[data-ui-language="de"]').click();
     await expect(page.locator("html")).toHaveAttribute("lang", "de");
     if (
@@ -2800,7 +2944,7 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(
       page.getByRole("heading", { name: "Diktat", exact: true }),
     ).toBeVisible();
-    await selectSettingsTab(page, "general");
+    await selectSettingsTab(page, "recording");
     await expect(
       page.getByRole("button", { name: "Erlauben", exact: true }),
     ).toBeVisible();
@@ -2945,7 +3089,7 @@ for (const platform of ["linux", "macos"] as const) {
     }
     await expect(page.locator("dialog#settings-dialog")).toBeHidden();
     await expect(page.locator(".settings-dialog-nav [data-tab]")).toHaveCount(
-      5,
+      6,
     );
     await expect(
       page.getByRole("heading", { name: "Diktat", exact: true }),
@@ -3035,12 +3179,9 @@ for (const platform of ["linux", "macos"] as const) {
   }) => {
     await start(page, platform);
     await page.setViewportSize({ width: 800, height: 560 });
+    await selectSettingsTab(page, "general");
     const login = page.getByRole("checkbox", {
       name: "Launch at login",
-      exact: true,
-    });
-    const overlay = page.getByRole("checkbox", {
-      name: "Show overlay when idle",
       exact: true,
     });
     await login.scrollIntoViewIfNeeded();
@@ -3052,7 +3193,6 @@ for (const platform of ["linux", "macos"] as const) {
       (window as any).saveDelay = 200;
     });
     await login.click();
-    await overlay.click();
     await expect
       .poll(() =>
         page.evaluate(
@@ -3060,15 +3200,8 @@ for (const platform of ["linux", "macos"] as const) {
         ),
       )
       .toBe(true);
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () => (window as any).testState.preferences.show_idle_overlay,
-        ),
-      )
-      .toBe(true);
     await expect(login).toBeChecked();
-    await expect(overlay).toBeChecked();
+    await expect(login).toBeVisible();
     // Native hosts publish another snapshot after completing the command reply.
     await page.evaluate(() => (window as any).publishState());
     expect(
@@ -3076,6 +3209,23 @@ for (const platform of ["linux", "macos"] as const) {
         () => (window as any).originalLoginSwitch.isConnected,
       ),
     ).toBe(true);
+    const afterLoginSave = await login.boundingBox();
+    expect(afterLoginSave!.y).toBeCloseTo(before!.y, 0);
+    await selectSettingsTab(page, "recording");
+    const overlay = page.getByRole("checkbox", {
+      name: "Show overlay when idle",
+      exact: true,
+    });
+    await overlay.click();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (window as any).testState.preferences.show_idle_overlay,
+        ),
+      )
+      .toBe(true);
+    await expect(overlay).toBeChecked();
+    await selectSettingsTab(page, "general");
     const after = await login.boundingBox();
     expect(after!.y).toBeCloseTo(before!.y, 0);
     await login.click();
@@ -3086,9 +3236,12 @@ for (const platform of ["linux", "macos"] as const) {
         ),
       )
       .toBe(false);
+    await selectSettingsTab(page, "recording");
     await expect(overlay).toBeChecked();
     await page.reload();
+    await selectSettingsTab(page, "general");
     await expect(login).not.toBeChecked();
+    await selectSettingsTab(page, "recording");
     await expect(overlay).toBeChecked();
     const changes = await page.evaluate(() =>
       (window as any).calls.filter(
@@ -3110,11 +3263,13 @@ for (const platform of ["linux", "macos"] as const) {
       name: "Launch at login",
       exact: true,
     });
+    await selectSettingsTab(page, "general");
     await login.click();
     await expect(page.getByRole("alert")).toContainText(
       "Could not save settings",
     );
     await expect(login).not.toBeChecked();
+    await selectSettingsTab(page, "recording");
     await expect(
       page.getByRole("checkbox", {
         name: "Show overlay when idle",
@@ -3189,7 +3344,7 @@ test("Mac Dev controls expose native Accessibility setup and preserve separate t
     host.testState.preferences.native_trigger = { kind: "mouse", button: 8 };
     host.publishState();
   });
-  await selectSettingsTab(page, "general");
+  await selectSettingsTab(page, "recording");
   await expect(page.getByLabel("Recording mode")).toBeDisabled();
   await expect(page.getByLabel("Recording mode")).toHaveValue("false");
   await expect(
@@ -3198,7 +3353,6 @@ test("Mac Dev controls expose native Accessibility setup and preserve separate t
       { exact: true },
     ),
   ).toBeVisible();
-  await expect(page.locator('[data-portal="enable_paste"]')).toBeEnabled();
   await expect(
     page.getByRole("checkbox", {
       name: "Restore the previous clipboard afterward",
@@ -3214,6 +3368,8 @@ test("Mac Dev controls expose native Accessibility setup and preserve separate t
   await expect(
     page.getByRole("button", { name: "Set trigger …", exact: true }),
   ).toBeVisible();
+  await selectSettingsTab(page, "recording");
+  await expect(page.locator('[data-portal="enable_paste"]')).toBeEnabled();
   expect(
     await page.evaluate(() => {
       const host = window as unknown as {
@@ -3232,6 +3388,7 @@ test("macOS shows pending login approval without changing the idle overlay", asy
 }) => {
   await start(page, "macos");
   await page.setViewportSize({ width: 800, height: 560 });
+  await selectSettingsTab(page, "general");
   await page.evaluate(() => {
     const w = window as any;
     w.testState.preferences.launch_at_login = true;
@@ -3252,6 +3409,7 @@ test("macOS shows pending login approval without changing the idle overlay", asy
   await page
     .getByRole("checkbox", { name: "Launch at login", exact: true })
     .uncheck();
+  await selectSettingsTab(page, "recording");
   await expect(
     page.getByRole("checkbox", { name: "Show overlay when idle", exact: true }),
   ).not.toBeChecked();
@@ -3270,7 +3428,7 @@ test("Linux: native trigger capture blocks recording, cancels, and shows saved m
     });
     w.publishState();
   });
-  await selectSettingsTab(page, "general");
+  await selectSettingsTab(page, "recording");
   await expect(
     page.getByText("Choose a single key, shortcut, or mouse button.", {
       exact: false,
@@ -3332,7 +3490,7 @@ test("Linux mouse setup commits matching middle, back and forward releases only 
   context,
 }) => {
   await start(page, "linux");
-  await selectSettingsTab(page, "general");
+  await selectSettingsTab(page, "recording");
   await page.evaluate(() => {
     Object.assign(window.testState, {
       native_shortcuts: true,
@@ -3423,7 +3581,7 @@ test("Linux X11 fallback exposes explicit keyboard setup and session paste witho
     w.testState.preferences.native_trigger = { kind: "key", key: 0x01000021 };
     w.publishState();
   });
-  await selectSettingsTab(page, "general");
+  await selectSettingsTab(page, "recording");
   await expect(
     page.getByText("Choose a regular keyboard key or shortcut.", {
       exact: false,
@@ -3432,9 +3590,6 @@ test("Linux X11 fallback exposes explicit keyboard setup and session paste witho
   await expect(
     page.getByRole("combobox", { name: "Recording mode" }),
   ).toBeEnabled();
-  await expect(
-    page.getByText("Automatic X11 paste", { exact: true }),
-  ).toBeVisible();
   await page
     .getByRole("button", { name: "Set trigger …", exact: true })
     .click();
@@ -3446,6 +3601,9 @@ test("Linux X11 fallback exposes explicit keyboard setup and session paste witho
   await expect(page.locator("#record")).toBeDisabled();
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(page.locator("#record")).toBeEnabled();
+  await expect(
+    page.getByText("Automatic X11 paste", { exact: true }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Allow", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Revoke", exact: true }),
@@ -3454,6 +3612,7 @@ test("Linux X11 fallback exposes explicit keyboard setup and session paste witho
   await expect(
     page.getByRole("button", { name: "Allow", exact: true }),
   ).toBeEnabled();
+  await selectSettingsTab(page, "general");
   await expect(
     page.getByText("Native X11 triggers", { exact: true }),
   ).toBeVisible();
@@ -3485,7 +3644,7 @@ test("Linux X11 trigger removal and German help preserve the inactive KDE profil
     });
     w.publishState();
   });
-  await selectSettingsTab(page, "general");
+  await selectSettingsTab(page, "recording");
   await expect(
     page.getByText("Automatisches Einfügen unter X11", { exact: true }),
   ).toBeVisible();
@@ -3523,7 +3682,7 @@ test("Linux: modifier-only triggers explain toggle mode and disable push to talk
     w.testState.preferences.native_trigger = { kind: "key", key: 0x01000021 };
     w.publishState();
   });
-  await selectSettingsTab(page, "general");
+  await selectSettingsTab(page, "recording");
   await expect(
     page.getByRole("combobox", { name: "Recording mode" }),
   ).toBeDisabled();
@@ -3576,6 +3735,7 @@ for (const platform of ["linux", "macos"] as const) {
     page,
   }) => {
     await start(page, platform);
+    await selectSettingsTab(page, "recording");
     await page.evaluate(() => {
       const host = window as any;
       host.rejectPortal = true;

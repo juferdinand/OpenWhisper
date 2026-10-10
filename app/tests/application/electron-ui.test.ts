@@ -57,7 +57,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     path: join(evidence, name),
     mask: [page.locator(".dictation-device, .dictation-change-model, .dictation-feature-card:first-child small, .compute-mode small, #recognition-backend, .model-drawer-heading p")],
   });
-  const openSettings = async (page: Page, tab: "general" | "models" | "about") => {
+  const openSettings = async (page: Page, tab: "general" | "recording" | "models" | "about") => {
     if (!await page.locator("#settings-dialog").isVisible()) await page.locator("#open-settings").click();
     await page.locator(`#settings-dialog nav [data-tab="${tab}"]`).click();
   };
@@ -272,7 +272,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await screenshot(page, "dev-dictation.png");
     await page.locator(".dictation-change-model").click();
     await expect(page.locator("#model-drawer")).toBeVisible();
-    await expect(page.locator("#model-drawer").getByRole("heading", { name: "Choose a speech model", exact: true })).toBeVisible();
+    await expect(page.locator("#model-drawer").getByRole("heading", { name: "Speech model for Dictation", exact: true })).toBeVisible();
     const drawerBounds = await page.locator("#model-drawer").evaluate((drawer) => {
       const bounds = drawer.getBoundingClientRect();
       const titlebar = document.querySelector(".window-titlebar")!.getBoundingClientRect();
@@ -318,13 +318,14 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await expect.poll(async () => page.locator(".about-brand img").evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth === 512)).toBe(true);
     assert.equal(await page.evaluate(async () => {
       await document.fonts.ready;
-      return Array.from(document.fonts).some((font) => font.family === "OpenWhisper Inter" && font.status === "loaded");
+      return ["OpenWhisper Instrument Sans", "OpenWhisper Newsreader"].every((family) =>
+        Array.from(document.fonts).some((font) => font.family === family && font.status === "loaded"));
     }), true);
     await screenshot(page, "dev-about.png");
     await page.locator('nav [data-tab="models"]').click();
     await expect(page.locator("#development-model-directory")).toHaveText(state.model_directory);
     await screenshot(page, "dev-models.png");
-    checks.push("visible Dev build identifier, supplied SVG branding, bundled Inter and private model directory");
+    checks.push("visible Dev build identifier, supplied SVG branding, bundled reference font and private model directory");
     await expect(page.locator("#record")).toBeDisabled();
     await expect(page.locator("#status-title")).toHaveText("Recording is unavailable");
     await expect(page.locator("#status")).toHaveText("The recording service could not start. Restart OpenWhisper and try again.");
@@ -359,6 +360,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     const overlayPage = app.windows().find((candidate) => candidate.url().endsWith("?overlay=1"));
     assert.ok(overlayPage);
     await expect(overlayPage.locator(".window-titlebar")).toHaveCount(0);
+    assert.deepEqual(await overlayPage.evaluate(() => ({ width: innerWidth, height: innerHeight })), { width: 476, height: 68 });
     assert.equal(await overlayPage.evaluate(async () => {
       try { await window.openwhisper?.invoke("window_action", { action: "close" }); return false; }
       catch { return true; }
@@ -392,10 +394,10 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await expect(page.locator(".window-wordmark")).toHaveText("openwhisper");
     await expect(page.getByRole("heading", { name: "Dictation", exact: true })).toBeVisible();
 
-    await openSettings(page, "general");
+    await page.getByRole("button", { name: /Vocabulary/ }).click();
+    await expect(page.locator("#page-title")).toHaveText("Recording");
     const vocabulary = page.locator("#vocabulary");
     const settingsUrl = page.url();
-    await page.locator(".settings-index").getByRole("button", { name: "Custom vocabulary", exact: true }).click();
     assert.equal(page.url(), settingsUrl, "Settings section navigation must preserve the trusted renderer URL.");
     await expect(vocabulary).toBeInViewport();
     await vocabulary.fill("Kubernetes, Grüß Gott, 東京");
@@ -407,20 +409,23 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await expect.poll(async () => validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.vocabulary).toBe("Kubernetes, Grüß Gott, 東京");
     await page.keyboard.press("Escape");
     await expect(page.locator("#settings-dialog")).toBeHidden();
-    await expect(page.locator("#open-settings")).toBeFocused();
-    await openSettings(page, "general");
+    await expect(page.locator('.dictation-feature-card[data-settings-view="recording"]')).toBeFocused();
+    await openSettings(page, "recording");
     await vocabulary.focus();
-    const savedToggle = await page.locator('[data-pref="launch_at_login"]').elementHandle();
+    const savedToggle = await page.locator('[data-pref="show_idle_overlay"]').elementHandle();
     assert.ok(savedToggle);
     await page.evaluate(async () => { await window.openwhisper?.invoke("save_preferences", { changes: { hold_to_record: true } }); });
     await expect(vocabulary).toBeFocused();
-    assert.equal(await savedToggle.evaluate((node) => node === document.querySelector('[data-pref="launch_at_login"]')), true);
+    assert.equal(await savedToggle.evaluate((node) => node === document.querySelector('[data-pref="show_idle_overlay"]')), true);
     await expect(page.locator('[data-pref="hold_to_record"]')).toHaveValue("true");
+    await openSettings(page, "general");
     await page.locator('[data-ui-language="de"]').click();
     await expect(page.locator("#page-title")).toHaveText("Allgemein");
     await expect(page.locator('[data-ui-language="de"]')).toHaveAttribute("aria-pressed", "true");
-    await expect(page.locator("#vocabulary")).toHaveValue("Kubernetes, Grüß Gott, 東京");
     await screenshot(page, "dev-general-de.png");
+    await openSettings(page, "recording");
+    await expect(vocabulary).toHaveValue("Kubernetes, Grüß Gott, 東京");
+    await openSettings(page, "general");
     await page.locator('[data-ui-language="en"]').click();
     await expect(page.locator("#page-title")).toHaveText("General");
     await screenshot(page, "dev-general-en.png");
@@ -469,14 +474,18 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await expect(page.locator("#processing-feedback")).toHaveText("The local server rejected the request; check its model and authentication settings");
     await expect(page.locator("#processing-input")).toHaveValue(previewText);
     assert.equal((await page.locator("body").textContent())?.includes("Owned private diagnostic"), false);
+    await openSettings(page, "general");
     await page.locator('[data-ui-language="de"]').click();
+    await openSettings(page, "models");
     await expect(page.locator("#processing-preview h2")).toHaveText("Textverarbeitung ausprobieren");
     await expect(page.locator("#processing-input")).toHaveValue(previewText);
     await page.locator("#processing-preview h2").scrollIntoViewIfNeeded();
     await screenshot(page, "dev-processing-profile-de.png");
     await page.locator("#processing-result").scrollIntoViewIfNeeded();
     await screenshot(page, "dev-processing-de.png");
+    await openSettings(page, "general");
     await page.locator('[data-ui-language="en"]').click();
+    await openSettings(page, "models");
     await expect(page.locator("#processing-preview h2")).toHaveText("Text processing preview");
     await page.locator("#processing-preview h2").scrollIntoViewIfNeeded();
     await screenshot(page, "dev-processing-profile-en.png");
@@ -545,10 +554,12 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
   } catch (error: unknown) {
     await writeFile(join(evidence, "failure.json"), JSON.stringify({
       checks, url: currentPage?.url(), requests,
-      message: error instanceof Error ? error.message : "Unknown owned UI failure",
+      errorType: error instanceof Error ? error.name : "Unknown owned UI failure",
+      stack: error instanceof Error ? error.stack?.split("\n").filter((line) => line.startsWith("    at ")).slice(0, 8) : [],
     }, null, 2));
     if (currentPage) await screenshot(currentPage, "failure.png").catch(() => undefined);
-    throw error;
+    // Playwright's full error includes the live accessibility tree and device labels.
+    throw new Error("Owned UI check failed; inspect the bounded failure receipt and masked screenshot.");
   } finally {
     await application?.close();
     xvfb.kill("SIGTERM");

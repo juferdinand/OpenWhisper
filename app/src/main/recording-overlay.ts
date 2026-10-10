@@ -1,5 +1,6 @@
-import type { BrowserWindowConstructorOptions } from "electron";
+import type { BrowserWindowConstructorOptions, Rectangle } from "electron";
 import type { AppState } from "../contracts/ui/state.js";
+import { HEIGHT, WIDTH } from "../contracts/platforms/wayland-surface.js";
 
 export function supportsInactiveRecordingOverlay({ platform, sessionType, ozonePlatform, waylandDisplay }: Readonly<{
   platform: string; sessionType?: string; ozonePlatform?: string; waylandDisplay?: string;
@@ -13,11 +14,16 @@ export function supportsInactiveRecordingOverlay({ platform, sessionType, ozoneP
 
 export function overlayWindowOptions({ title, preloadPath }: Readonly<{ title: string; preloadPath: string }>): BrowserWindowConstructorOptions {
   return {
-    title, width: 360, height: 64,
+    title, width: WIDTH, height: HEIGHT,
     transparent: true, frame: false, show: false, focusable: false,
     skipTaskbar: true, alwaysOnTop: true, resizable: false, hasShadow: false,
     webPreferences: { preload: preloadPath, sandbox: true, contextIsolation: true, nodeIntegration: false },
   };
+}
+
+export function overlayWindowBounds(area: Readonly<Rectangle>): Rectangle {
+  return { x: Math.floor(area.x + (area.width - WIDTH) / 2),
+    y: Math.floor(area.y + area.height - HEIGHT - 24), width: WIDTH, height: HEIGHT };
 }
 
 export function waylandOverlayWindowOptions(options: Readonly<{ title: string; preloadPath: string }>): BrowserWindowConstructorOptions {
