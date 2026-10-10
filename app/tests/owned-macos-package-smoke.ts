@@ -142,7 +142,7 @@ try {
     stage = "fresh-dev-installation";
     installation = z.object({ installationRoot: z.literal(installationRoot), application: z.literal(bundle),
       executable: z.literal(executable), profile: z.literal(profile), desktopFile: z.null(), sourceDigest: z.string().regex(/^[a-f0-9]{64}$/u),
-      version: z.literal("0.3.0"), launchArguments: z.tuple([z.literal("--dev-profile"), z.literal(profile)]) }).parse(JSON.parse(
+      version: z.literal("0.3.1"), launchArguments: z.tuple([z.literal("--dev-profile"), z.literal(profile)]) }).parse(JSON.parse(
         execFileSync(sourceExecutable, installArguments, { env: installEnvironment, encoding: "utf8", timeout: 120_000, maxBuffer: 256 * 1024 })));
     await assert.rejects(lstat(profile), { code: "ENOENT" });
     checks.push("Embedded Node CLI copies and verifies a fresh signed Dev app, preserving source inputs and leaving the explicit profile nonexistent");

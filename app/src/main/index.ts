@@ -827,16 +827,16 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   if (process.argv.filter((argument) => argument === ownedMacUpdateFixture).length > 1) throw new Error("Invalid owned Mac updater test mode.");
   if (process.argv.includes(ownedMacUpdateFixture)) {
     if (process.platform !== "darwin" || identity.kind !== "stable" || !app.isPackaged || !macUpdateAdmission || !macUpdates ||
-      version !== "0.3.0" || macUpdateAdmission.repository !== "juferdinand/OpenWhisper") throw new Error("Owned Mac updater test mode is unavailable.");
+      version !== "0.3.1" || macUpdateAdmission.repository !== "juferdinand/OpenWhisper") throw new Error("Owned Mac updater test mode is unavailable.");
     let invoked = false;
     Object.defineProperty(app, "openWhisperRunOwnedMacUpdateFixture", { configurable: false, enumerable: false, value: async (): Promise<void> => {
       if (invoked || shutdownInProgress || !preferences.snapshot().setup_completed) throw new Error("Owned Mac updater fixture is not ready.");
       invoked = true;
       macUpdates = createMacosUpdateCoordinator({ admission: macUpdateAdmission!, identity, currentVersion: version,
         cacheDirectory: profile.paths.cache }, ownedMacosUpdateFixtureEffects({ archive: join(profile.paths.cache, "owned-macos-successor.zip"),
-        repository: macUpdateAdmission!.repository, currentVersion: version, expectedVersion: "0.3.1" }));
+        repository: macUpdateAdmission!.repository, currentVersion: version, expectedVersion: "0.3.2" }));
       const candidate = await macUpdates.check(new AbortController().signal);
-      if (!candidate || candidate.version !== "0.3.1") throw new Error("Owned Mac updater fixture was not admitted.");
+      if (!candidate || candidate.version !== "0.3.2") throw new Error("Owned Mac updater fixture was not admitted.");
       updates = { ...updates, status: "available", version: candidate.version, error: null, progress: 0 }; notify();
       await requestUpdate("install");
     } });

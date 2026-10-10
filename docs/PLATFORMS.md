@@ -1,13 +1,13 @@
 # Platform architecture
 
-The current 0.3.0 release uses the Electron app in `app/`. See [release status and evidence](ELECTRON-STATUS.md)
+The current 0.3.1 release uses the Electron app in `app/`. See [release status and evidence](ELECTRON-STATUS.md)
 for exact package and test scope. The [immutable 0.2.5 source](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4)
 preserves the former native hosts and their historical evidence.
 
 | Platform | Current release | Status |
 | --- | --- | --- |
-| macOS 14+ | 0.3.0 Universal DMG and ZIP | Self-signed, not notarized; see status for tested scope |
-| Linux x86_64 | 0.3.0 AppImage and Debian package | See status and [Linux evidence](LINUX.md) |
+| macOS 14+ | 0.3.1 Universal DMG and ZIP | Self-signed, not notarized; see status for tested scope |
+| Linux x86_64 | 0.3.1 AppImage and Debian package | See status and [Linux evidence](LINUX.md) |
 | Windows | None | Not implemented; tracked by [issue #35](https://github.com/juferdinand/OpenWhisper/issues/35) |
 
 ## Electron source layout

@@ -29,14 +29,14 @@ const sourceInfo = z.object({ commit: z.string().regex(/^[a-f0-9]{40}$/u), modif
 assert.equal(run("/usr/bin/git", ["status", "--porcelain"]), "");
 const identity = parseApplicationBuildModule(await readFile(join(source, "app/dist/main/application-build.js"), "utf8"));
 assert.deepEqual(identity, { version: 1, kind: "stable", appId: "io.github.whisperfree", productName: "OpenWhisper" });
-assert.equal((await readFile(join(source, "VERSION"), "utf8")).trim(), "0.3.1");
+assert.equal((await readFile(join(source, "VERSION"), "utf8")).trim(), "0.3.2");
 assert.equal(run("/usr/bin/git", ["rev-parse", "HEAD"]).trim(), sourceInfo.commit);
 assert.equal(run("/usr/bin/git", ["rev-parse", `${sourceInfo.commit}^`]).trim(), process.env["GITHUB_SHA"]);
 assert.deepEqual(run("/usr/bin/git", ["diff-tree", "--no-commit-id", "--name-only", "-r", sourceInfo.commit]).trim().split("\n").sort(),
   ["VERSION", "app/package-lock.json", "app/package.json"]);
 const result = await packageMacPreview(output, join(source, "app"), { signingMode: "persistent-validation", enableUpdates: true });
 await writeFile(join(output, "successor-package-result.json"), `${JSON.stringify({ status: "PASS", sourceCommit: sourceInfo.commit,
-  version: "0.3.1", directory: result.directory, archive: result.archive, sha256: result.sha256,
+  version: "0.3.2", directory: result.directory, archive: result.archive, sha256: result.sha256,
   signingMode: "persistent-validation", updateConfigured: true, scope: "Private signed same-source successor package; no publication." })}\n`,
   { flag: "wx", mode: 0o600 });
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.stdout.write("PASS: private Mac successor package signed.\n");

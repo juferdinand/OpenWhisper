@@ -11,15 +11,15 @@ German; dictation can use multiple languages.
 
 ## Project status
 
-The current release is **0.3.0**, a shared Electron app for macOS and Linux. Automated package,
+The current release is **0.3.1**, a shared Electron app for macOS and Linux. Automated package,
 update, and owned-runtime checks cover the scopes listed in [release status](docs/ELECTRON-STATUS.md);
 they do not establish every desktop, device, or distribution combination. The older native 0.2.5
 source and evidence remain available as an immutable reference.
 
 | Platform | Current release | Notes |
 | --- | --- | --- |
-| macOS 14+ | 0.3.0 DMG and ZIP | Self-signed and not Apple-notarized; see [signing](docs/SIGNING.md) |
-| Linux x86_64 | 0.3.0 AppImage and Debian package | Scoped KDE Wayland and X11 checks; see [Linux status](docs/LINUX.md) |
+| macOS 14+ | 0.3.1 DMG and ZIP | Self-signed and not Apple-notarized; see [signing](docs/SIGNING.md) |
+| Linux x86_64 | 0.3.1 AppImage and Debian package | Scoped KDE Wayland and X11 checks; see [Linux status](docs/LINUX.md) |
 | Windows | None | Not implemented; tracked by [issue #35](https://github.com/juferdinand/OpenWhisper/issues/35) |
 
 The immutable [0.2.5 source snapshot](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4)
@@ -37,7 +37,7 @@ interface translations. Platform integrations and validation differ; consult the
 [Linux evidence](docs/LINUX.md) and [platform overview](docs/PLATFORMS.md).
 
 Optional LM Studio and Ollama text processing is available only as a manual preview in the
-isolated Electron Dev build; it is not part of the 0.3.0 release. Speech output and structured
+isolated Electron Dev build; it is not part of the 0.3.1 release. Speech output and structured
 Obsidian notes are planned integrations, with prerequisites and delivery order in the
 [roadmap](docs/ROADMAP.md).
 
@@ -49,21 +49,21 @@ against the download server's metadata before installing it.
 
 ## Installation
 
-Download 0.3.0 only from the [official Releases page](https://github.com/juferdinand/OpenWhisper/releases)
+Download 0.3.1 only from the [official Releases page](https://github.com/juferdinand/OpenWhisper/releases)
 and verify files against its `SHA256SUMS`.
 
 ### macOS
 
-Download the [macOS DMG](https://github.com/juferdinand/OpenWhisper/releases/download/v0.3.0/OpenWhisper-macOS.dmg),
+Download the [macOS DMG](https://github.com/juferdinand/OpenWhisper/releases/download/v0.3.1/OpenWhisper-macOS.dmg),
 drag OpenWhisper to Applications, eject the volume, then launch it from Applications. The
-[ZIP](https://github.com/juferdinand/OpenWhisper/releases/download/v0.3.0/OpenWhisper-macOS.zip)
+[ZIP](https://github.com/juferdinand/OpenWhisper/releases/download/v0.3.1/OpenWhisper-macOS.zip)
 is also available. The app requires macOS 14 or later and microphone
 permission. Its release signature is self-signed and the app is not notarized; see
 [signing details](docs/SIGNING.md).
 
 ### Linux x86_64
 
-Download and run the [AppImage](https://github.com/juferdinand/OpenWhisper/releases/download/v0.3.0/OpenWhisper-Linux-x86_64.AppImage):
+Download and run the [AppImage](https://github.com/juferdinand/OpenWhisper/releases/download/v0.3.1/OpenWhisper-Linux-x86_64.AppImage):
 
 ```bash
 chmod +x OpenWhisper-Linux-x86_64.AppImage
@@ -71,7 +71,7 @@ chmod +x OpenWhisper-Linux-x86_64.AppImage
 ```
 
 If FUSE is unavailable, use `APPIMAGE_EXTRACT_AND_RUN=1` for that launch. On Debian or Ubuntu,
-install the [Debian package](https://github.com/juferdinand/OpenWhisper/releases/download/v0.3.0/OpenWhisper-Linux-amd64.deb):
+install the [Debian package](https://github.com/juferdinand/OpenWhisper/releases/download/v0.3.1/OpenWhisper-Linux-amd64.deb):
 
 ```bash
 sudo apt install ./OpenWhisper-Linux-amd64.deb
@@ -80,7 +80,7 @@ sudo apt install ./OpenWhisper-Linux-amd64.deb
 Verify downloads against the release's `SHA256SUMS`. Linux desktop and package evidence is
 summarized in [Linux status](docs/LINUX.md).
 
-When moving from 0.2.5, download and install 0.3.0 manually. The original app's GUI updater has
+When moving from 0.2.5, download and install 0.3.1 manually. The original app's GUI updater has
 not been demonstrated to update to Electron; back up data you need before changing installations.
 
 For a per-user install of the **legacy 0.2.5 AppImage only**, review and download the installer
