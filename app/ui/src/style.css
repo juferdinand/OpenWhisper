@@ -1075,6 +1075,9 @@ html.setup-mode #content {
   justify-content: center;
   padding: 14px 0 0;
 }
+html.setup-mode #content:has(.setup-model-families) {
+  align-items: flex-start;
+}
 html.setup-mode.setup-recording #content {
   padding-bottom: 88px;
 }

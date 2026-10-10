@@ -1090,6 +1090,31 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(modelFamilies).toHaveCount(2);
     await expect(modelFamilies.nth(0)).toHaveJSProperty("open", false);
     await expect(modelFamilies.nth(1)).toHaveJSProperty("open", false);
+    for (const viewport of [
+      { width: 740, height: 560 },
+      { width: 980, height: 740 },
+    ]) {
+      await page.setViewportSize(viewport);
+      const card = page.locator(".setup-card");
+      const top = await card.evaluate(
+        (element) => element.getBoundingClientRect().top,
+      );
+      const summary = modelFamilies.nth(0).locator("summary");
+      await summary.click();
+      await expect(modelFamilies.nth(0)).toHaveJSProperty("open", true);
+      expect(
+        await card.evaluate((element) => element.getBoundingClientRect().top),
+      ).toBeCloseTo(top, 0);
+      await expect(
+        page.getByRole("button", { name: "Continue", exact: true }),
+      ).toBeInViewport();
+      await summary.click();
+      await expect(modelFamilies.nth(0)).toHaveJSProperty("open", false);
+      expect(
+        await card.evaluate((element) => element.getBoundingClientRect().top),
+      ).toBeCloseTo(top, 0);
+    }
+    await page.setViewportSize({ width: 740, height: 560 });
     await page.locator('[data-model-family="whisper"] > summary').click();
     await expect(
       page.locator('[data-model-family="whisper"]'),
