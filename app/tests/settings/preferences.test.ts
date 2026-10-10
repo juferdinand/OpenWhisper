@@ -36,6 +36,23 @@ test("concurrent development patches preserve each field and retain text across 
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
+test("development autostart requires a host admission opt-in and never enables stable update checks", async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-dev-autostart-preferences-")));
+  try {
+    const profile = resolveDevelopmentProfile({ home, explicitRoot: join(home, "private-dev-profile") });
+    prepareDevelopmentProfile(profile);
+    const sourceStore = await DevelopmentPreferenceStore.open(profile);
+    assert.equal(sourceStore.snapshot().launch_at_login, false);
+    await assert.rejects(sourceStore.patch({ launch_at_login: true }), /unavailable in development/u);
+
+    const admittedStore = await DevelopmentPreferenceStore.open(profile, { allowDevelopmentAutostart: true });
+    assert.equal((await admittedStore.patch({ launch_at_login: true })).launch_at_login, true);
+    await assert.rejects(admittedStore.patch({ auto_check_updates: true }), /unavailable in development/u);
+    await assert.rejects(DevelopmentPreferenceStore.open(profile), /unavailable in development/u);
+    assert.equal((await DevelopmentPreferenceStore.open(profile, { allowDevelopmentAutostart: true })).snapshot().launch_at_login, true);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
 test("development preferences reject FIFO and malformed UTF-8 without waiting or replacement", async () => {
   const home = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-pref-bounds-")));
   try {

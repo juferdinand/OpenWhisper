@@ -19,7 +19,7 @@ export const recordingHostErrorSchema = z.enum(["BUSY", "INVALID_REQUEST", "CALL
 export const recordingHostRequestSchema = z.discriminatedUnion("command", [
   z.strictObject({ ...request, command: z.literal("configure"), capture: developmentCaptureDescriptorSchema, server,
     source: z.string().regex(/^(?:[A-Za-z0-9_.:-]{1,255})?$/u), recoveryPath: absolute,
-    request: recordingRequestSchema.unwrap().extend({ model: speechModelSchema.refine((model) => !model.gpu),
+    request: recordingRequestSchema.unwrap().extend({ model: speechModelSchema,
       vocabulary: speechVocabularySchema, snippets: preferencesSchema.shape.snippets }) }),
   z.strictObject({ ...request, command: z.literal("enumerate-sources"), capture: developmentCaptureDescriptorSchema, server }),
   ...(["start", "stop", "cancel", "retry", "discard", "status", "close"] as const)

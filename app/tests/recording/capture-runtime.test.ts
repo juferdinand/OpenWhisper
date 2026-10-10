@@ -83,10 +83,23 @@ test("normal recording protocol separates host controls and metadata from infere
   const f = fixture(), config = f.configuration(); recordingHostRequestSchema.parse(config);
   for (const changed of [{ ...config, binding: "/untrusted.node" }, { ...config, samples: new Float32Array(1) },
     { ...config, source: "@DEFAULT_SOURCE@" }, { ...config, server: "tcp:localhost" },
-    { ...config, request: { ...config.request, model: { ...config.request.model, gpu: true } } },
     { ...config, channel: "effects" }]) assert.equal(recordingHostRequestSchema.safeParse(changed).success, false);
   const reply = f.messages[0]; assert.ok(reply); assert.equal(recordingHostReplySchema.safeParse({ ...reply, samples: new Float32Array(1) }).success, false);
   assert.deepEqual(f.events, []);
+});
+test("a GPU recording request configures and starts through the validated host protocol", async () => {
+  const f = fixture(), config = f.configuration();
+  config.request.model.gpu = true;
+  assert.equal(recordingHostRequestSchema.safeParse(config).success, true);
+  await f.runtime.receive(config);
+  await f.runtime.receive(f.command("start"));
+  assert.equal(f.last()?.phase, "recording");
+  assert.ok(f.events.includes("start"));
+  await f.runtime.receive(f.command("stop"));
+  assert.equal((await f.terminal())?.phase, "done");
+  assert.ok(f.events.includes("infer"));
+  assert.equal(f.token(), null);
+  await f.runtime.close();
 });
 test("device-only epoch enumerates without model recovery stream creation or inference", async () => {
   const f = fixture(), config = f.configuration();

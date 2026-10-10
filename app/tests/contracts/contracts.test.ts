@@ -51,6 +51,16 @@ test("legacy Linux catalog and macOS capability snapshots remain valid without a
   assert.equal(appStateSchema.safeParse({ ...state(), platform: "macos" }).success, false);
 });
 
+test("optional CPU and GPU device labels are bounded plain hardware names", () => {
+  const valid = { ...state(), cpu_device: "AMD Ryzen 5 5600X", gpu_device: "NVIDIA GeForce RTX 3060" };
+  assert.deepEqual(appStateSchema.parse(valid), valid);
+  for (const value of ["", " GPU ", "name\nleak", "x".repeat(257)]) {
+    assert.equal(appStateSchema.safeParse({ ...state(), gpu_device: value }).success, false);
+    assert.equal(appStateSchema.safeParse({ ...state(), cpu_device: value }).success, false);
+  }
+  assert.equal(appStateSchema.safeParse({ ...state(), cpu_device: null, gpu_device: null }).success, true);
+});
+
 test("schema-derived command maps cover all current renderer actions", async () => {
   const renderer = await readFile(new URL("../../ui/src/main.ts", import.meta.url), "utf8");
   const literalCommands = [

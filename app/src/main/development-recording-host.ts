@@ -38,7 +38,7 @@ interface Owner {
   allocation?: RetirementAllocation; boundary?: RetirementBoundary; generation: number;
   closing?: Promise<void>; failed?: Error; exited: boolean;
 }
-interface GpuSelectionState { readonly supported: boolean; readonly checked: boolean; readonly available: boolean; readonly fallback: boolean }
+interface GpuSelectionState { readonly supported: boolean; readonly checked: boolean; readonly available: boolean; readonly fallback: boolean; readonly device: string | null }
 const fail = (code = "Recording could not complete.") => new Error(code);
 const sourceDiscoveryStages = ["checked-pulse", "artifact", "allocation-fork", "spawn-ready", "native-query", "retirement"] as const;
 const sourceDiscoveryCodeSchema = z.union([recordingHostErrorSchema, z.literal("INTEGRITY_FAILED"), z.literal("FAILED")]);
@@ -83,6 +83,7 @@ export class DevelopmentRecordingHost {
   private gpuChecked = false;
   private gpuAvailable = false;
   private gpuFallback = false;
+  private gpuDevice: string | null = null;
   private constructor(private readonly root: string, private readonly descriptor: DevelopmentRecordingDescriptor,
     private readonly inventory: ModelInventory, private readonly supervisor: BackendSupervisor,
     private readonly prepareRetirement: (pid: number, epoch: string) => RetirementAllocation,
@@ -268,7 +269,6 @@ export class DevelopmentRecordingHost {
   async configure(input: { readonly id: string; readonly request: RecordingRequest; readonly server?: string; readonly source?: string }): Promise<void> {
     if (this.owner) await this.retire(this.owner);
     this.gpuFallback = false;
-    if (input.request.model.gpu) this.gpuChecked = false;
     this.reportGpuState();
     const owner = await this.allocate(input);
     try {
@@ -277,6 +277,17 @@ export class DevelopmentRecordingHost {
       if (reply.kind !== "control" || !reply.reply.ok) throw fail();
     } catch (error: unknown) { await this.retire(owner); throw error; }
   }
+  async discoverGpu(): Promise<BackendSelection> {
+    if (!this.supportsGpu() || !this.supervisor.discoverGpu) throw fail();
+    const selection = await this.supervisor.discoverGpu();
+    if (!selection.requestedGpu) throw fail();
+    this.gpuChecked = true;
+    this.gpuAvailable = selection.gpu && selection.detection === "device";
+    this.gpuFallback = false;
+    this.gpuDevice = selection.gpuDevice ?? null;
+    this.reportGpuState();
+    return selection;
+  }
   private supportsGpu(): boolean {
     return this.descriptor.platform === "linux" && this.descriptor.architecture === "x64" &&
       this.descriptor.speech.entries.some((entry) => entry.backend === "vulkan");
@@ -284,7 +295,7 @@ export class DevelopmentRecordingHost {
   private reportGpuState(): void {
     if (!this.supportsGpu()) return;
     try { this.options.gpuSelection?.({ supported: true, checked: this.gpuChecked,
-      available: this.gpuAvailable, fallback: this.gpuFallback }); }
+      available: this.gpuAvailable, fallback: this.gpuFallback, device: this.gpuDevice }); }
     catch { /* UI state cannot affect recording ownership. */ }
   }
   private reportGpuBackendSelection(selection: BackendSelection): void {
@@ -292,6 +303,7 @@ export class DevelopmentRecordingHost {
     this.gpuChecked = true;
     this.gpuAvailable = selection.gpu && selection.detection === "device";
     this.gpuFallback = !selection.gpu;
+    if (selection.gpuDevice) this.gpuDevice = selection.gpuDevice;
     this.reportGpuState();
   }
   private reportAdaptiveGpuFallback(): void {

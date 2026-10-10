@@ -15,6 +15,9 @@ const utf8 = (limit: number) => z.string().max(limit).refine(
   { message: "String exceeds the supported UTF-8 byte length" },
 );
 const label = utf8(1024);
+export const hardwareDeviceNameSchema = utf8(256).refine(
+  (value) => value.length > 0 && value === value.trim() && !/\p{Cc}/u.test(value),
+);
 // Imported macOS models retain their file's Unicode/space-containing basename. Hosts resolve
 // identifiers against their model inventory; the renderer cannot supply an arbitrary path.
 const modelId = utf8(1024).min(1).refine(
@@ -166,7 +169,8 @@ export const appStateSchema = z.strictObject({
   gpu_available: z.boolean(),
   gpu_checked: z.boolean().optional(),
   gpu_supported: z.boolean().optional(),
-  gpu_device: label.nullable().optional(),
+  cpu_device: hardwareDeviceNameSchema.nullable().optional(),
+  gpu_device: hardwareDeviceNameSchema.nullable().optional(),
   gpu_fallback: z.boolean().optional(),
   recovery_available: z.boolean().optional(),
   overlay_available: z.boolean().optional(),
@@ -180,6 +184,7 @@ export const appStateSchema = z.strictObject({
   model_directory: utf8(4096),
   profile: z.literal("development").optional(),
   recording_available: z.boolean().optional(),
+  recording_unavailable_reason: z.enum(["host", "audio", "model", "permission"]).optional(),
   local_processing: localProcessingProfileSchema.optional(),
   local_processing_invalid_profile: z.boolean().optional(),
 }).refine(

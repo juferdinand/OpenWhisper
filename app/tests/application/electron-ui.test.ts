@@ -240,7 +240,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await page.screenshot({ path: join(evidence, "dev-models.png") });
     checks.push("visible Dev build identifier, original 256px icon/Inter assets and private model directory");
     await expect(page.locator("#record")).toBeDisabled();
-    await expect(page.locator("#status-title")).toHaveText("Development preview");
+    await expect(page.locator("#status-title")).toHaveText("Recording is unavailable");
     await expect(page.locator("#status")).toHaveText("Recording is not available in this development preview.");
     checks.push("unsupported recording truthfully disabled, no device inventory");
 

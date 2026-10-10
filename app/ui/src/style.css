@@ -368,6 +368,69 @@ input::placeholder {
 .radio-group input:checked {
   border: 5px solid var(--accent);
 }
+.compute-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.compute-mode label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  cursor: pointer;
+}
+.compute-mode label:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.compute-mode label:has(input:disabled) {
+  opacity: 0.55;
+  cursor: default;
+}
+.compute-mode input {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--secondary);
+  border-radius: 50%;
+  margin: 0;
+  background: transparent;
+}
+.compute-mode input:checked {
+  border: 5px solid var(--accent);
+}
+.compute-mode span {
+  display: block;
+  min-width: 0;
+}
+.compute-mode strong,
+.compute-mode small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.compute-mode strong {
+  font-size: 11px;
+  font-weight: 600;
+}
+.compute-mode small {
+  margin-top: 3px;
+  color: var(--secondary);
+  font-size: 9px;
+}
+#recognition-backend {
+  margin: 7px 0 0;
+  font-size: 10px;
+}
 .switch {
   width: 32px;
   height: 19px;
@@ -664,6 +727,14 @@ progress::-webkit-progress-value {
 }
 .record-status > div:last-child {
   min-width: 0;
+}
+.record-status > .record-copy {
+  min-width: 0;
+}
+#record-unavailable-action {
+  min-height: 29px;
+  padding: 5px 9px;
+  font-size: 10px;
 }
 #status-title {
   display: block;

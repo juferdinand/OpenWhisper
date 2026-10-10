@@ -107,7 +107,7 @@ test("Linux overlay availability distinguishes unsupported protocol from missing
   ).toBeVisible();
 });
 
-test("Linux GPU status distinguishes an unchecked device from an observed fallback", async ({
+test("Linux recognition mode names devices and distinguishes selection, discovery, and GPU fallback", async ({
   page,
 }) => {
   await start(page, "linux");
@@ -118,36 +118,104 @@ test("Linux GPU status distinguishes an unchecked device from an observed fallba
       gpu_checked: false,
       gpu_available: false,
       gpu_fallback: false,
+      cpu_device: "AMD Ryzen 7 5700G",
     });
-    window.testState.preferences.gpu = true;
     window.publishState();
   });
+  const cpu = page.locator('input[name="gpu-mode"][value="false"]');
+  const gpu = page.locator('input[name="gpu-mode"][value="true"]');
+  await expect(cpu).toBeChecked();
   await expect(
-    page.getByText("GPU availability is checked when recognition starts.", {
+    page.getByText("AMD Ryzen 7 5700G", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("CPU selected: AMD Ryzen 7 5700G", {
       exact: true,
     }),
   ).toBeVisible();
-  await page.evaluate(() => {
-    window.testState.gpu_checked = true;
-    window.publishState();
-  });
+  await gpu.check();
+  await expect(gpu).toBeChecked();
   await expect(
-    page.getByText("No compatible GPU detected.", { exact: false }),
+    page.getByText("Checking GPU hardware …", { exact: true }),
   ).toBeVisible();
   await page.evaluate(() => {
+    window.testState.gpu_device = "NVIDIA GeForce RTX 3060";
+    window.testState.gpu_checked = true;
     window.testState.gpu_available = true;
     window.publishState();
   });
   await expect(
-    page.getByText("Vulkan acceleration is available.", { exact: false }),
+    page.getByText(
+      "GPU selected. Vulkan device detected: NVIDIA GeForce RTX 3060",
+      { exact: true },
+    ),
   ).toBeVisible();
   await page.evaluate(() => {
     window.testState.gpu_fallback = true;
     window.publishState();
   });
   await expect(
-    page.getByText("The GPU could not complete recognition.", { exact: false }),
+    page.getByText(
+      "GPU recognition failed; this recording used the CPU: AMD Ryzen 7 5700G",
+      { exact: true },
+    ),
   ).toBeVisible();
+  await cpu.check();
+  await expect(
+    page.getByText("CPU selected: AMD Ryzen 7 5700G", { exact: true }),
+  ).toBeVisible();
+});
+
+test("missing selected model gives a direct model download path and translates unavailable reasons", async ({
+  page,
+}) => {
+  await start(page, "linux");
+  await page.evaluate(() => {
+    Object.assign(window.testState, {
+      recording_available: false,
+      recording_unavailable_reason: "model",
+      installed: [],
+    });
+    window.publishState();
+  });
+  await expect(page.locator("#status-title")).toHaveText("Choose a model");
+  await expect(page.locator("#status")).toHaveText(
+    "Choose a speech model before recording.",
+  );
+  await expect(
+    page.getByRole("button", { name: "Start dictation", exact: true }),
+  ).toBeDisabled();
+  await page.locator("#vocabulary").fill("Unsaved vocabulary");
+  await page.locator("#record-unavailable-action").click();
+  await expect(page.locator("#notice")).toHaveText(
+    "Save or discard your changes before switching tabs or language.",
+  );
+  await expect(page.locator("#vocabulary")).toHaveValue("Unsaved vocabulary");
+  await page.locator("[data-discard]").click();
+  await page.locator("#record-unavailable-action").click();
+  await expect(
+    page.getByRole("button", { name: "Models", exact: true }),
+  ).toHaveClass(/selected/);
+  await expect(page.locator('[data-download="base"]')).toHaveText("Download");
+
+  await page.evaluate(() => {
+    window.testState.recording_unavailable_reason = "permission";
+    window.testState.preferences.ui_language = "de";
+    window.publishState();
+  });
+  await expect(page.locator("#status-title")).toHaveText(
+    "Aufnahme nicht verfügbar",
+  );
+  await expect(page.locator("#status")).toHaveText(
+    "Mikrofonzugriff ist erforderlich. Prüfe die Berechtigungen in den allgemeinen Einstellungen.",
+  );
+  await expect(page.locator("#record-unavailable-action")).toHaveText(
+    "Einstellungen öffnen",
+  );
+  await page.locator("#record-unavailable-action").click();
+  await expect(
+    page.getByRole("button", { name: "Allgemein", exact: true }),
+  ).toHaveClass(/selected/);
 });
 
 test("Linux keyboard-only setup suppresses button defaults and restores normal input after Cancel", async ({
@@ -269,6 +337,8 @@ test("saved Linux recordings can be retried or discarded without starting captur
     const host = window as any;
     host.testState.status = "error";
     host.testState.recovery_available = true;
+    host.testState.recording_available = false;
+    host.testState.recording_unavailable_reason = "audio";
     host.testState.message =
       "An unfinished recording is saved. Retry transcription or discard it.";
     host.publishState();
@@ -276,9 +346,12 @@ test("saved Linux recordings can be retried or discarded without starting captur
   await expect(
     page.getByRole("button", { name: "Start dictation", exact: true }),
   ).toHaveCount(0);
-  await page
-    .getByRole("button", { name: "Retry transcription", exact: true })
-    .click();
+  const retry = page.getByRole("button", {
+    name: "Retry transcription",
+    exact: true,
+  });
+  await expect(retry).toBeEnabled();
+  await retry.click();
   await expect
     .poll(() => page.evaluate(() => (window as any).calls.at(-1).command))
     .toBe("retry_transcription");
@@ -1023,7 +1096,7 @@ for (const platform of ["linux", "macos"] as const) {
   });
 }
 
-test("Linux exposes the detected GPU and keeps the CPU choice independent of autostart", async ({
+test("Linux recognition mode selection remains independent of launch-at-login", async ({
   page,
 }) => {
   await start(page, "linux");
@@ -1036,16 +1109,29 @@ test("Linux exposes the detected GPU and keeps the CPU choice independent of aut
     });
     w.publishState();
   });
-  const gpu = page.getByRole("checkbox", {
-    name: "Use GPU acceleration when available",
-  });
+  const gpu = page.locator('input[name="gpu-mode"][value="true"]');
   await gpu.check();
   await expect(
-    page.getByText("GPU · NVIDIA GeForce RTX 3060", { exact: true }),
+    page.getByText(
+      "GPU selected. Vulkan device detected: NVIDIA GeForce RTX 3060",
+      { exact: true },
+    ),
   ).toBeVisible();
   await expect(
     page.getByRole("checkbox", { name: "Launch at login", exact: true }),
   ).not.toBeChecked();
+  await page.evaluate(() => {
+    window.testState.launch_at_login_available = false;
+    window.publishState();
+  });
+  await expect(
+    page.getByRole("checkbox", { name: "Launch at login", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByText("Launch at login is unavailable in this installation.", {
+      exact: true,
+    }),
+  ).toBeVisible();
   await page.reload();
   await expect(gpu).toBeChecked();
   await expect(

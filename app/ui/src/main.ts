@@ -188,18 +188,70 @@ function syncPreferenceControls() {
       if (input instanceof HTMLInputElement && input.type === "checkbox")
         input.checked = !!value;
       else if (input instanceof HTMLInputElement && input.type === "radio")
-        input.checked = input.value === value;
+        input.checked = input.value === String(value);
       else input.value = String(value ?? "");
     });
   const vocabulary = document.querySelector<HTMLTextAreaElement>("#vocabulary");
   if (vocabulary && !dirty) vocabulary.value = state.preferences.vocabulary;
   const recognition = document.querySelector("#recognition-backend");
-  if (recognition) recognition.textContent = recognitionBackend();
+  if (recognition) recognition.textContent = recognitionModeStatus();
 }
-function recognitionBackend() {
-  return state.gpu_available && state.preferences.gpu && !state.gpu_fallback
-    ? `GPU · ${state.gpu_device ?? "Vulkan"}`
-    : "CPU";
+function recordingUnavailableMessage(): string {
+  switch (state.recording_unavailable_reason) {
+    case "model":
+      return t("Choose a speech model before recording.");
+    case "audio":
+      return t(
+        "No audio input is available. Check your microphone and audio settings.",
+      );
+    case "permission":
+      return t(
+        "Microphone permission is required. Check permissions in General settings.",
+      );
+    case "host":
+      return t(
+        "The recording service could not start. Restart OpenWhisper and try again.",
+      );
+    default:
+      return t("Recording is unavailable. Check your settings and try again.");
+  }
+}
+
+function recognitionModeStatus(): string {
+  const cpu = state.cpu_device ?? t("CPU processor");
+  if (!state.preferences.gpu) {
+    return t("CPU selected: {device}", { device: cpu });
+  }
+  if (state.gpu_supported === false) {
+    return t("GPU is selected, but this build uses the CPU: {device}", {
+      device: cpu,
+    });
+  }
+  if (state.gpu_checked === false) {
+    return t("Checking GPU hardware …");
+  }
+  if (state.gpu_fallback) {
+    return t("GPU recognition failed; this recording used the CPU: {device}", {
+      device: cpu,
+    });
+  }
+  if (!state.gpu_available) {
+    return t(
+      "No compatible GPU was detected. Recognition uses the CPU: {device}",
+      {
+        device: cpu,
+      },
+    );
+  }
+  return t("GPU selected. Vulkan device detected: {device}", {
+    device: state.gpu_device ?? t("GPU device"),
+  });
+}
+
+function recognitionModeControl(): string {
+  const cpu = state.cpu_device ?? t("CPU processor");
+  const gpu = state.gpu_device ?? t("Vulkan GPU");
+  return `<fieldset class="compute-mode" aria-label="${esc(t("Recognition mode"))}"><label><input type="radio" name="gpu-mode" data-pref="gpu" value="false" ${state.preferences.gpu ? "" : "checked"}><span><strong>${esc(t("CPU"))}</strong><small>${esc(cpu)}</small></span></label><label><input type="radio" name="gpu-mode" data-pref="gpu" value="true" ${state.preferences.gpu ? "checked" : ""} ${state.gpu_supported ? "" : "disabled"}><span><strong>${esc(t("GPU"))}</strong><small>${esc(gpu)}</small></span></label></fieldset><p class="secondary" id="recognition-backend">${esc(recognitionModeStatus())}</p>`;
 }
 
 const microphoneIcon =
@@ -264,7 +316,7 @@ function recordControl() {
         : t("Start dictation");
   const controls = document.querySelector<HTMLDivElement>("#record-control")!;
   if (!controls.childElementCount) {
-    controls.innerHTML = `<div class="record-status"><div class="audio-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div><strong id="status-title"></strong><span id="status" role="status"></span></div></div><div class="record-actions"><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-label"></span></button></div>`;
+    controls.innerHTML = `<div class="record-status"><div class="audio-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="general" hidden></button></div><div class="record-actions"><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-label"></span></button></div>`;
     document
       .querySelector("#record")!
       .addEventListener(
@@ -287,15 +339,33 @@ function recordControl() {
               : "cancel_recording",
           ),
       );
+    document
+      .querySelector<HTMLButtonElement>("#record-unavailable-action")!
+      .addEventListener("click", () => {
+        if (dirty) {
+          notice(
+            "Save or discard your changes before switching tabs or language.",
+          );
+          return;
+        }
+        tab =
+          state.recording_unavailable_reason === "model" ? "models" : "general";
+        render();
+      });
   }
   const button = document.querySelector<HTMLButtonElement>("#record")!;
   button.disabled =
-    state.recording_available === false ||
-    busy ||
-    !!state.recording_shortcut ||
-    ["downloading", "installing"].includes(state.updates.status);
+    !recording &&
+    !recovery &&
+    (state.recording_available === false ||
+      busy ||
+      !!state.recording_shortcut ||
+      ["downloading", "installing"].includes(state.updates.status));
   button.classList.toggle("recording", recording);
-  button.title = t(state.message);
+  button.title =
+    state.recording_available === false && !recording && !recovery
+      ? recordingUnavailableMessage()
+      : t(state.message);
   document.querySelector("#record-symbol")!.innerHTML = symbol(
     recording ? "M6 6h12v12H6z" : busy ? "M12 3a9 9 0 1 1-9 9" : microphoneIcon,
   );
@@ -310,9 +380,13 @@ function recordControl() {
       ? t("Finding your words")
       : state.status === "error"
         ? t("Something needs attention")
-        : state.recording_available === false
-          ? t("Development preview")
-          : t("Ready when you are");
+        : state.recording_available === false &&
+            !recovery &&
+            state.recording_unavailable_reason === "model"
+          ? t("Choose a model")
+          : state.recording_available === false && !recovery
+            ? t("Recording is unavailable")
+            : t("Ready when you are");
   document.querySelector("#record-label")!.textContent = text;
   const cancel = document.querySelector<HTMLButtonElement>("#cancel")!;
   cancel.hidden = !recording && !recovery;
@@ -321,7 +395,23 @@ function recordControl() {
     t(recovery ? "Discard saved recording" : "Discard recording"),
   );
   cancel.textContent = t(recovery ? "Discard" : "Cancel");
-  document.querySelector("#status")!.textContent = t(state.message);
+  const unavailableAction = document.querySelector<HTMLButtonElement>(
+    "#record-unavailable-action",
+  )!;
+  const unavailable =
+    state.recording_available === false && !recording && !recovery;
+  unavailableAction.hidden =
+    !unavailable || state.recording_unavailable_reason === "host";
+  unavailableAction.dataset.goto =
+    state.recording_unavailable_reason === "model" ? "models" : "general";
+  unavailableAction.textContent = t(
+    state.recording_unavailable_reason === "model"
+      ? "Open models"
+      : "Open settings",
+  );
+  document.querySelector("#status")!.textContent = unavailable
+    ? recordingUnavailableMessage()
+    : t(state.message);
 }
 
 function render() {
@@ -398,6 +488,7 @@ function render() {
       state.gpu_checked,
       state.gpu_available,
       state.gpu_device,
+      state.cpu_device,
       state.gpu_fallback,
       state.launch_at_login_available,
       state.local_processing !== undefined,
@@ -660,6 +751,9 @@ function render() {
             !!p.launch_at_login,
             state.launch_at_login_available === false,
           ) +
+          (state.launch_at_login_available === false
+            ? `<p class="secondary">${esc(t("Launch at login is unavailable in this installation."))}</p>`
+            : "") +
           (state.macos?.launch_at_login_pending
             ? `<div class="row approval"><span>${esc(t("Allow OpenWhisper in System Settings to finish enabling launch at login."))}</span><button data-command="open_login_settings">${esc(t("System Settings"))}</button></div>`
             : "") +
@@ -693,29 +787,7 @@ function render() {
                 t("Keyboard portal"),
                 state.paste_portal ? t("Available") : t("Unavailable"),
               ) +
-              row(
-                t("Recognition"),
-                `<span id="recognition-backend">${esc(recognitionBackend())}</span>`,
-              ) +
-              toggle(
-                t("Use GPU acceleration when available"),
-                "gpu",
-                p.gpu,
-                !state.gpu_supported,
-              ) +
-              `<p class="secondary">${esc(
-                t(
-                  !state.gpu_supported
-                    ? "GPU support is not included in this build. Install a current Linux package."
-                    : state.gpu_checked === false
-                      ? "GPU availability is checked when recognition starts."
-                      : state.gpu_fallback
-                        ? "The GPU could not complete recognition. The recording was processed on the CPU."
-                        : !state.gpu_available
-                          ? "No compatible GPU detected. CPU recognition remains available. Check your Vulkan driver and restart the app."
-                          : "Vulkan acceleration is available. Recoverable GPU errors fall back to the CPU.",
-                ),
-              )}</p>`),
+              row(t("Recognition"), recognitionModeControl())),
         isMac()
           ? ""
           : t(
@@ -969,7 +1041,8 @@ function render() {
           const value =
             input instanceof HTMLInputElement && input.type === "checkbox"
               ? input.checked
-              : input.dataset.pref === "hold_to_record"
+              : input.dataset.pref === "hold_to_record" ||
+                  input.dataset.pref === "gpu"
                 ? input.value === "true"
                 : input.value;
           void preference(input.dataset.pref!, value);

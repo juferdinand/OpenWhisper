@@ -6,7 +6,10 @@ a schema-validated sandboxed bridge and private settings/session directories. An
 recording build connects the shared controls to native capture and clipboard output on
 Linux and macOS. See [current release status](ELECTRON-STATUS.md).
 The default lightweight preview leaves recording disabled. Recording Dev supports explicit
-Linux trigger setup and optional keyboard-only paste; autostart and stable updates remain disabled.
+Linux trigger setup and optional keyboard-only paste. Source Dev previews keep autostart disabled;
+a separately installed Linux Dev package with an explicit private profile can opt in through
+Launch at login. Its `io.github.whisperfree.dev.desktop` registration remains separate from the
+stable app. Stable updates remain disabled in Dev.
 It does not replace the installed application or establish desktop/speech parity.
 The About view shows the Dev build's source commit and whether the checkout was modified;
 the Models view exposes the selected private model directory.

@@ -4,12 +4,12 @@ import { WaylandClipboard } from "../services/platforms/linux/wayland-clipboard.
 import { portalPasteStateSchema } from "../platforms/linux/shared/portal-paste.js";
 import type { IpcMainInvokeEvent } from "electron";
 import { readFile, realpath } from "node:fs/promises";
-import { homedir } from "node:os";
+import { cpus, homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
-  appStateSchema, modelSchema, preferencesSchema, validateEvent, isSteadyRecordingUpdate,
+  appStateSchema, hardwareDeviceNameSchema, modelSchema, preferencesSchema, validateEvent, isSteadyRecordingUpdate,
   MAX_USER_TEXT_BYTES, MAX_UI_REQUEST_BYTES,
   type AppState, type EventName, type EventPayload, type UpdateState,
 } from "../contracts/ui/state.js";
@@ -40,7 +40,7 @@ import { developmentRecordingDescriptorSchema, selectDevelopmentRecordingDescrip
 import { DevelopmentRecordingHost, developmentPulseServer, formatSourceDiscoveryFailure } from "./development-recording-host.js";
 import { saveTranscript } from "../services/development/development-transcripts.js";
 import { DevelopmentPlatformHost } from "./development-platform-host.js";
-import { createRecordingControlPort } from "./recording-control.js";
+import { createRecordingControlPort, recordingUnavailableReason } from "./recording-control.js";
 import { portalShortcutStateSchema } from "../platforms/linux/shared/portal-shortcuts.js";
 import { KdeKeyCapture } from "../platforms/linux/kde/key-capture.js";
 import { modifierOnly } from "../platforms/linux/kde/keyboard.js";
@@ -58,6 +58,7 @@ import { ownedMacosUpdateFixtureEffects } from "./owned-macos-update-fixture.js"
 import type { PreparedMacosUpdateInstall } from "../services/update/macos/macos-update-install.js";
 import { LinuxAutostart } from "../services/platforms/linux/linux-autostart.js";
 import { admitLinuxInstalledLaunch } from "./linux-installed-launch.js";
+import { admitLinuxDevelopmentAutostart } from "./linux-development-autostart.js";
 import { openLinuxUpdateGuiChannel, LINUX_UPDATE_PROTOCOL, type LinuxUpdateGuiChannel, type LinuxUpdateResponse } from "./linux-update-channel.js";
 import { LINUX_RESTART_NONCE, LINUX_RESTART_VERSION } from "./linux-restart.js";
 import { createRequire } from "node:module";
@@ -176,7 +177,11 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   });
   app.on("window-all-closed", () => { app.quit(); });
   await app.whenReady();
-  const preferences = await PreferenceStore.open(profile);
+  const devAutostart = process.platform === "linux" && identity.kind === "development" && app.isPackaged
+    ? admitLinuxDevelopmentAutostart({ build: identity, platform: process.platform, packaged: app.isPackaged,
+      executable: await realpath(process.execPath), appPath: await realpath(app.getAppPath()),
+      resourcesPath: await realpath(process.resourcesPath), argv: process.argv, profile }) : undefined;
+  const preferences = await PreferenceStore.open(profile, { allowDevelopmentAutostart: devAutostart !== undefined });
   const processingProfile = await PrivateStateStore.open(
     join(profile.paths.settings, "local-processing.json"), localProcessingProfileSchema, defaultLocalProcessingProfile(),
     1024 * 1024, { invalidContent: "preserve-and-default" },
@@ -195,8 +200,9 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let host: DevelopmentRecordingHost | undefined;
   let gpuSelection = {
     supported: descriptor?.platform === "linux" && descriptor.speech.entries.some((entry) => entry.backend === "vulkan"),
-    checked: false, available: false, fallback: false,
+    checked: false, available: false, fallback: false, device: null as string | null,
   };
+  const cpuName = hardwareDeviceNameSchema.safeParse(cpus()[0]?.model.trim());
   let configured = false;
   let recordingControl = false, cancelRequested = false;
   let recordingOperation: Promise<unknown> | undefined;
@@ -255,6 +261,14 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           ...(launch.kind === "appimage" ? { appImage: { image: launch.arguments[0], assertUnchanged: launch.assertUnchanged } } : {}) });
       }
     } catch { /* Keep persisted requests intact when installation or OS facts are unavailable. */ }
+    await refreshLogin();
+  } else if (devAutostart) {
+    try {
+      autostart = await LinuxAutostart.open({ appId: profile.appId,
+        configHome: process.env["XDG_CONFIG_HOME"] || join(homedir(), ".config"),
+        configDirs: (process.env["XDG_CONFIG_DIRS"] || "/etc/xdg").split(":").filter(Boolean),
+        executable: devAutostart.executable, launchArguments: devAutostart.launchArguments });
+    } catch { /* Source and unsafe Dev installations keep automatic startup unavailable. */ }
     await refreshLogin();
   }
   if (process.platform === "darwin" && identity.kind === "stable") {
@@ -358,6 +372,15 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     if (descriptor.platform === "linux") {
       try { audioServer = await checkedAudioServer(); sources = await host.enumerate(audioServer); }
       catch { message = "A local audio server is not available."; }
+      // Complete the no-model probe before enabling recording; it shares the supervised speech allocation.
+      if (gpuSelection.supported) {
+        try { await host.discoverGpu(); }
+        catch {
+          // Eligible loader/device failures already return safe CPU fallback after cleanup.
+          // A rejected probe may have poisoned ownership; never advertise this host as ready.
+          recordingRetired = true;
+        }
+      }
     }
   }
   const platform = process.platform === "darwin" ? "macos" : "linux";
@@ -369,6 +392,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   const state = (): AppState => {
     const preferenceSnapshot = preferences.snapshot();
     const macShortcutState = macShortcut?.state();
+    const gpuName = hardwareDeviceNameSchema.safeParse(gpuSelection.device);
+    const unavailable = recordingUnavailableReason({ host: !recordingRetired && !!host,
+      model: installed.some((item) => item.model.id === preferenceSnapshot.model), busy: recording.busy,
+      recovery: recording.recoveryAvailable, mac: macRecording, microphoneAllowed, audioServer: !!audioServer });
     return appStateSchema.parse({
       updates,
       launch_at_login_available: !!autostart && loginFact !== undefined,
@@ -400,7 +427,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       recording_shortcut: (macShortcutState?.configuring ?? false) || !!keyCapture || !!shortcut.nativeX11 && shortcut.configuring,
       paste_ready: macPaste ? accessibilityAllowed : pasteState.ready, paste_configuring: pasteState.configuring,
       gpu_available: gpuSelection.available, gpu_supported: gpuSelection.supported, gpu_checked: gpuSelection.checked,
-      gpu_device: null, gpu_fallback: preferenceSnapshot.gpu && gpuSelection.fallback, recovery_available: recording.recoveryAvailable,
+      cpu_device: cpuName.success ? cpuName.data : null, gpu_device: gpuName.success ? gpuName.data : null,
+      gpu_fallback: preferenceSnapshot.gpu && gpuSelection.fallback, recovery_available: recording.recoveryAvailable,
       overlay_available: !!overlay && !overlay.isDestroyed() && (!waylandOverlay || waylandOverlay.available),
       ...(overlayUnavailableReason ? { overlay_unavailable_reason: overlayUnavailableReason } : {}),
       download, progress: download ? downloadProgress : inferenceProgress,
@@ -408,8 +436,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       recording_generation: recording.generation,
       model_directory: profile.paths.models,
       ...(identity.kind === "development" ? { profile: "development", development_build: `${build.commit.slice(0, 12)}${build.modified ? "+modified" : ""}` } : {}),
-      recording_available: !recordingRetired && updateReserved !== "install" && !!host && (macRecording ? microphoneAllowed || recording.busy : !!audioServer || recording.busy) &&
-        (recording.busy || installed.some((item) => item.model.id === preferenceSnapshot.model)),
+      recording_available: updateReserved !== "install" && unavailable === undefined,
+      ...(unavailable ? { recording_unavailable_reason: unavailable } : {}),
       local_processing: processingProfile.snapshot(),
       local_processing_invalid_profile: processingProfile.invalidContent,
     });

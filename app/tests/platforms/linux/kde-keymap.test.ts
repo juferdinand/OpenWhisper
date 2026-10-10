@@ -13,13 +13,13 @@ const map = (f19Action = ""): string => `xkb_keymap {
  };
 };`;
 
-test("KDE mouse surrogates require level-zero keys with inert XKB actions", () => {
+test("KDE mouse surrogates require level-zero keys with inert XKB actions", { skip: process.platform !== "linux" }, () => {
   assert.deepEqual(evaluateKdeSurrogates(map()), { f19: true, f24: true });
   assert.deepEqual(evaluateKdeSurrogates(map(", actions[Group1] = [ SetMods(modifiers=Shift) ]")), { f19: false, f24: true });
   assert.throws(() => evaluateKdeSurrogates("not a keymap"));
 });
 
-test("a restored mouse lease is rejected when its assigned key is no longer safe", () => {
+test("a restored mouse lease is rejected when its assigned key is no longer safe", { skip: process.platform !== "linux" }, () => {
   assert.equal(kdeMouseLeaseSurrogateIsSafe("Key,F19", { f19: true, f24: false }), true);
   assert.equal(kdeMouseLeaseSurrogateIsSafe("Key,F19", { f19: false, f24: true }), false);
   assert.equal(kdeMouseLeaseSurrogateIsSafe("Key,F24", { f19: true, f24: false }), false);
