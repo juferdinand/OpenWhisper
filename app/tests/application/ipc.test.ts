@@ -5,6 +5,7 @@ import { MAX_USER_TEXT_BYTES } from "../../src/contracts/ui/state.js";
 import type { AppState, PreferencePatch } from "../../src/contracts/ui/state.js";
 import {
   createUiDispatcher,
+  performWindowAction,
   MAX_UI_REQUEST_BYTES,
   TRUSTED_UI_URLS,
 } from "../../src/main/ipc.js";
@@ -69,6 +70,34 @@ test("mouse capture is bounded and cannot be invoked by the recording overlay", 
   assert.deepEqual(buttons, []);
   assert.deepEqual(await bridge.dispatch({ sender: main, serializedRequest: request("capture_mouse_trigger", { button: 8 }) }), { ok: true, value: null });
   assert.deepEqual(buttons, [8]);
+});
+
+test("main window actions validate their enum and are forbidden to the overlay", async () => {
+  const actions: string[] = [];
+  const bridge = dispatcher({ window_action: ({ action }) => { actions.push(action); } });
+  failure(await bridge.dispatch({ sender: main, serializedRequest: request("window_action", { action: "restore" }) }), "INVALID_REQUEST");
+  failure(await bridge.dispatch({ sender: overlay, serializedRequest: request("window_action", { action: "close" }) }), "FORBIDDEN_COMMAND");
+  assert.deepEqual(await bridge.dispatch({ sender: main, serializedRequest: request("window_action", { action: "maximize" }) }), { ok: true, value: null });
+  assert.deepEqual(actions, ["maximize"]);
+});
+
+test("window action adapter minimizes, toggles maximize, and closes through the guarded close event", () => {
+  const calls: string[] = [];
+  let maximized = false;
+  const fake = {
+    isDestroyed: () => false,
+    isMaximized: () => maximized,
+    minimize: () => calls.push("minimize"),
+    maximize: () => { maximized = true; calls.push("maximize"); },
+    unmaximize: () => { maximized = false; calls.push("unmaximize"); },
+    close: () => calls.push("close"),
+  };
+  performWindowAction(fake, "minimize");
+  performWindowAction(fake, "maximize");
+  performWindowAction(fake, "maximize");
+  performWindowAction(fake, "close");
+  assert.deepEqual(calls, ["minimize", "maximize", "unmaximize", "close"]);
+  assert.throws(() => performWindowAction(undefined, "close"));
 });
 
 test("typed preference handler receives only the validated patch", async () => {

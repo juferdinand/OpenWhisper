@@ -743,6 +743,7 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(page.locator("#record-unavailable-action")).toBeHidden();
     await expect(page.locator("#cancel")).toBeHidden();
     await expect(page.locator("#record")).toBeDisabled();
+    await expect(page.locator("[data-window-action]")).toHaveCount(0);
     await page.evaluate(() => {
       Object.assign(window.testState, {
         status: "error",
@@ -777,6 +778,13 @@ for (const platform of ["linux", "macos"] as const) {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await start(page, platform);
+    await expect(page.locator("[data-window-action]")).toHaveCount(3);
+    for (const action of ["minimize", "maximize", "close"] as const) {
+      await page.locator(`[data-window-action="${action}"]`).click();
+      await expect
+        .poll(() => page.evaluate(() => window.calls.at(-1)))
+        .toEqual({ command: "window_action", args: { action } });
+    }
     await expect(page.locator("nav button")).toHaveText([
       "General",
       "Models",
@@ -980,6 +988,9 @@ for (const platform of ["linux", "macos"] as const) {
   }) => {
     const microphoneHeading =
       platform === "macos" ? "Allow microphone access" : "Choose a microphone";
+    const longMicrophoneId = `alsa_input.usb-${"0123456789abcdef".repeat(7)}`;
+    const longFriendlyName = `Studio microphone ${"for broadcast and dictation ".repeat(6)}`;
+    const unlabeledMicrophoneId = `alsa_input.pci-${"fedcba9876543210".repeat(7)}`;
     await start(page, platform, false, true);
     await expect(page.locator("nav button[data-tab]")).toHaveCount(0);
     await expect(
@@ -1075,6 +1086,48 @@ for (const platform of ["linux", "macos"] as const) {
         .locator("main")
         .evaluate((e) => e.scrollWidth <= e.clientWidth),
     ).toBe(true);
+    const modelFamilies = page.locator("details[data-model-family]");
+    await expect(modelFamilies).toHaveCount(2);
+    await expect(modelFamilies.nth(0)).toHaveJSProperty("open", false);
+    await expect(modelFamilies.nth(1)).toHaveJSProperty("open", false);
+    await page.locator('[data-model-family="whisper"] > summary').click();
+    await expect(
+      page.locator('[data-model-family="whisper"]'),
+    ).toHaveJSProperty("open", true);
+    await page.locator('[data-model-family="parakeet"] > summary').click();
+    await expect(
+      page.locator('[data-model-family="parakeet"]'),
+    ).toHaveJSProperty("open", true);
+    await expect(page.locator(".setup-model-family .model-row")).toHaveCount(9);
+    await page.evaluate(() => {
+      window.testState.recommended_models = ["small", "parakeet-v3-q4"];
+      window.publishState();
+    });
+    const whisperFamily = page.locator('[data-model-family="whisper"]');
+    const parakeetFamily = page.locator('[data-model-family="parakeet"]');
+    await expect(whisperFamily).toHaveJSProperty("open", true);
+    await expect(parakeetFamily).toHaveJSProperty("open", true);
+    await expect(
+      whisperFamily
+        .locator(".model-row")
+        .filter({ hasText: "Whisper Small" })
+        .getByText("Starting recommendation"),
+    ).toBeVisible();
+    await expect(
+      whisperFamily
+        .locator(".model-row")
+        .filter({ hasText: "Whisper Base" })
+        .getByText("Starting recommendation"),
+    ).toHaveCount(0);
+    await expect(
+      parakeetFamily
+        .locator(".model-row")
+        .filter({ hasText: "Parakeet TDT v3 (compact)" })
+        .getByText("Starting recommendation"),
+    ).toBeVisible();
+    await parakeetFamily.locator("summary").click();
+    await expect(parakeetFamily).toHaveJSProperty("open", false);
+    await expect(whisperFamily).toHaveJSProperty("open", true);
     await expect(page.locator("#record-control")).toBeHidden();
     await page.screenshot({
       path: `test-results/${platform}-setup-model-minimum.png`,
@@ -1095,6 +1148,7 @@ for (const platform of ["linux", "macos"] as const) {
       .filter({ hasText: "Whisper Base" });
     await baseModel.getByRole("button", { name: "Download" }).click();
     await expect(baseModel.getByRole("progressbar")).toBeVisible();
+    await expect(whisperFamily).toHaveJSProperty("open", true);
     await expect
       .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
       .toBe("download_model");
@@ -1119,6 +1173,7 @@ for (const platform of ["linux", "macos"] as const) {
     ).toBeVisible();
     await page.getByRole("button", { name: "Back", exact: true }).click();
     await expect(page.getByText("Step 1 of 6", { exact: true })).toBeVisible();
+    await expect(whisperFamily).toHaveJSProperty("open", true);
 
     await page.evaluate(() => {
       const w = window as any;
@@ -1140,21 +1195,59 @@ for (const platform of ["linux", "macos"] as const) {
     ).toBeVisible();
 
     if (platform === "linux") {
-      await page.evaluate(() => {
-        window.testState.microphones = [
-          "Built-in microphone",
-          "USB microphone",
-        ];
-        window.publishState();
-      });
-      await page
-        .getByRole("combobox", { name: "Microphone" })
-        .selectOption("USB microphone");
+      await page.evaluate(
+        ({ longMicrophoneId, longFriendlyName, unlabeledMicrophoneId }) => {
+          const state = window.testState as any;
+          state.microphones = [
+            "Built-in microphone",
+            "USB microphone",
+            longMicrophoneId,
+            unlabeledMicrophoneId,
+          ];
+          state.microphone_labels = [
+            { id: longMicrophoneId, name: longFriendlyName },
+          ];
+          window.publishState();
+        },
+        { longMicrophoneId, longFriendlyName, unlabeledMicrophoneId },
+      );
+      const microphone = page.getByRole("combobox", { name: "Microphone" });
+      await microphone.selectOption(longMicrophoneId);
+      await expect(microphone.locator("option:checked")).toHaveText(
+        longFriendlyName,
+      );
       await expect
         .poll(() =>
           page.evaluate(() => window.testState.preferences.microphone),
         )
-        .toBe("USB microphone");
+        .toBe(longMicrophoneId);
+      await microphone.selectOption(unlabeledMicrophoneId);
+      await expect(microphone.locator("option:checked")).toHaveText(
+        unlabeledMicrophoneId,
+      );
+      await microphone.selectOption(longMicrophoneId);
+      expect(
+        await page.evaluate(() => {
+          const card = document.querySelector<HTMLElement>(".setup-card")!;
+          const body = document.querySelector<HTMLElement>(".setup-card-body")!;
+          const content = document.querySelector<HTMLElement>(
+            ".setup-panel-content",
+          )!;
+          const main = document.querySelector<HTMLElement>("main")!;
+          const documentElement = document.documentElement;
+          return [card, body, content, main, documentElement].map(
+            (element) => element.scrollWidth <= element.clientWidth,
+          );
+        }),
+      ).toEqual([true, true, true, true, true]);
+      await page
+        .getByRole("combobox", { name: "Microphone" })
+        .selectOption(longMicrophoneId);
+      await expect
+        .poll(() =>
+          page.evaluate(() => window.testState.preferences.microphone),
+        )
+        .toBe(longMicrophoneId);
     }
 
     await page.getByRole("button", { name: "Continue", exact: true }).click();
@@ -1310,17 +1403,30 @@ for (const platform of ["linux", "macos"] as const) {
     if (platform === "linux") {
       expect(
         await page.evaluate(() => window.testState.preferences.microphone),
-      ).toBe("USB microphone");
-      await page.evaluate(() => {
-        window.testState.microphones = [
-          "Built-in microphone",
-          "USB microphone",
-        ];
-        window.publishState();
-      });
+      ).toBe(longMicrophoneId);
+      await page.evaluate(
+        ({ longMicrophoneId, longFriendlyName, unlabeledMicrophoneId }) => {
+          window.testState.microphones = [
+            "Built-in microphone",
+            "USB microphone",
+            longMicrophoneId,
+            unlabeledMicrophoneId,
+          ];
+          window.testState.microphone_labels = [
+            { id: longMicrophoneId, name: longFriendlyName },
+          ];
+          window.publishState();
+        },
+        { longMicrophoneId, longFriendlyName, unlabeledMicrophoneId },
+      );
       await expect(
         page.getByRole("combobox", { name: "Mikrofon" }),
-      ).toHaveValue("USB microphone");
+      ).toHaveValue(longMicrophoneId);
+      await expect(
+        page
+          .getByRole("combobox", { name: "Mikrofon" })
+          .locator("option:checked"),
+      ).toHaveText(longFriendlyName);
     }
   });
   test(`${platform}: update controls show availability and prevent recording during installation`, async ({

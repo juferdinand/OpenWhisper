@@ -27,6 +27,7 @@ let shellKey = "";
 let renderedTab: Tab | undefined;
 let setupStep = -1;
 let focusSetupTitle = false;
+const expandedModelFamilies = new Set<string>();
 let preferenceQueue = Promise.resolve();
 let pendingPreferences = 0;
 let mouseTriggerCandidate: number | undefined;
@@ -40,6 +41,8 @@ document.documentElement.classList.toggle("overlay", overlay);
 app.innerHTML = '<div id="notice" role="alert" hidden></div>';
 const option = (value: string, label: string, selected: string) =>
   `<option value="${esc(value)}" ${value === selected ? "selected" : ""}>${esc(label)}</option>`;
+const modelRecommendations = () =>
+  state.recommended_models ?? state.macos?.recommended ?? [];
 const tabs: [Tab, string, string][] = [
   ["setup", "Setup", "M4 5h2m4 0h10M4 12h2m4 0h10M4 19h2m4 0h10"],
   [
@@ -58,6 +61,16 @@ const tabs: [Tab, string, string][] = [
 ];
 const symbol = (path: string) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
+const wordmark = () =>
+  `<span class="window-wordmark"><span>open</span><span>whisper</span></span>`;
+function windowTitlebar(): string {
+  if (overlay) return "";
+  const dev =
+    state.profile === "development"
+      ? `<span class="window-dev-badge">Dev</span>`
+      : "";
+  return `<header class="window-titlebar"><div class="window-titlebar-brand"><img src="./branding/icon-bordered.svg" width="24" height="24" alt="">${wordmark()}${dev}</div><div class="window-actions"><button data-window-action="minimize" aria-label="${esc(t("Minimize window"))}" title="${esc(t("Minimize window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 11.5h10"/></svg></button><button data-window-action="maximize" aria-label="${esc(t("Maximize or restore window"))}" title="${esc(t("Maximize or restore window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/></svg></button><button class="window-close" data-window-action="close" aria-label="${esc(t("Close window"))}" title="${esc(t("Close window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div></header>`;
+}
 const section = (title: string, body: string, note = "") =>
   `<section>${title ? `<h2>${title}</h2>` : ""}<div class="group">${body}</div>${note ? `<p class="section-note">${note}</p>` : ""}</section>`;
 const row = (label: string, control: string) =>
@@ -94,13 +107,62 @@ const languages = () => {
 const isMac = () => state.platform === "macos";
 const macToggleOnly = () =>
   isMac() && state.macos?.shortcut_toggle_only === true;
-const microphoneControl = () =>
-  `<select data-pref="microphone" aria-label="${esc(t("Microphone"))}">${option("", t("System default"), state.preferences.microphone)}${state.microphones.map((m) => option(m, m, state.preferences.microphone)).join("")}</select>`;
+const microphoneControl = () => {
+  const labels = new Map(
+    (state.microphone_labels ?? []).map(({ id, name }) => [id, name]),
+  );
+  return `<select class="microphone-select" data-pref="microphone" aria-label="${esc(t("Microphone"))}">${option("", t("System default"), state.preferences.microphone)}${state.microphones.map((id) => option(id, labels.get(id) ?? id, state.preferences.microphone)).join("")}</select>`;
+};
 function modelRow(m: Model): string {
   const installed = state.installed.includes(m.id),
     selected = state.preferences.model === m.id && installed,
     downloading = state.download === m.id;
-  return `<div class="model-row ${selected ? "active-model" : ""}"><button class="model-radio" aria-label="${esc(t("Use {model}", { model: m.title }))}" aria-pressed="${selected}" data-select="${esc(m.id)}" ${!installed ? "disabled" : ""}><span></span></button><div class="model-description"><strong>${esc(m.title)}</strong>${(isMac() ? state.macos!.recommended.includes(m.id) : m.id === "base") ? `<span class="recommendation">${esc(t("Recommended"))}</span>` : ""}<p>${esc(m.size)} · ${esc(t(m.note))}</p></div><div class="model-buttons">${downloading ? `<progress aria-label="${esc(t("Download progress"))}" value="${state.progress}" max="1"></progress><button data-cancel-download>${esc(t("Cancel"))}</button>` : installed ? `${selected ? `<span class="success">${esc(t("Active"))}</span>` : `<button data-select="${esc(m.id)}">${esc(t("Use"))}</button>`}` : `<button data-download="${esc(m.id)}" ${state.download || ["downloading", "installing"].includes(state.updates.status) ? "disabled" : ""}>${esc(t("Download"))}</button>`}${installed && isMac() ? `<button data-delete="${esc(m.id)}" aria-label="${esc(t("Delete {model}", { model: m.title }))}" class="destructive">×</button>` : ""}</div></div>`;
+  const recommended = modelRecommendations().includes(m.id);
+  return `<div class="model-row ${selected ? "active-model" : ""}"><button class="model-radio" aria-label="${esc(t("Use {model}", { model: m.title }))}" aria-pressed="${selected}" data-select="${esc(m.id)}" ${!installed ? "disabled" : ""}><span></span></button><div class="model-description"><strong>${esc(m.title)}</strong>${recommended ? `<span class="recommendation">${esc(t("Starting recommendation"))}</span>` : ""}<p>${esc(m.size)} · ${esc(t(m.note))}</p></div><div class="model-buttons">${downloading ? `<progress aria-label="${esc(t("Download progress"))}" value="${state.progress}" max="1"></progress><button data-cancel-download>${esc(t("Cancel"))}</button>` : installed ? `${selected ? `<span class="success">${esc(t("Active"))}</span>` : `<button data-select="${esc(m.id)}">${esc(t("Use"))}</button>`}` : `<button data-download="${esc(m.id)}" ${state.download || ["downloading", "installing"].includes(state.updates.status) ? "disabled" : ""}>${esc(t("Download"))}</button>`}${installed && isMac() ? `<button data-delete="${esc(m.id)}" aria-label="${esc(t("Delete {model}", { model: m.title }))}" class="destructive">×</button>` : ""}</div></div>`;
+}
+function recognitionHardwareStatus(): string {
+  if (isMac()) return t("Native speech engine");
+  const cpu = state.cpu_device ?? t("CPU");
+  const gpu = state.gpu_device;
+  if (state.gpu_fallback)
+    return t("CPU selected after GPU fallback: {device}", { device: cpu });
+  if (state.preferences.gpu && state.gpu_checked === false)
+    return t("Checking GPU hardware …");
+  if (state.preferences.gpu && state.gpu_supported === false)
+    return t("GPU is selected, but this build uses the CPU: {device}", {
+      device: cpu,
+    });
+  if (
+    state.preferences.gpu &&
+    state.gpu_available &&
+    state.gpu_supported !== false
+  )
+    return t("Vulkan GPU selected: {device}", {
+      device: gpu ?? t("Vulkan GPU"),
+    });
+  if (state.preferences.gpu && !state.gpu_available)
+    return t("GPU unavailable; using CPU: {device}", { device: cpu });
+  if (state.gpu_available && gpu)
+    return t("CPU selected; Vulkan GPU available: {device}", {
+      device: gpu,
+    });
+  return t("CPU selected: {device}", { device: cpu });
+}
+function setupModelGroups(): string {
+  return `<div class="setup-model-families">${(
+    [
+      ["whisper", "OpenAI Whisper"],
+      ["parakeet", "NVIDIA Parakeet"],
+    ] as const
+  )
+    .map(([family, label]) => {
+      const models = state.models.filter((model) => model.family === family);
+      const recommended = models.find((model) =>
+        modelRecommendations().includes(model.id),
+      );
+      return `<details class="setup-model-family" data-model-family="${family}" ${expandedModelFamilies.has(family) ? "open" : ""}><summary><span class="setup-family-name">${esc(t(label))}<small>${esc(recognitionHardwareStatus())}</small>${recommended ? `<small>${esc(t("Starting recommendation: {model}", { model: recommended.title }))}</small>` : `<small>${esc(t("No starting recommendation is available."))}</small>`}</span><span class="setup-family-chevron" aria-hidden="true">⌄</span></summary><div class="setup-family-models">${models.map(modelRow).join("")}</div></details>`;
+    })
+    .join("")}</div>`;
 }
 const outputs = () =>
   `<div class="radio-group">${[["paste", t("Paste at the cursor")], ["clipboard", t("Copy to clipboard only")], ...(isMac() ? [["editor", t("Open in a text editor")]] : [])].map(([v, l]) => `<label><input type="radio" name="output" data-pref="output" value="${v}" ${state.preferences.output === v ? "checked" : ""}>${l}</label>`).join("")}</div>`;
@@ -282,13 +344,13 @@ function renderShell() {
   const setup = !state.preferences.setup_completed;
   document.documentElement.classList.toggle("setup-mode", setup && !overlay);
   if (setup) {
-    app.innerHTML = `<main class="setup-main"><header class="setup-topbar"><div class="setup-brand"><img src="./branding/icon-bordered.svg" width="34" height="34" alt=""><strong>OpenWhisper${state.profile === "development" ? " <span>Dev</span>" : ""}</strong></div></header><div id="notice" role="alert" hidden></div><div id="content"></div></main><div id="record-control"></div>`;
+    app.innerHTML = `${windowTitlebar()}<main class="setup-main"><div id="notice" role="alert" hidden></div><div id="content"></div></main><div id="record-control"></div>`;
     if (overlay)
       app.innerHTML =
         '<div id="notice" role="alert" hidden></div><div id="record-control"></div>';
     return;
   }
-  app.innerHTML = `<aside><div class="sidebar-brand"><img src="./app-icon.png" width="38" height="38" alt=""><div><strong>OpenWhisper${state.profile === "development" ? " Dev" : ""}</strong><span>${esc(t("Make yourself heard."))}</span></div></div><div class="nav-caption">${esc(t("WORKSPACE"))}</div><nav aria-label="${esc(t("Settings"))}">${tabs
+  app.innerHTML = `${windowTitlebar()}<aside><div class="nav-caption">${esc(t("WORKSPACE"))}</div><nav aria-label="${esc(t("Settings"))}">${tabs
     .filter(([id]) =>
       state.preferences.setup_completed ? id !== "setup" : id === "setup",
     )
@@ -305,9 +367,13 @@ function renderShell() {
 }
 app.addEventListener("click", (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
-    "[data-tab], [data-ui-language]",
+    "[data-tab], [data-ui-language], [data-window-action]",
   );
   if (!button) return;
+  if (button.dataset.windowAction) {
+    void command("window_action", { action: button.dataset.windowAction });
+    return;
+  }
   if (dirty) {
     notice(
       t("Save or discard your changes before switching tabs or language."),
@@ -448,6 +514,15 @@ function recordControl() {
 
 function render() {
   if (!state) return;
+  document
+    .querySelectorAll<HTMLDetailsElement>("[data-model-family]")
+    .forEach((details) => {
+      if (!details.isConnected) return;
+      const family = details.dataset.modelFamily;
+      if (!family) return;
+      if (details.open) expandedModelFamilies.add(family);
+      else expandedModelFamilies.delete(family);
+    });
   setLocale(state.preferences.ui_language ?? "en");
   if (!state.preferences.setup_completed) tab = "setup";
   else if (tab === "setup") tab = "general";
@@ -495,6 +570,8 @@ function render() {
         : state.preferences,
       state.installed,
       state.microphones,
+      state.microphone_labels,
+      state.recommended_models,
       state.shortcut_portal,
       state.paste_portal,
       state.shortcut,
@@ -569,9 +646,9 @@ function render() {
       {
         title: t("Download a speech model"),
         detail: t(
-          "Download once, then work offline. Start with Whisper Base (142 MB) for CPU recognition.",
+          "Choose a model family to see its variants. Recommendations use your current CPU/GPU mode; all models remain available.",
         ),
-        content: `<div>${state.models.map(modelRow).join("")}</div>`,
+        content: setupModelGroups(),
       },
       {
         title: isMac()
@@ -645,7 +722,7 @@ function render() {
       return `<footer class="setup-navigation">${welcome ? "" : `<button class="setup-back" data-setup-back ${disabled}>${esc(t("Back"))}</button>`}<span></span>${welcome || setupStep < panels.length - 1 ? `<button class="setup-primary" data-setup-next ${disabled}>${esc(t("Continue"))}</button>` : `<button class="setup-primary" data-command="complete_setup" ${disabled}>${esc(t("Finish setup"))}</button>`}</footer>`;
     };
     if (setupStep < 0) {
-      content.innerHTML = `<section class="setup-card" aria-labelledby="setup-title"><div class="setup-card-body setup-welcome"><h1 id="setup-title" tabindex="-1">${esc(t("Speak. OpenWhisper writes with you."))}</h1><p class="setup-intro">${esc(t("OpenWhisper turns speech into text directly on this computer. No account, cloud, or subscription. Your recordings never leave your computer."))}</p><p class="setup-language-label">${esc(t("Interface language"))}</p><div class="setup-language" role="group" aria-label="${esc(t("Interface language"))}"><button data-ui-language="de" aria-pressed="${state.preferences.ui_language === "de"}">Deutsch</button><button data-ui-language="en" aria-pressed="${state.preferences.ui_language === "en"}">${esc(t("English"))}</button></div></div>${navigation(true)}</section>`;
+      content.innerHTML = `<section class="setup-card" aria-labelledby="setup-title"><div class="setup-card-body setup-welcome"><img class="setup-logo" src="./branding/mark-on-dark.svg" width="72" height="72" alt="OpenWhisper"><h1 id="setup-title" tabindex="-1">${esc(t("Speak. OpenWhisper writes with you."))}</h1><p class="setup-intro">${esc(t("OpenWhisper turns speech into text directly on this computer. No account, cloud, or subscription. Your recordings never leave your computer."))}</p><p class="setup-language-label">${esc(t("Interface language"))}</p><div class="setup-language" role="group" aria-label="${esc(t("Interface language"))}"><button data-ui-language="de" aria-pressed="${state.preferences.ui_language === "de"}">Deutsch</button><button data-ui-language="en" aria-pressed="${state.preferences.ui_language === "en"}">${esc(t("English"))}</button></div></div>${navigation(true)}</section>`;
     } else {
       const panel = panels[setupStep]!;
       const progress = Array.from(
@@ -848,7 +925,7 @@ function render() {
     content.innerHTML =
       section(
         "",
-        `<strong>${esc(t("Your computer:"))} ${esc(state.desktop)} · ${esc(state.session)} · ${isMac() ? t("Native speech engine") : state.gpu_available ? "CPU / Vulkan" : "CPU"}</strong><p class="secondary">${esc(t("Highlighted models are recommended for your device."))}</p>`,
+        `<strong>${esc(t("Your computer:"))} ${esc(state.desktop)} · ${esc(state.session)}</strong><p class="secondary">${esc(t("Current recognition device: {device}", { device: recognitionHardwareStatus() }))}</p>`,
       ) +
       (state.profile === "development"
         ? section(
@@ -1031,6 +1108,17 @@ function render() {
   content
     .querySelectorAll<HTMLButtonElement>("[data-command]")
     .forEach((b) => (b.onclick = () => void command(b.dataset.command!)));
+  content
+    .querySelectorAll<HTMLDetailsElement>("[data-model-family]")
+    .forEach((details) =>
+      details.addEventListener("toggle", () => {
+        if (!details.isConnected) return;
+        const family = details.dataset.modelFamily;
+        if (!family) return;
+        if (details.open) expandedModelFamilies.add(family);
+        else expandedModelFamilies.delete(family);
+      }),
+    );
   content
     .querySelector<HTMLButtonElement>("[data-setup-next]")
     ?.addEventListener("click", () => {

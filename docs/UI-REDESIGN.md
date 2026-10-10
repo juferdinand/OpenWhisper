@@ -54,8 +54,17 @@ state. A live recording waveform indicates input level, not live transcription.
 
 Use strict TypeScript and the existing renderer. Do not import the prototype's dynamic
 React/Babel runtime, remote fonts or demo scripts, relax the content security policy, or
-switch frameworks solely for this appearance. Keep native window controls and titlebars;
-the prototype's custom window buttons are placeholders.
+switch frameworks solely for this appearance. Use the prototype's custom titlebar with
+working minimize, maximize/restore and close buttons, as requested during owner review.
+Keep dragging available and route these actions through the validated main-window bridge;
+recording overlays must not gain access to main-window controls.
+
+Group setup models into collapsible Whisper and Parakeet families. Show a starting
+recommendation for each family using the catalog and detected hardware, while allowing
+every supported model to be selected. These recommendations are heuristics, not device
+benchmarks or compatibility limits. Preserve group expansion during download progress.
+Show microphone display names while retaining their exact IDs for selection, and constrain
+long labels so the minimum-size setup view does not scroll horizontally.
 
 Preserve these existing behaviors throughout:
 
@@ -105,7 +114,8 @@ is part of this planning step. Independent review and owner acceptance precede f
 
 The five supplied SVG variants are stored unchanged in `app/ui/public/branding/`: bordered
 and borderless icons, a monochrome mark, and transparent marks for dark/light backgrounds.
-The setup increment uses `icon-bordered.svg`; existing views and packaged OS icons can adopt
+The setup increment uses a prominent transparent mark and the prototype's lowercase
+wordmark, also used in the main titlebar; existing views and packaged OS icons can adopt
 the assets in subsequent reviewed increments. Do not maintain separate platform logo designs.
 Revisit the final name and public presentation when the owner is ready to share the app.
 Preserve existing package/data identities and signing continuity when public branding changes.

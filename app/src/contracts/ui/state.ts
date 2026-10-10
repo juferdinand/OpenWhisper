@@ -151,6 +151,8 @@ export const appStateSchema = z.strictObject({
   models: z.array(modelSchema).max(128),
   installed: z.array(modelId).max(128),
   microphones: z.array(label).max(256),
+  microphone_labels: z.array(z.strictObject({ id: z.string().regex(/^[A-Za-z0-9_.:-]{1,255}$/u), name: label })).max(256).optional(),
+  recommended_models: z.array(modelId).max(128).optional(),
   session: label,
   desktop: label,
   clipboard_available: z.boolean(),
@@ -277,6 +279,7 @@ export const commandInputSchemas = {
   open_login_settings: noArgs,
   check_updates: noArgs,
   install_update: noArgs,
+  window_action: z.strictObject({ action: z.enum(["minimize", "maximize", "close"]) }),
 };
 const commandNameSchema = z.strictObject(commandInputSchemas).keyof();
 export type CommandName = z.infer<typeof commandNameSchema>;
@@ -313,6 +316,7 @@ export const commandOutputSchemas = {
   open_login_settings: actionResult,
   check_updates: actionResult,
   install_update: actionResult,
+  window_action: actionResult,
 } satisfies Record<CommandName, z.ZodType>;
 export type CommandInput<N extends CommandName> = z.infer<(typeof commandInputSchemas)[N]>;
 export type CommandOutput<N extends CommandName> = z.infer<(typeof commandOutputSchemas)[N]>;

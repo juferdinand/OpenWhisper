@@ -165,7 +165,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     let app = await launch();
     let page = await app.firstWindow();
     currentPage = page;
-    await expect(page.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev");
+    await expect(page.locator(".window-wordmark")).toHaveText("openwhisper");
     assert.equal(page.url(), "app://openwhisper/index.html");
     const security = await app.evaluate(({ app: host, BrowserWindow }) => {
       const window = BrowserWindow.getAllWindows()[0];
@@ -215,9 +215,12 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
 
     const beforeSetup = validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {})));
     assert.equal(beforeSetup.preferences.setup_completed, false);
-    await expect(page.locator('nav button[data-tab="setup"]')).toBeVisible();
-    await expect(page.locator("nav button[data-tab]")).toHaveCount(1);
+    await expect(page.locator(".setup-logo")).toBeVisible();
+    await expect(page.locator("nav button[data-tab]")).toHaveCount(0);
     await expect(page.locator('nav button[data-tab="general"]')).toHaveCount(0);
+    for (let step = 0; step < 6; step++) {
+      await page.locator("[data-setup-next]").click();
+    }
     await page.locator('[data-command="complete_setup"]').click();
     await expect.poll(async () => validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.setup_completed).toBe(true);
     const state = validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {})));
@@ -277,6 +280,14 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     const windowUrls = async () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((window) => window.webContents.getURL()).sort());
     const expectedWindows = ["app://openwhisper/index.html", "app://openwhisper/index.html?overlay=1"];
     await expect.poll(windowUrls).toEqual(expectedWindows);
+    const overlayPage = app.windows().find((candidate) => candidate.url().endsWith("?overlay=1"));
+    assert.ok(overlayPage);
+    await expect(overlayPage.locator(".window-titlebar")).toHaveCount(0);
+    assert.equal(await overlayPage.evaluate(async () => {
+      try { await window.openwhisper?.invoke("window_action", { action: "close" }); return false; }
+      catch { return true; }
+    }), true);
+    checks.push("recording overlay has no titlebar and cannot close the main window through IPC");
     await page.evaluate((url) => { window.open(url, "_blank"); }, target);
     await expect.poll(windowUrls).toEqual(expectedWindows);
     await page.evaluate((url) => {
@@ -286,7 +297,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     // Chromium correctly cancels the navigation. Playwright may retain a pending
     // navigation marker; inspect the actual unchanged document and a functioning
     // UI event before reopening the same private profile for later driver input.
-    assert.equal(await page.evaluate(() => document.querySelector(".sidebar-brand strong")?.textContent), "OpenWhisper Dev");
+    assert.equal(await page.evaluate(() => document.querySelector(".window-wordmark")?.textContent), "openwhisper");
     assert.equal(page.url(), "app://openwhisper/index.html");
     assert.equal(requests, 1);
     await page.evaluate(() => {
@@ -302,7 +313,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     app = await launch();
     page = await app.firstWindow();
     currentPage = page;
-    await expect(page.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev");
+    await expect(page.locator(".window-wordmark")).toHaveText("openwhisper");
 
     await page.locator('[data-tab="general"]').click();
     const vocabulary = page.locator("#vocabulary");
@@ -393,7 +404,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     const restarted = await launch();
     const reopened = await restarted.firstWindow();
     currentPage = reopened;
-    await expect(reopened.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev");
+    await expect(reopened.locator(".window-wordmark")).toHaveText("openwhisper");
     const restored = validateCommandOutput("get_state", await reopened.evaluate(() => window.openwhisper?.invoke("get_state", {})));
     assert.deepEqual(restored.preferences, saved.preferences);
     assert.deepEqual(restored.local_processing, saved.local_processing);
@@ -409,7 +420,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     const recoveredApp = await launch();
     const recoveredPage = await recoveredApp.firstWindow();
     currentPage = recoveredPage;
-    await expect(recoveredPage.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev");
+    await expect(recoveredPage.locator(".window-wordmark")).toHaveText("openwhisper");
     const recovered = validateCommandOutput("get_state", await recoveredPage.evaluate(() => window.openwhisper?.invoke("get_state", {})));
     assert.deepEqual(recovered.preferences, saved.preferences);
     assert.equal(recovered.local_processing?.enabled, false);
@@ -427,6 +438,12 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     assert.deepEqual(await Promise.all(stableFiles.map(hash)), stableBefore);
     const persisted = join(profile, "config", "settings", "preferences.json");
     assert.equal((await lstat(persisted)).mode & 0o777, 0o600);
+    await Promise.all([
+      recoveredApp.waitForEvent("close"),
+      recoveredPage.locator('[data-window-action="close"]').click(),
+    ]);
+    application = undefined;
+    checks.push("custom close button reaches normal application shutdown through the validated bridge");
     checks.push("EN/DE patches, focused editor and stable toggle node, restart persistence, stable sentinels unchanged");
     await writeFile(join(evidence, "result.json"), JSON.stringify({
       result: "PASS", scope: "P1/P5 owned development UI with fake model protocol; no dictation or real model quality parity", checks,

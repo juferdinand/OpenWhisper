@@ -33,6 +33,24 @@ export type CommandHandlers = {
   readonly [N in CommandName]?: (args: CommandInput<N>) => unknown | Promise<unknown>;
 };
 
+export interface MainWindowActions {
+  isDestroyed(): boolean;
+  isMaximized(): boolean;
+  minimize(): void;
+  maximize(): void;
+  unmaximize(): void;
+  close(): void;
+}
+
+export function performWindowAction(window: MainWindowActions | undefined, action: "minimize" | "maximize" | "close"): void {
+  if (!window || window.isDestroyed()) throw new Error("Main window is unavailable.");
+  if (action === "minimize") window.minimize();
+  else if (action === "maximize") {
+    if (window.isMaximized()) window.unmaximize();
+    else window.maximize();
+  } else window.close();
+}
+
 const errorMessages = Object.freeze({
   UNTRUSTED_SENDER: "This window is not authorized to use the app bridge.",
   INVALID_REQUEST: "The app bridge request is invalid.",
@@ -190,6 +208,7 @@ export function createUiDispatcher(options: {
     open_login_settings: route("open_login_settings", handlers.open_login_settings),
     check_updates: route("check_updates", handlers.check_updates),
     install_update: route("install_update", handlers.install_update),
+    window_action: route("window_action", handlers.window_action),
   } satisfies Record<CommandName, Route>;
 
   return {

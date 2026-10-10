@@ -21,6 +21,7 @@
   --field: #f5f8f9;
   --hover: #e8eff0;
   --sidebar-width: 218px;
+  --window-titlebar-height: 40px;
   color: var(--text);
   background: var(--background);
   font-synthesis: none;
@@ -98,9 +99,88 @@ svg {
   height: 20px;
   flex-shrink: 0;
 }
+.window-titlebar {
+  position: fixed;
+  z-index: 20;
+  inset: 0 0 auto 0;
+  height: var(--window-titlebar-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.window-titlebar-brand {
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+}
+.window-titlebar-brand img {
+  width: 22px;
+  height: 22px;
+}
+.window-wordmark {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.45px;
+  text-transform: lowercase;
+}
+.window-wordmark span:last-child {
+  color: #ad87ff;
+}
+.window-dev-badge {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--secondary);
+  font-size: 9px;
+  font-weight: 600;
+}
+.window-actions {
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  border-left: 1px solid var(--border);
+  -webkit-app-region: no-drag;
+}
+.window-actions button {
+  width: 46px;
+  min-width: 46px;
+  height: 100%;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--secondary);
+}
+.window-actions button:hover:not(:disabled) {
+  background: var(--hover);
+  border: 0;
+}
+.window-actions button.window-close:hover:not(:disabled) {
+  background: #c9414a;
+  color: #fff;
+}
+.window-actions svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 aside {
   position: fixed;
-  inset: 0 auto 0 0;
+  inset: var(--window-titlebar-height) auto 0 0;
   width: var(--sidebar-width);
   padding: 28px 16px 20px;
   background: var(--sidebar);
@@ -214,7 +294,7 @@ main {
   position: fixed;
   left: var(--sidebar-width);
   right: 0;
-  top: 0;
+  top: var(--window-titlebar-height);
   bottom: 88px;
   padding: 32px 34px 16px;
   overflow-y: auto;
@@ -322,6 +402,13 @@ select {
   font-size: 12px;
   text-overflow: ellipsis;
   cursor: pointer;
+}
+select.microphone-select {
+  display: block;
+  width: min(360px, 100%);
+  max-width: 100%;
+  min-width: 0;
+  text-overflow: ellipsis;
 }
 textarea,
 input:not([type="checkbox"]):not([type="radio"]) {
@@ -971,39 +1058,14 @@ html.setup-mode main.setup-main {
   position: relative;
   inset: auto;
   width: 100%;
-  height: 100vh;
+  height: calc(100vh - var(--window-titlebar-height));
+  margin-top: var(--window-titlebar-height);
   min-height: 0;
   padding: 20px 30px 24px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   scrollbar-gutter: auto;
-}
-html.setup-mode .setup-topbar {
-  min-height: 38px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-html.setup-mode .setup-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 14px;
-  letter-spacing: -0.2px;
-}
-html.setup-mode .setup-brand img {
-  border-radius: 9px;
-}
-html.setup-mode .setup-brand span {
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 650;
-}
-html.setup-mode .setup-topbar .language-switch {
-  position: static;
-  margin: 0;
 }
 html.setup-mode #content {
   flex: 1;
@@ -1018,6 +1080,7 @@ html.setup-mode.setup-recording #content {
 }
 html.setup-mode .setup-card {
   width: min(670px, 100%);
+  min-width: 0;
   max-height: min(620px, calc(100vh - 106px));
   min-height: min(420px, calc(100vh - 106px));
   display: flex;
@@ -1034,6 +1097,7 @@ html.setup-mode.setup-recording .setup-card {
 }
 html.setup-mode .setup-card-body {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   padding: 38px 46px 22px;
   overflow-y: auto;
@@ -1044,6 +1108,12 @@ html.setup-mode .setup-welcome {
   flex-direction: column;
   align-items: stretch;
   justify-content: center;
+}
+html.setup-mode .setup-logo {
+  width: 72px;
+  height: 72px;
+  margin-bottom: 20px;
+  object-fit: contain;
 }
 html.setup-mode .setup-progress {
   margin: 0 0 12px;
@@ -1112,10 +1182,73 @@ html.setup-mode .setup-card-body > h1 {
   font-size: clamp(21px, 3vw, 27px);
 }
 html.setup-mode .setup-panel-content {
+  min-width: 0;
   margin-top: 24px;
+}
+html.setup-mode .setup-panel-content .microphone-select {
+  display: block;
+  width: min(360px, 100%);
+  max-width: 100%;
+  min-width: 0;
+  text-overflow: ellipsis;
 }
 html.setup-mode .setup-panel-content .model-row {
   border-color: #342b40;
+}
+html.setup-mode .setup-model-families {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+html.setup-mode .setup-model-family {
+  min-width: 0;
+  border: 1px solid #342b40;
+  border-radius: 12px;
+  background: #1a1522;
+}
+html.setup-mode .setup-model-family > summary {
+  min-height: 66px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+html.setup-mode .setup-model-family > summary::-webkit-details-marker {
+  display: none;
+}
+html.setup-mode .setup-family-name {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+html.setup-mode .setup-family-name small {
+  overflow: hidden;
+  color: var(--secondary);
+  font-size: 10px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html.setup-mode .setup-family-chevron {
+  color: var(--secondary);
+  transition: transform 120ms ease;
+}
+html.setup-mode .setup-model-family[open] .setup-family-chevron {
+  transform: rotate(180deg);
+}
+html.setup-mode .setup-family-models {
+  min-width: 0;
+  padding: 0 12px 5px;
+}
+html.setup-mode .setup-family-models .model-row {
+  min-width: 0;
+  gap: 10px;
 }
 html.setup-mode .setup-panel-content .model-row:last-child {
   border-bottom: 0;

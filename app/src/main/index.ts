@@ -4,12 +4,12 @@ import { WaylandClipboard } from "../services/platforms/linux/wayland-clipboard.
 import { portalPasteStateSchema } from "../platforms/linux/shared/portal-paste.js";
 import type { IpcMainInvokeEvent } from "electron";
 import { readFile, realpath } from "node:fs/promises";
-import { cpus, homedir } from "node:os";
+import { cpus, homedir, totalmem } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
-  appStateSchema, hardwareDeviceNameSchema, modelSchema, preferencesSchema, validateEvent, isSteadyRecordingUpdate,
+  appStateSchema, hardwareDeviceNameSchema, preferencesSchema, validateEvent, isSteadyRecordingUpdate,
   MAX_USER_TEXT_BYTES, MAX_UI_REQUEST_BYTES,
   type AppState, type EventName, type EventPayload, type UpdateState,
 } from "../contracts/ui/state.js";
@@ -29,7 +29,7 @@ import {
 } from "../contracts/speech/local-processing.js";
 import { prepareDevelopmentProfile, resolveDevelopmentProfile } from "../services/settings/profiles.js";
 import { CONTENT_SECURITY_POLICY, MAIN_URL, OVERLAY_URL, readApplicationAsset } from "./assets.js";
-import { createUiDispatcher, uiFailure, type UiSender } from "./ipc.js";
+import { createUiDispatcher, performWindowAction, uiFailure, type UiSender } from "./ipc.js";
 import { ModelInventory, type InstalledModel } from "../services/models/model-inventory.js";
 import { ModelDownloads } from "../services/models/model-download.js";
 import { recordingRequestSchema } from "../core/recording/recording.js";
@@ -66,6 +66,7 @@ import { routeControlStartup } from "./control-startup.js";
 import { createControlAdapter } from "../platforms/linux/shared/control-adapter.js";
 import { LinuxBus } from "../platforms/linux/shared/bus.js";
 import { verifyDevelopmentLinuxBusArtifact } from "../services/development/development-artifact.js";
+import { parseModelCatalog, recommendationsFor, recommendationTier } from "../core/models/catalog.js";
 
 const distribution = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let window: BrowserWindow | undefined;
@@ -188,7 +189,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   );
   const processing = new LocalProcessingService();
   const rawCatalog: unknown = JSON.parse(await readFile(join(distribution, "resources/models.json"), "utf8"));
-  const catalog = z.object({ models: z.array(modelSchema).min(1).max(128) }).parse(rawCatalog);
+  const catalog = parseModelCatalog(rawCatalog);
   const inventory = await ModelInventory.open(profile, rawCatalog);
   let installed: readonly InstalledModel[] = await inventory.installed();
   let sources: readonly RecordingSource[] = [];
@@ -417,6 +418,13 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       preferences: { ...preferenceSnapshot, ...(loginFact ? { launch_at_login: loginFact.requested } : {}) },
       models: [...catalog.models, ...installed.filter((item) => !catalog.models.some((model) => model.id === item.model.id)).map((item) => item.model)],
       installed: installed.map((item) => item.model.id), microphones: sources.map((source) => source.id),
+      microphone_labels: sources.map((source) => ({ id: source.id, name: source.name })),
+      recommended_models: recommendationsFor(catalog, recommendationTier({
+        gpuAvailable: gpuSelection.available && gpuSelection.supported,
+        gpuEnabled: preferenceSnapshot.gpu,
+        gpuFallback: gpuSelection.fallback,
+        memoryBytes: totalmem(),
+      }), preferenceSnapshot.language === "auto" ? preferenceSnapshot.ui_language : preferenceSnapshot.language).map((model) => model.id),
       session: process.env["XDG_SESSION_TYPE"] ?? "unknown",
       desktop: process.env["XDG_CURRENT_DESKTOP"] ?? "unknown", clipboard_available: descriptor !== null,
       shortcut_portal: shortcut.available, paste_portal: pasteState.available, shortcut: macShortcutState?.label ?? shortcut.label,
@@ -467,6 +475,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     { role: "editMenu" },
   ]));
   window = new BrowserWindow({
+    frame: false,
     title: profile.productName,
     width: 980, height: 740, minWidth: 740, minHeight: 560,
     backgroundColor: "#141a21", show: false,
@@ -854,6 +863,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     windows: [{ webContentsId: contents.id, role: "main" }, ...(overlay ? [{ webContentsId: overlay.webContents.id, role: "overlay" as const }] : [])],
     handlers: {
       get_state: () => state(),
+      window_action: ({ action: windowAction }) => performWindowAction(window, windowAction),
       check_updates: () => requestUpdate("check"),
       install_update: () => requestUpdate("install"),
       save_preferences: ({ changes }) => withRecordingControl(async () => {

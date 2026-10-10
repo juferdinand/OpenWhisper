@@ -51,6 +51,14 @@ test("legacy Linux catalog and macOS capability snapshots remain valid without a
   assert.equal(appStateSchema.safeParse({ ...state(), platform: "macos" }).success, false);
 });
 
+test("microphone labels and recommended model IDs are optional validated state fields", () => {
+  const enriched = { ...state(), microphone_labels: [{ id: "alsa_input.card_1", name: "USB Microphone" }], recommended_models: ["tiny"] };
+  assert.deepEqual(appStateSchema.parse(enriched), enriched);
+  assert.equal(appStateSchema.safeParse({ ...enriched, microphone_labels: [{ id: "", name: "USB Microphone" }] }).success, false);
+  assert.deepEqual(validateCommandInput("window_action", { action: "minimize" }), { action: "minimize" });
+  assert.throws(() => validateCommandInput("window_action", { action: "quit" }));
+});
+
 test("optional CPU and GPU device labels are bounded plain hardware names", () => {
   const valid = { ...state(), cpu_device: "AMD Ryzen 5 5600X", gpu_device: "NVIDIA GeForce RTX 3060" };
   assert.deepEqual(appStateSchema.parse(valid), valid);
@@ -73,7 +81,7 @@ test("schema-derived command maps cover all current renderer actions", async () 
     "enable_paste", "disable_paste", "enable_shortcut", "desktop_shortcut", "clear_shortcut",
     "retry_transcription", "discard_recovery", "toggle_recording", "cancel_recording", "check_updates", "install_update",
   ]) assert.doesNotThrow(() => validateCommandName(name));
-  assert.equal(Object.keys(commandInputSchemas).length, 32);
+  assert.equal(Object.keys(commandInputSchemas).length, 33);
   assert.deepEqual(Object.keys(commandOutputSchemas).sort(), Object.keys(commandInputSchemas).sort());
 });
 

@@ -5,7 +5,7 @@ import { z } from "zod";
 import { cleanTranscript } from "../../src/core/text/transcript-cleaner.js";
 import { correctVocabulary, normalizeVocabularyKey, parseVocabulary, vocabularySimilarity, vocabularyThreshold } from "../../src/core/text/vocabulary-corrector.js";
 import { expandSnippets, processTranscript } from "../../src/core/text/snippet-expander.js";
-import { catalogSchema, detectModelFamily, ModelCatalog, modelDownloadURL, modelVendor, parseModelCatalog, recommendationsFor } from "../../src/core/models/catalog.js";
+import { catalogSchema, detectModelFamily, ModelCatalog, modelDownloadURL, modelVendor, parseModelCatalog, recommendationTier, recommendationsFor } from "../../src/core/models/catalog.js";
 
 const textCase = z.strictObject({ name: z.string(), input: z.string(), expected: z.string() });
 const vectorsSchema = z.strictObject({
@@ -138,4 +138,12 @@ test("runtime catalog and fixture validation reject malformed input without coer
   assert.equal(catalogSchema.safeParse({ ...catalog.data, recommendations: { strong: { whisper: true, parakeet: "base" } } }).success, false);
   assert.equal(catalogSchema.safeParse({ ...catalog.data, unknown: true }).success, false);
   assert.equal(vectorsSchema.safeParse({ ...vectors, snippets: { ...vectors.snippets, snippets: [{ trigger: "", expansion: "", enabled: "true" }] } }).success, false);
+});
+
+test("recommendation tier uses available enabled GPU and system memory without guessing VRAM", () => {
+  assert.equal(recommendationTier({ gpuAvailable: false, gpuEnabled: true, gpuFallback: false, memoryBytes: 64 * 1024 ** 3 }), "cpuOnly");
+  assert.equal(recommendationTier({ gpuAvailable: true, gpuEnabled: false, gpuFallback: false, memoryBytes: 64 * 1024 ** 3 }), "cpuOnly");
+  assert.equal(recommendationTier({ gpuAvailable: true, gpuEnabled: true, gpuFallback: true, memoryBytes: 64 * 1024 ** 3 }), "cpuOnly");
+  assert.equal(recommendationTier({ gpuAvailable: true, gpuEnabled: true, gpuFallback: false, memoryBytes: 8 * 1024 ** 3 }), "strong");
+  assert.equal(recommendationTier({ gpuAvailable: true, gpuEnabled: true, gpuFallback: false, memoryBytes: 4 * 1024 ** 3 }), "weak");
 });
