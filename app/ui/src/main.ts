@@ -19,12 +19,13 @@ import {
 } from "../../src/contracts/ui/state.js";
 
 let state: State;
-let tab: Tab = "general";
+type View = Tab | "dictation";
+let tab: View = "dictation";
 let dirty = false;
 let portalBusy = false;
 let contentKey = "";
 let shellKey = "";
-let renderedTab: Tab | undefined;
+let renderedTab: View | undefined;
 let setupStep = -1;
 const SETUP_STEP_COUNT = 7;
 const SETUP_MODEL_STEP = 1;
@@ -47,7 +48,8 @@ const modelRecommendations = () =>
   state.recommended_models ?? state.macos?.recommended ?? [];
 const hasInstalledSelectedModel = () =>
   state.installed.includes(state.preferences.model);
-const tabs: [Tab, string, string][] = [
+const tabs: [View, string, string][] = [
+  ["dictation", "Dictation", "M12 3v10m0 0 4-4m-4 4-4-4M5 19h14"],
   ["setup", "Setup", "M4 5h2m4 0h10M4 12h2m4 0h10M4 19h2m4 0h10"],
   [
     "general",
@@ -381,13 +383,14 @@ function recognitionModeControl(setup = false): string {
 
 const microphoneIcon =
   "M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0V5M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8";
-const pageDescriptions: Record<Tab, string> = {
+const viewDescriptions: Record<View, string> = {
   setup: "A few small steps. Then just speak your mind.",
   general: "Choose how you record and where your words go.",
   models: "Find the right balance of speed, size, and accuracy.",
   snippets: "Turn a few spoken words into something longer.",
   history: "Your recent words, saved only on this device.",
   about: "A little more freedom for your voice.",
+  dictation: "Your latest transcript, ready to copy.",
 };
 function renderShell() {
   const key = `${state.preferences.ui_language}:${state.preferences.setup_completed}:${state.profile ?? "stable"}`;
@@ -437,9 +440,26 @@ app.addEventListener("click", (event) => {
     void preference("ui_language", button.dataset.uiLanguage);
     return;
   }
-  tab = button.dataset.tab as Tab;
+  tab = button.dataset.tab as View;
   render();
 });
+
+function recordingStatusTitle(): string {
+  const recording = state.status === "recording";
+  const busy = state.status === "transcribing";
+  const recovery = !!state.recovery_available && !recording && !busy;
+  if (recording) return t("Listening to you");
+  if (busy) return t("Finding your words");
+  if (recovery || state.status === "error")
+    return t("Something needs attention");
+  if (
+    state.recording_available === false &&
+    state.recording_unavailable_reason === "model"
+  )
+    return t("Choose a model");
+  if (state.recording_available === false) return t("Recording is unavailable");
+  return t("Ready when you are");
+}
 
 function recordControl() {
   const recording = state.status === "recording",
@@ -525,19 +545,7 @@ function recordControl() {
     "--voice-level",
     String(0.2 + (state.level ?? 0) * 0.8),
   );
-  document.querySelector("#status-title")!.textContent = recording
-    ? t("Listening to you")
-    : busy
-      ? t("Finding your words")
-      : state.status === "error"
-        ? t("Something needs attention")
-        : state.recording_available === false &&
-            !recovery &&
-            state.recording_unavailable_reason === "model"
-          ? t("Choose a model")
-          : state.recording_available === false && !recovery
-            ? t("Recording is unavailable")
-            : t("Ready when you are");
+  document.querySelector("#status-title")!.textContent = recordingStatusTitle();
   document.querySelector("#record-label")!.textContent = text;
   const cancel = document.querySelector<HTMLButtonElement>("#cancel")!;
   cancel.hidden = !recording && !recovery;
@@ -563,6 +571,22 @@ function recordControl() {
   document.querySelector("#status")!.textContent = unavailable
     ? recordingUnavailableMessage()
     : t(state.message);
+  syncDictationState();
+}
+
+function syncDictationState() {
+  const heading = document.querySelector<HTMLElement>(".dictation-overview h2");
+  if (heading) heading.textContent = recordingStatusTitle();
+  const timer = document.querySelector<HTMLElement>("#dictation-timer");
+  if (timer) {
+    const elapsed = state.elapsed;
+    timer.textContent = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
+  }
+  const level = document.querySelector<HTMLElement>(".dictation-level");
+  if (level) {
+    level.style.setProperty("--voice-level", String(state.level ?? 0));
+    level.dataset.active = String(state.status === "recording");
+  }
 }
 
 function render() {
@@ -578,7 +602,7 @@ function render() {
     });
   setLocale(state.preferences.ui_language ?? "en");
   if (!state.preferences.setup_completed) tab = "setup";
-  else if (tab === "setup") tab = "general";
+  else if (tab === "setup") tab = "dictation";
   renderShell();
   recordControl();
   if (overlay) return;
@@ -611,7 +635,7 @@ function render() {
   const nextKey = JSON.stringify(
     [
       tab,
-      tab === "general" ? null : state.status,
+      tab === "general" || tab === "dictation" ? null : state.status,
       // Checkbox changes must not replace the focused row or move its click target.
       tab === "general"
         ? {
@@ -643,6 +667,7 @@ function render() {
       Math.round(state.progress * 100),
       state.history,
       state.transcript,
+      state.transcript_preview_omitted,
       state.macos,
       state.updates,
       state.overlay_available,
@@ -676,7 +701,7 @@ function render() {
       tabs.find(([id]) => id === tab)![1],
     );
     document.querySelector("#page-description")!.textContent = t(
-      pageDescriptions[tab],
+      viewDescriptions[tab],
     );
     document.querySelector<HTMLElement>(".page-header")!.hidden =
       tab === "about";
@@ -694,7 +719,20 @@ function render() {
   const scrollTop = renderedTab === tab ? main.scrollTop : 0;
   renderedTab = tab;
   const p = state.preferences;
-  if (tab === "setup") {
+  if (tab === "dictation") {
+    const model = state.models.find((candidate) => candidate.id === p.model);
+    const transcriptAvailable =
+      !!state.transcript || state.transcript_preview_omitted;
+    const workspaceHeading = recordingStatusTitle();
+    const emptyText = t(
+      "Your final transcript will appear here after you stop dictating.",
+    );
+    content.innerHTML = `<section class="dictation-workspace" aria-label="${esc(t("Dictation workspace"))}"><div class="dictation-overview"><div class="dictation-overview-copy"><span class="dictation-kicker">${esc(t("YOUR VOICE, IN TEXT"))}</span><h2>${esc(workspaceHeading)}</h2><p>${esc(t("Speak naturally. Your audio stays on this computer."))}</p></div><div class="dictation-timer-wrap"><span>${esc(t("Recording time"))}</span><strong id="dictation-timer">0:00</strong></div></div><div class="dictation-context"><div class="dictation-context-item"><span>${esc(t("Speech model"))}</span><strong>${esc(model?.title ?? t("Choose a model"))}</strong></div><button class="dictation-change-model" data-tab="models">${esc(t("Change model"))}<span aria-hidden="true">→</span></button><div class="dictation-context-item dictation-device"><span>${esc(t("Recognition device"))}</span><strong>${esc(recognitionHardwareStatus())}</strong></div><div class="dictation-level" aria-label="${esc(t("Microphone input level"))}" role="img"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div><section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><div><span class="dictation-kicker">${esc(t("LATEST TRANSCRIPT"))}</span><h2 id="transcript-heading">${esc(t("Your words"))}</h2></div><button id="copy-dictation" ${transcriptAvailable ? "" : "hidden"}>${symbol("M8 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3M9 2h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2")}${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptAvailable ? `<p class="transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</p>` : `<div class="dictation-empty"><span class="dictation-empty-mark">${symbol("M12 4v10m0 0 4-4m-4 4-4-4M5 20h14")}</span><p>${esc(emptyText)}</p></div>`}</div></section></section>`;
+    content
+      .querySelector<HTMLButtonElement>("#copy-dictation")
+      ?.addEventListener("click", () => void command("copy_transcript"));
+    syncDictationState();
+  } else if (tab === "setup") {
     const panels = [
       {
         title: t("Choose recognition hardware"),

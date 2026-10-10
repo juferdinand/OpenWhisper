@@ -53,6 +53,10 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
   }
   const evidence = process.env.OPENWHISPER_UI_EVIDENCE;
   assert.equal(evidence, "/evidence", "Evidence must stay in the owned container filesystem.");
+  const screenshot = async (page: Page, name: string) => page.screenshot({
+    path: join(evidence, name),
+    mask: [page.locator(".dictation-device, .compute-mode small, #recognition-backend")],
+  });
   const root = await mkdtemp("/tmp/openwhisper-owned-ui-");
   await chmod(root, 0o700);
   const home = join(root, "home");
@@ -256,7 +260,14 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     }
     await page.locator('[data-command="complete_setup"]').click();
     await expect.poll(async () => validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.setup_completed).toBe(true);
+    await expect(page.getByRole("heading", { name: "Dictation", exact: true })).toBeVisible();
+    await expect(page.locator(".dictation-workspace")).toBeVisible();
+    await expect(page.locator("#dictation-timer")).toHaveText("0:00");
+    await expect(page.locator("#copy-dictation")).toBeHidden();
+    assert.equal(await page.locator("main").evaluate((main) => main.scrollWidth <= main.clientWidth), true);
+    await screenshot(page, "dev-dictation.png");
     checks.push("setup rejects missing or unselected installed models through real IPC; a selected private inventory fixture permits completion");
+    checks.push("completed setup opens the dictation workspace without inventing a transcript or recording availability");
     const state = validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {})));
     assert.equal(state.profile, "development");
     assert.equal(state.recording_available, false);
@@ -273,15 +284,15 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     assert.equal(modelDirectory.mode & 0o777, 0o700);
     await page.locator('[data-tab="about"]').click();
     await expect(page.locator(".version-badge")).toHaveText(`Version ${state.version} · Dev ${buildIdentifier} · Linux`);
-    assert.equal(await page.locator(".about-brand img").evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth === 256), true);
+    await expect.poll(async () => page.locator(".about-brand img").evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth === 256)).toBe(true);
     assert.equal(await page.evaluate(async () => {
       await document.fonts.ready;
       return Array.from(document.fonts).some((font) => font.family === "OpenWhisper Inter" && font.status === "loaded");
     }), true);
-    await page.screenshot({ path: join(evidence, "dev-about.png") });
-    await page.locator('[data-tab="models"]').click();
+    await screenshot(page, "dev-about.png");
+    await page.locator('nav [data-tab="models"]').click();
     await expect(page.locator("#development-model-directory")).toHaveText(state.model_directory);
-    await page.screenshot({ path: join(evidence, "dev-models.png") });
+    await screenshot(page, "dev-models.png");
     checks.push("visible Dev build identifier, original 256px icon/Inter assets and private model directory");
     await expect(page.locator("#record")).toBeDisabled();
     await expect(page.locator("#status-title")).toHaveText("Recording is unavailable");
@@ -348,6 +359,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     page = await app.firstWindow();
     currentPage = page;
     await expect(page.locator(".window-wordmark")).toHaveText("openwhisper");
+    await expect(page.getByRole("heading", { name: "Dictation", exact: true })).toBeVisible();
 
     await page.locator('[data-tab="general"]').click();
     const vocabulary = page.locator("#vocabulary");
@@ -365,11 +377,11 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await expect(page.locator("#page-title")).toHaveText("Allgemein");
     await expect(page.locator('[data-ui-language="de"]')).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator("#vocabulary")).toHaveValue("Kubernetes, Grüß Gott, 東京");
-    await page.screenshot({ path: join(evidence, "dev-general-de.png") });
+    await screenshot(page, "dev-general-de.png");
     await page.locator('[data-ui-language="en"]').click();
     await expect(page.locator("#page-title")).toHaveText("General");
-    await page.screenshot({ path: join(evidence, "dev-general-en.png") });
-    await page.locator('[data-tab="models"]').click();
+    await screenshot(page, "dev-general-en.png");
+    await page.locator('nav [data-tab="models"]').click();
     await expect(page.locator("#processing-preview h2")).toHaveText("Text processing preview");
     await expect(page.locator("#processing-enabled")).not.toBeChecked();
     assert.equal(previewRequests, 0, "Opening optional controls must not contact a model server.");
@@ -418,15 +430,15 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await expect(page.locator("#processing-preview h2")).toHaveText("Textverarbeitung ausprobieren");
     await expect(page.locator("#processing-input")).toHaveValue(previewText);
     await page.locator("#processing-preview h2").scrollIntoViewIfNeeded();
-    await page.screenshot({ path: join(evidence, "dev-processing-profile-de.png") });
+    await screenshot(page, "dev-processing-profile-de.png");
     await page.locator("#processing-result").scrollIntoViewIfNeeded();
-    await page.screenshot({ path: join(evidence, "dev-processing-de.png") });
+    await screenshot(page, "dev-processing-de.png");
     await page.locator('[data-ui-language="en"]').click();
     await expect(page.locator("#processing-preview h2")).toHaveText("Text processing preview");
     await page.locator("#processing-preview h2").scrollIntoViewIfNeeded();
-    await page.screenshot({ path: join(evidence, "dev-processing-profile-en.png") });
+    await screenshot(page, "dev-processing-profile-en.png");
     await page.locator("#processing-result").scrollIntoViewIfNeeded();
-    await page.screenshot({ path: join(evidence, "dev-processing-en.png") });
+    await screenshot(page, "dev-processing-en.png");
     assert.equal(await page.locator("main").evaluate((main) => main.scrollWidth <= main.clientWidth + 1), true);
     checks.push("actual Dev model-preview IPC, intact multilingual request, escaped renderer-only result, manual cancel/retry, categorical HTTP error, private 0600 profile and EN/DE");
     const saved = validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {})));
@@ -442,7 +454,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     const restored = validateCommandOutput("get_state", await reopened.evaluate(() => window.openwhisper?.invoke("get_state", {})));
     assert.deepEqual(restored.preferences, saved.preferences);
     assert.deepEqual(restored.local_processing, saved.local_processing);
-    await reopened.locator('[data-tab="models"]').click();
+    await reopened.locator('nav [data-tab="models"]').click();
     await expect(reopened.locator("#processing-enabled")).toBeChecked();
     await expect(reopened.locator("#processing-input")).toHaveValue("");
     await expect(reopened.locator("#processing-result")).toHaveValue("");
@@ -460,7 +472,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     assert.equal(recovered.local_processing?.enabled, false);
     assert.equal(recovered.local_processing_invalid_profile, true);
     assert.equal(await readFile(featureFile, "utf8"), "{owned invalid optional profile");
-    await recoveredPage.locator('[data-tab="models"]').click();
+    await recoveredPage.locator('nav [data-tab="models"]').click();
     await expect(recoveredPage.locator("#processing-profile-warning")).toBeVisible();
     await expect(recoveredPage.locator("#processing-enabled")).not.toBeChecked();
     await recoveredPage.locator("#processing-model").fill("owned repaired profile");
@@ -483,15 +495,14 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
       result: "PASS", scope: "P1/P5 owned development UI with fake model protocol; no dictation or real model quality parity", checks,
       root, display, stableBefore, stableAfter: await Promise.all(stableFiles.map(hash)),
       driverNote: "Canceled external navigation leaves Playwright pending; actual URL, DOM and General click were verified before private profile restart.",
-      preferenceFileMode: "0600", screenshotFiles: ["dev-general-de.png", "dev-general-en.png", "dev-about.png", "dev-models.png", "dev-processing-profile-de.png", "dev-processing-profile-en.png", "dev-processing-de.png", "dev-processing-en.png"],
+      preferenceFileMode: "0600", screenshotFiles: ["dev-dictation.png", "dev-general-de.png", "dev-general-en.png", "dev-about.png", "dev-models.png", "dev-processing-profile-de.png", "dev-processing-profile-en.png", "dev-processing-de.png", "dev-processing-en.png"],
     }, null, 2));
   } catch (error: unknown) {
     await writeFile(join(evidence, "failure.json"), JSON.stringify({
       checks, url: currentPage?.url(), requests,
-      body: await currentPage?.locator("body").textContent({ timeout: 1000 }).catch(() => "unavailable"),
       message: error instanceof Error ? error.message : "Unknown owned UI failure",
     }, null, 2));
-    await currentPage?.screenshot({ path: join(evidence, "failure.png"), timeout: 1000 }).catch(() => undefined);
+    if (currentPage) await screenshot(currentPage, "failure.png").catch(() => undefined);
     throw error;
   } finally {
     await application?.close();

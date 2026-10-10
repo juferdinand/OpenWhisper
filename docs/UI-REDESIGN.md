@@ -48,7 +48,14 @@ state. A live recording waveform indicates input level, not live transcription.
    or completing setup. Pending, cancelled and failed downloads do not satisfy this check;
    permission and shortcut fallbacks remain optional.
 2. **Foundation and recording view.** Extend the visual tokens to the single transcript
-   workspace. Preserve the current typed bridge and host state machine. Keep record, stop,
+   workspace, shown by default after setup. Keep the existing settings, models, snippets,
+   history and About views reachable while their visual migration continues. Keep the
+   renderer-only dictation view separate from host settings-navigation contracts.
+   Show the actual selected model and recognition device, an elapsed timer and input level
+   from host telemetry, and the latest final transcript. Do not imply live transcription;
+   retain the previous result while recording or transcribing. Copy the complete result
+   through the existing host command, including when the preview is omitted for size.
+   Preserve the current typed bridge and host state machine. Keep record, stop,
    cancel, retry and discard visible in the states where they are valid. Review screenshots
    at the actual 740 × 560 minimum window size and at larger sizes.
 3. **Models, history and settings.** Reuse existing model operations and history actions;

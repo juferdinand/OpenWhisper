@@ -428,5 +428,18 @@
   "Could not complete the preview; your dictation is unchanged": "Die Vorschau konnte nicht abgeschlossen werden; dein Diktat bleibt unverändert",
   "Saved text processing preferences are invalid. Previews are disabled; edit this profile to replace the saved file.": "Die gespeicherten Einstellungen zur Textverarbeitung sind ungültig. Vorschauen sind deaktiviert; bearbeite dieses Profil, um die gespeicherte Datei zu ersetzen.",
   "Use a regular key or shortcut. Fn and mouse triggers are not available in this build.": "Nutze eine normale Taste oder Tastenkombination. Fn- und Mausauslöser sind in diesem Build nicht verfügbar.",
-  "Regular keyboard shortcuts use toggle mode in this build.": "Normale Tastaturkürzel nutzen in diesem Build den Umschaltmodus."
+  "Regular keyboard shortcuts use toggle mode in this build.": "Normale Tastaturkürzel nutzen in diesem Build den Umschaltmodus.",
+  "Dictation": "Diktat",
+  "Dictation workspace": "Diktat-Arbeitsbereich",
+  "Your latest transcript, ready to copy.": "Dein letztes Transkript ist bereit zum Kopieren.",
+  "YOUR VOICE, IN TEXT": "DEINE STIMME ALS TEXT",
+  "Speak naturally. Your audio stays on this computer.": "Sprich ganz natürlich. Deine Audiodaten bleiben auf diesem Computer.",
+  "Recording time": "Aufnahmezeit",
+  "Speech model": "Sprachmodell",
+  "Change model": "Modell ändern",
+  "Recognition device": "Erkennungsgerät",
+  "Microphone input level": "Mikrofoneingangspegel",
+  "LATEST TRANSCRIPT": "LETZTES TRANSKRIPT",
+  "Your words": "Deine Worte",
+  "Your final transcript will appear here after you stop dictating.": "Dein fertiges Transkript erscheint hier, sobald du das Diktat beendet hast."
 }

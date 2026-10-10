@@ -398,6 +398,7 @@ async function start(
   overlay = false,
   fresh = false,
   initialStateRace = false,
+  initialTab: AppState["initial_tab"] | null = "general",
 ) {
   let savedPreferences: unknown = null;
   await page.exposeBinding("loadTestPreferences", () => savedPreferences);
@@ -405,7 +406,7 @@ async function start(
     savedPreferences = preferences;
   });
   await page.addInitScript(
-    ({ platform, models, overlay, fresh, initialStateRace }) => {
+    ({ platform, models, overlay, fresh, initialStateRace, initialTab }) => {
       const host = window as any;
       host.__OPENWHISPER_OVERLAY__ = platform === "macos" && overlay;
       host.calls = [];
@@ -419,6 +420,7 @@ async function start(
           error: null,
           package: platform === "linux" ? "appimage" : "macos",
         },
+        initial_tab: initialTab ?? undefined,
         version: "0.1.2",
         status: "idle",
         message: "Ready to dictate",
@@ -594,7 +596,7 @@ async function start(
         },
       };
     },
-    { platform, models: catalog, overlay, fresh, initialStateRace },
+    { platform, models: catalog, overlay, fresh, initialStateRace, initialTab },
   );
   await page.goto(
     pathToFileURL(resolve("dist/index.html")).href +
@@ -606,7 +608,11 @@ async function start(
   }
   await expect(
     page.getByRole("heading", {
-      name: fresh ? "Speak. OpenWhisper writes with you." : "Recording",
+      name: fresh
+        ? "Speak. OpenWhisper writes with you."
+        : initialTab === null
+          ? "Dictation"
+          : "Recording",
       exact: true,
     }),
   ).toBeVisible();
@@ -660,6 +666,339 @@ test("recording telemetry follows the newest full state and ignores stale genera
       ),
   ).toBeCloseTo(0.2);
 });
+
+for (const platform of ["linux", "macos"] as const) {
+  test(`${platform}: completed setup opens Dictation and keeps transcript actions on the existing bridge`, async ({
+    page,
+  }) => {
+    await start(page, platform, false, false, false, null);
+    await expect(page.locator("nav button[data-tab]")).toHaveText([
+      "Dictation",
+      "General",
+      "Models",
+      "Snippets",
+      "History",
+      "About",
+    ]);
+    await expect(page.locator("nav .selected")).toHaveText("Dictation");
+    await expect(
+      page.getByRole("heading", { name: "Dictation", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator(".dictation-workspace")).toBeVisible();
+    await expect(page.locator("#dictation-timer")).toHaveText("0:00");
+    await expect(page.locator("#copy-dictation")).toBeHidden();
+    await expect(
+      page.locator(".dictation-context-item strong").first(),
+    ).toHaveText("Whisper Base");
+    if (platform === "linux") {
+      await page.evaluate(() => {
+        Object.assign(window.testState, {
+          cpu_device: "AMD Ryzen 7 5700G",
+          gpu_device: "NVIDIA GeForce RTX 3060",
+          gpu_available: true,
+          gpu_checked: true,
+          gpu_supported: true,
+        });
+        window.testState.preferences.gpu = true;
+        window.publishState();
+      });
+      await expect(page.locator(".dictation-device strong")).toHaveText(
+        "Vulkan GPU selected: NVIDIA GeForce RTX 3060",
+      );
+      await page.evaluate(() => {
+        window.testState.preferences.gpu = false;
+        window.publishState();
+      });
+      await expect(page.locator(".dictation-device strong")).toHaveText(
+        "CPU selected; Vulkan GPU available: NVIDIA GeForce RTX 3060",
+      );
+    } else {
+      await expect(page.locator(".dictation-device strong")).toHaveText(
+        "Native speech engine",
+      );
+    }
+    await expect(page.locator(".dictation-empty")).toContainText(
+      "Your final transcript will appear here after you stop dictating.",
+    );
+    await page.locator("#record").click();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+      .toBe("toggle_recording");
+
+    await page.locator(".dictation-change-model").click();
+    await expect(page.locator("nav .selected")).toHaveText("Models");
+    await expect(
+      page.getByRole("heading", { name: "Models", exact: true }),
+    ).toBeVisible();
+    await page.locator('[data-tab="dictation"]').click();
+    await page.evaluate(() => {
+      window.testState.status = "recording";
+      window.publishState();
+    });
+    await expect(page.locator(".dictation-empty")).toContainText(
+      "Your final transcript will appear here after you stop dictating.",
+    );
+
+    const hostileTranscript =
+      '<img src=x onerror="window.compromised=true"> final';
+    await page.evaluate((transcript) => {
+      Object.assign(window.testState, {
+        status: "recording",
+        transcript,
+        elapsed: 73,
+        level: 0.4,
+        recording_generation: 9,
+      });
+      window.publishState();
+    }, hostileTranscript);
+    await expect(page.locator(".dictation-transcript .transcript")).toHaveText(
+      hostileTranscript,
+    );
+    await expect(page.locator(".dictation-transcript img")).toHaveCount(0);
+    expect(
+      await page.evaluate(() => (window as any).compromised),
+    ).toBeUndefined();
+    await expect(page.locator("#dictation-timer")).toHaveText("1:13");
+    const copy = page.locator("#copy-dictation");
+    await copy.focus();
+    await page.evaluate(() => {
+      window.publishTelemetry({ generation: 9, elapsed: 74, level: 0.65 });
+      window.publishTelemetry({ generation: 8, elapsed: 99, level: 1 });
+    });
+    await expect(page.locator("#dictation-timer")).toHaveText("1:14");
+    expect(
+      await page
+        .locator(".dictation-level")
+        .evaluate((level) =>
+          Number.parseFloat(
+            getComputedStyle(level).getPropertyValue("--voice-level"),
+          ),
+        ),
+    ).toBeCloseTo(0.65);
+    expect(await copy.evaluate((button) => button.isConnected)).toBe(true);
+    await expect(copy).toBeFocused();
+    await copy.click();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+      .toBe("copy_transcript");
+
+    await page.evaluate(() => {
+      window.testState.status = "transcribing";
+      window.publishState();
+    });
+    await expect(page.locator("#record")).toBeDisabled();
+    await expect(page.locator(".dictation-overview h2")).toHaveText(
+      "Finding your words",
+    );
+    await expect(copy).toBeFocused();
+    await expect(page.locator(".dictation-transcript .transcript")).toHaveText(
+      hostileTranscript,
+    );
+    await page.evaluate(() => {
+      Object.assign(window.testState, {
+        status: "recording",
+        elapsed: 75,
+        transcript: "Previous final transcript stays visible while recording.",
+      });
+      window.publishState();
+    });
+    await expect(page.locator(".dictation-transcript .transcript")).toHaveText(
+      "Previous final transcript stays visible while recording.",
+    );
+    await page.locator("#cancel").click();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+      .toBe("cancel_recording");
+    await page.evaluate(() => {
+      Object.assign(window.testState, {
+        status: "error",
+        recovery_available: true,
+        message:
+          "An unfinished recording is saved. Retry transcription or discard it.",
+      });
+      window.publishState();
+    });
+    await page.locator("#record").click();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+      .toBe("retry_transcription");
+    await page.locator("#cancel").click();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+      .toBe("discard_recovery");
+
+    await page.evaluate(() => {
+      Object.assign(window.testState, {
+        status: "idle",
+        recovery_available: false,
+        transcript: "",
+        transcript_preview_omitted: true,
+      });
+      window.publishState();
+    });
+    await expect(page.locator("#copy-dictation")).toBeEnabled();
+    await expect(
+      page.locator(".dictation-transcript .transcript"),
+    ).toContainText(
+      "The complete transcript is available with Copy; its preview is too large.",
+    );
+    await page.locator("#copy-dictation").click();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+      .toBe("copy_transcript");
+
+    await page.evaluate(() => {
+      window.testState.recording_available = false;
+      window.testState.recording_unavailable_reason = "model";
+      window.publishState();
+    });
+    await expect(page.locator(".dictation-overview h2")).toHaveText(
+      "Choose a model",
+    );
+    await page.evaluate(() => {
+      window.testState.recovery_available = true;
+      window.publishState();
+    });
+    await expect(page.locator(".dictation-overview h2")).toHaveText(
+      "Something needs attention",
+    );
+    await page.evaluate(() => {
+      Object.assign(window.testState, {
+        recovery_available: false,
+        recording_available: false,
+        recording_unavailable_reason: "model",
+        transcript_preview_omitted: false,
+      });
+      window.publishState();
+    });
+    await page.locator("#record-unavailable-action").click();
+    await expect(page.locator("nav .selected")).toHaveText("Models");
+  });
+
+  test(`${platform}: Dictation stays usable at minimum and large window sizes in English and German`, async ({
+    page,
+  }) => {
+    await start(page, platform, false, false, false, null);
+    const longTranscript = "Synthetic long transcript. ".repeat(4_000);
+    await page.evaluate((transcript) => {
+      Object.assign(window.testState, {
+        status: "error",
+        transcript,
+        transcript_preview_omitted: false,
+        recovery_available: true,
+        recording_available: false,
+        recording_unavailable_reason: "audio",
+        message:
+          "An unfinished recording is saved. Retry transcription or discard it.",
+      });
+      window.publishState();
+    }, longTranscript);
+    for (const language of ["en", "de"] as const) {
+      if (language === "de") {
+        await page.locator('[data-ui-language="de"]').click();
+        await expect(page.locator("html")).toHaveAttribute("lang", "de");
+      }
+      for (const viewport of [
+        { width: 740, height: 560 },
+        { width: 980, height: 560 },
+        { width: 980, height: 740 },
+      ]) {
+        await page.setViewportSize(viewport);
+        if (language === "en")
+          await page.screenshot({
+            path: `test-results/${platform}-dictation-${viewport.width}x${viewport.height}.png`,
+          });
+        await expect(page.locator("#copy-dictation")).toBeInViewport();
+        await expect(page.locator("#record")).toBeInViewport();
+        await expect(page.locator("#cancel")).toBeInViewport();
+        await expect(page.locator("#record-label")).toBeInViewport();
+        await expect(page.locator(".dictation-workspace")).toBeVisible();
+        expect(
+          await page
+            .locator("main")
+            .evaluate((main) => main.scrollWidth <= main.clientWidth),
+        ).toBe(true);
+        const geometry = await page.evaluate(() => {
+          const transcript = document
+            .querySelector(".dictation-transcript")!
+            .getBoundingClientRect();
+          const body = document
+            .querySelector(".dictation-transcript-body")!
+            .getBoundingClientRect();
+          const record = document
+            .querySelector("#record-control")!
+            .getBoundingClientRect();
+          const transcriptBody = document.querySelector(
+            ".dictation-transcript-body",
+          )!;
+          return {
+            transcriptBottom: transcript.bottom,
+            recordTop: record.top,
+            bodyScrolls:
+              transcriptBody.scrollHeight > transcriptBody.clientHeight,
+            bodyBottom: body.bottom,
+            recordBottom: record.bottom,
+          };
+        });
+        expect(geometry.transcriptBottom).toBeLessThanOrEqual(
+          geometry.recordTop + 1,
+        );
+        expect(geometry.bodyScrolls).toBe(true);
+        expect(
+          geometry.bodyBottom,
+          JSON.stringify({ language, viewport, ...geometry }),
+        ).toBeLessThanOrEqual(geometry.transcriptBottom + 1);
+        expect(geometry.recordBottom).toBeLessThanOrEqual(viewport.height);
+        await expect(page.locator(".dictation-transcript-body")).toContainText(
+          "Synthetic long transcript.",
+        );
+      }
+      if (language === "en") {
+        await page.setViewportSize({ width: 740, height: 560 });
+        await page.evaluate(() => {
+          const notice = document.querySelector<HTMLElement>("#notice")!;
+          notice.textContent =
+            "Synthetic command error notice for layout coverage.";
+          notice.hidden = false;
+        });
+        await expect(page.locator("#notice")).toBeVisible();
+        const geometry = await page.evaluate(() => {
+          const transcript = document
+            .querySelector(".dictation-transcript")!
+            .getBoundingClientRect();
+          const record = document
+            .querySelector("#record-control")!
+            .getBoundingClientRect();
+          const main = document.querySelector("main")!;
+          return {
+            transcriptBottom: transcript.bottom,
+            bodyBottom: document
+              .querySelector(".dictation-transcript-body")!
+              .getBoundingClientRect().bottom,
+            recordTop: record.top,
+            mainScrollWidth: main.scrollWidth,
+            mainClientWidth: main.clientWidth,
+          };
+        });
+        expect(geometry.transcriptBottom).toBeLessThanOrEqual(
+          geometry.recordTop + 1,
+        );
+        expect(geometry.bodyBottom).toBeLessThanOrEqual(
+          geometry.transcriptBottom + 1,
+        );
+        expect(geometry.mainScrollWidth).toBeLessThanOrEqual(
+          geometry.mainClientWidth,
+        );
+        await expect(page.locator("#copy-dictation")).toBeInViewport();
+        await expect(page.locator("#record")).toBeInViewport();
+        await expect(page.locator("#cancel")).toBeInViewport();
+        await page.evaluate(() => {
+          document.querySelector<HTMLElement>("#notice")!.hidden = true;
+        });
+      }
+    }
+  });
+}
 
 for (const platform of ["linux", "macos"] as const) {
   test(`${platform}: floating recorder keeps translated timers and actions separate from status copy`, async ({
@@ -796,6 +1135,7 @@ for (const platform of ["linux", "macos"] as const) {
         .toEqual({ command: "window_action", args: { action } });
     }
     await expect(page.locator("nav button")).toHaveText([
+      "Dictation",
       "General",
       "Models",
       "Snippets",
@@ -881,6 +1221,7 @@ for (const platform of ["linux", "macos"] as const) {
           height: width === 960 ? 680 : 560,
         });
         for (const tab of [
+          "Dictation",
           "General",
           "Models",
           "Snippets",
@@ -1001,7 +1342,7 @@ for (const platform of ["linux", "macos"] as const) {
     const longMicrophoneId = `alsa_input.usb-${"0123456789abcdef".repeat(7)}`;
     const longFriendlyName = `Studio microphone ${"for broadcast and dictation ".repeat(6)}`;
     const unlabeledMicrophoneId = `alsa_input.pci-${"fedcba9876543210".repeat(7)}`;
-    await start(page, platform, false, true);
+    await start(page, platform, false, true, false, null);
     await expect(page.locator("nav button[data-tab]")).toHaveCount(0);
     await expect(
       page.getByRole("heading", {
@@ -1655,15 +1996,15 @@ for (const platform of ["linux", "macos"] as const) {
     await page
       .getByRole("button", { name: "Finish setup", exact: true })
       .click();
-    await expect(page.locator("nav button[data-tab]")).toHaveCount(5);
+    await expect(page.locator("nav button[data-tab]")).toHaveCount(6);
     await page.locator('[data-ui-language="de"]').click();
     await expect(page.locator("html")).toHaveAttribute("lang", "de");
     await expect(
       page.getByRole("button", { name: "Einrichtung", exact: true }),
     ).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Allgemein" })).toBeVisible();
+    await expect(page.locator("nav .selected")).toHaveText("Diktat");
     await expect(
-      page.getByRole("heading", { name: "Berechtigungen", exact: true }),
+      page.getByRole("heading", { name: "Deine Worte", exact: true }),
     ).toBeVisible();
     await expect
       .poll(() =>
@@ -1675,8 +2016,9 @@ for (const platform of ["linux", "macos"] as const) {
       page.getByRole("button", { name: "Einrichtung", exact: true }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("heading", { name: "Aufnahme", exact: true }),
+      page.getByRole("heading", { name: "Diktat", exact: true }),
     ).toBeVisible();
+    await page.getByRole("button", { name: "Allgemein", exact: true }).click();
     await expect(
       page.getByRole("button", { name: "Erlauben", exact: true }),
     ).toBeVisible();
@@ -1819,11 +2161,12 @@ for (const platform of ["linux", "macos"] as const) {
         })
         .click();
     }
-    await expect(page.locator("nav button[data-tab]")).toHaveCount(5);
+    await expect(page.locator("nav button[data-tab]")).toHaveCount(6);
     await expect(
-      page.getByRole("heading", { name: "Aufnahme", exact: true }),
+      page.getByRole("heading", { name: "Diktat", exact: true }),
     ).toBeVisible();
     for (const title of [
+      "Diktat",
       "Allgemein",
       "Modelle",
       "Textbausteine",

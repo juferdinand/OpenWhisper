@@ -428,5 +428,18 @@
   "Could not complete the preview; your dictation is unchanged": "Could not complete the preview; your dictation is unchanged",
   "Saved text processing preferences are invalid. Previews are disabled; edit this profile to replace the saved file.": "Saved text processing preferences are invalid. Previews are disabled; edit this profile to replace the saved file.",
   "Use a regular key or shortcut. Fn and mouse triggers are not available in this build.": "Use a regular key or shortcut. Fn and mouse triggers are not available in this build.",
-  "Regular keyboard shortcuts use toggle mode in this build.": "Regular keyboard shortcuts use toggle mode in this build."
+  "Regular keyboard shortcuts use toggle mode in this build.": "Regular keyboard shortcuts use toggle mode in this build.",
+  "Dictation": "Dictation",
+  "Dictation workspace": "Dictation workspace",
+  "Your latest transcript, ready to copy.": "Your latest transcript, ready to copy.",
+  "YOUR VOICE, IN TEXT": "YOUR VOICE, IN TEXT",
+  "Speak naturally. Your audio stays on this computer.": "Speak naturally. Your audio stays on this computer.",
+  "Recording time": "Recording time",
+  "Speech model": "Speech model",
+  "Change model": "Change model",
+  "Recognition device": "Recognition device",
+  "Microphone input level": "Microphone input level",
+  "LATEST TRANSCRIPT": "LATEST TRANSCRIPT",
+  "Your words": "Your words",
+  "Your final transcript will appear here after you stop dictating.": "Your final transcript will appear here after you stop dictating."
 }
