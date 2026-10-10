@@ -441,5 +441,13 @@
   "Microphone input level": "Mikrofoneingangspegel",
   "LATEST TRANSCRIPT": "LETZTES TRANSKRIPT",
   "Your words": "Deine Worte",
-  "Your final transcript will appear here after you stop dictating.": "Dein fertiges Transkript erscheint hier, sobald du das Diktat beendet hast."
+  "Your final transcript will appear here after you stop dictating.": "Dein fertiges Transkript erscheint hier, sobald du das Diktat beendet hast.",
+  "MODEL LIBRARY": "MODELLBIBLIOTHEK",
+  "Choose a speech model": "Sprachmodell auswählen",
+  "Close model chooser": "Modellauswahl schließen",
+  "Done": "Fertig",
+  "Show history": "Verlauf anzeigen",
+  "Hide history": "Verlauf ausblenden",
+  "No dictations in history yet.": "Noch keine Diktate im Verlauf.",
+  "Settings sections": "Einstellungsbereiche"
 }

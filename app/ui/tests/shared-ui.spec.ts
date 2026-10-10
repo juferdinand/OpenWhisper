@@ -726,6 +726,22 @@ for (const platform of ["linux", "macos"] as const) {
       .toBe("toggle_recording");
 
     await page.locator(".dictation-change-model").click();
+    const modelDialog = page.locator("dialog#model-drawer");
+    await expect(modelDialog).toBeVisible();
+    await expect(
+      modelDialog.getByRole("heading", {
+        name: "Choose a speech model",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      modelDialog.locator(".model-drawer-body .model-row"),
+    ).toHaveCount(catalog.length);
+    await expect(modelDialog.locator(".model-drawer-footer")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(modelDialog).toBeHidden();
+    await expect(page.locator(".dictation-change-model")).toBeFocused();
+    await page.locator('nav [data-tab="models"]').click();
     await expect(page.locator("nav .selected")).toHaveText("Models");
     await expect(
       page.getByRole("heading", { name: "Models", exact: true }),
@@ -1121,6 +1137,339 @@ for (const platform of ["linux", "macos"] as const) {
     });
   });
 
+  test(`${platform}: model chooser patches progress, cancels downloads, and keeps full Models navigation`, async ({
+    page,
+  }) => {
+    await start(page, platform, false, false, false, null);
+    await page.setViewportSize({ width: 740, height: 560 });
+    await page.locator(".dictation-change-model").click();
+    const dialog = page.locator("dialog#model-drawer");
+    const body = page.locator("#model-drawer .model-drawer-body");
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveJSProperty("open", true);
+    await expect(page.locator("#close-model-drawer")).toBeFocused();
+    await expect(body.locator(".model-row")).toHaveCount(catalog.length);
+    expect(
+      await body.evaluate(
+        (element) => element.scrollHeight - element.clientHeight,
+      ),
+    ).toBeGreaterThan(0);
+    await expect(
+      page.locator("#model-drawer .model-drawer-footer"),
+    ).toBeInViewport();
+    await expect(
+      page.locator("#model-drawer .model-drawer-body"),
+    ).toBeVisible();
+    await page.screenshot({
+      path: `test-results/${platform}-model-drawer.png`,
+    });
+    await page.locator("#close-model-drawer").click();
+    await expect(dialog).toBeHidden();
+    await expect(body.locator(".model-row")).toHaveCount(0);
+    await page.locator('[data-ui-language="de"]').click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "de");
+    await page.locator(".dictation-change-model").click();
+    await expect(
+      dialog.getByRole("heading", {
+        name: "Sprachmodell auswählen",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(page.locator("#close-model-drawer")).toBeFocused();
+    for (const viewport of [
+      { width: 740, height: 560 },
+      { width: 980, height: 740 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await expect(dialog).toBeVisible();
+      await expect(
+        page.locator("#model-drawer .model-drawer-footer"),
+      ).toBeInViewport();
+    }
+    await page.setViewportSize({ width: 740, height: 560 });
+
+    for (let index = 0; index < 12; index++) await page.keyboard.press("Tab");
+    const focusedAfterTab = await page.evaluate(() => {
+      const active = document.activeElement as HTMLElement | null;
+      return {
+        inside: !!document.querySelector("#model-drawer")?.contains(active),
+        open: document.querySelector<HTMLDialogElement>("#model-drawer")?.open,
+        modal: document.querySelector("#model-drawer")?.matches(":modal"),
+        tag: active?.tagName,
+        id: active?.id,
+        label: active?.getAttribute("aria-label"),
+        text: active?.textContent?.trim().slice(0, 60),
+      };
+    });
+    expect(focusedAfterTab.inside, JSON.stringify(focusedAfterTab)).toBe(true);
+
+    await page.evaluate(() => {
+      window.testState.installed = ["base", "tiny"];
+      (window as any).rejectSave = true;
+      window.publishState();
+    });
+    const tinyRow = page
+      .locator("#model-drawer .model-row")
+      .filter({ has: page.locator('[data-select="tiny"]') });
+    const useTiny = tinyRow.locator(
+      'button[data-select="tiny"]:not(.model-radio)',
+    );
+    await useTiny.click();
+    await expect(page.locator("#model-drawer-notice")).toBeVisible();
+    await expect(page.locator("#model-drawer-notice")).toContainText(
+      "Could not save settings",
+    );
+    await expect(dialog).toBeVisible();
+    expect(await page.evaluate(() => window.testState.preferences.model)).toBe(
+      "base",
+    );
+    await page.evaluate(() => {
+      (window as any).rejectSave = false;
+    });
+    await useTiny.click();
+    await expect
+      .poll(() => page.evaluate(() => window.testState.preferences.model))
+      .toBe("tiny");
+    await expect(dialog).toBeVisible();
+    expect(
+      await page.evaluate(() =>
+        document
+          .querySelector("#model-drawer")
+          ?.contains(document.activeElement),
+      ),
+    ).toBe(true);
+
+    await page.locator('[data-download="small"]').click();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+      .toBe("download_model");
+    const cancel = page.locator("#model-drawer [data-cancel-download]");
+    await expect(cancel).toBeVisible();
+    await cancel.focus();
+    const cancelElement = await cancel.elementHandle();
+    const progress = page.locator("#model-drawer progress");
+    await page.evaluate(() => {
+      window.testState.progress = 0.37;
+      window.publishState();
+    });
+    await expect(progress).toHaveJSProperty("value", 0.37);
+    await expect(dialog).toBeVisible();
+    await expect(cancel).toBeFocused();
+    expect(
+      await cancelElement?.evaluate((element) => element.isConnected),
+    ).toBe(true);
+    await cancel.click();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+      .toBe("cancel_download");
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(page.locator(".dictation-change-model")).toBeFocused();
+    await page.locator(".dictation-change-model").click();
+    await page.evaluate(() => {
+      window.testState.transcript =
+        "Background changed while the chooser was open.";
+      window.publishState();
+    });
+    await expect(dialog).toBeVisible();
+    await expect(page.locator(".dictation-change-model")).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".dictation-change-model")).toBeFocused();
+    await page.locator('[data-ui-language="en"]').click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await page.locator('nav [data-tab="models"]').click();
+    await expect(page.locator("nav .selected")).toHaveText("Models");
+    await expect(page.getByRole("heading", { name: "Models" })).toBeVisible();
+    await page.locator('[data-tab="dictation"]').click();
+    await page.locator(".dictation-change-model").click();
+    await expect(
+      page.locator('#model-drawer [data-model-command="show_models_folder"]'),
+    ).toBeVisible();
+    await page
+      .locator('#model-drawer [data-model-command="show_models_folder"]')
+      .click();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+      .toBe("show_models_folder");
+    if (platform === "macos") {
+      await expect(
+        page.locator('#model-drawer [data-delete="base"]'),
+      ).toBeVisible();
+      await expect(
+        page.locator('#model-drawer [data-model-command="import_model"]'),
+      ).toBeVisible();
+      await page
+        .locator('#model-drawer [data-model-command="import_model"]')
+        .click();
+      await expect
+        .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+        .toBe("import_model");
+      await page.locator('#model-drawer [data-delete="base"]').click();
+      await expect
+        .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+        .toBe("delete_model");
+    } else {
+      await expect(
+        page.locator('#model-drawer [data-model-command="import_model"]'),
+      ).toHaveCount(0);
+      await expect(page.locator("#model-drawer [data-delete]")).toHaveCount(0);
+    }
+  });
+
+  test(`${platform}: Dictation history rail copies full text and clears through host commands`, async ({
+    page,
+  }) => {
+    await start(page, platform, false, false, false, null);
+    const longEntry = `Synthetic history entry <img src=x onerror="window.historyCompromised=true"><script>window.historyCompromised=true</script> ${"long text ".repeat(900)}`;
+    const entries = Array.from(
+      { length: 14 },
+      (_, index) => `History entry ${index}`,
+    );
+    entries[1] = longEntry;
+    await page.evaluate((longEntry) => {
+      window.testState.history = Array.from(
+        { length: 14 },
+        (_, index) => `History entry ${index}`,
+      );
+      window.testState.history[1] = longEntry;
+      window.testState.transcript = longEntry;
+      window.publishState();
+    }, longEntry);
+    const toggle = page.locator("#toggle-history");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(toggle).toHaveAttribute("aria-controls", "dictation-history");
+    const history = page.locator(".dictation-history#dictation-history");
+    for (const language of ["en", "de"] as const) {
+      if (language === "de") {
+        await page.locator('[data-ui-language="de"]').click();
+        await expect(page.locator("html")).toHaveAttribute("lang", "de");
+      }
+      for (const viewport of [
+        { width: 740, height: 560 },
+        { width: 980, height: 740 },
+      ]) {
+        await page.setViewportSize(viewport);
+        await expect(toggle).toHaveAttribute("aria-expanded", "false");
+        await toggle.click();
+        await expect(toggle).toHaveAttribute("aria-expanded", "true");
+        await expect(history).toBeVisible();
+        await expect(history.locator(".history-row p")).toHaveCount(
+          entries.length,
+        );
+        await expect(history.locator(".history-row p").nth(1)).toHaveText(
+          longEntry,
+        );
+        expect(
+          await page.evaluate(() => (window as any).historyCompromised),
+        ).toBe(undefined);
+        await expect(history.locator("time")).toHaveCount(0);
+        await expect(history.locator("[data-copy]")).toHaveCount(
+          entries.length,
+        );
+        await expect(page.locator("#clear-history")).toBeInViewport();
+        await expect(page.locator("#copy-dictation")).toBeVisible();
+        await expect(page.locator("#record")).toBeInViewport();
+        const transcriptGeometry = await page.evaluate(() => {
+          const card = document.querySelector(".dictation-transcript")!;
+          const header = card.querySelector(".dictation-transcript-heading")!;
+          const body = card.querySelector(".dictation-transcript-body")!;
+          const copy = card.querySelector("#copy-dictation")!;
+          const cardRect = card.getBoundingClientRect();
+          const copyRect = copy.getBoundingClientRect();
+          return {
+            copyInsideCard:
+              copyRect.left >= cardRect.left &&
+              copyRect.right <= cardRect.right,
+            headerBeforeBody:
+              header.getBoundingClientRect().bottom <=
+              body.getBoundingClientRect().bottom,
+          };
+        });
+        expect(transcriptGeometry.copyInsideCard).toBe(true);
+        expect(transcriptGeometry.headerBeforeBody).toBe(true);
+        await page.locator("#copy-dictation").click();
+        await expect
+          .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+          .toBe("copy_transcript");
+        if (viewport.width === 740) {
+          await page.screenshot({
+            path: `test-results/${platform}-history-${language}.png`,
+          });
+          await history.locator('[data-copy="1"]').click();
+          await expect
+            .poll(() => page.evaluate(() => window.calls.at(-1)))
+            .toEqual({ command: "copy_history", args: { index: 1 } });
+        }
+        const lastCopy = history.locator('[data-copy="13"]');
+        await lastCopy.scrollIntoViewIfNeeded();
+        await expect(lastCopy).toBeInViewport();
+        await lastCopy.click();
+        await expect
+          .poll(() => page.evaluate(() => window.calls.at(-1)))
+          .toEqual({ command: "copy_history", args: { index: 13 } });
+        expect(
+          await page.evaluate(() => {
+            const main = document.querySelector("main")!;
+            return main.scrollWidth <= main.clientWidth;
+          }),
+        ).toBe(true);
+        await toggle.click();
+        await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      }
+    }
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await page.locator("#clear-history").click();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+      .toBe("clear_history");
+    await expect(history.locator(".history-row")).toHaveCount(0);
+    await expect(history).toContainText("Noch keine Diktate im Verlauf.");
+  });
+
+  test(`${platform}: General settings index reaches each section by keyboard`, async ({
+    page,
+  }) => {
+    await start(page, platform);
+    const trustedUrl = page.url();
+    for (const id of [
+      "settings-recording",
+      "settings-permissions",
+      "settings-vocabulary",
+      "settings-output",
+      "settings-system",
+    ]) {
+      const sectionButton = page.locator(
+        `.settings-index button[data-settings-section="${id}"]`,
+      );
+      await expect(sectionButton).toBeVisible();
+      await expect(sectionButton).toHaveRole("button");
+      await sectionButton.focus();
+      await expect(sectionButton).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(page.locator(`#${id}`)).toBeInViewport();
+      expect(page.url()).toBe(trustedUrl);
+      if (id === "settings-vocabulary") {
+        const vocabulary = page.locator("#vocabulary");
+        await vocabulary.fill("OpenWhisper, Kubernetes");
+        await page.locator("#save-vocabulary").click();
+        await expect
+          .poll(() => page.evaluate(() => window.calls.at(-1)))
+          .toEqual({
+            command: "save_preferences",
+            args: { changes: { vocabulary: "OpenWhisper, Kubernetes" } },
+          });
+        await expect
+          .poll(() =>
+            page.evaluate(() => window.testState.preferences.vocabulary),
+          )
+          .toBe("OpenWhisper, Kubernetes");
+        expect(page.url()).toBe(trustedUrl);
+      }
+    }
+  });
+
   test(`${platform}: signed-file-compatible bundle, shared navigation and branding`, async ({
     page,
   }) => {
@@ -1146,14 +1495,16 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(
       page.getByRole("heading", { name: "OpenWhisper", exact: true }),
     ).toBeVisible();
-    expect(
-      await page
-        .locator(".about-brand img")
-        .evaluate(
-          (image: HTMLImageElement) =>
-            image.complete && image.naturalWidth === 256,
-        ),
-    ).toBe(true);
+    const aboutIcon = page.locator(".about-brand img");
+    await expect(aboutIcon).toHaveAttribute(
+      "src",
+      "./branding/icon-bordered.svg",
+    );
+    await expect
+      .poll(() =>
+        aboutIcon.evaluate((image: HTMLImageElement) => image.naturalWidth),
+      )
+      .toBe(512);
     await page.evaluate(() => document.fonts.ready);
     expect(
       await page.evaluate(() =>

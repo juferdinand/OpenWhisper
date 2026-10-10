@@ -441,5 +441,13 @@
   "Microphone input level": "Microphone input level",
   "LATEST TRANSCRIPT": "LATEST TRANSCRIPT",
   "Your words": "Your words",
-  "Your final transcript will appear here after you stop dictating.": "Your final transcript will appear here after you stop dictating."
+  "Your final transcript will appear here after you stop dictating.": "Your final transcript will appear here after you stop dictating.",
+  "MODEL LIBRARY": "MODEL LIBRARY",
+  "Choose a speech model": "Choose a speech model",
+  "Close model chooser": "Close model chooser",
+  "Done": "Done",
+  "Show history": "Show history",
+  "Hide history": "Hide history",
+  "No dictations in history yet.": "No dictations in history yet.",
+  "Settings sections": "Settings sections"
 }

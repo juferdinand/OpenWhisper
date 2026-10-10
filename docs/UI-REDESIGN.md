@@ -59,8 +59,14 @@ state. A live recording waveform indicates input level, not live transcription.
    cancel, retry and discard visible in the states where they are valid. Review screenshots
    at the actual 740 × 560 minimum window size and at larger sizes.
 3. **Models, history and settings.** Reuse existing model operations and history actions;
-   adapt settings, snippets and About without removing current controls. A settings
-   dialog/drawer must support keyboard navigation, Escape and focus restoration. Keep
+   open a model chooser drawer from Dictation while retaining the full Models management
+   view. Keep the native dialog stable through download progress, show command failures
+   inside it, and support keyboard navigation, Escape and focus restoration.
+   Add a collapsible history rail beside the transcript using the existing text list,
+   complete-copy and clear commands, without inventing dates or durations. Keep the full
+   History view available. Add section navigation to General and adapt snippets and About,
+   including the supplied SVG branding, without removing current controls. Any later settings
+   dialog/drawer must also support keyboard navigation, Escape and focus restoration. Keep
    setup exclusive until completion, then remove it from normal navigation.
 4. **Overlay and regression review.** Restyle floating controls separately from the main
    window, check both host layouts and capability fallbacks, and present one functional

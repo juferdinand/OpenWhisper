@@ -55,7 +55,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
   assert.equal(evidence, "/evidence", "Evidence must stay in the owned container filesystem.");
   const screenshot = async (page: Page, name: string) => page.screenshot({
     path: join(evidence, name),
-    mask: [page.locator(".dictation-device, .compute-mode small, #recognition-backend")],
+    mask: [page.locator(".dictation-device, .compute-mode small, #recognition-backend, .model-drawer-heading p")],
   });
   const root = await mkdtemp("/tmp/openwhisper-owned-ui-");
   await chmod(root, 0o700);
@@ -266,8 +266,23 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await expect(page.locator("#copy-dictation")).toBeHidden();
     assert.equal(await page.locator("main").evaluate((main) => main.scrollWidth <= main.clientWidth), true);
     await screenshot(page, "dev-dictation.png");
+    await page.locator(".dictation-change-model").click();
+    await expect(page.locator("#model-drawer")).toBeVisible();
+    await expect(page.locator("#model-drawer").getByRole("heading", { name: "Choose a speech model", exact: true })).toBeVisible();
+    await screenshot(page, "dev-model-drawer.png");
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#model-drawer")).toBeHidden();
+    await expect(page.locator(".dictation-change-model")).toBeFocused();
+    await expect(page.locator(".model-drawer-body")).toBeEmpty();
+    await page.locator("#toggle-history").click();
+    await expect(page.locator("#toggle-history")).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("#dictation-history")).toBeVisible();
+    await expect(page.locator("#dictation-history .history-row")).toHaveCount(0);
+    await screenshot(page, "dev-history-rail.png");
+    await page.locator("#toggle-history").click();
     checks.push("setup rejects missing or unselected installed models through real IPC; a selected private inventory fixture permits completion");
     checks.push("completed setup opens the dictation workspace without inventing a transcript or recording availability");
+    checks.push("native model drawer closes with Escape and restores focus; the empty history rail remains optional");
     const state = validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {})));
     assert.equal(state.profile, "development");
     assert.equal(state.recording_available, false);
@@ -284,7 +299,8 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     assert.equal(modelDirectory.mode & 0o777, 0o700);
     await page.locator('[data-tab="about"]').click();
     await expect(page.locator(".version-badge")).toHaveText(`Version ${state.version} · Dev ${buildIdentifier} · Linux`);
-    await expect.poll(async () => page.locator(".about-brand img").evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth === 256)).toBe(true);
+    await expect(page.locator(".about-brand img")).toHaveAttribute("src", "./branding/icon-bordered.svg");
+    await expect.poll(async () => page.locator(".about-brand img").evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth === 512)).toBe(true);
     assert.equal(await page.evaluate(async () => {
       await document.fonts.ready;
       return Array.from(document.fonts).some((font) => font.family === "OpenWhisper Inter" && font.status === "loaded");
@@ -293,7 +309,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await page.locator('nav [data-tab="models"]').click();
     await expect(page.locator("#development-model-directory")).toHaveText(state.model_directory);
     await screenshot(page, "dev-models.png");
-    checks.push("visible Dev build identifier, original 256px icon/Inter assets and private model directory");
+    checks.push("visible Dev build identifier, supplied SVG branding, bundled Inter and private model directory");
     await expect(page.locator("#record")).toBeDisabled();
     await expect(page.locator("#status-title")).toHaveText("Recording is unavailable");
     await expect(page.locator("#status")).toHaveText("The recording service could not start. Restart OpenWhisper and try again.");
@@ -363,6 +379,10 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
 
     await page.locator('[data-tab="general"]').click();
     const vocabulary = page.locator("#vocabulary");
+    const settingsUrl = page.url();
+    await page.locator(".settings-index").getByRole("button", { name: "Custom vocabulary", exact: true }).click();
+    assert.equal(page.url(), settingsUrl, "Settings section navigation must preserve the trusted renderer URL.");
+    await expect(vocabulary).toBeInViewport();
     await vocabulary.fill("Kubernetes, Grüß Gott, 東京");
     await page.locator("#save-vocabulary").click();
     await expect.poll(async () => validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.vocabulary).toBe("Kubernetes, Grüß Gott, 東京");
@@ -495,7 +515,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
       result: "PASS", scope: "P1/P5 owned development UI with fake model protocol; no dictation or real model quality parity", checks,
       root, display, stableBefore, stableAfter: await Promise.all(stableFiles.map(hash)),
       driverNote: "Canceled external navigation leaves Playwright pending; actual URL, DOM and General click were verified before private profile restart.",
-      preferenceFileMode: "0600", screenshotFiles: ["dev-dictation.png", "dev-general-de.png", "dev-general-en.png", "dev-about.png", "dev-models.png", "dev-processing-profile-de.png", "dev-processing-profile-en.png", "dev-processing-de.png", "dev-processing-en.png"],
+      preferenceFileMode: "0600", screenshotFiles: ["dev-dictation.png", "dev-model-drawer.png", "dev-history-rail.png", "dev-general-de.png", "dev-general-en.png", "dev-about.png", "dev-models.png", "dev-processing-profile-de.png", "dev-processing-profile-en.png", "dev-processing-de.png", "dev-processing-en.png"],
     }, null, 2));
   } catch (error: unknown) {
     await writeFile(join(evidence, "failure.json"), JSON.stringify({

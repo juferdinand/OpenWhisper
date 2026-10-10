@@ -26,6 +26,10 @@ let portalBusy = false;
 let contentKey = "";
 let shellKey = "";
 let renderedTab: View | undefined;
+let historyRailOpen = false;
+let dialogOpener: HTMLElement | null = null;
+let modelDialogKey = "";
+let modelFocusRestorePending = false;
 let setupStep = -1;
 const SETUP_STEP_COUNT = 7;
 const SETUP_MODEL_STEP = 1;
@@ -77,8 +81,8 @@ function windowTitlebar(): string {
       : "";
   return `<header class="window-titlebar"><div class="window-titlebar-brand"><img src="./branding/icon-bordered.svg" width="24" height="24" alt="">${wordmark()}${dev}</div><div class="window-actions"><button data-window-action="minimize" aria-label="${esc(t("Minimize window"))}" title="${esc(t("Minimize window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 11.5h10"/></svg></button><button data-window-action="maximize" aria-label="${esc(t("Maximize or restore window"))}" title="${esc(t("Maximize or restore window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/></svg></button><button class="window-close" data-window-action="close" aria-label="${esc(t("Close window"))}" title="${esc(t("Close window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div></header>`;
 }
-const section = (title: string, body: string, note = "") =>
-  `<section>${title ? `<h2>${title}</h2>` : ""}<div class="group">${body}</div>${note ? `<p class="section-note">${note}</p>` : ""}</section>`;
+const section = (title: string, body: string, note = "", id = "") =>
+  `<section${id ? ` id="${id}"` : ""}>${title ? `<h2>${title}</h2>` : ""}<div class="group">${body}</div>${note ? `<p class="section-note">${note}</p>` : ""}</section>`;
 const row = (label: string, control: string) =>
   `<div class="row"><span>${label}</span><div class="control">${control}</div></div>`;
 const toggle = (
@@ -124,7 +128,192 @@ function modelRow(m: Model): string {
     selected = state.preferences.model === m.id && installed,
     downloading = state.download === m.id;
   const recommended = modelRecommendations().includes(m.id);
-  return `<div class="model-row ${selected ? "active-model" : ""}"><button class="model-radio" aria-label="${esc(t("Use {model}", { model: m.title }))}" aria-pressed="${selected}" data-select="${esc(m.id)}" ${!installed ? "disabled" : ""}><span></span></button><div class="model-description"><strong>${esc(m.title)}</strong>${recommended ? `<span class="recommendation">${esc(t("Starting recommendation"))}</span>` : ""}<p>${esc(m.size)} · ${esc(t(m.note))}</p></div><div class="model-buttons">${downloading ? `<progress aria-label="${esc(t("Download progress"))}" value="${state.progress}" max="1"></progress><button data-cancel-download>${esc(t("Cancel"))}</button>` : installed ? `${selected ? `<span class="success">${esc(t("Active"))}</span>` : `<button data-select="${esc(m.id)}">${esc(t("Use"))}</button>`}` : `<button data-download="${esc(m.id)}" ${state.download || ["downloading", "installing"].includes(state.updates.status) ? "disabled" : ""}>${esc(t("Download"))}</button>`}${installed && isMac() ? `<button data-delete="${esc(m.id)}" aria-label="${esc(t("Delete {model}", { model: m.title }))}" class="destructive">×</button>` : ""}</div></div>`;
+  return `<div class="model-row ${selected ? "active-model" : ""}" data-model-id="${esc(m.id)}"><button class="model-radio" aria-label="${esc(t("Use {model}", { model: m.title }))}" aria-pressed="${selected}" data-select="${esc(m.id)}" ${!installed ? "disabled" : ""}><span></span></button><div class="model-description"><strong>${esc(m.title)}</strong>${recommended ? `<span class="recommendation">${esc(t("Starting recommendation"))}</span>` : ""}<p>${esc(m.size)} · ${esc(t(m.note))}</p></div><div class="model-buttons">${downloading ? `<progress aria-label="${esc(t("Download progress"))}" value="${state.progress}" max="1"></progress><button data-cancel-download>${esc(t("Cancel"))}</button>` : installed ? `${selected ? `<span class="success">${esc(t("Active"))}</span>` : `<button data-select="${esc(m.id)}">${esc(t("Use"))}</button>`}` : `<button data-download="${esc(m.id)}" ${state.download || ["downloading", "installing"].includes(state.updates.status) ? "disabled" : ""}>${esc(t("Download"))}</button>`}${installed && isMac() ? `<button data-delete="${esc(m.id)}" aria-label="${esc(t("Delete {model}", { model: m.title }))}" class="destructive">×</button>` : ""}</div></div>`;
+}
+function modelDialogMarkup(): string {
+  return `<div class="model-drawer-shell"><header class="model-drawer-heading"><div><span class="dictation-kicker">${esc(t("MODEL LIBRARY"))}</span><h2 id="model-drawer-title">${esc(t("Choose a speech model"))}</h2><p>${esc(t("Current recognition device: {device}", { device: recognitionHardwareStatus() }))}</p></div><button type="button" id="close-model-drawer" data-close-model-drawer aria-label="${esc(t("Close model chooser"))}">×</button></header><div id="model-drawer-notice" role="alert" hidden></div><div class="model-drawer-body">${state.models.map(modelRow).join("")}</div><footer class="model-drawer-footer">${isMac() ? `<button type="button" data-model-command="import_model">${esc(t("Import a model …"))}</button>` : ""}<button type="button" data-model-command="show_models_folder">${esc(t("Show in file manager"))}</button><button type="button" class="model-drawer-done" data-close-model-drawer>${esc(t("Done"))}</button></footer></div>`;
+}
+function modelDialogSemanticKey(): string {
+  return JSON.stringify([
+    state.models,
+    modelRecommendations(),
+    state.installed,
+    state.preferences.model,
+    state.download,
+    state.updates.status,
+    state.preferences.gpu,
+    state.gpu_supported,
+    state.gpu_checked,
+    state.gpu_available,
+    state.gpu_device,
+    state.cpu_device,
+    state.gpu_fallback,
+  ]);
+}
+function updateDialogProgress() {
+  const progress = document.querySelector<HTMLProgressElement>(
+    "#model-drawer progress",
+  );
+  if (progress) progress.value = state.progress;
+}
+function syncModelDialog(force = false) {
+  const dialog = document.querySelector<HTMLDialogElement>("#model-drawer");
+  if (!dialog || (!dialog.open && !force)) return;
+  const key = modelDialogSemanticKey();
+  if (!force && key === modelDialogKey) {
+    updateDialogProgress();
+    return;
+  }
+  const active = document.activeElement;
+  const activeButton =
+    active instanceof HTMLButtonElement && dialog.contains(active)
+      ? active
+      : null;
+  const modelRow = activeButton?.closest<HTMLElement>(".model-row");
+  const modelId = activeButton?.dataset.select ?? modelRow?.dataset.modelId;
+  const wasRadio = activeButton?.classList.contains("model-radio") ?? false;
+  const commandName = activeButton?.dataset.modelCommand;
+  const wasClose = activeButton?.id === "close-model-drawer";
+  modelDialogKey = key;
+  dialog.innerHTML = modelDialogMarkup();
+  bindModelActions(dialog, true);
+  dialog
+    .querySelectorAll<HTMLButtonElement>("[data-close-model-drawer]")
+    .forEach((button) => button.addEventListener("click", closeModelDialog));
+  let restore: HTMLButtonElement | undefined;
+  if (wasClose)
+    restore =
+      dialog.querySelector<HTMLButtonElement>("#close-model-drawer") ??
+      undefined;
+  else if (commandName) {
+    restore = Array.from(
+      dialog.querySelectorAll<HTMLButtonElement>("[data-model-command]"),
+    ).find((button) => button.dataset.modelCommand === commandName);
+  } else if (modelId) {
+    const row = Array.from(
+      dialog.querySelectorAll<HTMLElement>(".model-row"),
+    ).find((candidate) => candidate.dataset.modelId === modelId);
+    restore = wasRadio
+      ? (row?.querySelector<HTMLButtonElement>(".model-radio") ?? undefined)
+      : (row?.querySelector<HTMLButtonElement>(
+          "[data-cancel-download], [data-download]",
+        ) ??
+        Array.from(
+          row?.querySelectorAll<HTMLButtonElement>("[data-select]") ?? [],
+        ).find((button) => !button.classList.contains("model-radio")) ??
+        row?.querySelector<HTMLButtonElement>(".model-radio") ??
+        undefined);
+  }
+  if (!restore || restore.disabled) {
+    restore =
+      dialog.querySelector<HTMLButtonElement>("#close-model-drawer") ??
+      undefined;
+  }
+  if (restore && !restore.disabled) restore.focus();
+}
+function openModelDialog(opener: HTMLElement) {
+  const dialog = document.querySelector<HTMLDialogElement>("#model-drawer");
+  if (!dialog) return;
+  dialogOpener = opener;
+  modelDialogKey = "";
+  syncModelDialog(true);
+  if (!dialog.open) dialog.showModal();
+  dialog.querySelector<HTMLButtonElement>("#close-model-drawer")?.focus();
+}
+function closeModelDialog() {
+  const dialog = document.querySelector<HTMLDialogElement>("#model-drawer");
+  if (dialog?.open) dialog.close();
+}
+function restoreModelDialogFocus(dialog: HTMLDialogElement) {
+  if (!dialog.isConnected || dialog.open) return;
+  const opener = dialogOpener?.isConnected
+    ? dialogOpener
+    : document.querySelector<HTMLElement>(".dictation-change-model");
+  if (!modelFocusRestorePending) opener?.focus();
+  dialogOpener = null;
+  modelDialogKey = "";
+  const body = dialog.querySelector<HTMLElement>(".model-drawer-body");
+  if (body) body.replaceChildren();
+}
+function historyRows(): string {
+  return state.history
+    .map(
+      (text, i) =>
+        `<div class="history-row"><p>${esc(text)}</p><button data-copy="${i}" aria-label="${esc(t("Copy dictation"))}">${esc(t("Copy"))}</button></div>`,
+    )
+    .join("");
+}
+function bindHistoryActions(root: ParentNode) {
+  root
+    .querySelectorAll<HTMLButtonElement>("[data-copy]")
+    .forEach(
+      (button) =>
+        (button.onclick = () =>
+          void command("copy_history", { index: Number(button.dataset.copy) })),
+    );
+  root
+    .querySelector<HTMLButtonElement>("[data-clear-history]")
+    ?.addEventListener("click", () => void command("clear_history"));
+}
+function bindModelActions(root: ParentNode, inDrawer = false) {
+  const errorTarget = inDrawer
+    ? () => {
+        const dialog =
+          document.querySelector<HTMLDialogElement>("#model-drawer");
+        return dialog?.open
+          ? dialog.querySelector<HTMLElement>("#model-drawer-notice")
+          : null;
+      }
+    : undefined;
+  root
+    .querySelectorAll<HTMLButtonElement>("[data-delete]")
+    .forEach(
+      (button) =>
+        (button.onclick = () =>
+          void command(
+            "delete_model",
+            { id: button.dataset.delete },
+            errorTarget,
+          )),
+    );
+  root
+    .querySelectorAll<HTMLButtonElement>("[data-download]")
+    .forEach(
+      (button) =>
+        (button.onclick = () =>
+          void command(
+            "download_model",
+            { id: button.dataset.download },
+            errorTarget,
+          )),
+    );
+  root
+    .querySelectorAll<HTMLButtonElement>("[data-select]")
+    .forEach(
+      (button) =>
+        (button.onclick = () =>
+          void savePreferences(
+            preferencePatchSchema.parse({ model: button.dataset.select }),
+            errorTarget,
+          )),
+    );
+  root
+    .querySelectorAll<HTMLButtonElement>("[data-cancel-download]")
+    .forEach((button) =>
+      button.addEventListener(
+        "click",
+        () => void command("cancel_download", undefined, errorTarget),
+      ),
+    );
+  root
+    .querySelectorAll<HTMLButtonElement>("[data-model-command]")
+    .forEach((button) =>
+      button.addEventListener(
+        "click",
+        () =>
+          void command(button.dataset.modelCommand!, undefined, errorTarget),
+      ),
+    );
 }
 function recognitionHardwareStatus(): string {
   if (isMac()) return t("Native speech engine");
@@ -181,6 +370,7 @@ function notice(text: string) {
 async function command(
   name: string,
   args?: Record<string, unknown>,
+  errorTarget?: () => HTMLElement | null,
 ): Promise<boolean> {
   if (name === "complete_setup" && !hasInstalledSelectedModel()) {
     notice("Download and select a model to continue.");
@@ -191,7 +381,11 @@ async function command(
     await invoke(command, validateCommandInput(command, args ?? {}));
     return true;
   } catch (error) {
-    notice(String(error));
+    const target = errorTarget?.();
+    if (target) {
+      target.textContent = String(error);
+      target.hidden = false;
+    } else notice(String(error));
     return false;
   }
 }
@@ -211,7 +405,10 @@ async function recoverState(): Promise<boolean> {
   }
 }
 // Send only the edited fields. Serializing writes also keeps delayed host replies in order.
-async function savePreferences(changes: PreferencePatch): Promise<boolean> {
+async function savePreferences(
+  changes: PreferencePatch,
+  errorTarget?: () => HTMLElement | null,
+): Promise<boolean> {
   pendingPreferences++;
   document
     .querySelectorAll<HTMLButtonElement>(".setup-navigation button")
@@ -221,7 +418,11 @@ async function savePreferences(changes: PreferencePatch): Promise<boolean> {
       state = await invoke("save_preferences", { changes });
       return true;
     } catch (error) {
-      notice(String(error));
+      const target = errorTarget?.();
+      if (target) {
+        target.textContent = String(error);
+        target.hidden = false;
+      } else notice(String(error));
       await recoverState();
       return false;
     } finally {
@@ -392,15 +593,53 @@ const viewDescriptions: Record<View, string> = {
   about: "A little more freedom for your voice.",
   dictation: "Your latest transcript, ready to copy.",
 };
+function emptyModelDialog() {
+  return '<dialog id="model-drawer" aria-labelledby="model-drawer-title"></dialog>';
+}
+function bindModelDialogShell() {
+  const dialog = document.querySelector<HTMLDialogElement>("#model-drawer");
+  if (!dialog) return;
+  dialog.onclose = (event) =>
+    restoreModelDialogFocus(event.currentTarget as HTMLDialogElement);
+  dialog.addEventListener("keydown", (event) => {
+    if (event.key !== "Tab" || !dialog.open) return;
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter(
+      (element) => !element.hidden && element.getClientRects().length > 0,
+    );
+    if (!focusable.length) return;
+    const first = focusable[0]!;
+    const last = focusable.at(-1)!;
+    const active = document.activeElement;
+    if (active === dialog || !dialog.contains(active)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    } else if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
+}
 function renderShell() {
   const key = `${state.preferences.ui_language}:${state.preferences.setup_completed}:${state.profile ?? "stable"}`;
   if (shellKey === key) return;
+  if (document.querySelector<HTMLDialogElement>("#model-drawer")?.open) {
+    modelFocusRestorePending = true;
+    closeModelDialog();
+  }
   shellKey = key;
   contentKey = "";
   const setup = !state.preferences.setup_completed;
   document.documentElement.classList.toggle("setup-mode", setup && !overlay);
   if (setup) {
-    app.innerHTML = `${windowTitlebar()}<main class="setup-main"><div id="notice" role="alert" hidden></div><div id="content"></div></main><div id="record-control"></div>`;
+    app.innerHTML = `${windowTitlebar()}<main class="setup-main"><div id="notice" role="alert" hidden></div><div id="content"></div></main><div id="record-control"></div>${emptyModelDialog()}`;
+    bindModelDialogShell();
     if (overlay)
       app.innerHTML =
         '<div id="notice" role="alert" hidden></div><div id="record-control"></div>';
@@ -416,16 +655,27 @@ function renderShell() {
     )
     .join(
       "",
-    )}</nav><div class="language-switch" role="group" aria-label="${esc(t("Interface language"))}"><button data-ui-language="en" aria-pressed="${state.preferences.ui_language === "en"}">${esc(t("English"))}</button><button data-ui-language="de" aria-pressed="${state.preferences.ui_language === "de"}">Deutsch</button></div><div class="sidebar-foot">${symbol("M12 3 4 6v6c0 4 4 7 8 9 4-2 8-5 8-9V6l-8-3m-4 9 3 3 5-6")}<div><strong>${esc(t("Private by design"))}</strong><span>${esc(t("Your voice stays here."))}</span></div></div></aside><main><header class="page-header"><div class="page-eyebrow">${esc(t("YOUR SPACE, YOUR PACE"))}</div><h1 id="page-title"></h1><p id="page-description"></p></header><div id="notice" role="alert" hidden></div><div id="content"></div></main><div id="record-control"></div>`;
+    )}</nav><div class="language-switch" role="group" aria-label="${esc(t("Interface language"))}"><button data-ui-language="en" aria-pressed="${state.preferences.ui_language === "en"}">${esc(t("English"))}</button><button data-ui-language="de" aria-pressed="${state.preferences.ui_language === "de"}">Deutsch</button></div><div class="sidebar-foot">${symbol("M12 3 4 6v6c0 4 4 7 8 9 4-2 8-5 8-9V6l-8-3m-4 9 3 3 5-6")}<div><strong>${esc(t("Private by design"))}</strong><span>${esc(t("Your voice stays here."))}</span></div></div></aside><main><header class="page-header"><div class="page-eyebrow">${esc(t("YOUR SPACE, YOUR PACE"))}</div><h1 id="page-title"></h1><p id="page-description"></p></header><div id="notice" role="alert" hidden></div><div id="content"></div></main><div id="record-control"></div>${emptyModelDialog()}`;
+  bindModelDialogShell();
   if (overlay)
     app.innerHTML =
       '<div id="notice" role="alert" hidden></div><div id="record-control"></div>';
 }
 app.addEventListener("click", (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
-    "[data-tab], [data-ui-language], [data-window-action]",
+    "[data-tab], [data-ui-language], [data-window-action], [data-open-model-drawer]",
   );
   if (!button) return;
+  if (button.hasAttribute("data-open-model-drawer")) {
+    if (dirty) {
+      notice(
+        t("Save or discard your changes before switching tabs or language."),
+      );
+      return;
+    }
+    openModelDialog(button);
+    return;
+  }
   if (button.dataset.windowAction) {
     void command("window_action", { action: button.dataset.windowAction });
     return;
@@ -606,6 +856,7 @@ function render() {
   renderShell();
   recordControl();
   if (overlay) return;
+  syncModelDialog();
   document
     .querySelectorAll<HTMLButtonElement>("[data-tab]")
     .forEach((b) => b.classList.toggle("selected", b.dataset.tab === tab));
@@ -727,10 +978,26 @@ function render() {
     const emptyText = t(
       "Your final transcript will appear here after you stop dictating.",
     );
-    content.innerHTML = `<section class="dictation-workspace" aria-label="${esc(t("Dictation workspace"))}"><div class="dictation-overview"><div class="dictation-overview-copy"><span class="dictation-kicker">${esc(t("YOUR VOICE, IN TEXT"))}</span><h2>${esc(workspaceHeading)}</h2><p>${esc(t("Speak naturally. Your audio stays on this computer."))}</p></div><div class="dictation-timer-wrap"><span>${esc(t("Recording time"))}</span><strong id="dictation-timer">0:00</strong></div></div><div class="dictation-context"><div class="dictation-context-item"><span>${esc(t("Speech model"))}</span><strong>${esc(model?.title ?? t("Choose a model"))}</strong></div><button class="dictation-change-model" data-tab="models">${esc(t("Change model"))}<span aria-hidden="true">→</span></button><div class="dictation-context-item dictation-device"><span>${esc(t("Recognition device"))}</span><strong>${esc(recognitionHardwareStatus())}</strong></div><div class="dictation-level" aria-label="${esc(t("Microphone input level"))}" role="img"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div><section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><div><span class="dictation-kicker">${esc(t("LATEST TRANSCRIPT"))}</span><h2 id="transcript-heading">${esc(t("Your words"))}</h2></div><button id="copy-dictation" ${transcriptAvailable ? "" : "hidden"}>${symbol("M8 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3M9 2h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2")}${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptAvailable ? `<p class="transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</p>` : `<div class="dictation-empty"><span class="dictation-empty-mark">${symbol("M12 4v10m0 0 4-4m-4 4-4-4M5 20h14")}</span><p>${esc(emptyText)}</p></div>`}</div></section></section>`;
+    content.innerHTML = `<section class="dictation-workspace" aria-label="${esc(t("Dictation workspace"))}"><div class="dictation-overview"><div class="dictation-overview-copy"><span class="dictation-kicker">${esc(t("YOUR VOICE, IN TEXT"))}</span><h2>${esc(workspaceHeading)}</h2><p>${esc(t("Speak naturally. Your audio stays on this computer."))}</p></div><div class="dictation-timer-wrap"><span>${esc(t("Recording time"))}</span><strong id="dictation-timer">0:00</strong></div></div><div class="dictation-context"><div class="dictation-context-item"><span>${esc(t("Speech model"))}</span><strong>${esc(model?.title ?? t("Choose a model"))}</strong></div><button class="dictation-change-model" data-open-model-drawer>${esc(t("Change model"))}<span aria-hidden="true">→</span></button><div class="dictation-context-item dictation-device"><span>${esc(t("Recognition device"))}</span><strong>${esc(recognitionHardwareStatus())}</strong></div><div class="dictation-level" aria-label="${esc(t("Microphone input level"))}" role="img"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="dictation-results ${historyRailOpen ? "history-open" : ""}"><section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><div><span class="dictation-kicker">${esc(t("LATEST TRANSCRIPT"))}</span><h2 id="transcript-heading">${esc(t("Your words"))}</h2></div><div class="dictation-transcript-actions"><button id="toggle-history" type="button" aria-expanded="${historyRailOpen}" aria-controls="dictation-history">${esc(t(historyRailOpen ? "Hide history" : "Show history"))}</button><button id="copy-dictation" ${transcriptAvailable ? "" : "hidden"}>${symbol("M8 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3M9 2h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2")}${esc(t("Copy"))}</button></div></header><div class="dictation-transcript-body">${transcriptAvailable ? `<p class="transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</p>` : `<div class="dictation-empty"><span class="dictation-empty-mark">${symbol("M12 4v10m0 0 4-4m-4 4-4-4M5 20h14")}</span><p>${esc(emptyText)}</p></div>`}</div></section><section class="dictation-history" id="dictation-history" aria-label="${esc(t("Recent dictations"))}" ${historyRailOpen ? "" : "hidden"}><header><h2>${esc(t("Recent dictations"))}</h2><button type="button" data-clear-history id="clear-history" class="destructive" ${state.history.length || state.transcript ? "" : "hidden"}>${esc(t("Clear history"))}</button></header><div class="dictation-history-list">${state.history.length ? historyRows() : `<p class="secondary">${esc(t("No dictations in history yet."))}</p>`}</div></section></div></section>`;
     content
       .querySelector<HTMLButtonElement>("#copy-dictation")
       ?.addEventListener("click", () => void command("copy_transcript"));
+    content
+      .querySelector<HTMLButtonElement>("#toggle-history")
+      ?.addEventListener("click", (event) => {
+        historyRailOpen = !historyRailOpen;
+        const button = event.currentTarget as HTMLButtonElement;
+        button.setAttribute("aria-expanded", String(historyRailOpen));
+        button.textContent = t(
+          historyRailOpen ? "Hide history" : "Show history",
+        );
+        content.querySelector<HTMLElement>("#dictation-history")!.hidden =
+          !historyRailOpen;
+        content
+          .querySelector<HTMLElement>(".dictation-results")!
+          .classList.toggle("history-open", historyRailOpen);
+      });
+    bindHistoryActions(content);
     syncDictationState();
   } else if (tab === "setup") {
     const panels = [
@@ -846,6 +1113,7 @@ function render() {
     }
   } else if (tab === "general") {
     content.innerHTML =
+      `<div class="settings-index" role="navigation" aria-label="${esc(t("Settings sections"))}"><button type="button" data-settings-section="settings-recording">${esc(t("Recording"))}</button><button type="button" data-settings-section="settings-permissions">${esc(t("Permissions"))}</button><button type="button" data-settings-section="settings-vocabulary">${esc(t("Custom vocabulary"))}</button><button type="button" data-settings-section="settings-output">${esc(t("Output"))}</button><button type="button" data-settings-section="settings-system">${esc(t("Appearance & system"))}</button></div>` +
       section(
         t("Recording"),
         row(t("Trigger"), shortcutButton()) +
@@ -882,6 +1150,7 @@ function render() {
         isMac()
           ? ""
           : t("Start and stop sounds are not yet available on Linux."),
+        "settings-recording",
       ) +
       section(
         t("Permissions"),
@@ -910,6 +1179,7 @@ function render() {
             : t(
                 "Keyboard access is needed for automatic pasting. Portal permission may need to be enabled again after restarting the app.",
               ),
+        "settings-permissions",
       ) +
       section(
         t("Custom vocabulary"),
@@ -917,6 +1187,7 @@ function render() {
         t(
           "Names and technical terms, separated by commas. Similar spellings are corrected after recognition with any model. Whisper models also receive these terms during recognition.",
         ),
+        "settings-vocabulary",
       ) +
       section(
         t("Output"),
@@ -942,6 +1213,7 @@ function render() {
           : t(
               "Automatic pasting requires keyboard permission. Clipboard restoration and text editor output are not yet available on Linux.",
             ),
+        "settings-output",
       ) +
       section(
         t("Appearance & system"),
@@ -1011,6 +1283,17 @@ function render() {
           : t(
               "There is no fixed recording limit. Stop or cancel when you are finished.",
             ),
+        "settings-system",
+      );
+    content
+      .querySelectorAll<HTMLButtonElement>("[data-settings-section]")
+      .forEach((button) =>
+        button.addEventListener("click", () => {
+          const target = document.getElementById(
+            button.dataset.settingsSection!,
+          );
+          target?.scrollIntoView({ block: "start" });
+        }),
       );
     const vocabulary =
       document.querySelector<HTMLTextAreaElement>("#vocabulary")!;
@@ -1136,12 +1419,7 @@ function render() {
       section(
         t("Recent dictations"),
         state.history.length
-          ? state.history
-              .map(
-                (text, i) =>
-                  `<div class="history-row"><p>${esc(text)}</p><button data-copy="${i}" aria-label="${esc(t("Copy dictation"))}">${esc(t("Copy"))}</button></div>`,
-              )
-              .join("")
+          ? historyRows()
           : `<div class="empty-state">${symbol(microphoneIcon)}<strong>${esc(t("Your next thought belongs here."))}</strong><p>${esc(t("Start a dictation and your words will appear here."))}</p></div>`,
       ) +
       (state.transcript_preview_omitted || (!p.keep_history && state.transcript)
@@ -1156,27 +1434,18 @@ function render() {
       (state.history.length || state.transcript
         ? section(
             "",
-            `<button id="clear-history" class="destructive">${esc(t("Clear history"))}</button>`,
+            `<button id="clear-history" data-clear-history class="destructive">${esc(t("Clear history"))}</button>`,
           )
         : "");
-    content
-      .querySelectorAll<HTMLButtonElement>("[data-copy]")
-      .forEach(
-        (b) =>
-          (b.onclick = () =>
-            void command("copy_history", { index: Number(b.dataset.copy) })),
-      );
+    bindHistoryActions(content);
     content
       .querySelector("#copy-latest")
       ?.addEventListener("click", () => void command("copy_transcript"));
-    content
-      .querySelector("#clear-history")
-      ?.addEventListener("click", () => void command("clear_history"));
   } else {
     content.innerHTML =
       section(
         "",
-        `<div class="about-brand"><img src="./app-icon.png" width="88" height="88" alt="${esc(t("OpenWhisper app icon"))}"><div><span class="page-eyebrow">${esc(t("LESS TYPING. MORE YOU."))}</span><h1>OpenWhisper</h1><p class="version-badge">Version ` +
+        `<div class="about-brand"><img src="./branding/icon-bordered.svg" width="88" height="88" alt="${esc(t("OpenWhisper app icon"))}"><div><span class="page-eyebrow">${esc(t("LESS TYPING. MORE YOU."))}</span><h1>OpenWhisper</h1><p class="version-badge">Version ` +
           esc(state.version) +
           (state.profile === "development" && state.development_build
             ? ` · Dev ${esc(state.development_build)}`
@@ -1213,6 +1482,10 @@ function render() {
           ));
   }
   main.scrollTop = scrollTop;
+  if (modelFocusRestorePending) {
+    document.querySelector<HTMLElement>(".dictation-change-model")?.focus();
+    modelFocusRestorePending = false;
+  }
   content
     .querySelectorAll<HTMLButtonElement>("[data-command]")
     .forEach((b) => (b.onclick = () => void command(b.dataset.command!)));
@@ -1285,30 +1558,7 @@ function render() {
         }
       }),
   );
-  content
-    .querySelectorAll<HTMLButtonElement>("[data-delete]")
-    .forEach(
-      (b) =>
-        (b.onclick = () =>
-          void command("delete_model", { id: b.dataset.delete })),
-    );
-  content
-    .querySelectorAll<HTMLButtonElement>("[data-download]")
-    .forEach(
-      (b) =>
-        (b.onclick = () =>
-          void command("download_model", { id: b.dataset.download })),
-    );
-  content
-    .querySelectorAll<HTMLButtonElement>("[data-select]")
-    .forEach(
-      (b) => (b.onclick = () => void preference("model", b.dataset.select)),
-    );
-  content
-    .querySelectorAll<HTMLButtonElement>("[data-cancel-download]")
-    .forEach((b) =>
-      b.addEventListener("click", () => void command("cancel_download")),
-    );
+  bindModelActions(content);
   content.querySelectorAll("[data-discard]").forEach((b) =>
     b.addEventListener("click", () => {
       dirty = false;

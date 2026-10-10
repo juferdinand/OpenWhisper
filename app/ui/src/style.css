@@ -303,6 +303,15 @@ main:has(.dictation-workspace) #content {
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 16px;
 }
+.dictation-results {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+.dictation-results.history-open {
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 220px);
+}
 .dictation-overview,
 .dictation-context,
 .dictation-transcript {
@@ -452,6 +461,15 @@ main:has(.dictation-workspace) #content {
   background: #352a49;
   border-color: #58486f;
 }
+.dictation-transcript-actions {
+  display: flex;
+  gap: 8px;
+}
+.dictation-transcript-actions button:first-child {
+  background: var(--purple-wash);
+  border-color: #504465;
+  color: var(--accent);
+}
 .dictation-transcript-heading button svg {
   width: 15px;
   height: 15px;
@@ -497,6 +515,148 @@ main:has(.dictation-workspace) #content {
 .dictation-empty-mark svg {
   width: 21px;
   height: 21px;
+}
+.dictation-history {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--group);
+}
+.dictation-history > header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.dictation-history h2 {
+  margin: 0;
+  font-size: 12px;
+}
+.dictation-history > header button {
+  min-height: 27px;
+  padding: 4px 7px;
+  font-size: 9px;
+}
+.dictation-history-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 12px;
+}
+.dictation-history .history-row {
+  align-items: start;
+  gap: 6px;
+  padding: 11px 0;
+}
+.dictation-history .history-row p {
+  min-width: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.dictation-history .history-row button {
+  min-height: 25px;
+  padding: 4px 6px;
+  font-size: 9px;
+}
+.dictation-history-list > .secondary {
+  color: var(--secondary);
+  font-size: 11px;
+  line-height: 1.6;
+}
+dialog#model-drawer {
+  width: min(740px, calc(100vw - 36px));
+  max-width: none;
+  max-height: calc(100vh - 48px);
+  padding: 0;
+  overflow: hidden;
+  color: var(--text);
+  border: 1px solid #514365;
+  border-radius: 18px;
+  background: var(--background);
+  box-shadow: 0 24px 80px #05030acc;
+}
+dialog#model-drawer::backdrop {
+  background: #090710b8;
+  backdrop-filter: blur(4px);
+}
+.model-drawer-shell {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 50px);
+}
+.model-drawer-heading {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px 14px;
+  border-bottom: 1px solid var(--border);
+  background: radial-gradient(ellipse at 88% 10%, #39294f 0, var(--group) 54%);
+}
+.model-drawer-heading h2 {
+  margin: 7px 0 0;
+  font-size: 19px;
+}
+.model-drawer-heading p {
+  margin: 6px 0 0;
+  color: var(--secondary);
+  font-size: 11px;
+}
+.model-drawer-heading > button {
+  min-width: 34px;
+  min-height: 34px;
+  padding: 2px;
+  font-size: 21px;
+}
+.model-drawer-body {
+  min-height: 100px;
+  overflow: auto;
+  padding: 0 22px;
+}
+.model-drawer-body .model-row {
+  gap: 10px;
+  padding: 13px 0;
+}
+.model-drawer-body .model-buttons {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.model-drawer-footer {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--sidebar);
+}
+.model-drawer-done {
+  background: var(--accent);
+  color: var(--button-text);
+  border-color: transparent;
+}
+#model-drawer-notice {
+  flex: 0 0 auto;
+  margin: 12px 22px 0;
+  padding: 9px 11px;
+  border: 1px solid #855758;
+  border-radius: 8px;
+  color: #ffb7b4;
+  background: #49282e;
+  font-size: 11px;
+  overflow-wrap: anywhere;
 }
 main::-webkit-scrollbar {
   width: 7px;
@@ -558,6 +718,43 @@ p {
   font-size: 11px;
   line-height: 1.6;
   margin: 9px 3px 0;
+}
+.settings-index {
+  position: sticky;
+  z-index: 2;
+  top: -32px;
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin: -16px -6px 18px;
+  padding: 9px 6px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--background) 92%, transparent);
+  backdrop-filter: blur(10px);
+}
+.settings-index button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 29px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--purple-wash);
+  color: var(--accent);
+  font-size: 10px;
+  text-decoration: none;
+}
+.settings-index button:hover,
+.settings-index button:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+#settings-recording,
+#settings-permissions,
+#settings-vocabulary,
+#settings-output,
+#settings-system {
+  scroll-margin-top: 52px;
 }
 .secondary {
   color: var(--secondary);
@@ -822,10 +1019,14 @@ progress::-webkit-progress-value {
 }
 .snippet-row {
   display: grid;
-  grid-template-columns: 32px minmax(80px, 1fr) 12px minmax(100px, 1.2fr) 22px;
+  grid-template-columns: 32px minmax(80px, 1fr) 12px minmax(100px, 1.2fr) 28px;
   gap: 10px;
   align-items: start;
-  padding: 12px 0;
+  margin: 11px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: linear-gradient(135deg, #292239, #211c2e);
 }
 .snippet-row .switch {
   margin-top: 10px;
@@ -835,9 +1036,12 @@ progress::-webkit-progress-value {
   padding-top: 10px;
 }
 .snippet-row button {
-  border: 0;
-  padding: 3px 0;
-  background: transparent;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 2px;
+  border-color: #594047;
+  background: #38262f;
+  color: #e39a98;
   font-size: 20px;
 }
 .edit-actions {
@@ -1116,6 +1320,17 @@ html:not(.overlay) #record-control {
   }
   .dictation-context {
     grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .dictation-results.history-open {
+    grid-template-columns: minmax(0, 1fr) minmax(160px, 180px);
+  }
+  .dictation-results.history-open .dictation-transcript-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .dictation-results.history-open .dictation-transcript-actions {
+    width: 100%;
+    justify-content: flex-end;
   }
   .dictation-device {
     grid-column: 1;
