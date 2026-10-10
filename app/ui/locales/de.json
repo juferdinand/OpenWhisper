@@ -449,5 +449,18 @@
   "Show history": "Verlauf anzeigen",
   "Hide history": "Verlauf ausblenden",
   "No dictations in history yet.": "Noch keine Diktate im Verlauf.",
-  "Settings sections": "Einstellungsbereiche"
+  "Settings sections": "Einstellungsbereiche",
+  "Checking": "Wird geprüft",
+  "Dictation settings": "Diktiereinstellungen",
+  "Editor": "Editor",
+  "Expand spoken phrases": "Gesprochene Formulierungen erweitern",
+  "LOCAL DICTATION": "LOKALES DIKTAT",
+  "Model family": "Modellfamilie",
+  "Names and technical terms": "Namen und Fachbegriffe",
+  "RECENT": "ZULETZT",
+  "Recording activity": "Aufnahmeaktivität",
+  "Text shortcuts": "Textkürzel",
+  "Transcript": "Transkript",
+  "Vocabulary": "Wörterbuch",
+  "Native": "Nativ"
 }

@@ -449,5 +449,18 @@
   "Show history": "Show history",
   "Hide history": "Hide history",
   "No dictations in history yet.": "No dictations in history yet.",
-  "Settings sections": "Settings sections"
+  "Settings sections": "Settings sections",
+  "Checking": "Checking",
+  "Dictation settings": "Dictation settings",
+  "Editor": "Editor",
+  "Expand spoken phrases": "Expand spoken phrases",
+  "LOCAL DICTATION": "LOCAL DICTATION",
+  "Model family": "Model family",
+  "Names and technical terms": "Names and technical terms",
+  "RECENT": "RECENT",
+  "Recording activity": "Recording activity",
+  "Text shortcuts": "Text shortcuts",
+  "Transcript": "Transcript",
+  "Vocabulary": "Vocabulary",
+  "Native": "Native"
 }

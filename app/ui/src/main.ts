@@ -24,10 +24,14 @@ let tab: View = "dictation";
 let dirty = false;
 let portalBusy = false;
 let contentKey = "";
+let workspaceKey = "";
 let shellKey = "";
 let renderedTab: View | undefined;
-let historyRailOpen = false;
-let dialogOpener: HTMLElement | null = null;
+let historyRailOpen = true;
+let modelDrawerFamily: "parakeet" | "whisper" = "parakeet";
+let modelDialogOpener: HTMLElement | null = null;
+let settingsDialogOpener: HTMLElement | null = null;
+let pendingSettingsSection = "";
 let modelDialogKey = "";
 let modelFocusRestorePending = false;
 let setupStep = -1;
@@ -79,7 +83,8 @@ function windowTitlebar(): string {
     state.profile === "development"
       ? `<span class="window-dev-badge">Dev</span>`
       : "";
-  return `<header class="window-titlebar"><div class="window-titlebar-brand"><img src="./branding/icon-bordered.svg" width="24" height="24" alt="">${wordmark()}${dev}</div><div class="window-actions"><button data-window-action="minimize" aria-label="${esc(t("Minimize window"))}" title="${esc(t("Minimize window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 11.5h10"/></svg></button><button data-window-action="maximize" aria-label="${esc(t("Maximize or restore window"))}" title="${esc(t("Maximize or restore window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/></svg></button><button class="window-close" data-window-action="close" aria-label="${esc(t("Close window"))}" title="${esc(t("Close window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div></header>`;
+  const setup = !state.preferences.setup_completed;
+  return `<header class="window-titlebar"><div class="window-titlebar-brand"><img src="./branding/icon-bordered.svg" width="24" height="24" alt="">${wordmark()}${dev}</div><span class="window-dictation-title">${esc(t(setup ? "Setup" : "Dictation"))}</span>${setup ? "" : `<div class="window-titlebar-actions"><button type="button" id="open-settings">${symbol("M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2")}${esc(t("Settings"))}</button></div>`}<div class="window-actions"><button data-window-action="minimize" aria-label="${esc(t("Minimize window"))}" title="${esc(t("Minimize window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 11.5h10"/></svg></button><button data-window-action="maximize" aria-label="${esc(t("Maximize or restore window"))}" title="${esc(t("Maximize or restore window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/></svg></button><button class="window-close" data-window-action="close" aria-label="${esc(t("Close window"))}" title="${esc(t("Close window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div></header>`;
 }
 const section = (title: string, body: string, note = "", id = "") =>
   `<section${id ? ` id="${id}"` : ""}>${title ? `<h2>${title}</h2>` : ""}<div class="group">${body}</div>${note ? `<p class="section-note">${note}</p>` : ""}</section>`;
@@ -131,7 +136,14 @@ function modelRow(m: Model): string {
   return `<div class="model-row ${selected ? "active-model" : ""}" data-model-id="${esc(m.id)}"><button class="model-radio" aria-label="${esc(t("Use {model}", { model: m.title }))}" aria-pressed="${selected}" data-select="${esc(m.id)}" ${!installed ? "disabled" : ""}><span></span></button><div class="model-description"><strong>${esc(m.title)}</strong>${recommended ? `<span class="recommendation">${esc(t("Starting recommendation"))}</span>` : ""}<p>${esc(m.size)} · ${esc(t(m.note))}</p></div><div class="model-buttons">${downloading ? `<progress aria-label="${esc(t("Download progress"))}" value="${state.progress}" max="1"></progress><button data-cancel-download>${esc(t("Cancel"))}</button>` : installed ? `${selected ? `<span class="success">${esc(t("Active"))}</span>` : `<button data-select="${esc(m.id)}">${esc(t("Use"))}</button>`}` : `<button data-download="${esc(m.id)}" ${state.download || ["downloading", "installing"].includes(state.updates.status) ? "disabled" : ""}>${esc(t("Download"))}</button>`}${installed && isMac() ? `<button data-delete="${esc(m.id)}" aria-label="${esc(t("Delete {model}", { model: m.title }))}" class="destructive">×</button>` : ""}</div></div>`;
 }
 function modelDialogMarkup(): string {
-  return `<div class="model-drawer-shell"><header class="model-drawer-heading"><div><span class="dictation-kicker">${esc(t("MODEL LIBRARY"))}</span><h2 id="model-drawer-title">${esc(t("Choose a speech model"))}</h2><p>${esc(t("Current recognition device: {device}", { device: recognitionHardwareStatus() }))}</p></div><button type="button" id="close-model-drawer" data-close-model-drawer aria-label="${esc(t("Close model chooser"))}">×</button></header><div id="model-drawer-notice" role="alert" hidden></div><div class="model-drawer-body">${state.models.map(modelRow).join("")}</div><footer class="model-drawer-footer">${isMac() ? `<button type="button" data-model-command="import_model">${esc(t("Import a model …"))}</button>` : ""}<button type="button" data-model-command="show_models_folder">${esc(t("Show in file manager"))}</button><button type="button" class="model-drawer-done" data-close-model-drawer>${esc(t("Done"))}</button></footer></div>`;
+  const families = [
+    ["parakeet", "NVIDIA Parakeet"],
+    ["whisper", "OpenAI Whisper"],
+  ] as const;
+  const models = state.models.filter(
+    (model) => model.family === modelDrawerFamily,
+  );
+  return `<div class="model-drawer-shell"><header class="model-drawer-heading"><div><span class="dictation-kicker">${esc(t("MODEL LIBRARY"))}</span><h2 id="model-drawer-title">${esc(t("Choose a speech model"))}</h2><p>${esc(t("Current recognition device: {device}", { device: recognitionHardwareStatus() }))}</p></div><button type="button" id="close-model-drawer" data-close-model-drawer aria-label="${esc(t("Close model chooser"))}">×</button></header><div class="model-drawer-families" role="group" aria-label="${esc(t("Model family"))}">${families.map(([family, label]) => `<button type="button" aria-pressed="${modelDrawerFamily === family}" data-drawer-family="${family}">${esc(t(label))}</button>`).join("")}</div><div id="model-drawer-notice" role="alert" hidden></div><div class="model-drawer-body">${models.map(modelRow).join("")}</div><footer class="model-drawer-footer">${isMac() ? `<button type="button" data-model-command="import_model">${esc(t("Import a model …"))}</button>` : ""}<button type="button" data-model-command="show_models_folder">${esc(t("Show in file manager"))}</button><button type="button" class="model-drawer-done" data-close-model-drawer>${esc(t("Done"))}</button></footer></div>`;
 }
 function modelDialogSemanticKey(): string {
   return JSON.stringify([
@@ -148,6 +160,7 @@ function modelDialogSemanticKey(): string {
     state.gpu_device,
     state.cpu_device,
     state.gpu_fallback,
+    modelDrawerFamily,
   ]);
 }
 function updateDialogProgress() {
@@ -174,9 +187,20 @@ function syncModelDialog(force = false) {
   const wasRadio = activeButton?.classList.contains("model-radio") ?? false;
   const commandName = activeButton?.dataset.modelCommand;
   const wasClose = activeButton?.id === "close-model-drawer";
+  const family = activeButton?.dataset.drawerFamily;
   modelDialogKey = key;
   dialog.innerHTML = modelDialogMarkup();
   bindModelActions(dialog, true);
+  dialog
+    .querySelectorAll<HTMLButtonElement>("[data-drawer-family]")
+    .forEach((button) =>
+      button.addEventListener("click", () => {
+        modelDrawerFamily = button.dataset.drawerFamily as
+          "parakeet" | "whisper";
+        modelDialogKey = "";
+        syncModelDialog();
+      }),
+    );
   dialog
     .querySelectorAll<HTMLButtonElement>("[data-close-model-drawer]")
     .forEach((button) => button.addEventListener("click", closeModelDialog));
@@ -185,6 +209,11 @@ function syncModelDialog(force = false) {
     restore =
       dialog.querySelector<HTMLButtonElement>("#close-model-drawer") ??
       undefined;
+  else if (family)
+    restore =
+      dialog.querySelector<HTMLButtonElement>(
+        `[data-drawer-family="${family}"]`,
+      ) ?? undefined;
   else if (commandName) {
     restore = Array.from(
       dialog.querySelectorAll<HTMLButtonElement>("[data-model-command]"),
@@ -214,7 +243,12 @@ function syncModelDialog(force = false) {
 function openModelDialog(opener: HTMLElement) {
   const dialog = document.querySelector<HTMLDialogElement>("#model-drawer");
   if (!dialog) return;
-  dialogOpener = opener;
+  modelDialogOpener = opener;
+  const activeModel = state.models.find(
+    (model) => model.id === state.preferences.model,
+  );
+  if (activeModel?.family === "parakeet" || activeModel?.family === "whisper")
+    modelDrawerFamily = activeModel.family;
   modelDialogKey = "";
   syncModelDialog(true);
   if (!dialog.open) dialog.showModal();
@@ -226,11 +260,11 @@ function closeModelDialog() {
 }
 function restoreModelDialogFocus(dialog: HTMLDialogElement) {
   if (!dialog.isConnected || dialog.open) return;
-  const opener = dialogOpener?.isConnected
-    ? dialogOpener
+  const opener = modelDialogOpener?.isConnected
+    ? modelDialogOpener
     : document.querySelector<HTMLElement>(".dictation-change-model");
   if (!modelFocusRestorePending) opener?.focus();
-  dialogOpener = null;
+  modelDialogOpener = null;
   modelDialogKey = "";
   const body = dialog.querySelector<HTMLElement>(".model-drawer-body");
   if (body) body.replaceChildren();
@@ -363,7 +397,9 @@ const outputs = () =>
   `<div class="radio-group">${[["paste", t("Paste at the cursor")], ["clipboard", t("Copy to clipboard only")], ...(isMac() ? [["editor", t("Open in a text editor")]] : [])].map(([v, l]) => `<label><input type="radio" name="output" data-pref="output" value="${v}" ${state.preferences.output === v ? "checked" : ""}>${l}</label>`).join("")}</div>`;
 
 function notice(text: string) {
-  const el = document.querySelector<HTMLElement>("#notice")!;
+  const el = document.querySelector<HTMLDialogElement>("#settings-dialog")?.open
+    ? document.querySelector<HTMLElement>("#settings-notice")!
+    : document.querySelector<HTMLElement>("#notice")!;
   el.textContent = t(text);
   el.hidden = false;
 }
@@ -584,23 +620,10 @@ function recognitionModeControl(setup = false): string {
 
 const microphoneIcon =
   "M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0V5M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8";
-const viewDescriptions: Record<View, string> = {
-  setup: "A few small steps. Then just speak your mind.",
-  general: "Choose how you record and where your words go.",
-  models: "Find the right balance of speed, size, and accuracy.",
-  snippets: "Turn a few spoken words into something longer.",
-  history: "Your recent words, saved only on this device.",
-  about: "A little more freedom for your voice.",
-  dictation: "Your latest transcript, ready to copy.",
-};
 function emptyModelDialog() {
   return '<dialog id="model-drawer" aria-labelledby="model-drawer-title"></dialog>';
 }
-function bindModelDialogShell() {
-  const dialog = document.querySelector<HTMLDialogElement>("#model-drawer");
-  if (!dialog) return;
-  dialog.onclose = (event) =>
-    restoreModelDialogFocus(event.currentTarget as HTMLDialogElement);
+function bindDialogFocusTrap(dialog: HTMLDialogElement) {
   dialog.addEventListener("keydown", (event) => {
     if (event.key !== "Tab" || !dialog.open) return;
     const focusable = Array.from(
@@ -626,6 +649,59 @@ function bindModelDialogShell() {
     }
   });
 }
+function bindModelDialogShell() {
+  const dialog = document.querySelector<HTMLDialogElement>("#model-drawer");
+  if (!dialog) return;
+  dialog.onclose = (event) =>
+    restoreModelDialogFocus(event.currentTarget as HTMLDialogElement);
+  bindDialogFocusTrap(dialog);
+}
+function bindSettingsDialogShell() {
+  const dialog = document.querySelector<HTMLDialogElement>("#settings-dialog");
+  if (!dialog) return;
+  dialog.addEventListener("cancel", (event) => {
+    if (dirty) {
+      event.preventDefault();
+      const target = dialog.querySelector<HTMLElement>("#settings-notice");
+      if (target) {
+        target.textContent = t(
+          "Save or discard your changes before switching tabs or language.",
+        );
+        target.hidden = false;
+      }
+      return;
+    }
+    event.preventDefault();
+    tab = "dictation";
+    contentKey = "";
+    render();
+  });
+  dialog.onclose = () => {
+    if (dialog.open || !dialog.isConnected) return;
+    settingsDialogOpener?.isConnected
+      ? settingsDialogOpener.focus()
+      : document.querySelector<HTMLElement>("#open-settings")?.focus();
+    settingsDialogOpener = null;
+  };
+  dialog
+    .querySelector<HTMLButtonElement>("#close-settings")
+    ?.addEventListener("click", () => {
+      if (dirty) {
+        const target = dialog.querySelector<HTMLElement>("#settings-notice");
+        if (target) {
+          target.textContent = t(
+            "Save or discard your changes before switching tabs or language.",
+          );
+          target.hidden = false;
+        }
+        return;
+      }
+      tab = "dictation";
+      contentKey = "";
+      render();
+    });
+  bindDialogFocusTrap(dialog);
+}
 function renderShell() {
   const key = `${state.preferences.ui_language}:${state.preferences.setup_completed}:${state.profile ?? "stable"}`;
   if (shellKey === key) return;
@@ -633,8 +709,12 @@ function renderShell() {
     modelFocusRestorePending = true;
     closeModelDialog();
   }
+  const previousSettings =
+    document.querySelector<HTMLDialogElement>("#settings-dialog");
+  if (previousSettings?.open) previousSettings.close();
   shellKey = key;
   contentKey = "";
+  workspaceKey = "";
   const setup = !state.preferences.setup_completed;
   document.documentElement.classList.toggle("setup-mode", setup && !overlay);
   if (setup) {
@@ -645,27 +725,65 @@ function renderShell() {
         '<div id="notice" role="alert" hidden></div><div id="record-control"></div>';
     return;
   }
-  app.innerHTML = `${windowTitlebar()}<aside><div class="nav-caption">${esc(t("WORKSPACE"))}</div><nav aria-label="${esc(t("Settings"))}">${tabs
-    .filter(([id]) =>
-      state.preferences.setup_completed ? id !== "setup" : id === "setup",
-    )
-    .map(
-      ([id, title, path]) =>
-        `<button data-tab="${id}">${symbol(path)}<span>${esc(t(title))}</span></button>`,
-    )
-    .join(
-      "",
-    )}</nav><div class="language-switch" role="group" aria-label="${esc(t("Interface language"))}"><button data-ui-language="en" aria-pressed="${state.preferences.ui_language === "en"}">${esc(t("English"))}</button><button data-ui-language="de" aria-pressed="${state.preferences.ui_language === "de"}">Deutsch</button></div><div class="sidebar-foot">${symbol("M12 3 4 6v6c0 4 4 7 8 9 4-2 8-5 8-9V6l-8-3m-4 9 3 3 5-6")}<div><strong>${esc(t("Private by design"))}</strong><span>${esc(t("Your voice stays here."))}</span></div></div></aside><main><header class="page-header"><div class="page-eyebrow">${esc(t("YOUR SPACE, YOUR PACE"))}</div><h1 id="page-title"></h1><p id="page-description"></p></header><div id="notice" role="alert" hidden></div><div id="content"></div></main><div id="record-control"></div>${emptyModelDialog()}`;
+  const settingsTabs = tabs.filter(
+    ([id]) => !["dictation", "setup"].includes(id),
+  );
+  app.innerHTML = `${windowTitlebar()}<div id="notice" role="alert" hidden></div><div id="dictation-workspace" class="dictation-workspace"><div class="workspace-frame${historyRailOpen ? "" : " history-collapsed"}"><main id="dictation-content" class="dictation-main"></main><aside id="dictation-history" class="dictation-history history-rail" aria-label="${esc(t("Recent dictations"))}"></aside></div><div id="record-control"></div></div><dialog id="settings-dialog" aria-labelledby="page-title"><div class="settings-dialog-shell"><nav class="settings-dialog-nav" aria-label="${esc(t("Settings"))}">${settingsTabs.map(([id, title, path]) => `<button type="button" data-tab="${id}">${symbol(path)}<span>${esc(t(title))}</span></button>`).join("")}</nav><div class="settings-dialog-panel"><header class="settings-dialog-heading"><h1 id="page-title"></h1><div class="settings-dialog-heading-actions"><div class="language-switch" role="group" aria-label="${esc(t("Interface language"))}"><button type="button" data-ui-language="en" aria-pressed="${state.preferences.ui_language === "en"}">${esc(t("English"))}</button><button type="button" data-ui-language="de" aria-pressed="${state.preferences.ui_language === "de"}">Deutsch</button></div><button type="button" id="close-settings">${esc(t("Done"))}</button></div></header><div id="settings-notice" role="alert" hidden></div><div class="settings-dialog-scroll"><div class="settings-content"><div id="content"></div></div></div></div></div></dialog>${emptyModelDialog()}`;
   bindModelDialogShell();
+  bindSettingsDialogShell();
   if (overlay)
     app.innerHTML =
       '<div id="notice" role="alert" hidden></div><div id="record-control"></div>';
 }
+
 app.addEventListener("click", (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
-    "[data-tab], [data-ui-language], [data-window-action], [data-open-model-drawer]",
+    "[data-tab], [data-settings-view], [data-ui-language], [data-window-action], [data-open-model-drawer], #open-settings, #toggle-history",
   );
   if (!button) return;
+  if (button.id === "toggle-history") {
+    historyRailOpen = !historyRailOpen;
+    const frame = document.querySelector<HTMLElement>(".workspace-frame");
+    frame?.classList.toggle("history-collapsed", !historyRailOpen);
+    button.setAttribute("aria-expanded", String(historyRailOpen));
+    button.setAttribute(
+      "aria-label",
+      t(historyRailOpen ? "Hide history" : "Show history"),
+    );
+    button.textContent = t(historyRailOpen ? "Hide history" : "Show history");
+    const list = document.querySelector<HTMLElement>("#dictation-history-list");
+    if (list) list.hidden = !historyRailOpen;
+    return;
+  }
+  if (button.id === "open-settings") {
+    if (dirty) {
+      notice("Save or discard your changes before switching tabs or language.");
+      return;
+    }
+    settingsDialogOpener = button;
+    tab = "general";
+    contentKey = "";
+    render();
+    return;
+  }
+  if (button.dataset.settingsView) {
+    if (dirty) {
+      notice("Save or discard your changes before switching tabs or language.");
+      return;
+    }
+    settingsDialogOpener = button;
+    tab = button.dataset.settingsView as Tab;
+    pendingSettingsSection = button.dataset.settingsSection ?? "";
+    contentKey = "";
+    render();
+    if (pendingSettingsSection) {
+      document
+        .getElementById(pendingSettingsSection)
+        ?.scrollIntoView({ block: "start" });
+      pendingSettingsSection = "";
+    }
+    return;
+  }
   if (button.hasAttribute("data-open-model-drawer")) {
     if (dirty) {
       notice(
@@ -690,6 +808,7 @@ app.addEventListener("click", (event) => {
     void preference("ui_language", button.dataset.uiLanguage);
     return;
   }
+  if (button.dataset.tab && tab === "dictation") settingsDialogOpener = button;
   tab = button.dataset.tab as View;
   render();
 });
@@ -732,12 +851,29 @@ function recordControl() {
     !recovery &&
     state.status !== "error";
   controls.dataset.setupIdle = String(setupIdle);
+  controls.dataset.recovery = String(recovery);
   document.documentElement.classList.toggle(
     "setup-recording",
     !overlay && !state.preferences.setup_completed && !setupIdle,
   );
   if (!controls.childElementCount) {
-    controls.innerHTML = `<div class="record-status"><div class="audio-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="general" hidden></button></div><div class="record-actions"><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-label"></span></button></div>`;
+    const outputModes: [string, string, string][] = [
+      ["paste", t("Insert"), t("Paste at the cursor")],
+      ["clipboard", t("Copy"), t("Copy to clipboard only")],
+      ...(isMac()
+        ? [
+            ["editor", t("Editor"), t("Open in a text editor")] as [
+              string,
+              string,
+              string,
+            ],
+          ]
+        : []),
+    ];
+    const outputControls = `<div class="record-output" role="group" aria-label="${esc(t("Output"))}">${outputModes.map(([value, label, fullLabel]) => `<button type="button" data-output="${value}" data-pref="output" aria-label="${esc(fullLabel)}" title="${esc(fullLabel)}" aria-pressed="${state.preferences.output === value}" ${recording || recovery ? "disabled" : ""}>${esc(label)}</button>`).join("")}</div>`;
+    controls.innerHTML = overlay
+      ? `<div class="record-actions"><div class="record-status"><div class="audio-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="general" hidden></button></div><span id="record-label"></span><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span></button></div>`
+      : `<div class="record-leading"><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><div class="record-status"><div class="audio-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="general" hidden></button></div></div><div class="record-center"><button id="record" class="capsule"><span id="record-symbol"></span></button><span id="record-label"></span></div>${outputControls}`;
     document
       .querySelector("#record")!
       .addEventListener(
@@ -759,6 +895,14 @@ function recordControl() {
               ? "discard_recovery"
               : "cancel_recording",
           ),
+      );
+    controls
+      .querySelectorAll<HTMLButtonElement>("[data-output]")
+      .forEach((output) =>
+        output.addEventListener(
+          "click",
+          () => void preference("output", output.dataset.output),
+        ),
       );
     document
       .querySelector<HTMLButtonElement>("#record-unavailable-action")!
@@ -787,6 +931,7 @@ function recordControl() {
     state.recording_available === false && !recording && !recovery
       ? recordingUnavailableMessage()
       : t(state.message);
+  button.setAttribute("aria-label", text);
   document.querySelector("#record-symbol")!.innerHTML = symbol(
     recording ? "M6 6h12v12H6z" : busy ? "M12 3a9 9 0 1 1-9 9" : microphoneIcon,
   );
@@ -804,11 +949,21 @@ function recordControl() {
     t(recovery ? "Discard saved recording" : "Discard recording"),
   );
   cancel.textContent = t(recovery ? "Discard" : "Cancel");
+  controls
+    .querySelectorAll<HTMLButtonElement>("[data-output]")
+    .forEach((output) => {
+      output.setAttribute(
+        "aria-pressed",
+        String(output.dataset.output === state.preferences.output),
+      );
+      output.disabled = recording || recovery;
+    });
   const unavailableAction = document.querySelector<HTMLButtonElement>(
     "#record-unavailable-action",
   )!;
   const unavailable =
     state.recording_available === false && !recording && !recovery;
+  controls.dataset.unavailable = String(unavailable);
   unavailableAction.hidden =
     !unavailable || state.recording_unavailable_reason === "host";
   unavailableAction.dataset.goto =
@@ -825,18 +980,83 @@ function recordControl() {
 }
 
 function syncDictationState() {
-  const heading = document.querySelector<HTMLElement>(".dictation-overview h2");
+  const heading = document.querySelector<HTMLElement>(".dictation-status-pill");
   if (heading) heading.textContent = recordingStatusTitle();
   const timer = document.querySelector<HTMLElement>("#dictation-timer");
   if (timer) {
     const elapsed = state.elapsed;
     timer.textContent = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
   }
-  const level = document.querySelector<HTMLElement>(".dictation-level");
+  const level = document.querySelector<HTMLElement>(".dictation-waveform");
   if (level) {
     level.style.setProperty("--voice-level", String(state.level ?? 0));
     level.dataset.active = String(state.status === "recording");
   }
+}
+
+function renderWorkspace() {
+  const main = document.querySelector<HTMLElement>("#dictation-content");
+  const rail = document.querySelector<HTMLElement>("#dictation-history");
+  if (!main || !rail) return;
+  const key = JSON.stringify([
+    state.preferences.model,
+    state.preferences.gpu,
+    state.preferences.output,
+    state.models,
+    state.installed,
+    state.recommended_models,
+    state.recording_available,
+    state.recording_unavailable_reason,
+    state.recovery_available,
+    state.history,
+    state.transcript,
+    state.transcript_preview_omitted,
+    state.gpu_supported,
+    state.gpu_checked,
+    state.gpu_available,
+    state.gpu_fallback,
+    state.gpu_device,
+    state.cpu_device,
+    tab === "history",
+    historyRailOpen,
+  ]);
+  if (key === workspaceKey) {
+    syncDictationState();
+    return;
+  }
+  workspaceKey = key;
+  const model = state.models.find(
+    (candidate) => candidate.id === state.preferences.model,
+  );
+  const transcriptAvailable =
+    !!state.transcript || state.transcript_preview_omitted;
+  const mode = isMac()
+    ? t("Native")
+    : state.preferences.gpu && state.gpu_checked === false
+      ? t("Checking")
+      : state.preferences.gpu &&
+          state.gpu_supported !== false &&
+          state.gpu_available &&
+          !state.gpu_fallback
+        ? t("GPU")
+        : t("CPU");
+  const statusLabel =
+    state.status === "recording"
+      ? t("Listening to you")
+      : state.status === "transcribing"
+        ? t("Finding your words")
+        : state.recovery_available
+          ? t("Something needs attention")
+          : state.recording_available === false
+            ? t("Recording is unavailable")
+            : t("Ready when you are");
+  main.innerHTML = `<div class="dictation-topline"><div class="dictation-title"><span class="dictation-kicker">${esc(t("LOCAL DICTATION"))}</span><h1>${esc(t("Dictation"))}</h1></div><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${recognitionHardwareStatus()}`)}" title="${esc(recognitionHardwareStatus())}"><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true">${Array.from({ length: 48 }, (_, i) => `<i style="--wave-index:${i}"></i>`).join("")}</div></section><section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptAvailable ? `<p class="transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</p>` : `<div class="dictation-empty"><p>${esc(t("Your final transcript will appear here after you stop dictating."))}</p></div>`}</div></section><section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-settings-view="models" class="dictation-feature-card"><span>${esc(t("Speech model"))}</span><strong>${esc(model?.title ?? t("Choose a model"))}</strong><small>${esc(mode)}</small></button><button type="button" data-settings-view="general" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span>${esc(t("Custom vocabulary"))}</span><strong>${esc(t("Vocabulary"))}</strong><small>${esc(t("Names and technical terms"))}</small></button><button type="button" data-settings-view="snippets" class="dictation-feature-card"><span>${esc(t("Text shortcuts"))}</span><strong>${esc(t("Snippets"))}</strong><small>${esc(t("Expand spoken phrases"))}</small></button></section>`;
+  rail.innerHTML = `<header class="dictation-history-heading"><div><span class="dictation-kicker">${esc(t("RECENT"))}</span><h2>${esc(t("Recent dictations"))}</h2></div><button id="toggle-history" type="button" aria-expanded="${historyRailOpen}" aria-controls="dictation-history-list" aria-label="${esc(t(historyRailOpen ? "Hide history" : "Show history"))}">${esc(t(historyRailOpen ? "Hide history" : "Show history"))}</button></header><div id="dictation-history-list" class="dictation-history-list" ${historyRailOpen ? "" : "hidden"}>${state.history.length ? historyRows() : `<p class="secondary">${esc(t("No dictations in history yet."))}</p>`}${state.history.length || state.transcript ? `<button type="button" data-clear-history id="clear-history-rail" class="destructive">${esc(t("Clear history"))}</button>` : ""}</div>`;
+  main
+    .querySelector<HTMLButtonElement>("#copy-dictation")
+    ?.addEventListener("click", () => void command("copy_transcript"));
+  bindHistoryActions(rail);
+  syncDictationState();
 }
 
 function render() {
@@ -857,11 +1077,24 @@ function render() {
   recordControl();
   if (overlay) return;
   syncModelDialog();
-  document
-    .querySelectorAll<HTMLButtonElement>("[data-tab]")
-    .forEach((b) => b.classList.toggle("selected", b.dataset.tab === tab));
+  const settingsDialog =
+    document.querySelector<HTMLDialogElement>("#settings-dialog");
+  if (tab !== "dictation" && settingsDialog && !settingsDialog.open) {
+    settingsDialogOpener ??=
+      document.querySelector<HTMLElement>("#open-settings");
+    settingsDialog.showModal();
+  } else if (tab === "dictation" && settingsDialog?.open) {
+    settingsDialog.close();
+  }
+  document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((b) => {
+    const selected = b.dataset.tab === tab;
+    b.classList.toggle("selected", selected);
+    b.setAttribute("aria-current", selected ? "page" : "false");
+  });
   syncPreferenceControls();
   syncProcessingPreview();
+  renderWorkspace();
+  if (tab === "dictation") return;
   const triggerBusy =
     portalBusy ||
     state.shortcut_configuring ||
@@ -886,7 +1119,7 @@ function render() {
   const nextKey = JSON.stringify(
     [
       tab,
-      tab === "general" || tab === "dictation" ? null : state.status,
+      tab === "general" ? null : state.status,
       // Checkbox changes must not replace the focused row or move its click target.
       tab === "general"
         ? {
@@ -948,58 +1181,18 @@ function render() {
   contentKey = nextKey;
   if (overlay) return;
   if (tab !== "setup") {
-    document.querySelector("#page-title")!.textContent = t(
+    document.querySelector<HTMLElement>("#page-title")!.textContent = t(
       tabs.find(([id]) => id === tab)![1],
     );
-    document.querySelector("#page-description")!.textContent = t(
-      viewDescriptions[tab],
-    );
-    document.querySelector<HTMLElement>(".page-header")!.hidden =
-      tab === "about";
   }
-  document
-    .querySelectorAll("[data-tab]")
-    .forEach((button) =>
-      button.setAttribute(
-        "aria-current",
-        button.getAttribute("data-tab") === tab ? "page" : "false",
-      ),
-    );
   const content = document.querySelector<HTMLDivElement>("#content")!;
-  const main = document.querySelector<HTMLElement>("main")!;
+  const main =
+    document.querySelector<HTMLElement>(".settings-dialog-scroll") ??
+    document.querySelector<HTMLElement>(".setup-main")!;
   const scrollTop = renderedTab === tab ? main.scrollTop : 0;
   renderedTab = tab;
   const p = state.preferences;
-  if (tab === "dictation") {
-    const model = state.models.find((candidate) => candidate.id === p.model);
-    const transcriptAvailable =
-      !!state.transcript || state.transcript_preview_omitted;
-    const workspaceHeading = recordingStatusTitle();
-    const emptyText = t(
-      "Your final transcript will appear here after you stop dictating.",
-    );
-    content.innerHTML = `<section class="dictation-workspace" aria-label="${esc(t("Dictation workspace"))}"><div class="dictation-overview"><div class="dictation-overview-copy"><span class="dictation-kicker">${esc(t("YOUR VOICE, IN TEXT"))}</span><h2>${esc(workspaceHeading)}</h2><p>${esc(t("Speak naturally. Your audio stays on this computer."))}</p></div><div class="dictation-timer-wrap"><span>${esc(t("Recording time"))}</span><strong id="dictation-timer">0:00</strong></div></div><div class="dictation-context"><div class="dictation-context-item"><span>${esc(t("Speech model"))}</span><strong>${esc(model?.title ?? t("Choose a model"))}</strong></div><button class="dictation-change-model" data-open-model-drawer>${esc(t("Change model"))}<span aria-hidden="true">→</span></button><div class="dictation-context-item dictation-device"><span>${esc(t("Recognition device"))}</span><strong>${esc(recognitionHardwareStatus())}</strong></div><div class="dictation-level" aria-label="${esc(t("Microphone input level"))}" role="img"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="dictation-results ${historyRailOpen ? "history-open" : ""}"><section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><div><span class="dictation-kicker">${esc(t("LATEST TRANSCRIPT"))}</span><h2 id="transcript-heading">${esc(t("Your words"))}</h2></div><div class="dictation-transcript-actions"><button id="toggle-history" type="button" aria-expanded="${historyRailOpen}" aria-controls="dictation-history">${esc(t(historyRailOpen ? "Hide history" : "Show history"))}</button><button id="copy-dictation" ${transcriptAvailable ? "" : "hidden"}>${symbol("M8 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3M9 2h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2")}${esc(t("Copy"))}</button></div></header><div class="dictation-transcript-body">${transcriptAvailable ? `<p class="transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</p>` : `<div class="dictation-empty"><span class="dictation-empty-mark">${symbol("M12 4v10m0 0 4-4m-4 4-4-4M5 20h14")}</span><p>${esc(emptyText)}</p></div>`}</div></section><section class="dictation-history" id="dictation-history" aria-label="${esc(t("Recent dictations"))}" ${historyRailOpen ? "" : "hidden"}><header><h2>${esc(t("Recent dictations"))}</h2><button type="button" data-clear-history id="clear-history" class="destructive" ${state.history.length || state.transcript ? "" : "hidden"}>${esc(t("Clear history"))}</button></header><div class="dictation-history-list">${state.history.length ? historyRows() : `<p class="secondary">${esc(t("No dictations in history yet."))}</p>`}</div></section></div></section>`;
-    content
-      .querySelector<HTMLButtonElement>("#copy-dictation")
-      ?.addEventListener("click", () => void command("copy_transcript"));
-    content
-      .querySelector<HTMLButtonElement>("#toggle-history")
-      ?.addEventListener("click", (event) => {
-        historyRailOpen = !historyRailOpen;
-        const button = event.currentTarget as HTMLButtonElement;
-        button.setAttribute("aria-expanded", String(historyRailOpen));
-        button.textContent = t(
-          historyRailOpen ? "Hide history" : "Show history",
-        );
-        content.querySelector<HTMLElement>("#dictation-history")!.hidden =
-          !historyRailOpen;
-        content
-          .querySelector<HTMLElement>(".dictation-results")!
-          .classList.toggle("history-open", historyRailOpen);
-      });
-    bindHistoryActions(content);
-    syncDictationState();
-  } else if (tab === "setup") {
+  if (tab === "setup") {
     const panels = [
       {
         title: t("Choose recognition hardware"),

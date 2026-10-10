@@ -19,6 +19,13 @@ deferred at the owner's request and have no new feature ticket. Final naming rem
 until the owner is ready to prepare a public introduction. The owner subsequently supplied
 new SVG logo variants for the frontend.
 
+Reproduce the reference's layout and interaction hierarchy, not just its purple palette:
+a compact titlebar, a wide dictation canvas, a right-hand history rail, a right-edge model
+drawer, and settings in a centered dialog with its own navigation. The timer and input level
+sit above the large transcript; existing feature shortcuts and the centered round recording
+control sit below it. Do not retain the previous permanent left navigation or promotional
+dashboard cards in the dictation view. Keep the accepted seven-step setup flow.
+
 | Design element | First milestone |
 | --- | --- |
 | Dark purple surfaces, spacing, cards and visual hierarchy | Adapt to the shared renderer with bundled Inter; use the supplied logo in the new setup view |
@@ -47,9 +54,9 @@ state. A live recording waveform indicates input level, not live transcription.
    Require a fully installed, selected speech model before advancing from model selection
    or completing setup. Pending, cancelled and failed downloads do not satisfy this check;
    permission and shortcut fallbacks remain optional.
-2. **Foundation and recording view.** Extend the visual tokens to the single transcript
-   workspace, shown by default after setup. Keep the existing settings, models, snippets,
-   history and About views reachable while their visual migration continues. Keep the
+2. **Foundation and recording view.** Reproduce the reference's single transcript
+   workspace, shown by default after setup. Place the existing settings, models, snippets,
+   history and About views inside the settings dialog. Keep the
    renderer-only dictation view separate from host settings-navigation contracts.
    Show the actual selected model and recognition device, an elapsed timer and input level
    from host telemetry, and the latest final transcript. Do not imply live transcription;
@@ -59,14 +66,16 @@ state. A live recording waveform indicates input level, not live transcription.
    cancel, retry and discard visible in the states where they are valid. Review screenshots
    at the actual 740 × 560 minimum window size and at larger sizes.
 3. **Models, history and settings.** Reuse existing model operations and history actions;
-   open a model chooser drawer from Dictation while retaining the full Models management
-   view. Keep the native dialog stable through download progress, show command failures
+   open a right-edge model chooser drawer from Dictation with Whisper/Parakeet family
+   selection, while retaining the full Models management view inside settings.
+   Keep the native dialog stable through download progress, show command failures
    inside it, and support keyboard navigation, Escape and focus restoration.
-   Add a collapsible history rail beside the transcript using the existing text list,
+   Add a collapsible history rail at the right edge of the workspace using the existing text list,
    complete-copy and clear commands, without inventing dates or durations. Keep the full
-   History view available. Add section navigation to General and adapt snippets and About,
-   including the supplied SVG branding, without removing current controls. Any later settings
-   dialog/drawer must also support keyboard navigation, Escape and focus restoration. Keep
+   History view available. Use a centered settings dialog with internal navigation and a
+   scrollable content area; adapt snippets and About, including the supplied SVG branding,
+   without removing current controls. Both dialogs must support keyboard navigation, Escape,
+   focus restoration, and retained unsaved edits. Keep
    setup exclusive until completion, then remove it from normal navigation.
 4. **Overlay and regression review.** Restyle floating controls separately from the main
    window, check both host layouts and capability fallbacks, and present one functional

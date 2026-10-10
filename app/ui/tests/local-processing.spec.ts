@@ -370,7 +370,7 @@ test("provider defaults save atomically and a rejected focused provider retains 
     ),
   ).toBe(true);
   await expect(page.locator("#processing-send")).toBeEnabled();
-  await expect(page.locator("#notice")).toHaveText(
+  await expect(page.locator("#settings-notice")).toHaveText(
     "Invalid text processing profile",
   );
   await provider.selectOption("ollama");
@@ -447,7 +447,7 @@ test("failed earlier save cannot erase newer focused uncommitted text", async ({
   await expect.poll(() => fixture.saves.length).toBe(1);
   await model.fill("newer typing 日本語");
   fixture.rejectSave(0);
-  await expect(page.locator("#notice")).toHaveText(
+  await expect(page.locator("#settings-notice")).toHaveText(
     "Invalid text processing profile",
   );
   await expect(model).toHaveValue("newer typing 日本語");

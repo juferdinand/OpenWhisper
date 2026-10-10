@@ -55,8 +55,12 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
   assert.equal(evidence, "/evidence", "Evidence must stay in the owned container filesystem.");
   const screenshot = async (page: Page, name: string) => page.screenshot({
     path: join(evidence, name),
-    mask: [page.locator(".dictation-device, .compute-mode small, #recognition-backend, .model-drawer-heading p")],
+    mask: [page.locator(".dictation-device, .dictation-change-model, .dictation-feature-card:first-child small, .compute-mode small, #recognition-backend, .model-drawer-heading p")],
   });
+  const openSettings = async (page: Page, tab: "general" | "models" | "about") => {
+    if (!await page.locator("#settings-dialog").isVisible()) await page.locator("#open-settings").click();
+    await page.locator(`#settings-dialog nav [data-tab="${tab}"]`).click();
+  };
   const root = await mkdtemp("/tmp/openwhisper-owned-ui-");
   await chmod(root, 0o700);
   const home = join(root, "home");
@@ -269,17 +273,26 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await page.locator(".dictation-change-model").click();
     await expect(page.locator("#model-drawer")).toBeVisible();
     await expect(page.locator("#model-drawer").getByRole("heading", { name: "Choose a speech model", exact: true })).toBeVisible();
+    const drawerBounds = await page.locator("#model-drawer").evaluate((drawer) => {
+      const bounds = drawer.getBoundingClientRect();
+      const titlebar = document.querySelector(".window-titlebar")!.getBoundingClientRect();
+      return { right: bounds.right, top: bounds.top, bottom: bounds.bottom, width: innerWidth, height: innerHeight, titlebarBottom: titlebar.bottom };
+    });
+    assert.ok(Math.abs(drawerBounds.right - drawerBounds.width) <= 1);
+    assert.ok(Math.abs(drawerBounds.top - drawerBounds.titlebarBottom) <= 1);
+    assert.ok(Math.abs(drawerBounds.bottom - drawerBounds.height) <= 1);
     await screenshot(page, "dev-model-drawer.png");
     await page.keyboard.press("Escape");
     await expect(page.locator("#model-drawer")).toBeHidden();
     await expect(page.locator(".dictation-change-model")).toBeFocused();
     await expect(page.locator(".model-drawer-body")).toBeEmpty();
-    await page.locator("#toggle-history").click();
     await expect(page.locator("#toggle-history")).toHaveAttribute("aria-expanded", "true");
     await expect(page.locator("#dictation-history")).toBeVisible();
     await expect(page.locator("#dictation-history .history-row")).toHaveCount(0);
     await screenshot(page, "dev-history-rail.png");
     await page.locator("#toggle-history").click();
+    await expect(page.locator("#toggle-history")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator("#dictation-history .dictation-history-list")).toBeHidden();
     checks.push("setup rejects missing or unselected installed models through real IPC; a selected private inventory fixture permits completion");
     checks.push("completed setup opens the dictation workspace without inventing a transcript or recording availability");
     checks.push("native model drawer closes with Escape and restores focus; the empty history rail remains optional");
@@ -297,7 +310,9 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     const modelDirectory = await lstat(state.model_directory);
     assert.equal(modelDirectory.uid, 1000);
     assert.equal(modelDirectory.mode & 0o777, 0o700);
-    await page.locator('[data-tab="about"]').click();
+    await openSettings(page, "about");
+    await expect(page.locator("#dictation-workspace")).toBeVisible();
+    await expect(page.locator("#settings-dialog")).toHaveJSProperty("open", true);
     await expect(page.locator(".version-badge")).toHaveText(`Version ${state.version} · Dev ${buildIdentifier} · Linux`);
     await expect(page.locator(".about-brand img")).toHaveAttribute("src", "./branding/icon-bordered.svg");
     await expect.poll(async () => page.locator(".about-brand img").evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth === 512)).toBe(true);
@@ -377,15 +392,23 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await expect(page.locator(".window-wordmark")).toHaveText("openwhisper");
     await expect(page.getByRole("heading", { name: "Dictation", exact: true })).toBeVisible();
 
-    await page.locator('[data-tab="general"]').click();
+    await openSettings(page, "general");
     const vocabulary = page.locator("#vocabulary");
     const settingsUrl = page.url();
     await page.locator(".settings-index").getByRole("button", { name: "Custom vocabulary", exact: true }).click();
     assert.equal(page.url(), settingsUrl, "Settings section navigation must preserve the trusted renderer URL.");
     await expect(vocabulary).toBeInViewport();
     await vocabulary.fill("Kubernetes, Grüß Gott, 東京");
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#settings-dialog")).toBeVisible();
+    await expect(vocabulary).toHaveValue("Kubernetes, Grüß Gott, 東京");
+    await expect(page.locator("#settings-notice")).toBeVisible();
     await page.locator("#save-vocabulary").click();
     await expect.poll(async () => validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.vocabulary).toBe("Kubernetes, Grüß Gott, 東京");
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#settings-dialog")).toBeHidden();
+    await expect(page.locator("#open-settings")).toBeFocused();
+    await openSettings(page, "general");
     await vocabulary.focus();
     const savedToggle = await page.locator('[data-pref="launch_at_login"]').elementHandle();
     assert.ok(savedToggle);
@@ -474,7 +497,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     const restored = validateCommandOutput("get_state", await reopened.evaluate(() => window.openwhisper?.invoke("get_state", {})));
     assert.deepEqual(restored.preferences, saved.preferences);
     assert.deepEqual(restored.local_processing, saved.local_processing);
-    await reopened.locator('nav [data-tab="models"]').click();
+    await openSettings(reopened, "models");
     await expect(reopened.locator("#processing-enabled")).toBeChecked();
     await expect(reopened.locator("#processing-input")).toHaveValue("");
     await expect(reopened.locator("#processing-result")).toHaveValue("");
@@ -492,7 +515,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     assert.equal(recovered.local_processing?.enabled, false);
     assert.equal(recovered.local_processing_invalid_profile, true);
     assert.equal(await readFile(featureFile, "utf8"), "{owned invalid optional profile");
-    await recoveredPage.locator('nav [data-tab="models"]').click();
+    await openSettings(recoveredPage, "models");
     await expect(recoveredPage.locator("#processing-profile-warning")).toBeVisible();
     await expect(recoveredPage.locator("#processing-enabled")).not.toBeChecked();
     await recoveredPage.locator("#processing-model").fill("owned repaired profile");
@@ -504,6 +527,8 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     assert.deepEqual(await Promise.all(stableFiles.map(hash)), stableBefore);
     const persisted = join(profile, "config", "settings", "preferences.json");
     assert.equal((await lstat(persisted)).mode & 0o777, 0o600);
+    await recoveredPage.locator("#close-settings").click();
+    await expect(recoveredPage.locator("#settings-dialog")).toBeHidden();
     await Promise.all([
       recoveredApp.waitForEvent("close"),
       recoveredPage.locator('[data-window-action="close"]').click(),
