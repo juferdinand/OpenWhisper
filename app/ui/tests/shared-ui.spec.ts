@@ -596,7 +596,7 @@ async function start(
   }
   await expect(
     page.getByRole("heading", {
-      name: fresh ? "Get started in six steps" : "Recording",
+      name: fresh ? "Speak. OpenWhisper writes with you." : "Recording",
       exact: true,
     }),
   ).toBeVisible();
@@ -656,8 +656,13 @@ for (const platform of ["linux", "macos"] as const) {
     page,
   }) => {
     await page.setViewportSize({ width: 340, height: 64 });
-    await start(page, platform, true);
+    await start(page, platform, true, true);
     await expect(page.locator("aside")).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.testState.preferences.setup_completed),
+      )
+      .toBe(false);
     for (const language of ["en", "de"] as const) {
       for (const elapsed of [14, 126, 36_617]) {
         await page.evaluate(
@@ -672,6 +677,15 @@ for (const platform of ["linux", "macos"] as const) {
           },
           { language, elapsed },
         );
+        expect(
+          await page.evaluate(() => ({
+            html: getComputedStyle(document.documentElement).backgroundColor,
+            body: getComputedStyle(document.body).backgroundColor,
+          })),
+        ).toEqual({
+          html: "rgba(0, 0, 0, 0)",
+          body: "rgba(0, 0, 0, 0)",
+        });
         const time = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
         await expect(page.locator("#record-label")).toHaveText(
           `${language === "en" ? "Recording" : "Aufnahme"} · ${time}`,
@@ -729,6 +743,32 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(page.locator("#record-unavailable-action")).toBeHidden();
     await expect(page.locator("#cancel")).toBeHidden();
     await expect(page.locator("#record")).toBeDisabled();
+    await page.evaluate(() => {
+      Object.assign(window.testState, {
+        status: "error",
+        recovery_available: true,
+        recording_available: false,
+        recording_unavailable_reason: "audio",
+        message:
+          "An unfinished recording is saved. Retry transcription or discard it.",
+      });
+      window.publishState();
+    });
+    await expect(page.locator("#record-label")).toHaveText(
+      "Erneut transkribieren",
+    );
+    await expect(page.locator("#record")).toBeEnabled();
+    await expect(page.locator("#cancel")).toBeInViewport();
+    await expect(page.locator("#record")).toBeInViewport();
+    expect(
+      await page.evaluate(() => ({
+        html: getComputedStyle(document.documentElement).backgroundColor,
+        body: getComputedStyle(document.body).backgroundColor,
+      })),
+    ).toEqual({
+      html: "rgba(0, 0, 0, 0)",
+      body: "rgba(0, 0, 0, 0)",
+    });
   });
 
   test(`${platform}: signed-file-compatible bundle, shared navigation and branding`, async ({
@@ -938,16 +978,112 @@ for (const platform of ["linux", "macos"] as const) {
   test(`${platform}: setup is shown for a fresh installation and stays hidden after completion and restart`, async ({
     page,
   }) => {
+    const microphoneHeading =
+      platform === "macos" ? "Allow microphone access" : "Choose a microphone";
     await start(page, platform, false, true);
-    const navigation = page.locator("nav button[data-tab]");
-    await expect(navigation).toHaveCount(1);
+    await expect(page.locator("nav button[data-tab]")).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: "Setup", exact: true }),
+      page.getByRole("heading", {
+        name: "Speak. OpenWhisper writes with you.",
+        exact: true,
+      }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Get started in six steps" }),
+      page.getByRole("button", { name: "English", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "Deutsch", exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "de");
+    await expect(
+      page.getByRole("heading", {
+        name: "Sprich. OpenWhisper schreibt mit.",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Englisch", exact: true }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Englisch", exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(
+      page.getByRole("heading", {
+        name: "Speak. OpenWhisper writes with you.",
+        exact: true,
+      }),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: "Models" })).toHaveCount(0);
+    await expect(page.locator(".model-row")).toHaveCount(0);
+    await expect(page.locator("#record-control")).toBeHidden();
+    const initialCommands = await page.evaluate(() =>
+      window.calls.map((call) => call.command),
+    );
+    expect(initialCommands).not.toContain("toggle_recording");
+    expect(initialCommands).not.toContain("retry_transcription");
+    expect(initialCommands).not.toContain("enable_paste");
+    expect(initialCommands).not.toContain("enable_shortcut");
+    expect(initialCommands).not.toContain("allow_microphone");
+    await page.setViewportSize({ width: 960, height: 680 });
+    await page.screenshot({
+      path: `test-results/${platform}-setup-welcome.png`,
+    });
+
+    await page.setViewportSize({ width: 740, height: 560 });
+    await page.screenshot({
+      path: `test-results/${platform}-setup-welcome-minimum.png`,
+    });
+    await page.evaluate(() => {
+      Object.assign(window.testState, {
+        status: "error",
+        recovery_available: true,
+        recording_available: false,
+        recording_unavailable_reason: "audio",
+        message:
+          "An unfinished recording is saved. Retry transcription or discard it.",
+      });
+      window.publishState();
+    });
+    await expect(
+      page.getByRole("button", { name: "Retry transcription", exact: true }),
+    ).toBeInViewport();
+    await expect(
+      page.getByRole("button", {
+        name: "Discard saved recording",
+        exact: true,
+      }),
+    ).toBeInViewport();
+    expect(
+      await page.locator("#record-control").evaluate((element) => {
+        const { left, right } = element.getBoundingClientRect();
+        return { left, right, width: window.innerWidth };
+      }),
+    ).toEqual({ left: 0, right: 740, width: 740 });
+    await page.evaluate(() => {
+      Object.assign(window.testState, {
+        status: "idle",
+        recovery_available: false,
+        recording_unavailable_reason: undefined,
+      });
+      window.publishState();
+    });
+    await expect(page.locator("#record-control")).toBeHidden();
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(page.getByText("Step 1 of 6", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Download a speech model" }),
+    ).toBeVisible();
+    expect(
+      await page
+        .locator("main")
+        .evaluate((e) => e.scrollWidth <= e.clientWidth),
+    ).toBe(true);
+    await expect(page.locator("#record-control")).toBeHidden();
+    await page.screenshot({
+      path: `test-results/${platform}-setup-model-minimum.png`,
+    });
+    await page.setViewportSize({ width: 960, height: 680 });
+    await page.screenshot({
+      path: `test-results/${platform}-setup-model.png`,
+    });
+    await page.setViewportSize({ width: 740, height: 560 });
 
     await page.evaluate(() => {
       const w = window as any;
@@ -977,6 +1113,12 @@ for (const platform of ["linux", "macos"] as const) {
     await expect
       .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
       .toBe("cancel_download");
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: microphoneHeading }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await expect(page.getByText("Step 1 of 6", { exact: true })).toBeVisible();
 
     await page.evaluate(() => {
       const w = window as any;
@@ -991,8 +1133,10 @@ for (const platform of ["linux", "macos"] as const) {
       .poll(() => page.evaluate(() => window.testState.preferences.model))
       .toBe("small");
     await expect(smallModel.getByText("Active", { exact: true })).toBeVisible();
+    await expect(page.getByText("Step 1 of 6", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(
-      page.getByRole("heading", { name: "Get started in six steps" }),
+      page.getByRole("heading", { name: microphoneHeading }),
     ).toBeVisible();
 
     if (platform === "linux") {
@@ -1011,39 +1155,136 @@ for (const platform of ["linux", "macos"] as const) {
           page.evaluate(() => window.testState.preferences.microphone),
         )
         .toBe("USB microphone");
-      await expect(
-        page.getByRole("heading", { name: "Get started in six steps" }),
-      ).toBeVisible();
     }
+
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Choose a language" }),
+    ).toBeVisible();
+    await page
+      .getByRole("combobox", { name: "Language", exact: true })
+      .selectOption("de");
+    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: microphoneHeading }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(
+      page.getByRole("combobox", { name: "Language", exact: true }),
+    ).toHaveValue("de");
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Where should the text go?" }),
+    ).toBeVisible();
+    await page.getByRole("radio", { name: "Copy to clipboard only" }).check();
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    if (platform === "linux") {
+      await page.evaluate(() => {
+        window.testState.paste_configuring = true;
+        window.testState.paste_ready = false;
+        window.publishState();
+      });
+      await expect(
+        page.getByRole("button", { name: "Back", exact: true }),
+      ).toBeDisabled();
+      await expect(
+        page.getByRole("button", { name: "Continue", exact: true }),
+      ).toBeDisabled();
+      await page
+        .locator(".setup-panel-content")
+        .getByRole("button", { name: "Cancel", exact: true })
+        .click();
+      await expect
+        .poll(() => page.evaluate(() => window.testState.paste_configuring))
+        .toBe(false);
+      await expect(
+        page.getByRole("button", { name: "Continue", exact: true }),
+      ).toBeEnabled();
+      await expect(
+        page.getByRole("button", { name: "Allow", exact: true }),
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Allow", exact: true }).click();
+      await expect
+        .poll(() => page.evaluate(() => window.testState.paste_ready))
+        .toBe(true);
+      await page.getByRole("button", { name: "Revoke", exact: true }).click();
+      await expect
+        .poll(() => page.evaluate(() => window.testState.paste_ready))
+        .toBe(false);
+      await page.evaluate(() => {
+        window.testState.paste_portal = false;
+        window.testState.native_paste = false;
+        window.testState.paste_ready = false;
+        window.publishState();
+      });
+      await expect(
+        page.getByText(
+          "Your desktop does not expose this portal. Clipboard output remains available.",
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Allow", exact: true }),
+      ).toBeDisabled();
+    }
+    if (platform === "macos") {
+      expect(
+        await page.evaluate(() => window.calls.map((call) => call.command)),
+      ).not.toContain("allow_microphone");
+    }
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Set a trigger and try it" }),
+    ).toBeVisible();
+    await page.evaluate(() => {
+      const state = window.testState;
+      if (state.platform === "macos") state.macos.recording_shortcut = true;
+      else state.recording_shortcut = true;
+      window.publishState();
+    });
+    await expect(
+      page.getByRole("button", { name: "Back", exact: true }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Finish setup", exact: true }),
+    ).toBeDisabled();
+    await page
+      .locator(".setup-panel-content")
+      .getByRole("button", { name: "Cancel", exact: true })
+      .click();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            !window.testState.recording_shortcut &&
+            !window.testState.macos.recording_shortcut,
+        ),
+      )
+      .toBe(true);
+    await expect(
+      page.getByRole("button", { name: "Finish setup", exact: true }),
+    ).toBeEnabled();
+    expect(
+      await page.evaluate(() => window.calls.map((call) => call.command)),
+    ).not.toContain("enable_shortcut");
 
     await page.evaluate(() => {
       window.publishNavigate("models");
     });
     await expect(
-      page.getByRole("heading", { name: "Get started in six steps" }),
+      page.getByRole("heading", { name: "Set a trigger and try it" }),
     ).toBeVisible();
-    await expect(page.locator("nav button[data-tab]")).toHaveCount(1);
+    await expect(page.locator("nav button[data-tab]")).toHaveCount(0);
 
+    await page
+      .getByRole("button", { name: "Finish setup", exact: true })
+      .click();
+    await expect(page.locator("nav button[data-tab]")).toHaveCount(5);
     await page.locator('[data-ui-language="de"]').click();
     await expect(page.locator("html")).toHaveAttribute("lang", "de");
     await expect(
       page.getByRole("button", { name: "Einrichtung", exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", {
-        name: "Einrichtung abschließen",
-        exact: true,
-      }),
-    ).toBeVisible();
-    await expect(page.locator("nav button[data-tab]")).toHaveCount(1);
-
-    await page
-      .getByRole("button", { name: "Einrichtung abschließen", exact: true })
-      .click();
-    await expect(
-      page.getByRole("button", { name: "Einrichtung", exact: true }),
     ).toHaveCount(0);
-    await expect(page.locator("nav button[data-tab]")).toHaveCount(5);
     await expect(page.getByRole("button", { name: "Allgemein" })).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Berechtigungen", exact: true }),
@@ -1114,25 +1355,78 @@ for (const platform of ["linux", "macos"] as const) {
     page,
   }) => {
     await start(page, platform, false, true);
-    await page.setViewportSize({ width: 800, height: 560 });
-    await page.locator('[data-ui-language="de"]').click();
+    await page.setViewportSize({ width: 740, height: 560 });
+    await page.getByRole("button", { name: "Deutsch", exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "de");
     await expect(
-      page.getByRole("heading", { name: "In sechs Schritten startklar" }),
+      page.getByRole("heading", {
+        name: "Sprich. OpenWhisper schreibt mit.",
+        exact: true,
+      }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Deutsch", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("nav button[data-tab]")).toHaveCount(0);
     expect(
       await page
         .locator("main")
         .evaluate((e) => e.scrollWidth <= e.clientWidth),
     ).toBe(true);
     await page.screenshot({
-      path: `test-results/${platform}-setup-german.png`,
+      path: `test-results/${platform}-setup-welcome-de.png`,
     });
-    await page
-      .getByRole("button", { name: "Einrichtung abschließen", exact: true })
-      .click();
-    await expect(page.getByRole("button", { name: "Einrichtung" })).toHaveCount(
-      0,
-    );
+    await page.setViewportSize({ width: 960, height: 680 });
+    await page.screenshot({
+      path: `test-results/${platform}-setup-welcome-de-wide.png`,
+    });
+    await page.setViewportSize({ width: 740, height: 560 });
+    await page.getByRole("button", { name: "Weiter", exact: true }).click();
+    const titles = [
+      "Sprachmodell herunterladen",
+      platform === "macos" ? "Mikrofonzugriff erlauben" : "Mikrofon wählen",
+      "Sprache wählen",
+      "Wo soll der Text erscheinen?",
+      null,
+      "Auslöser festlegen und ausprobieren",
+    ];
+    for (const [index, title] of titles.entries()) {
+      await expect(
+        page.getByText(`Schritt ${index + 1} von 6`, { exact: true }),
+      ).toBeVisible();
+      if (title) {
+        await expect(
+          page.getByRole("heading", { name: title, exact: true }),
+        ).toBeVisible();
+      } else {
+        await expect(page.locator("main h1, main h2").first()).toBeVisible();
+      }
+      expect(
+        await page
+          .locator("main")
+          .evaluate((e) => e.scrollWidth <= e.clientWidth),
+      ).toBe(true);
+      if (index === 0) {
+        await page.screenshot({
+          path: `test-results/${platform}-setup-model-de-minimum.png`,
+        });
+        await page.setViewportSize({ width: 960, height: 680 });
+        await page.screenshot({
+          path: `test-results/${platform}-setup-model-de.png`,
+        });
+        await page.setViewportSize({ width: 740, height: 560 });
+      }
+      await page
+        .getByRole("button", {
+          name: index === 5 ? "Einrichtung abschließen" : "Weiter",
+          exact: true,
+        })
+        .click();
+    }
+    await expect(page.locator("nav button[data-tab]")).toHaveCount(5);
+    await expect(
+      page.getByRole("heading", { name: "Aufnahme", exact: true }),
+    ).toBeVisible();
     for (const title of [
       "Allgemein",
       "Modelle",

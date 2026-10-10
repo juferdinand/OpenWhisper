@@ -25,6 +25,8 @@ let portalBusy = false;
 let contentKey = "";
 let shellKey = "";
 let renderedTab: Tab | undefined;
+let setupStep = -1;
+let focusSetupTitle = false;
 let preferenceQueue = Promise.resolve();
 let pendingPreferences = 0;
 let mouseTriggerCandidate: number | undefined;
@@ -277,6 +279,15 @@ function renderShell() {
   if (shellKey === key) return;
   shellKey = key;
   contentKey = "";
+  const setup = !state.preferences.setup_completed;
+  document.documentElement.classList.toggle("setup-mode", setup && !overlay);
+  if (setup) {
+    app.innerHTML = `<main class="setup-main"><header class="setup-topbar"><div class="setup-brand"><img src="./branding/icon-bordered.svg" width="34" height="34" alt=""><strong>OpenWhisper${state.profile === "development" ? " <span>Dev</span>" : ""}</strong></div></header><div id="notice" role="alert" hidden></div><div id="content"></div></main><div id="record-control"></div>`;
+    if (overlay)
+      app.innerHTML =
+        '<div id="notice" role="alert" hidden></div><div id="record-control"></div>';
+    return;
+  }
   app.innerHTML = `<aside><div class="sidebar-brand"><img src="./app-icon.png" width="38" height="38" alt=""><div><strong>OpenWhisper${state.profile === "development" ? " Dev" : ""}</strong><span>${esc(t("Make yourself heard."))}</span></div></div><div class="nav-caption">${esc(t("WORKSPACE"))}</div><nav aria-label="${esc(t("Settings"))}">${tabs
     .filter(([id]) =>
       state.preferences.setup_completed ? id !== "setup" : id === "setup",
@@ -325,6 +336,17 @@ function recordControl() {
         ? t("Retry transcription")
         : t("Start dictation");
   const controls = document.querySelector<HTMLDivElement>("#record-control")!;
+  const setupIdle =
+    !state.preferences.setup_completed &&
+    !recording &&
+    !busy &&
+    !recovery &&
+    state.status !== "error";
+  controls.dataset.setupIdle = String(setupIdle);
+  document.documentElement.classList.toggle(
+    "setup-recording",
+    !overlay && !state.preferences.setup_completed && !setupIdle,
+  );
   if (!controls.childElementCount) {
     controls.innerHTML = `<div class="record-status"><div class="audio-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="general" hidden></button></div><div class="record-actions"><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-label"></span></button></div>`;
     document
@@ -504,6 +526,7 @@ function render() {
       state.launch_at_login_available,
       state.local_processing !== undefined,
       portalBusy,
+      tab === "setup" ? setupStep : null,
     ],
     (_key, value) => {
       // Native bridge replies and state events may serialize dictionaries in different orders.
@@ -517,13 +540,17 @@ function render() {
   );
   if (contentKey === nextKey) return;
   contentKey = nextKey;
-  document.querySelector("#page-title")!.textContent = t(
-    tabs.find(([id]) => id === tab)![1],
-  );
-  document.querySelector("#page-description")!.textContent = t(
-    pageDescriptions[tab],
-  );
-  document.querySelector<HTMLElement>(".page-header")!.hidden = tab === "about";
+  if (overlay) return;
+  if (tab !== "setup") {
+    document.querySelector("#page-title")!.textContent = t(
+      tabs.find(([id]) => id === tab)![1],
+    );
+    document.querySelector("#page-description")!.textContent = t(
+      pageDescriptions[tab],
+    );
+    document.querySelector<HTMLElement>(".page-header")!.hidden =
+      tab === "about";
+  }
   document
     .querySelectorAll("[data-tab]")
     .forEach((button) =>
@@ -538,105 +565,100 @@ function render() {
   renderedTab = tab;
   const p = state.preferences;
   if (tab === "setup") {
-    const step = (
-      n: number,
-      title: string,
-      detail: string,
-      done: boolean,
-      action: string,
-    ) =>
-      `<div class="step"><span class="step-number ${done ? "complete" : ""}">${done ? "✓" : n}</span><div class="step-text"><strong>${title}</strong><p>${detail}</p>${action}</div></div>`;
-    content.innerHTML =
-      section(
-        "",
-        `<p class="secondary">${esc(t("OpenWhisper turns speech into text directly on this computer. No account, cloud, or subscription. Your recordings never leave your computer."))}</p>`,
-      ) +
-      section(
-        t("Get started in six steps"),
-        step(
-          1,
-          t("Download a speech model"),
-          t(
-            "Download once, then work offline. Start with Whisper Base (142 MB) for CPU recognition.",
-          ),
-          state.installed.length > 0,
-          `<div>${state.models.map(modelRow).join("")}</div>`,
-        ) +
-          step(
-            2,
-            isMac() ? t("Allow microphone access") : t("Choose a microphone"),
-            t(
-              "Microphone access is needed to record your voice. Everything stays on your computer.",
-            ),
-            isMac()
-              ? state.macos!.microphone_allowed
-              : state.microphones.length > 0,
-            isMac()
-              ? `<button data-command="allow_microphone">${esc(t("Allow"))}</button>`
-              : microphoneControl(),
-          ) +
-          step(
-            3,
-            t("Choose a language"),
-            t(
-              "Which language do you usually dictate in? Automatic detection can mistake short phrases for English.",
-            ),
-            p.language !== "auto",
-            languages(),
-          ) +
-          step(
-            4,
-            t("Where should the text go?"),
-            t("Choose automatic pasting or copy your text to the clipboard."),
-            true,
-            outputs(),
-          ) +
-          step(
-            5,
-            isMac()
-              ? t("Allow Accessibility access")
-              : nativePaste()
-                ? t("Allow automatic X11 paste")
-                : t("Allow keyboard access"),
-            isMac()
-              ? t(
-                  "Required for automatic insertion and advanced triggers. Clipboard-only output remains available.",
-                )
-              : nativePaste()
-                ? t(
-                    "Enable Ctrl+V pasting into the focused application for this X11 session. No screen capture is requested.",
-                  )
-                : t(
-                    "Optional permission for automatic pasting. Only keyboard access is requested; no screen capture.",
-                  ),
-            state.paste_ready,
-            `${permissionButton()}${!pasteAvailable() ? `<p class="secondary">${esc(t("Your desktop does not expose this portal. Clipboard output remains available."))}</p>` : ""}`,
-          ) +
-          step(
-            6,
-            t("Set a trigger and try it"),
-            (isMac() && !macToggleOnly()) || state.native_mouse
-              ? t(
-                  "Choose a key, shortcut, or mouse button. Place the cursor in a text field, press the trigger, speak, then press it again.",
-                )
-              : state.native_x11 || macToggleOnly()
-                ? t(
-                    "Choose a keyboard key or shortcut. Place the cursor in a text field, press the trigger, speak, then press it again.",
-                  )
-                : t(
-                    "Choose a shortcut in your desktop’s dialog. Place the cursor in a text field, press the trigger, speak, then press it again.",
-                  ),
-            !!state.shortcut,
-            shortcutButton(),
-          ),
-      ) +
-      section(
-        "",
-        `<button data-command="complete_setup">${esc(t("Finish setup"))}</button>`,
-        t(
-          "You can change permissions, shortcuts, and recording preferences in General at any time.",
+    const panels = [
+      {
+        title: t("Download a speech model"),
+        detail: t(
+          "Download once, then work offline. Start with Whisper Base (142 MB) for CPU recognition.",
         ),
-      );
+        content: `<div>${state.models.map(modelRow).join("")}</div>`,
+      },
+      {
+        title: isMac()
+          ? t("Allow microphone access")
+          : t("Choose a microphone"),
+        detail: t(
+          "Microphone access is needed to record your voice. Everything stays on your computer.",
+        ),
+        content: isMac()
+          ? `<button data-command="allow_microphone">${esc(t("Allow"))}</button>`
+          : microphoneControl(),
+      },
+      {
+        title: t("Choose a language"),
+        detail: t(
+          "Which language do you usually dictate in? Automatic detection can mistake short phrases for English.",
+        ),
+        content: languages(),
+      },
+      {
+        title: t("Where should the text go?"),
+        detail: t(
+          "Choose automatic pasting or copy your text to the clipboard.",
+        ),
+        content: outputs(),
+      },
+      {
+        title: isMac()
+          ? t("Allow Accessibility access")
+          : nativePaste()
+            ? t("Allow automatic X11 paste")
+            : t("Allow keyboard access"),
+        detail: isMac()
+          ? t(
+              "Required for automatic insertion and advanced triggers. Clipboard-only output remains available.",
+            )
+          : nativePaste()
+            ? t(
+                "Enable Ctrl+V pasting into the focused application for this X11 session. No screen capture is requested.",
+              )
+            : t(
+                "Optional permission for automatic pasting. Only keyboard access is requested; no screen capture.",
+              ),
+        content: `${permissionButton()}${!pasteAvailable() ? `<p class="secondary">${esc(t("Your desktop does not expose this portal. Clipboard output remains available."))}</p>` : ""}`,
+      },
+      {
+        title: t("Set a trigger and try it"),
+        detail:
+          (isMac() && !macToggleOnly()) || state.native_mouse
+            ? t(
+                "Choose a key, shortcut, or mouse button. Place the cursor in a text field, press the trigger, speak, then press it again.",
+              )
+            : state.native_x11 || macToggleOnly()
+              ? t(
+                  "Choose a keyboard key or shortcut. Place the cursor in a text field, press the trigger, speak, then press it again.",
+                )
+              : t(
+                  "Choose a shortcut in your desktop’s dialog. Place the cursor in a text field, press the trigger, speak, then press it again.",
+                ),
+        content: shortcutButton(),
+      },
+    ];
+    const navigation = (welcome: boolean) => {
+      const permissionFlowActive =
+        portalBusy ||
+        state.paste_configuring ||
+        state.shortcut_configuring ||
+        state.recording_shortcut ||
+        state.macos?.recording_shortcut === true;
+      const disabled = permissionFlowActive ? "disabled" : "";
+      return `<footer class="setup-navigation">${welcome ? "" : `<button class="setup-back" data-setup-back ${disabled}>${esc(t("Back"))}</button>`}<span></span>${welcome || setupStep < panels.length - 1 ? `<button class="setup-primary" data-setup-next ${disabled}>${esc(t("Continue"))}</button>` : `<button class="setup-primary" data-command="complete_setup" ${disabled}>${esc(t("Finish setup"))}</button>`}</footer>`;
+    };
+    if (setupStep < 0) {
+      content.innerHTML = `<section class="setup-card" aria-labelledby="setup-title"><div class="setup-card-body setup-welcome"><h1 id="setup-title" tabindex="-1">${esc(t("Speak. OpenWhisper writes with you."))}</h1><p class="setup-intro">${esc(t("OpenWhisper turns speech into text directly on this computer. No account, cloud, or subscription. Your recordings never leave your computer."))}</p><p class="setup-language-label">${esc(t("Interface language"))}</p><div class="setup-language" role="group" aria-label="${esc(t("Interface language"))}"><button data-ui-language="de" aria-pressed="${state.preferences.ui_language === "de"}">Deutsch</button><button data-ui-language="en" aria-pressed="${state.preferences.ui_language === "en"}">${esc(t("English"))}</button></div></div>${navigation(true)}</section>`;
+    } else {
+      const panel = panels[setupStep]!;
+      const progress = Array.from(
+        { length: panels.length },
+        (_, index) =>
+          `<span${index === setupStep ? ' class="current"' : ""}></span>`,
+      ).join("");
+      content.innerHTML = `<section class="setup-card" aria-labelledby="setup-title"><div class="setup-card-body"><div class="setup-segments" aria-hidden="true">${progress}</div><div class="setup-progress" role="status">${esc(t("Step {step} of 6", { step: setupStep + 1 }))}</div><h1 id="setup-title" tabindex="-1">${esc(panel.title)}</h1><p class="setup-intro">${esc(panel.detail)}</p><div class="setup-panel-content">${panel.content}</div>${setupStep === panels.length - 1 ? `<p class="setup-footnote">${esc(t("You can change permissions, shortcuts, and recording preferences in General at any time."))}</p>` : ""}</div>${navigation(false)}</section>`;
+    }
+    if (focusSetupTitle) {
+      content.querySelector<HTMLElement>("#setup-title")?.focus();
+      focusSetupTitle = false;
+    }
   } else if (tab === "general") {
     content.innerHTML =
       section(
@@ -1009,6 +1031,22 @@ function render() {
   content
     .querySelectorAll<HTMLButtonElement>("[data-command]")
     .forEach((b) => (b.onclick = () => void command(b.dataset.command!)));
+  content
+    .querySelector<HTMLButtonElement>("[data-setup-next]")
+    ?.addEventListener("click", () => {
+      setupStep = Math.min(setupStep + 1, 5);
+      focusSetupTitle = true;
+      contentKey = "";
+      render();
+    });
+  content
+    .querySelector<HTMLButtonElement>("[data-setup-back]")
+    ?.addEventListener("click", () => {
+      setupStep = Math.max(setupStep - 1, -1);
+      focusSetupTitle = true;
+      contentKey = "";
+      render();
+    });
   content.querySelectorAll<HTMLButtonElement>("[data-goto]").forEach(
     (b) =>
       (b.onclick = () => {

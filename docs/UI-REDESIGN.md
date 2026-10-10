@@ -15,12 +15,13 @@ fixes alongside these milestones. Within later integrations, model communication
 optional TTS, and structured Obsidian output follows those prerequisites.
 
 The first milestone has one dictation workspace. Multiple dictation tabs/workspaces are
-deferred at the owner's request and have no new feature ticket. Naming and logo work are
-also deferred until the owner is ready to prepare a public introduction.
+deferred at the owner's request and have no new feature ticket. Final naming remains deferred
+until the owner is ready to prepare a public introduction. The owner subsequently supplied
+new SVG logo variants for the frontend.
 
 | Design element | First milestone |
 | --- | --- |
-| Dark purple surfaces, spacing, cards and visual hierarchy | Adapt to the shared renderer; retain bundled Inter and current app icon initially |
+| Dark purple surfaces, spacing, cards and visual hierarchy | Adapt to the shared renderer with bundled Inter; use the supplied logo in the new setup view |
 | Transcript-centered recording view | Use the existing final transcript and real recording state, elapsed time and audio level |
 | Model drawer and CPU/GPU information | Use the authoritative catalog, actual download progress, selected preference, detected devices and fallback state |
 | Collapsible history rail | Restyle the current bounded text list with full-text copy and clear controls |
@@ -35,15 +36,19 @@ state. A live recording waveform indicates input level, not live transcription.
 
 ## Implementation increments
 
-1. **Foundation and recording view.** Introduce shared color/spacing tokens and the single
-   transcript workspace. Preserve the current typed bridge and host state machine. Keep
-   record, stop, cancel, retry and discard visible in the states where they are valid.
-   Review screenshots at the actual 740 × 560 minimum window size and at larger sizes.
-2. **Models, history and settings.** Reuse existing model operations and history actions;
-   adapt setup, settings, snippets and About without removing current controls. A settings
+1. **Setup first.** Start with the welcome/language screen, then present the six existing
+   setup steps individually. Preserve the real model, microphone, language, output,
+   permission and shortcut controls, including optional fallback paths. Start a fresh,
+   isolated Dev profile for owner review; no installation is needed.
+2. **Foundation and recording view.** Extend the visual tokens to the single transcript
+   workspace. Preserve the current typed bridge and host state machine. Keep record, stop,
+   cancel, retry and discard visible in the states where they are valid. Review screenshots
+   at the actual 740 × 560 minimum window size and at larger sizes.
+3. **Models, history and settings.** Reuse existing model operations and history actions;
+   adapt settings, snippets and About without removing current controls. A settings
    dialog/drawer must support keyboard navigation, Escape and focus restoration. Keep
    setup exclusive until completion, then remove it from normal navigation.
-3. **Overlay and regression review.** Restyle floating controls separately from the main
+4. **Overlay and regression review.** Restyle floating controls separately from the main
    window, check both host layouts and capability fallbacks, and present one functional
    candidate for owner acceptance before merge.
 
@@ -96,9 +101,11 @@ increment. Use the documented owned package/runtime checks for platform acceptan
 unattended real-microphone or physical-input tests, installed-app replacement, or new release
 is part of this planning step. Independent review and owner acceptance precede functional merge.
 
-## Later branding
+## Branding assets and later naming
 
-Choose the final name before producing a replacement logo and before the public introduction.
-A possible visual direction is a simple speech-to-text symbol that remains legible as a small
-tray icon, with light/dark and monochrome variants. This is a concept, not an approved asset.
+The five supplied SVG variants are stored unchanged in `app/ui/public/branding/`: bordered
+and borderless icons, a monochrome mark, and transparent marks for dark/light backgrounds.
+The setup increment uses `icon-bordered.svg`; existing views and packaged OS icons can adopt
+the assets in subsequent reviewed increments. Do not maintain separate platform logo designs.
+Revisit the final name and public presentation when the owner is ready to share the app.
 Preserve existing package/data identities and signing continuity when public branding changes.
