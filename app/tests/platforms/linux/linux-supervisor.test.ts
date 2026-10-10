@@ -12,7 +12,7 @@ import type { LinuxInstalledLaunch } from "../../../src/main/linux-installed-lau
 const launch: LinuxInstalledLaunch = { kind: "debian", executable: "/opt/openwhisper/openwhisper", arguments: [] };
 const turn = (): Promise<void> => new Promise((accept) => setImmediate(accept));
 function fixture() {
-  const pipe = new PassThrough({ autoDestroy: false }), calls: string[] = [];
+  const pipe = new PassThrough({ autoDestroy: false }), calls: string[] = [], terminations: Array<"SIGTERM" | "SIGKILL"> = [];
   let acceptExit!: (time: number) => void, closeOriginal!: (value: { code: number | null; signal: NodeJS.Signals | null }) => void;
   const exited = new Promise<number>((accept) => { acceptExit = accept; });
   const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((accept) => { closeOriginal = accept; });
@@ -20,7 +20,8 @@ function fixture() {
   let environment: NodeJS.ProcessEnv | undefined, argumentsReceived: readonly string[] | undefined;
   let replacement: { executable: string; argv: readonly string[]; environment: NodeJS.ProcessEnv } | undefined;
   const effects: LinuxSupervisorEffects = {
-    launch(argv, env) { calls.push("spawn"); environment = env; argumentsReceived = argv; return { pipe, exited, closed }; },
+    launch(argv, env) { calls.push("spawn"); environment = env; argumentsReceived = argv; return { pipe, exited, closed,
+      terminate(signal) { terminations.push(signal); calls.push(`terminate:${signal}`); } }; },
     exec(executable, argv, env): never { calls.push("exec"); replacement = { executable, argv, environment: env }; throw new Error("Owned fixed exec boundary"); },
   };
   const receipt = (version = "0.3.1"): Buffer => {
@@ -28,7 +29,8 @@ function fixture() {
     return Buffer.from(`${JSON.stringify({ version: 1, type: "restart", nonce: environment[LINUX_RESTART_NONCE], installedVersion: version })}\n`);
   };
   const revalidateReplacement = async (version: string): Promise<void> => { calls.push(`revalidate:${version}`); };
-  return { pipe, calls, effects, acceptExit, acceptClose, receipt, revalidateReplacement, environment: () => environment, argv: () => argumentsReceived, replacement: () => replacement };
+  return { pipe, calls, effects, acceptExit, acceptClose, receipt, revalidateReplacement, environment: () => environment, argv: () => argumentsReceived,
+    replacement: () => replacement, terminations };
 }
 
 test("restart reaches fixed exec only after original close0, complete pipe close and replacement validation", async () => {
@@ -51,6 +53,18 @@ test("ordinary quit and original crash preserve exit outcome without replacement
     input.pipe.end(); input.pipe.destroy(); input.acceptClose({ code, signal: null });
     assert.equal(await original, code); assert.deepEqual(input.calls, ["spawn"]);
   }
+});
+
+test("external SIGTERM after a valid restart receipt terminates only the owned child and suppresses restart", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const input = fixture(), original = runLinuxSupervisor({ launch, currentVersion: "0.3.0", argv: [], revalidateReplacement: input.revalidateReplacement }, input.effects);
+  input.pipe.end(input.receipt()); await turn();
+  assert.equal(process.emit("SIGTERM"), true);
+  assert.deepEqual(input.terminations, ["SIGTERM"]); input.acceptClose({ code: 0, signal: null });
+  t.mock.timers.tick(1000); await turn();
+  assert.equal(await original, 143);
+  assert.deepEqual(input.terminations, ["SIGTERM", "SIGKILL"]);
+  assert.equal(input.calls.includes("revalidate:0.3.1"), false); assert.equal(input.calls.includes("exec"), false);
 });
 
 test("malformed original frame remains refused while supervisor still waits for original child close", async () => {
@@ -215,6 +229,38 @@ test("V2 crash or missing original retirement never starts the privileged instal
       assert.equal(input.calls.at(-1), "discard");
     } finally { await input.cleanup(); }
   }
+});
+
+test("external termination before original close skips the prepared installer", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let installations = 0;
+  const input = updateFixture(async () => { installations++; return { assertForExec() {} }; });
+  try {
+    await input.prepare(); await input.gui.acknowledgeRetired(); await input.gui.closed;
+    assert.equal(process.emit("SIGINT"), true); input.acceptClose({ code: 0, signal: null });
+    t.mock.timers.tick(1000); await turn();
+    assert.equal(await input.original, 130); assert.equal(installations, 0);
+    assert.equal(input.calls.includes("exec"), false);
+  } finally { await input.cleanup(); }
+});
+
+test("external termination during prepared async installation prevents restart and rolls back when supported", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let release!: () => void, rollbacks = 0;
+  const held = new Promise<void>((accept) => { release = accept; });
+  const input = updateFixture(async () => {
+    await held;
+    return { assertForExec() { input.calls.push("final-check"); }, async rollbackBeforeExec() { rollbacks++; } };
+  });
+  try {
+    await input.prepare(); await input.gui.acknowledgeRetired(); await input.gui.closed;
+    input.acceptClose({ code: 0, signal: null }); await turn();
+    assert.equal(input.calls.includes("install"), true);
+    assert.equal(process.emit("SIGTERM"), true); release(); await turn();
+    t.mock.timers.tick(1000); await turn();
+    assert.equal(await input.original, 143); assert.equal(rollbacks, 1);
+    assert.equal(input.calls.includes("final-check"), false); assert.equal(input.calls.includes("exec"), false);
+  } finally { release(); await input.cleanup(); }
 });
 
 test("V2 final synchronous refusal or deadline prevents fixed exec after the long phase", async (t) => {
