@@ -72,7 +72,7 @@ jobs:
           npm ci --prefix app
       - name: Install native CPU and desktop validation tools (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build pkg-config libglib2.0-dev desktop-file-utils squashfs-tools libxkbcommon0
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build pkg-config libglib2.0-dev desktop-file-utils squashfs-tools libxkbcommon0 libvulkan-dev
       - name: Check isolated Electron foundation
         working-directory: app
         run: |
