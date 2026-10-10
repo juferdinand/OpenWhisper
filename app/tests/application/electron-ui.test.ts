@@ -213,6 +213,13 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     })), { process: false, require: false, buffer: false, bridge: "function", frozen: true, keys: ["invoke", "subscribe"] });
     checks.push("actual sandboxed renderer, isolated preload, exact app origin and Dev storage");
 
+    const beforeSetup = validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {})));
+    assert.equal(beforeSetup.preferences.setup_completed, false);
+    await expect(page.locator('nav button[data-tab="setup"]')).toBeVisible();
+    await expect(page.locator("nav button[data-tab]")).toHaveCount(1);
+    await expect(page.locator('nav button[data-tab="general"]')).toHaveCount(0);
+    await page.locator('[data-command="complete_setup"]').click();
+    await expect.poll(async () => validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.setup_completed).toBe(true);
     const state = validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {})));
     assert.equal(state.profile, "development");
     assert.equal(state.recording_available, false);
@@ -241,7 +248,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     checks.push("visible Dev build identifier, original 256px icon/Inter assets and private model directory");
     await expect(page.locator("#record")).toBeDisabled();
     await expect(page.locator("#status-title")).toHaveText("Recording is unavailable");
-    await expect(page.locator("#status")).toHaveText("Recording is not available in this development preview.");
+    await expect(page.locator("#status")).toHaveText("The recording service could not start. Restart OpenWhisper and try again.");
     checks.push("unsupported recording truthfully disabled, no device inventory");
 
     const refusals = await page.evaluate(async () => {
@@ -251,7 +258,6 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
         ["unknown_command", {}], ["get_state", { unexpected: true }],
         ["save_preferences", { changes: { gpu: "wrong" } }],
         ["save_preferences", { changes: { setup_completed: true } }],
-        ["toggle_recording", {}], ["download_model", { id: "tiny" }],
       ];
       const outcomes: boolean[] = [];
       for (const [command, args] of cases) {
@@ -260,16 +266,19 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
       }
       return outcomes;
     });
-    assert.deepEqual(refusals, [true, true, true, true, true, true]);
+    assert.deepEqual(refusals, [true, true, true, true]);
     assert.deepEqual(validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))), state);
-    checks.push("public IPC rejects unknown/extra/invalid arguments and unavailable actions without mutation");
+    checks.push("public IPC rejects unknown/extra/invalid arguments without mutation");
 
     assert.equal(await page.evaluate(async (url) => {
       try { await fetch(url); return false; } catch { return true; }
     }, target), true);
     assert.equal(requests, 1, "The reachable owned HTTP control must receive no renderer requests.");
+    const windowUrls = async () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((window) => window.webContents.getURL()).sort());
+    const expectedWindows = ["app://openwhisper/index.html", "app://openwhisper/index.html?overlay=1"];
+    await expect.poll(windowUrls).toEqual(expectedWindows);
     await page.evaluate((url) => { window.open(url, "_blank"); }, target);
-    await expect.poll(async () => await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1);
+    await expect.poll(windowUrls).toEqual(expectedWindows);
     await page.evaluate((url) => {
       const anchor = document.createElement("a"); anchor.href = url; anchor.textContent = "Owned navigation probe";
       document.body.append(anchor); anchor.click(); anchor.remove();
@@ -284,7 +293,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
       const view = document.createElement("webview"); view.setAttribute("src", "app://openwhisper/index.html");
       document.body.append(view); view.remove();
     });
-    assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+    assert.deepEqual(await windowUrls(), expectedWindows);
     await page.evaluate(() => { document.querySelector<HTMLButtonElement>('[data-tab="general"]')?.click(); });
     assert.equal(await page.evaluate(() => document.querySelector("#page-title")?.textContent), "General");
     checks.push("reachable network target, navigation, popup and webview denied");

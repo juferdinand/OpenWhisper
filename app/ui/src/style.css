@@ -725,9 +725,6 @@ progress::-webkit-progress-value {
   align-items: center;
   gap: 12px;
 }
-.record-status > div:last-child {
-  min-width: 0;
-}
 .record-status > .record-copy {
   min-width: 0;
 }
@@ -886,12 +883,11 @@ html.overlay,
   background: transparent;
   justify-content: center;
 }
-.overlay .record-status {
-  display: none;
-}
 .overlay .record-actions {
   flex-direction: row-reverse;
   gap: 0;
+  width: 100%;
+  padding-left: 27px;
   max-width: 100%;
   border: 1px solid #3d515b;
   border-radius: 24px;
@@ -901,7 +897,8 @@ html.overlay,
 }
 .overlay .capsule {
   height: 44px;
-  min-width: 198px;
+  min-width: 0;
+  flex: 1;
   max-width: 260px;
   border: 0;
   border-radius: 24px;
@@ -945,7 +942,8 @@ html.overlay,
   left: 28px;
   pointer-events: none;
 }
-.overlay .record-status > div:last-child {
+.overlay .record-status > .record-copy,
+.overlay #record-unavailable-action {
   display: none;
 }
 .overlay .audio-mark {
@@ -956,15 +954,6 @@ html.overlay,
 .overlay .audio-mark i {
   width: 2px;
 }
-.overlay .record-actions {
-  width: 100%;
-  padding-left: 27px;
-}
-.overlay .capsule {
-  min-width: 0;
-  flex: 1;
-}
-
 .row.approval > span:first-child {
   flex-shrink: 1;
 }

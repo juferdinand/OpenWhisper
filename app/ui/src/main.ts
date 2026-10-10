@@ -92,6 +92,14 @@ const languages = () => {
 const isMac = () => state.platform === "macos";
 const macToggleOnly = () =>
   isMac() && state.macos?.shortcut_toggle_only === true;
+const microphoneControl = () =>
+  `<select data-pref="microphone" aria-label="${esc(t("Microphone"))}">${option("", t("System default"), state.preferences.microphone)}${state.microphones.map((m) => option(m, m, state.preferences.microphone)).join("")}</select>`;
+function modelRow(m: Model): string {
+  const installed = state.installed.includes(m.id),
+    selected = state.preferences.model === m.id && installed,
+    downloading = state.download === m.id;
+  return `<div class="model-row ${selected ? "active-model" : ""}"><button class="model-radio" aria-label="${esc(t("Use {model}", { model: m.title }))}" aria-pressed="${selected}" data-select="${esc(m.id)}" ${!installed ? "disabled" : ""}><span></span></button><div class="model-description"><strong>${esc(m.title)}</strong>${(isMac() ? state.macos!.recommended.includes(m.id) : m.id === "base") ? `<span class="recommendation">${esc(t("Recommended"))}</span>` : ""}<p>${esc(m.size)} · ${esc(t(m.note))}</p></div><div class="model-buttons">${downloading ? `<progress aria-label="${esc(t("Download progress"))}" value="${state.progress}" max="1"></progress><button data-cancel-download>${esc(t("Cancel"))}</button>` : installed ? `${selected ? `<span class="success">${esc(t("Active"))}</span>` : `<button data-select="${esc(m.id)}">${esc(t("Use"))}</button>`}` : `<button data-download="${esc(m.id)}" ${state.download || ["downloading", "installing"].includes(state.updates.status) ? "disabled" : ""}>${esc(t("Download"))}</button>`}${installed && isMac() ? `<button data-delete="${esc(m.id)}" aria-label="${esc(t("Delete {model}", { model: m.title }))}" class="destructive">×</button>` : ""}</div></div>`;
+}
 const outputs = () =>
   `<div class="radio-group">${[["paste", t("Paste at the cursor")], ["clipboard", t("Copy to clipboard only")], ...(isMac() ? [["editor", t("Open in a text editor")]] : [])].map(([v, l]) => `<label><input type="radio" name="output" data-pref="output" value="${v}" ${state.preferences.output === v ? "checked" : ""}>${l}</label>`).join("")}</div>`;
 
@@ -270,7 +278,9 @@ function renderShell() {
   shellKey = key;
   contentKey = "";
   app.innerHTML = `<aside><div class="sidebar-brand"><img src="./app-icon.png" width="38" height="38" alt=""><div><strong>OpenWhisper${state.profile === "development" ? " Dev" : ""}</strong><span>${esc(t("Make yourself heard."))}</span></div></div><div class="nav-caption">${esc(t("WORKSPACE"))}</div><nav aria-label="${esc(t("Settings"))}">${tabs
-    .filter(([id]) => id !== "setup" || !state.preferences.setup_completed)
+    .filter(([id]) =>
+      state.preferences.setup_completed ? id !== "setup" : id === "setup",
+    )
     .map(
       ([id, title, path]) =>
         `<button data-tab="${id}">${symbol(path)}<span>${esc(t(title))}</span></button>`,
@@ -417,7 +427,8 @@ function recordControl() {
 function render() {
   if (!state) return;
   setLocale(state.preferences.ui_language ?? "en");
-  if (tab === "setup" && state.preferences.setup_completed) tab = "general";
+  if (!state.preferences.setup_completed) tab = "setup";
+  else if (tab === "setup") tab = "general";
   renderShell();
   recordControl();
   if (overlay) return;
@@ -549,7 +560,7 @@ function render() {
             "Download once, then work offline. Start with Whisper Base (142 MB) for CPU recognition.",
           ),
           state.installed.length > 0,
-          `<button data-goto="models">${esc(t("Open models"))}</button>`,
+          `<div>${state.models.map(modelRow).join("")}</div>`,
         ) +
           step(
             2,
@@ -562,7 +573,7 @@ function render() {
               : state.microphones.length > 0,
             isMac()
               ? `<button data-command="allow_microphone">${esc(t("Allow"))}</button>`
-              : `<button data-goto="general">${esc(t("Microphone settings"))}</button>`,
+              : microphoneControl(),
           ) +
           step(
             3,
@@ -652,7 +663,7 @@ function render() {
             t("Microphone"),
             isMac()
               ? `<span class="secondary">${esc(t("System default"))}</span>`
-              : `<select data-pref="microphone" aria-label="${esc(t("Microphone"))}">${option("", t("System default"), p.microphone)}${state.microphones.map((m) => option(m, m, p.microphone)).join("")}</select>`,
+              : microphoneControl(),
           ) +
           (isMac()
             ? toggle(
@@ -812,12 +823,6 @@ function render() {
         })();
       });
   } else if (tab === "models") {
-    const modelRow = (m: Model) => {
-      const installed = state.installed.includes(m.id),
-        selected = p.model === m.id && installed,
-        downloading = state.download === m.id;
-      return `<div class="model-row ${selected ? "active-model" : ""}"><button class="model-radio" aria-label="${esc(t("Use {model}", { model: m.title }))}" aria-pressed="${selected}" data-select="${esc(m.id)}" ${!installed ? "disabled" : ""}><span></span></button><div class="model-description"><strong>${esc(m.title)}</strong>${(isMac() ? state.macos!.recommended.includes(m.id) : m.id === "base") ? `<span class="recommendation">${esc(t("Recommended"))}</span>` : ""}<p>${esc(m.size)} · ${esc(t(m.note))}</p></div><div class="model-buttons">${downloading ? `<progress aria-label="${esc(t("Download progress"))}" value="${state.progress}" max="1"></progress><button data-cancel-download>${esc(t("Cancel"))}</button>` : installed ? `${selected ? `<span class="success">${esc(t("Active"))}</span>` : `<button data-select="${esc(m.id)}">${esc(t("Use"))}</button>`}` : `<button data-download="${esc(m.id)}" ${state.download || ["downloading", "installing"].includes(state.updates.status) ? "disabled" : ""}>${esc(t("Download"))}</button>`}${installed && isMac() ? `<button data-delete="${esc(m.id)}" aria-label="${esc(t("Delete {model}", { model: m.title }))}" class="destructive">×</button>` : ""}</div></div>`;
-    };
     content.innerHTML =
       section(
         "",
@@ -867,28 +872,6 @@ function render() {
         ? '<section id="processing-preview"></section>'
         : "");
     syncProcessingPreview();
-    content
-      .querySelectorAll<HTMLButtonElement>("[data-delete]")
-      .forEach(
-        (b) =>
-          (b.onclick = () =>
-            void command("delete_model", { id: b.dataset.delete })),
-      );
-    content
-      .querySelectorAll<HTMLButtonElement>("[data-download]")
-      .forEach(
-        (b) =>
-          (b.onclick = () =>
-            void command("download_model", { id: b.dataset.download })),
-      );
-    content
-      .querySelectorAll<HTMLButtonElement>("[data-select]")
-      .forEach(
-        (b) => (b.onclick = () => void preference("model", b.dataset.select)),
-      );
-    content
-      .querySelector("[data-cancel-download]")
-      ?.addEventListener("click", () => void command("cancel_download"));
     content
       .querySelector("#show-models")!
       .addEventListener("click", () => void command("show_models_folder"));
@@ -1062,6 +1045,30 @@ function render() {
         }
       }),
   );
+  content
+    .querySelectorAll<HTMLButtonElement>("[data-delete]")
+    .forEach(
+      (b) =>
+        (b.onclick = () =>
+          void command("delete_model", { id: b.dataset.delete })),
+    );
+  content
+    .querySelectorAll<HTMLButtonElement>("[data-download]")
+    .forEach(
+      (b) =>
+        (b.onclick = () =>
+          void command("download_model", { id: b.dataset.download })),
+    );
+  content
+    .querySelectorAll<HTMLButtonElement>("[data-select]")
+    .forEach(
+      (b) => (b.onclick = () => void preference("model", b.dataset.select)),
+    );
+  content
+    .querySelectorAll<HTMLButtonElement>("[data-cancel-download]")
+    .forEach((b) =>
+      b.addEventListener("click", () => void command("cancel_download")),
+    );
   content.querySelectorAll("[data-discard]").forEach((b) =>
     b.addEventListener("click", () => {
       dirty = false;

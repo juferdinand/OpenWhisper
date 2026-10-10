@@ -691,6 +691,15 @@ async function main(): Promise<void> {
   if (stablePackage) await until(async () => !!(await state()).recording_available && !!(await state()).recovery_available);
   await checkpoint("initial-state-and-zero-streams");
   const initial = await state(); assert.equal(initial.profile, stablePackage ? undefined : "development"); assert.equal(initial.recording_available, true);
+  if (!stablePackage) {
+    assert.equal(initial.preferences.setup_completed, false);
+    await expect(page.locator('nav button[data-tab="setup"]')).toBeVisible();
+    await expect(page.locator("nav button[data-tab]")).toHaveCount(1);
+    await expect(page.locator('nav button[data-tab="general"]')).toHaveCount(0);
+    await page.locator('[data-command="complete_setup"]').click();
+    await expect.poll(async () => (await state()).preferences.setup_completed).toBe(true);
+    checks.push("fresh Dev profile exposes Setup only until Finish setup persists completion");
+  }
   if (stablePackage) {
     assert.equal(initial.development_build, undefined); assert.equal(initial.preferences.setup_completed, true);
     assert.deepEqual(initial.history, legacyHistory); assert.equal(initial.recovery_available, true); await assertStableOriginals();
@@ -957,7 +966,6 @@ async function main(): Promise<void> {
   assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "", "Initialization and enumeration must open no recording stream.");
   await checkpoint("actual-ui-complete-setup");
   if (stockKde) await page.screenshot({ path: join(evidence, "initial-ui.png"), timeout: 5000 });
-  if (!stablePackage) await page.locator('[data-command="complete_setup"]').click();
   await page.locator('[data-tab="general"]').click();
   if (installedDebian || appImageAdmission) {
     await checkpoint("installed-autostart-ui-enable");

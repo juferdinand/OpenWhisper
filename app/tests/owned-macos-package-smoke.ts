@@ -158,6 +158,15 @@ try {
   await expect(page.locator(".sidebar-brand strong")).toHaveText(capturedBuild.productName, { timeout: 15_000 });
   assert.equal(page.url(), "app://openwhisper/index.html");
   const state = async () => appStateSchema.parse(await page!.evaluate(() => window.openwhisper!.invoke("get_state", {})));
+  const finishSetupIfNeeded = async (setupPage: Page) => {
+    const current = await state();
+    if (current.preferences.setup_completed) return;
+    await expect(setupPage.locator('nav button[data-tab="setup"]')).toBeVisible();
+    await expect(setupPage.locator("nav button[data-tab]")).toHaveCount(1);
+    await expect(setupPage.locator('nav button[data-tab="general"]')).toHaveCount(0);
+    await setupPage.locator('[data-command="complete_setup"]').click();
+    await expect.poll(async () => (await state()).preferences.setup_completed).toBe(true);
+  };
   if (packageMetadata.updateConfigured) {
     stage = "owned-update-preference";
     const before = await state();
@@ -391,6 +400,11 @@ try {
   assert.equal(initial.macos?.shortcut_toggle_only, true, "The Mac recording descriptor must be active.");
   assert.equal(initial.status, "idle"); assert.deepEqual(initial.installed, stable ? ["tiny"] : []); assert.equal(initial.microphones.length, 0);
   assert.equal(initial.preferences.macos_shortcut ?? null, null);
+  if (!initial.preferences.setup_completed) {
+    await expect(page.locator('nav button[data-tab="setup"]')).toBeVisible();
+    await expect(page.locator("nav button[data-tab]")).toHaveCount(1);
+    await expect(page.locator('nav button[data-tab="general"]')).toHaveCount(0);
+  }
   checks.push("Normal production main factory initializes from signed packaged retirement/native descriptors");
   if (stable) {
     stage = "stable-native-context";
@@ -448,6 +462,7 @@ try {
       legacyModelSha256: originals?.[1]?.sha256, preferenceWrites: "owned JSON only; no CFPreferences writes",
       readiness: "ordinary packaged main reached UI after its pre-ready profile guard" };
     stage = "stable-migrated-ui";
+    await finishSetupIfNeeded(page);
     await page.locator('[data-tab="snippets"]').click();
     await expect(page.locator('#snippet-form [name="trigger"]')).toHaveValue(ownedSnippet.trigger);
     await expect(page.locator('#snippet-form [name="expansion"]')).toHaveValue(ownedSnippet.expansion);
@@ -455,6 +470,7 @@ try {
     await expect(page.locator('[data-delete="tiny"]')).toBeVisible();
     checks.push("Normal stable migration agrees actual empty native domain, real login/hardware/language defaults, exact raw snippets backup and legacy Tiny inventory");
   }
+  if (!stable) await finishSetupIfNeeded(page);
   if (!stable) {
     stage = "existing-installation-refusal";
     const refused = spawnSync(sourceExecutable, installArguments, { env: installEnvironment, encoding: "utf8", shell: false,
