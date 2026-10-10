@@ -43,6 +43,7 @@
   "Discard recording": "Discard recording",
   "Download": "Download",
   "Download & install": "Download & install",
+  "Download and select a model to continue.": "Download and select a model to continue.",
   "Download a speech model": "Download a speech model",
   "Choose a model family to see its variants. Recommendations use your current CPU/GPU mode; all models remain available.": "Choose a model family to see its variants. Recommendations use your current CPU/GPU mode; all models remain available.",
   "Download progress": "Download progress",

@@ -1171,9 +1171,29 @@ for (const platform of ["linux", "macos"] as const) {
     const baseModel = page
       .locator(".model-row")
       .filter({ hasText: "Whisper Base" });
+    const setupContinue = page.getByRole("button", {
+      name: "Continue",
+      exact: true,
+    });
+    await expect(setupContinue).toBeDisabled();
+    await expect(page.locator(".setup-model-required")).toHaveText(
+      "Download and select a model to continue.",
+    );
+    await expect(
+      page.getByRole("button", { name: "Back", exact: true }),
+    ).toBeEnabled();
+    await setupContinue.evaluate((button) => {
+      (button as HTMLButtonElement).disabled = false;
+      (button as HTMLButtonElement).click();
+    });
+    await expect(page.getByText("Step 1 of 6", { exact: true })).toBeVisible();
+    await setupContinue.evaluate((button) => {
+      (button as HTMLButtonElement).disabled = true;
+    });
     await baseModel.getByRole("button", { name: "Download" }).click();
     await expect(baseModel.getByRole("progressbar")).toBeVisible();
     await expect(whisperFamily).toHaveJSProperty("open", true);
+    await expect(setupContinue).toBeDisabled();
     await expect
       .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
       .toBe("download_model");
@@ -1192,7 +1212,42 @@ for (const platform of ["linux", "macos"] as const) {
     await expect
       .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
       .toBe("cancel_download");
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(setupContinue).toBeDisabled();
+    await expect(page.locator(".setup-model-required")).toHaveText(
+      "Download and select a model to continue.",
+    );
+
+    await baseModel.getByRole("button", { name: "Download" }).click();
+    await expect(baseModel.getByRole("progressbar")).toBeVisible();
+    await page.evaluate(() => {
+      window.testState.download = null;
+      window.testState.progress = 0;
+      window.testState.message = "Model download failed";
+      window.publishState();
+    });
+    await expect(
+      baseModel.getByRole("button", { name: "Download" }),
+    ).toBeVisible();
+    await expect(setupContinue).toBeDisabled();
+
+    await page.evaluate(() => {
+      window.testState.installed = ["small"];
+      window.publishState();
+    });
+    await expect(setupContinue).toBeDisabled();
+    await expect(page.locator(".setup-model-required")).toBeVisible();
+
+    await baseModel.getByRole("button", { name: "Download" }).click();
+    await expect(baseModel.getByRole("progressbar")).toBeVisible();
+    await page.evaluate(() => {
+      window.testState.download = null;
+      window.testState.progress = 1;
+      window.testState.installed = ["base", "small"];
+      window.publishState();
+    });
+    await expect(baseModel.getByText("Active", { exact: true })).toBeVisible();
+    await expect(setupContinue).toBeEnabled();
+    await setupContinue.click();
     await expect(
       page.getByRole("heading", { name: microphoneHeading }),
     ).toBeVisible();
@@ -1200,11 +1255,6 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(page.getByText("Step 1 of 6", { exact: true })).toBeVisible();
     await expect(whisperFamily).toHaveJSProperty("open", true);
 
-    await page.evaluate(() => {
-      const w = window as any;
-      w.testState.installed = ["base", "small"];
-      w.publishState();
-    });
     const smallModel = page
       .locator(".model-row")
       .filter({ hasText: "Whisper Small" });
@@ -1214,7 +1264,10 @@ for (const platform of ["linux", "macos"] as const) {
       .toBe("small");
     await expect(smallModel.getByText("Active", { exact: true })).toBeVisible();
     await expect(page.getByText("Step 1 of 6", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(setupContinue).toBeEnabled();
+    await baseModel.getByRole("button", { name: "Use", exact: true }).click();
+    await expect(baseModel.getByText("Active", { exact: true })).toBeVisible();
+    await setupContinue.click();
     await expect(
       page.getByRole("heading", { name: microphoneHeading }),
     ).toBeVisible();
@@ -1387,6 +1440,34 @@ for (const platform of ["linux", "macos"] as const) {
     ).not.toContain("enable_shortcut");
 
     await page.evaluate(() => {
+      window.testState.installed = [];
+      window.publishState();
+    });
+    const finishSetup = page.getByRole("button", {
+      name: "Finish setup",
+      exact: true,
+    });
+    await expect(finishSetup).toBeDisabled();
+    await expect(page.locator(".setup-model-required")).toBeVisible();
+    await finishSetup.evaluate((button) => {
+      (button as HTMLButtonElement).disabled = false;
+      (button as HTMLButtonElement).click();
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.testState.preferences.setup_completed),
+      )
+      .toBe(false);
+    expect(
+      await page.evaluate(() => window.calls.map((call) => call.command)),
+    ).not.toContain("complete_setup");
+    await page.evaluate(() => {
+      window.testState.installed = ["base"];
+      window.publishState();
+    });
+    await expect(finishSetup).toBeEnabled();
+
+    await page.evaluate(() => {
       window.publishNavigate("models");
     });
     await expect(
@@ -1424,7 +1505,10 @@ for (const platform of ["linux", "macos"] as const) {
     ).toBeVisible();
     await expect
       .poll(() => page.evaluate(() => window.testState.preferences.model))
-      .toBe("small");
+      .toBe("base");
+    expect(
+      await page.evaluate(() => window.calls.map((call) => call.command)),
+    ).not.toContain("download_model");
     if (platform === "linux") {
       expect(
         await page.evaluate(() => window.testState.preferences.microphone),

@@ -40,6 +40,9 @@ state. A live recording waveform indicates input level, not live transcription.
    setup steps individually. Preserve the real model, microphone, language, output,
    permission and shortcut controls, including optional fallback paths. Start a fresh,
    isolated Dev profile for owner review; no installation is needed.
+   Require a fully installed, selected speech model before advancing from model selection
+   or completing setup. Pending, cancelled and failed downloads do not satisfy this check;
+   permission and shortcut fallbacks remain optional.
 2. **Foundation and recording view.** Extend the visual tokens to the single transcript
    workspace. Preserve the current typed bridge and host state machine. Keep record, stop,
    cancel, retry and discard visible in the states where they are valid. Review screenshots

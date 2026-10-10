@@ -43,6 +43,7 @@
   "Discard recording": "Aufnahme verwerfen",
   "Download": "Herunterladen",
   "Download & install": "Laden & installieren",
+  "Download and select a model to continue.": "Lade ein Modell herunter und wähle es aus, um fortzufahren.",
   "Download a speech model": "Sprachmodell herunterladen",
   "Choose a model family to see its variants. Recommendations use your current CPU/GPU mode; all models remain available.": "Wähle eine Modellfamilie, um ihre Varianten zu sehen. Die Empfehlungen richten sich nach deinem CPU-/GPU-Modus. Du kannst jedes Modell auswählen.",
   "Download progress": "Downloadfortschritt",

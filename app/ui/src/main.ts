@@ -43,6 +43,8 @@ const option = (value: string, label: string, selected: string) =>
   `<option value="${esc(value)}" ${value === selected ? "selected" : ""}>${esc(label)}</option>`;
 const modelRecommendations = () =>
   state.recommended_models ?? state.macos?.recommended ?? [];
+const hasInstalledSelectedModel = () =>
+  state.installed.includes(state.preferences.model);
 const tabs: [Tab, string, string][] = [
   ["setup", "Setup", "M4 5h2m4 0h10M4 12h2m4 0h10M4 19h2m4 0h10"],
   [
@@ -176,6 +178,10 @@ async function command(
   name: string,
   args?: Record<string, unknown>,
 ): Promise<boolean> {
+  if (name === "complete_setup" && !hasInstalledSelectedModel()) {
+    notice("Download and select a model to continue.");
+    return false;
+  }
   try {
     const command = validateCommandName(name);
     await invoke(command, validateCommandInput(command, args ?? {}));
@@ -711,6 +717,9 @@ function render() {
         content: shortcutButton(),
       },
     ];
+    const modelRequired =
+      !hasInstalledSelectedModel() &&
+      (setupStep === 0 || setupStep === panels.length - 1);
     const navigation = (welcome: boolean) => {
       const permissionFlowActive =
         portalBusy ||
@@ -719,7 +728,9 @@ function render() {
         state.recording_shortcut ||
         state.macos?.recording_shortcut === true;
       const disabled = permissionFlowActive ? "disabled" : "";
-      return `<footer class="setup-navigation">${welcome ? "" : `<button class="setup-back" data-setup-back ${disabled}>${esc(t("Back"))}</button>`}<span></span>${welcome || setupStep < panels.length - 1 ? `<button class="setup-primary" data-setup-next ${disabled}>${esc(t("Continue"))}</button>` : `<button class="setup-primary" data-command="complete_setup" ${disabled}>${esc(t("Finish setup"))}</button>`}</footer>`;
+      const primaryDisabled =
+        permissionFlowActive || (!welcome && modelRequired) ? "disabled" : "";
+      return `<footer class="setup-navigation">${welcome ? "" : `<button class="setup-back" data-setup-back ${disabled}>${esc(t("Back"))}</button>`}<span></span>${welcome || setupStep < panels.length - 1 ? `<button class="setup-primary" data-setup-next ${primaryDisabled}>${esc(t("Continue"))}</button>` : `<button class="setup-primary" data-command="complete_setup" ${primaryDisabled}>${esc(t("Finish setup"))}</button>`}</footer>`;
     };
     if (setupStep < 0) {
       content.innerHTML = `<section class="setup-card" aria-labelledby="setup-title"><div class="setup-card-body setup-welcome"><img class="setup-logo" src="./branding/mark-on-dark.svg" width="72" height="72" alt="OpenWhisper"><h1 id="setup-title" tabindex="-1">${esc(t("Speak. OpenWhisper writes with you."))}</h1><p class="setup-intro">${esc(t("OpenWhisper turns speech into text directly on this computer. No account, cloud, or subscription. Your recordings never leave your computer."))}</p><p class="setup-language-label">${esc(t("Interface language"))}</p><div class="setup-language" role="group" aria-label="${esc(t("Interface language"))}"><button data-ui-language="de" aria-pressed="${state.preferences.ui_language === "de"}">Deutsch</button><button data-ui-language="en" aria-pressed="${state.preferences.ui_language === "en"}">${esc(t("English"))}</button></div></div>${navigation(true)}</section>`;
@@ -730,7 +741,7 @@ function render() {
         (_, index) =>
           `<span${index === setupStep ? ' class="current"' : ""}></span>`,
       ).join("");
-      content.innerHTML = `<section class="setup-card" aria-labelledby="setup-title"><div class="setup-card-body"><div class="setup-segments" aria-hidden="true">${progress}</div><div class="setup-progress" role="status">${esc(t("Step {step} of 6", { step: setupStep + 1 }))}</div><h1 id="setup-title" tabindex="-1">${esc(panel.title)}</h1><p class="setup-intro">${esc(panel.detail)}</p><div class="setup-panel-content">${panel.content}</div>${setupStep === panels.length - 1 ? `<p class="setup-footnote">${esc(t("You can change permissions, shortcuts, and recording preferences in General at any time."))}</p>` : ""}</div>${navigation(false)}</section>`;
+      content.innerHTML = `<section class="setup-card" aria-labelledby="setup-title"><div class="setup-card-body"><div class="setup-segments" aria-hidden="true">${progress}</div><div class="setup-progress" role="status">${esc(t("Step {step} of 6", { step: setupStep + 1 }))}</div><h1 id="setup-title" tabindex="-1">${esc(panel.title)}</h1><p class="setup-intro">${esc(panel.detail)}</p><div class="setup-panel-content">${panel.content}</div>${modelRequired ? `<p class="setup-footnote setup-model-required" role="status">${esc(t("Download and select a model to continue."))}</p>` : ""}${setupStep === panels.length - 1 ? `<p class="setup-footnote">${esc(t("You can change permissions, shortcuts, and recording preferences in General at any time."))}</p>` : ""}</div>${navigation(false)}</section>`;
     }
     if (focusSetupTitle) {
       content.querySelector<HTMLElement>("#setup-title")?.focus();
@@ -1122,6 +1133,10 @@ function render() {
   content
     .querySelector<HTMLButtonElement>("[data-setup-next]")
     ?.addEventListener("click", () => {
+      if (setupStep === 0 && !hasInstalledSelectedModel()) {
+        notice("Download and select a model to continue.");
+        return;
+      }
       setupStep = Math.min(setupStep + 1, 5);
       focusSetupTitle = true;
       contentKey = "";

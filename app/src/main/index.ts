@@ -905,6 +905,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         return current;
       }),
       complete_setup: () => withRecordingControl(async () => {
+        await refreshModels();
+        if (!installed.some((item) => item.model.id === preferences.snapshot().model)) {
+          throw new Error("Download and select an installed speech model before completing setup.");
+        }
         await preferences.completeSetup();
         emit("state", state());
       }),

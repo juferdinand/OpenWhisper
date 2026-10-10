@@ -218,11 +218,36 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await expect(page.locator(".setup-logo")).toBeVisible();
     await expect(page.locator("nav button[data-tab]")).toHaveCount(0);
     await expect(page.locator('nav button[data-tab="general"]')).toHaveCount(0);
+    assert.equal(await page.evaluate(async () => {
+      try { await window.openwhisper?.invoke("complete_setup", {}); return false; }
+      catch { return true; }
+    }), true);
+    assert.equal(validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.setup_completed, false);
+    assert.equal(beforeSetup.model_directory, join(profile, "data", "models"));
+    const otherModel = beforeSetup.models.find((model) => model.id === "base");
+    const selectedModel = beforeSetup.models.find((model) => model.id === beforeSetup.preferences.model);
+    assert.ok(otherModel?.file && selectedModel?.file);
+    assert.notEqual(otherModel.id, selectedModel.id);
+    // Private inventory sentinels exercise setup admission, never speech inference or model quality.
+    await writeFile(join(beforeSetup.model_directory, otherModel.file), "Owned unselected inventory fixture", { mode: 0o600 });
+    assert.equal(await page.evaluate(async () => {
+      try { await window.openwhisper?.invoke("complete_setup", {}); return false; }
+      catch { return true; }
+    }), true);
+    assert.equal(validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.setup_completed, false);
+    await writeFile(join(beforeSetup.model_directory, selectedModel.file), "Owned selected inventory fixture", { mode: 0o600 });
+    await app.close();
+    application = undefined;
+    app = await launch();
+    page = await app.firstWindow();
+    currentPage = page;
+    await expect(page.locator(".setup-logo")).toBeVisible();
     for (let step = 0; step < 6; step++) {
       await page.locator("[data-setup-next]").click();
     }
     await page.locator('[data-command="complete_setup"]').click();
     await expect.poll(async () => validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.setup_completed).toBe(true);
+    checks.push("setup rejects missing or unselected installed models through real IPC; a selected private inventory fixture permits completion");
     const state = validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {})));
     assert.equal(state.profile, "development");
     assert.equal(state.recording_available, false);
