@@ -64,3 +64,54 @@ is absent, settings preserve ordinary preferences, and no provider traffic start
 
 TTS, Obsidian and coding-agent actions remain later stages; ordinary local dictation stays
 independent of optional integrations. See the [roadmap](ROADMAP.md) for delivery order.
+
+## Planned Connections increment
+
+This section describes the next implementation, not functionality shipped in 0.4.2.
+The supplied Connections and Text processing designs define the interface.
+
+1. Detect running numeric-loopback Ollama and LM Studio servers and list their models.
+   Detect installed Claude Code and Codex tools without reading their credentials or
+   initiating a model request. Discovery never starts a server or downloads a model.
+2. Store a small, validated connection registry: enabled state, explicit priority, local
+   model selection, and one shared instruction. All connections start disabled. An
+   explicit enable action permits text processing using that connection. Show that CLI
+   tools can use cloud models and that a loopback server can itself forward text remotely.
+3. Use the highest-priority enabled connection for the optional model step after local
+   recognition, cleanup, vocabulary correction, and snippets. A provider failure never
+   silently selects another provider. Keep the deterministic result and explain the
+   failure; never truncate a long transcript to fit a provider limit.
+4. Preserve the recognized source and each successful processing result for the current
+   recording. Offer source/final review without translating user text. Keep existing
+   history persistence unchanged in this increment; durable source history is separate.
+5. Render one host-driven stage/progress strip in the app and floating bar. Recognition
+   uses actual inference progress; synchronous text stages and model requests do not
+   invent percentages. Correct transparent margins outside the floating pill and cover
+   them with synthetic screenshot evidence on both renderer platform layouts.
+6. Match the design's Connections priority controls, local model selectors and common
+   instruction. Text processing shows cleanup, vocabulary and snippets in their actual
+   order. Descriptions must match implemented deterministic behavior, rather than promise
+   semantic punctuation or filler removal that the cleaner does not perform.
+
+CLI adapters are fixed host implementations, not configurable shell commands. Submit text
+through stdin; use no shell, no project working directory, bounded output and total time,
+and explicit cancellation/child cleanup. Do not read or copy CLI authentication files.
+Claude Code's supported print mode, empty tool list, safe mode and no-session-persistence
+flags provide the candidate text-only boundary. Verify supported flags before enabling it.
+Codex discovery is included, but execution requires an independently verified boundary:
+read-only mode alone does not disable its agent tools, and public configuration currently
+does not establish a complete empty tool registry. Do not claim it is a text-only provider
+until that gap is resolved.
+
+Validation proceeds from schema/pipeline tests to private loopback and fake-process tests,
+then English/German renderer checks, then synthetic live requests to explicitly selected
+installed local models. No real microphone, user transcript, cloud-account request or
+user installation is needed for automated checks. Common preflight, app tests/build,
+renderer build/tests and independent review precede the functional PR. User acceptance
+remains required before merge of this new feature.
+
+Primary API references: [LM Studio Chat Completions](https://lmstudio.ai/docs/developer/openai-compat/chat-completions),
+[Ollama chat](https://docs.ollama.com/api/chat), [Ollama model list](https://docs.ollama.com/api/tags),
+[Claude Code CLI](https://code.claude.com/docs/en/cli-usage),
+[Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode),
+and [Codex configuration](https://learn.chatgpt.com/docs/config-file/config-reference).
