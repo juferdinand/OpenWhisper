@@ -1,15 +1,16 @@
-<!-- Prepared for the gated 0.4.1 release workflow; repository status lives in README.md. -->
+<!-- Prepared for the gated release workflow; repository status lives in README.md. -->
 
-## What's new in OpenWhisper 0.4.1
+## What's new in OpenWhisper 0.4.2
 
-- Refresh the managed Linux AppImage desktop icon after an update, while preserving customized
-  desktop entries and icons.
-- Notify KDE's icon loader after a successful refresh.
+- Download updates with visible progress, then choose Restart now or Later.
+- Read update highlights in your selected interface language.
+- Discover updates automatically at startup, hourly, and after resuming.
 
-## Neu in OpenWhisper 0.4.1
+## Neu in OpenWhisper 0.4.2
 
-- Aktualisiert das verwaltete Desktop-Symbol des Linux-AppImages nach einem Update und erhält angepasste Desktop-Einträge und Symbole.
-- Benachrichtigt KDE nach erfolgreicher Aktualisierung über das geänderte Symbol.
+- Updates mit sichtbarem Fortschritt herunterladen und anschließend Jetzt neu starten oder Später wählen.
+- Die Neuerungen eines Updates in der gewählten Oberflächensprache lesen.
+- Updates automatisch beim Start, stündlich und nach dem Aufwachen erkennen.
 
 Recognition runs locally. Exact package, desktop and test scope is recorded in
 [Electron status](https://github.com/juferdinand/OpenWhisper/blob/main/docs/ELECTRON-STATUS.md) and
