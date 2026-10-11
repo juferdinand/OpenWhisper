@@ -1,7 +1,8 @@
 # Frontend redesign plan
 
 This is a proposed implementation plan, not a description of shipped functionality.
-The owner supplied `Status page redesign.zip` on 2026-10-10. Use its
+The owner supplied `Status page redesign.zip` on 2026-10-10 and refreshed it on
+2026-10-11 with update controls and a release-notes dialog. Use its
 `OpenWhisper App v2.dc.html` as the visual reference; the older HTML is an alternative,
 not a second interface to maintain. The archive and rendered previews remain local
 reference material rather than application dependencies.
@@ -101,6 +102,50 @@ disabled without an explanatory paragraph. Place the existing signed-update acti
 version/progress indicator in the titlebar, with automatic-check preferences in General; keep
 unsupported Dev update controls hidden. About contains identity, version, license and project
 information, with platform coverage documented through the README-linked guides.
+
+Selecting Insert must request missing keyboard access immediately instead of silently
+saving an unusable destination. Keep the previous output when access is cancelled or
+unavailable. On macOS, guide the user to System Settings and allow an explicit retry
+after access is granted. Permission help should explain insertion without portal internals.
+Source-run Dev cannot reliably launch at login; use the existing packaged Dev admission
+and an explicit isolated profile when reviewing that setting.
+
+## Update dialog and release highlights
+
+Follow the refreshed reference's compact titlebar Update action and centered details
+dialog: installed and available versions, a few release highlights, the GitHub release
+link, Later and the real update action. Project actual host states into the dialog;
+the prototype's simulated progress, signature stages, restart-ready state and preview
+channel are not evidence that those capabilities exist in the app.
+
+Use `.github/release-notes.md` as the editorial source for a short highlights section.
+The release workflow already uses it for the GitHub release body. The Linux feed and
+macOS release reader accept notes, but the current renderer state does not expose them.
+A later implementation should publish the same curated highlights into Linux metadata
+and carry a bounded plain-text list through the typed host/UI boundary. Render text safely
+and link to the complete release for installation and platform details. Missing highlights
+must not block an otherwise valid update. Avoid a second independently maintained `.txt`
+asset or displaying the entire generated pull-request list in the dialog.
+
+## Recording-level presentation
+
+The current native capture reports callback peaks, not a PCM waveform or RMS. The
+renderer shifts these samples and transitions every bar's height, which is a likely
+source of the reported pulsing. Preserve the capture path and improve presentation first:
+smooth each real incoming level with a time-based envelope, then move fixed historical
+bars from right to left at a steady speed. Do not reshape the entire history on each
+sample or generate fake activity during silence or transcription.
+
+Use [ElevenLabs Live Waveform](https://ui.elevenlabs.io/docs/components/live-waveform)
+as a visual reference for scrolling history and softened edges. Its React microphone
+component is not a drop-in replacement for our existing native recorder. For frame-paced
+motion, use timestamps with
+[requestAnimationFrame](https://developer.mozilla.org/en-US/docs/Web/API/Window/requestAnimationFrame)
+and preserve reduced-motion behavior. Web Audio's
+[smoothingTimeConstant](https://developer.mozilla.org/en-US/docs/Web/API/AnalyserNode/smoothingTimeConstant)
+applies to frequency data; it does not smooth the existing peak telemetry automatically.
+Validate any replacement with synthetic speech-like pulses, silence, irregular telemetry,
+stop/cancel, both window sizes and both main/overlay views before owner review.
 
 Use strict TypeScript and the existing renderer. Do not import the prototype's dynamic
 React/Babel runtime, remote fonts or demo scripts, relax the content security policy, or

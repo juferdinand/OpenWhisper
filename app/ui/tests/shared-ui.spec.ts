@@ -60,6 +60,184 @@ test("pending keyboard permission exposes translated Cancel and sends only revoc
   );
 });
 
+test("Insert requests permission only on intent and persists once after an intervening state refresh", async ({
+  page,
+}) => {
+  await start(page, "linux", false, false, false, null);
+  const insert = page.locator('#record-control [data-output="paste"]');
+  const enableRequests = () =>
+    page.evaluate(
+      () =>
+        window.calls.filter((call) => call.command === "enable_paste").length,
+    );
+  const insertPreferenceWrites = () =>
+    page.evaluate(
+      () =>
+        window.calls.filter(
+          (call) =>
+            call.command === "save_preferences" &&
+            (call.args as { changes?: { output?: string } } | undefined)
+              ?.changes?.output === "paste",
+        ).length,
+    );
+
+  await expect(insert).toHaveAttribute("aria-pressed", "false");
+  expect(await enableRequests()).toBe(0);
+  await page.evaluate(() => {
+    Object.assign(window.testState, {
+      paste_portal: false,
+      native_paste: false,
+    });
+    window.publishState();
+  });
+  await insert.click();
+  await expect(page.locator("#notice")).toContainText(
+    "Your desktop does not expose this portal. Clipboard output remains available.",
+  );
+  expect(await enableRequests()).toBe(0);
+  await expect(insert).toHaveAttribute("aria-pressed", "false");
+
+  await page.evaluate(() => {
+    Object.assign(window.testState, {
+      paste_portal: true,
+      status: "recording",
+    });
+    window.publishState();
+  });
+  await expect(insert).toBeDisabled();
+  expect(await enableRequests()).toBe(0);
+  await page.evaluate(() => {
+    Object.assign(window.testState, {
+      status: "error",
+      recovery_available: true,
+    });
+    window.publishState();
+  });
+  await expect(insert).toBeDisabled();
+  expect(await enableRequests()).toBe(0);
+
+  await page.evaluate(() => {
+    const host = window as any;
+    Object.assign(host.testState, {
+      status: "idle",
+      recovery_available: false,
+    });
+    host.rejectPortal = true;
+    host.publishState();
+  });
+  await insert.click();
+  await expect(page.locator("#notice")).toContainText(
+    "Permission request cancelled",
+  );
+  expect(await enableRequests()).toBe(1);
+  expect(await insertPreferenceWrites()).toBe(0);
+  await expect
+    .poll(() => page.evaluate(() => window.testState.preferences.output))
+    .toBe("clipboard");
+  await expect(insert).toHaveAttribute("aria-pressed", "false");
+
+  await page.evaluate(() => {
+    const host = window as any;
+    host.rejectPortal = false;
+    host.deferPasteRequest = true;
+  });
+  await insert.click();
+  await expect.poll(enableRequests).toBe(2);
+  await page.evaluate(() => {
+    // This unrelated steady-state event can arrive before portal setup starts.
+    window.testState.elapsed += 1;
+    window.publishState();
+  });
+  await page.evaluate(() => {
+    window.testState.paste_configuring = true;
+    window.publishState();
+  });
+  await expect(insert).toBeDisabled();
+  await page.evaluate(() => {
+    window.testState.paste_ready = true;
+    window.testState.paste_configuring = false;
+    window.publishState();
+    (window as any).resolvePasteRequest();
+  });
+  await expect
+    .poll(() => page.evaluate(() => window.testState.preferences.output))
+    .toBe("paste");
+  expect(await insertPreferenceWrites()).toBe(1);
+  await expect(insert).toHaveAttribute("aria-pressed", "true");
+
+  await page.evaluate(() => {
+    window.testState.preferences.output = "clipboard";
+    window.publishState();
+  });
+  await selectSettingsTab(page, "recording");
+  await page
+    .locator(
+      '#settings-recording-output input[data-pref="output"][value="paste"]',
+    )
+    .check();
+  await expect
+    .poll(() => page.evaluate(() => window.testState.preferences.output))
+    .toBe("paste");
+  expect(await insertPreferenceWrites()).toBe(2);
+  expect(await enableRequests()).toBe(2);
+});
+
+test("Mac Insert opens Accessibility settings, then saves only after the user retries", async ({
+  page,
+}) => {
+  await start(page, "macos");
+  await closeSettings(page);
+  await page.evaluate(() => {
+    (window as any).autoGrantPaste = false;
+  });
+  const insert = page.locator('#record-control [data-output="paste"]');
+  await insert.click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.calls.filter((call) => call.command === "enable_paste").length,
+      ),
+    )
+    .toBe(1);
+  await expect(page.locator("#notice")).toContainText(
+    "Allow keyboard access in System Settings, then select Insert again.",
+  );
+  await expect(insert).toHaveAttribute("aria-pressed", "false");
+  expect(
+    await page.evaluate(
+      () =>
+        window.calls.filter(
+          (call) =>
+            call.command === "save_preferences" &&
+            (call.args as { changes?: { output?: string } } | undefined)
+              ?.changes?.output === "paste",
+        ).length,
+    ),
+  ).toBe(0);
+
+  await page.evaluate(() => {
+    window.testState.paste_ready = true;
+    window.publishState();
+  });
+  await insert.click();
+  await expect
+    .poll(() => page.evaluate(() => window.testState.preferences.output))
+    .toBe("paste");
+  expect(
+    await page.evaluate(
+      () =>
+        window.calls.filter(
+          (call) =>
+            call.command === "save_preferences" &&
+            (call.args as { changes?: { output?: string } } | undefined)
+              ?.changes?.output === "paste",
+        ).length,
+    ),
+  ).toBe(1);
+  await expect(insert).toHaveAttribute("aria-pressed", "true");
+});
+
 for (const platform of ["linux", "macos"] as const) {
   test(`${platform}: visible product copy uses Recording wording in English and German`, async ({
     page,
@@ -604,6 +782,11 @@ async function start(
           );
           throw new Error("Permission request cancelled");
         }
+        if (command === "enable_paste" && host.deferPasteRequest) {
+          await new Promise<void>((resolve) => {
+            host.resolvePasteRequest = resolve;
+          });
+        }
         if (command === "get_state") {
           const saved = await host.loadTestPreferences();
           if (saved) {
@@ -669,7 +852,8 @@ async function start(
           state.macos.recording_shortcut = false;
           state.recording_shortcut = false;
         }
-        if (command === "enable_paste") state.paste_ready = true;
+        if (command === "enable_paste" && host.autoGrantPaste !== false)
+          state.paste_ready = true;
         if (command === "disable_paste") {
           state.paste_ready = false;
           state.paste_configuring = false;
@@ -3469,6 +3653,17 @@ for (const platform of ["linux", "macos"] as const) {
       await expect(
         page.getByRole("button", { name: "Allow", exact: true }),
       ).toBeDisabled();
+      // Restore the synthetic permission capability for the later successful
+      // Insert choice; the unsupported branch above remains independently covered.
+      await page.evaluate(() => {
+        window.testState.paste_portal = true;
+        window.testState.paste_ready = false;
+        window.testState.paste_configuring = false;
+        window.publishState();
+      });
+      await expect(
+        page.getByRole("button", { name: "Allow", exact: true }),
+      ).toBeEnabled();
     }
     if (platform === "macos") {
       expect(
@@ -3488,11 +3683,37 @@ for (const platform of ["linux", "macos"] as const) {
       setupOutput.locator('input[name="settings-output"]'),
     ).toHaveCount(platform === "macos" ? 3 : 2);
     const pasteOutput = setupOutput.locator('input[value="paste"]');
+    const pasteRequestsBeforeChoice = await page.evaluate(
+      () =>
+        window.calls.filter((call) => call.command === "enable_paste").length,
+    );
     await pasteOutput.focus();
     await page.keyboard.press("Space");
     await expect
       .poll(() => page.evaluate(() => window.testState.preferences.output))
       .toBe("paste");
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.calls.filter((call) => call.command === "enable_paste")
+              .length,
+        ),
+      )
+      .toBe(pasteRequestsBeforeChoice + 1);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.calls.filter(
+              (call) =>
+                call.command === "save_preferences" &&
+                (call.args as { changes?: { output?: string } } | undefined)
+                  ?.changes?.output === "paste",
+            ).length,
+        ),
+      )
+      .toBe(1);
     await page.evaluate(() => {
       window.testState.native_shortcuts = true;
       window.testState.native_mouse = window.testState.platform === "linux";

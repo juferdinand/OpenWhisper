@@ -18,6 +18,9 @@ declare global {
 
 const enabled = process.env.OPENWHISPER_OWNED_UI_TEST === "1";
 const packageRoot = resolve(fileURLToPath(new URL("../../", import.meta.url)));
+const packagedDevDirectory = process.env.OPENWHISPER_PACKAGED_DEV_DIRECTORY;
+const packagedAppRoot = packagedDevDirectory ? join(packagedDevDirectory, "resources/app") : packageRoot;
+const packagedExecutable = packagedDevDirectory ? join(packagedDevDirectory, "openwhisper-dev") : undefined;
 
 // Playwright executes transpiled TypeScript in Electron's isolated preload world.
 // The function has no closures or imported values; no authored JavaScript fixture
@@ -65,7 +68,8 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
   await chmod(root, 0o700);
   const home = join(root, "home");
   const runtime = join(root, "runtime");
-  for (const path of [home, runtime, join(home, "config"), join(home, "data"), join(home, "cache")]) {
+  const systemConfig = join(root, "system-config");
+  for (const path of [home, runtime, join(home, "config"), join(home, "data"), join(home, "cache"), systemConfig]) {
     await mkdir(path, { mode: 0o700 });
   }
   // Synthetic stable-profile sentinels prove separation without reading live data.
@@ -105,7 +109,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     LANG: "C.UTF-8", LC_ALL: "C.UTF-8",
     HOME: home,
     XDG_CONFIG_HOME: join(home, "config"), XDG_DATA_HOME: join(home, "data"),
-    XDG_CACHE_HOME: join(home, "cache"), XDG_RUNTIME_DIR: runtime,
+    XDG_CACHE_HOME: join(home, "cache"), XDG_RUNTIME_DIR: runtime, XDG_CONFIG_DIRS: systemConfig,
     DBUS_SESSION_BUS_ADDRESS: `unix:path=${runtime}/disabled-session-bus`,
     DBUS_SYSTEM_BUS_ADDRESS: `unix:path=${runtime}/disabled-system-bus`,
     PULSE_SERVER: `unix:${runtime}/disabled-pulse`,
@@ -133,12 +137,18 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
   });
   environment.DISPLAY = display;
   const profile = join(root, "dev-profile");
+  const executable = packagedExecutable ?? join(packageRoot, "node_modules/electron/dist/electron");
+  const launchWrapper = join(root, "playwright-electron");
+  const shellArgument = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+  // Match Playwright's normal preload ordering before its debug switches. This
+  // instrumentation belongs only to the private fixture, never the Dev package.
+  await writeFile(launchWrapper, `#!/bin/sh\nexec ${shellArgument(executable)} -r ${shellArgument(join(packageRoot, "node_modules/playwright-core/lib/server/electron/loader.js"))} "$@"\n`, { mode: 0o700 });
   let application: ElectronApplication | undefined;
   let currentPage: Page | undefined;
   const launch = async (): Promise<ElectronApplication> => {
     const app = await _electron.launch({
-      executablePath: join(packageRoot, "node_modules/electron/dist/electron"),
-      args: [packageRoot, "--dev", "--dev-profile", profile],
+      executablePath: packagedExecutable ?? launchWrapper,
+      args: packagedDevDirectory ? ["--dev-profile", profile] : [packageRoot, "--dev", "--dev-profile", profile],
       env: environment,
       chromiumSandbox: true,
       timeout: 30_000,
@@ -164,6 +174,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
         argv: process.argv, mainUid: process.getuid?.(),
       };
     });
+    await writeFile(join(evidence, "app-launch.json"), JSON.stringify({ executable, appArgv: security.argv }, null, 2));
     assert.equal(security.name, "OpenWhisper Dev");
     assert.equal(security.userData.startsWith(`${profile}/`), true);
     assert.equal(security.sessionData.startsWith(`${profile}/`), true);
@@ -177,6 +188,8 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await page.evaluate(() => { Reflect.deleteProperty(globalThis, "ownedMainWorldMarker"); });
     assert.equal(security.devToolsOpen, false);
     assert.equal(security.mainUid, 1000);
+    assert.deepEqual(security.argv, packagedDevDirectory ? [packagedExecutable, "--inspect=0", "--remote-debugging-port=0", "--dev-profile", profile]
+      : [join(packageRoot, "node_modules/electron/dist/electron"), packageRoot, "--dev", "--dev-profile", profile]);
     assert.equal(security.argv.some((arg) => arg.includes("no-sandbox")), false);
     const rendererStatus = await readFile(`/proc/${security.rendererPid}/status`, "utf8");
     const rendererCmdline = (await readFile(`/proc/${security.rendererPid}/cmdline`, "utf8")).split("\0");
@@ -283,7 +296,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await expect(page.locator("#discard-result")).toBeDisabled();
     const metadata = z.strictObject({
       commit: z.string().regex(/^([a-f0-9]{40}|source)$/), modified: z.boolean(),
-    }).parse(JSON.parse(await readFile(join(packageRoot, "dist/resources/development-build.json"), "utf8")));
+    }).parse(JSON.parse(await readFile(join(packagedAppRoot, "dist/resources/development-build.json"), "utf8")));
     const buildIdentifier = `${metadata.commit.slice(0, 12)}${metadata.modified ? "+modified" : ""}`;
     assert.equal(state.development_build, buildIdentifier);
     assert.equal(state.model_directory, join(profile, "data", "models"));
@@ -303,11 +316,23 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     }), true);
     await screenshot(page, "dev-about.png");
     await openSettings(page, "general");
+    const loginToggle = page.locator('[data-pref="launch_at_login"]');
+    // Packaged Electron ignores Node CLI preloads. Playwright's debug switches
+    // therefore correctly fail the exact normal-launch admission. Cover its
+    // positive path in the focused admission/autostart tests, without relaxing it.
+    assert.equal(state.launch_at_login_available, false);
+    await expect(loginToggle).toBeDisabled();
+    assert.equal(await absent(join(home, "config/autostart/io.github.whisperfree.dev.desktop")), true);
+    checks.push(packagedDevDirectory ? "instrumented packaged Dev refuses autostart with extra debug arguments"
+      : "source-run Dev keeps login launch unavailable");
     await screenshot(page, "dev-general.png");
     checks.push("visible Dev build identifier, supplied SVG branding, bundled reference fonts and private model directory");
     await expect(page.locator("#record")).toBeDisabled();
     await expect(page.locator("#status-title")).toHaveText("Recording is unavailable");
-    await expect(page.locator("#status")).toHaveText("The recording service could not start. Restart OpenWhisper and try again.");
+    assert.ok(state.recording_unavailable_reason === "host" || state.recording_unavailable_reason === "audio");
+    await expect(page.locator("#status")).toHaveText(state.recording_unavailable_reason === "audio"
+      ? "No audio input is available. Check your microphone and audio settings."
+      : "The recording service could not start. Restart OpenWhisper and try again.");
     checks.push("unsupported recording truthfully disabled, no device inventory");
 
     const refusals = await page.evaluate(async () => {

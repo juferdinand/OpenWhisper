@@ -21,6 +21,9 @@ let tab: View = "dictation";
 let dirty = false;
 const dirtyTextParts = new Set<"vocabulary" | "snippets">();
 let portalBusy = false;
+let pendingInsertOutput = false;
+let insertPermissionActionPending = false;
+let insertPermissionSawConfiguring = false;
 let contentKey = "";
 let workspaceKey = "";
 let shellKey = "";
@@ -543,6 +546,87 @@ async function savePreferences(
 async function preference(name: string, value: unknown) {
   return savePreferences(preferencePatchSchema.parse({ [name]: value }));
 }
+async function selectOutput(value: string) {
+  if (value !== "paste") {
+    pendingInsertOutput = false;
+    insertPermissionSawConfiguring = false;
+  }
+  if (
+    pendingPreferences ||
+    ["recording", "transcribing"].includes(state.status) ||
+    state.recovery_available ||
+    state.shortcut_configuring ||
+    state.recording_shortcut ||
+    state.macos?.recording_shortcut === true ||
+    !!state.download ||
+    ["checking", "downloading", "installing"].includes(state.updates.status)
+  ) {
+    syncPreferenceControls();
+    notice("Wait until the current task finishes before changing the output.");
+    return false;
+  }
+  if (value !== "paste") {
+    return preference("output", value);
+  }
+  if (portalBusy || state.paste_configuring) {
+    syncPreferenceControls();
+    notice("Wait until the current task finishes before changing the output.");
+    return false;
+  }
+  if (state.paste_ready) return preference("output", "paste");
+  if (!pasteAvailable()) {
+    syncPreferenceControls();
+    notice(
+      "Your desktop does not expose this portal. Clipboard output remains available.",
+    );
+    return false;
+  }
+  if (pendingInsertOutput) return false;
+
+  portalBusy = true;
+  if (!isMac()) {
+    pendingInsertOutput = true;
+    insertPermissionActionPending = true;
+    insertPermissionSawConfiguring = false;
+  }
+  render();
+  try {
+    const requested = await command("enable_paste");
+    if (!requested) {
+      pendingInsertOutput = false;
+      insertPermissionSawConfiguring = false;
+      return false;
+    }
+    if (isMac()) {
+      if (state.paste_ready) return preference("output", "paste");
+      notice(
+        "Allow keyboard access in System Settings, then select Insert again.",
+      );
+      return false;
+    }
+    try {
+      state = await invoke("get_state");
+    } catch {
+      // Keep the latest event snapshot if the state read is temporarily unavailable.
+    }
+    insertPermissionActionPending = false;
+    if (state.paste_configuring) insertPermissionSawConfiguring = true;
+    if (pendingInsertOutput && state.paste_ready) {
+      pendingInsertOutput = false;
+      insertPermissionSawConfiguring = false;
+      return preference("output", "paste");
+    }
+    if (!state.paste_configuring) {
+      pendingInsertOutput = false;
+      insertPermissionSawConfiguring = false;
+    }
+    return false;
+  } finally {
+    insertPermissionActionPending = false;
+    portalBusy = false;
+    render();
+  }
+}
 function syncPreferenceControls() {
   if (pendingPreferences) return;
   document
@@ -939,7 +1023,7 @@ function recordControl() {
           ]
         : []),
     ];
-    const outputControls = `<div class="record-output" role="group" aria-label="${esc(t("Output"))}"><span class="record-output-label">${esc(t("Output"))}</span>${outputModes.map(([value, label, fullLabel]) => `<button type="button" data-output="${value}" data-pref="output" aria-label="${esc(fullLabel)}" title="${esc(fullLabel)}" aria-pressed="${state.preferences.output === value}" ${recording || recovery ? "disabled" : ""}>${esc(label)}</button>`).join("")}</div>`;
+    const outputControls = `<div class="record-output" role="group" aria-label="${esc(t("Output"))}"><span class="record-output-label">${esc(t("Output"))}</span>${outputModes.map(([value, label, fullLabel]) => `<button type="button" data-output="${value}" data-pref="output" aria-label="${esc(fullLabel)}" title="${esc(fullLabel)}" aria-pressed="${state.preferences.output === value}" ${recording || recovery || (value === "paste" && (portalBusy || state.paste_configuring)) ? "disabled" : ""}>${esc(label)}</button>`).join("")}</div>`;
     const overlayBars = Array.from(
       { length: 36 },
       (_, index) => `<i style="--wave-index:${index}"></i>`,
@@ -983,7 +1067,7 @@ function recordControl() {
       .forEach((output) =>
         output.addEventListener(
           "click",
-          () => void preference("output", output.dataset.output),
+          () => void selectOutput(output.dataset.output ?? ""),
         ),
       );
     document
@@ -1066,7 +1150,11 @@ function recordControl() {
         "aria-pressed",
         String(output.dataset.output === state.preferences.output),
       );
-      output.disabled = recording || recovery;
+      output.disabled =
+        recording ||
+        recovery ||
+        (output.dataset.output === "paste" &&
+          (portalBusy || state.paste_configuring === true));
     });
   const unavailableAction = document.querySelector<HTMLButtonElement>(
     "#record-unavailable-action",
@@ -1961,7 +2049,8 @@ function render() {
                   input.dataset.pref === "gpu"
                 ? input.value === "true"
                 : input.value;
-          void preference(input.dataset.pref!, value);
+          if (input.dataset.pref === "output") void selectOutput(String(value));
+          else void preference(input.dataset.pref!, value);
         }),
     );
   content.querySelectorAll<HTMLButtonElement>("[data-portal]").forEach(
@@ -2188,6 +2277,21 @@ async function start() {
       receivedStateEvent = true;
       state = event.payload;
       if (!state.recording_shortcut) mouseTriggerCandidate = undefined;
+      if (pendingInsertOutput && !isMac()) {
+        if (state.paste_ready) {
+          pendingInsertOutput = false;
+          insertPermissionSawConfiguring = false;
+          void preference("output", "paste");
+        } else if (state.paste_configuring) {
+          insertPermissionSawConfiguring = true;
+        } else if (
+          !insertPermissionActionPending &&
+          insertPermissionSawConfiguring
+        ) {
+          pendingInsertOutput = false;
+          insertPermissionSawConfiguring = false;
+        }
+      }
       render();
     });
     await listen("recording_telemetry", (event) => {
