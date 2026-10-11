@@ -12,9 +12,10 @@ async function until(check: () => boolean) { for (let count=0; count<100; count+
 
 test("callback-chained commands and retirement settle without publication turns", async () => {
   const [a, b] = duplexPair(), received: LinuxUpdateResponse[] = [], actions: string[] = [];
+  const details = { highlights: Array.from({ length: 5 }, () => "x".repeat(512)), size: 4096 };
   const entered = gate(); let chainedInstall: Promise<void> | undefined, retiring: Promise<void> | undefined, acknowledgment: Promise<void> | undefined;
   const parent = createLinuxUpdateParentChannel(a, binding, async (kind) => {
-    actions.push(kind); return kind === "check" ? { status: "available", updateVersion: "0.3.1" } : { status: "prepared", updateVersion: "0.3.1" };
+    actions.push(kind); return kind === "check" ? { status: "available", updateVersion: "0.3.1", details } : { status: "prepared", updateVersion: "0.3.1" };
   });
   const gui = createLinuxUpdateGuiChannel(b, binding, (response) => {
     received.push(response);
@@ -32,6 +33,8 @@ test("callback-chained commands and retirement settle without publication turns"
     assert.deepEqual(await parent.retirement, { updateVersion: "0.3.1" });
     await chainedInstall; await retiring; await acknowledgment;
     assert.deepEqual(actions, ["check", "install"]);
+    const available = received.find((response) => response.type === "state" && response.state.status === "available");
+    assert.deepEqual(available?.type === "state" ? available.state : undefined, { status: "available", updateVersion: "0.3.1", details });
     assert.deepEqual(received.map((response) => response.type === "state" ? response.state.status : response.type),
       ["checking", "available", "preparing", "prepared", "retire"]);
     assert.equal(a.closed, true); assert.equal(b.closed, true);

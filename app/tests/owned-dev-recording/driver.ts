@@ -13,6 +13,7 @@ import { resolveStableProfile } from "../../src/services/settings/stable-profile
 import { recoveryWavHeader } from "../../src/workers/recording/recovery.js";
 import { validateCommandOutput } from "../../src/contracts/ui/state.js";
 import type { DesktopBridge } from "../../src/contracts/ui/bridge.js";
+import { HEIGHT as OVERLAY_HEIGHT, WIDTH as OVERLAY_WIDTH } from "../../src/contracts/platforms/wayland-surface.js";
 import { recordingHostErrorSchema } from "../../src/workers/recording/recording-host-protocol.js";
 import { kdeJournalSchema } from "../../src/platforms/linux/kde/keyboard.js";
 import { parseApplicationBuildModule } from "../../src/contracts/application/build-identity.js";
@@ -22,6 +23,17 @@ import type { ControlCommand, ControlAction } from "../../src/cli/arguments.js";
 import { diagnosticIdentity, resourceSnapshot, type DiagnosticRoot } from "./resource-diagnostic.js";
 
 declare global { interface Window { openwhisper?: DesktopBridge } }
+async function openSettingsTab(page: Page, tab: string): Promise<void> {
+  const dialog = page.locator("#settings-dialog");
+  if (!(await dialog.evaluate((element) => (element as HTMLDialogElement).open))) await page.locator("#open-settings").click();
+  await expect(dialog).toBeVisible();
+  await page.locator(`.settings-dialog-nav [data-tab="${tab}"]`).click();
+}
+async function closeSettings(page: Page): Promise<void> {
+  const dialog = page.locator("#settings-dialog");
+  if (await dialog.evaluate((element) => (element as HTMLDialogElement).open)) await page.locator("#close-settings").click();
+  await expect(dialog).not.toBeVisible();
+}
 const execute = promisify(execFile);
 const payload = resolve(fileURLToPath(new URL("./", import.meta.url)));
 const packaged = process.env.OPENWHISPER_PACKAGE_DIRECTORY === "/payload/package";
@@ -355,7 +367,7 @@ async function main(): Promise<void> {
   };
   const autostartPath = join(config, "autostart/io.github.whisperfree.desktop");
   const autostartExec = appImageAdmission ? `"${imageLauncher}" "${permanentImage}"` : supervisedLaunch ? '"/opt/openwhisper/openwhisper-launch"' : '"/opt/openwhisper/openwhisper"';
-  const enabledAutostart = `[Desktop Entry]\nType=Application\nName=OpenWhisper\nComment=Free, local dictation\nExec=${autostartExec}\nIcon=io.github.whisperfree\nStartupWMClass=io.github.whisperfree\nTerminal=false\n`;
+  const enabledAutostart = `[Desktop Entry]\nType=Application\nName=OpenWhisper\nComment=Free, local speech recognition\nExec=${autostartExec}\nIcon=io.github.whisperfree\nStartupWMClass=io.github.whisperfree\nTerminal=false\n`;
   const legacyAutostart = enabledAutostart.replace(`Exec=${autostartExec}`, supervisedLaunch && installedDebian
     ? 'Exec="/opt/openwhisper/openwhisper"' : `Exec=env APPIMAGE_EXTRACT_AND_RUN=1 "${permanentImage}"`);
   let legacyAutostartIdentity: Awaited<ReturnType<typeof lstat>> | undefined;
@@ -642,7 +654,9 @@ async function main(): Promise<void> {
   });
   startupPhase = "initial-ui";
   page = await application.firstWindow();
-  await expect(page.locator(".sidebar-brand strong")).toHaveText(stablePackage ? "OpenWhisper" : "OpenWhisper Dev");
+  await expect(page.locator(".window-wordmark")).toHaveText("openwhisper");
+  await expect(page.locator(".window-dev-badge")).toHaveCount(stablePackage ? 0 : 1);
+  assert.equal(await application.evaluate(({ app }) => app.getName()), stablePackage ? "OpenWhisper" : "OpenWhisper Dev");
   assert.equal(page.url(), "app://openwhisper/index.html");
   if (stablePackage) {
     const actual = await application.evaluate(({ app }) => ({ name: app.getName(), path: app.getAppPath(), executable: process.execPath,
@@ -681,7 +695,9 @@ async function main(): Promise<void> {
     const window = BrowserWindow.getAllWindows()[0];
     return { visible: window?.isVisible(), loading: window?.webContents.isLoading(), gpu: app.getGPUFeatureStatus() };
   })), { mode: 0o600 });
-  await expect(page.locator(".sidebar-brand strong")).toHaveText(stablePackage ? "OpenWhisper" : "OpenWhisper Dev");
+  await expect(page.locator(".window-wordmark")).toHaveText("openwhisper");
+  await expect(page.locator(".window-dev-badge")).toHaveCount(stablePackage ? 0 : 1);
+  assert.equal(await application.evaluate(({ app }) => app.getName()), stablePackage ? "OpenWhisper" : "OpenWhisper Dev");
   assert.equal(page.url(), "app://openwhisper/index.html");
   const firstSources = await state();
   await writeFile(join(evidence, "initial-source-enumeration.json"), JSON.stringify({ count: firstSources.microphones.length,
@@ -693,9 +709,10 @@ async function main(): Promise<void> {
   const initial = await state(); assert.equal(initial.profile, stablePackage ? undefined : "development"); assert.equal(initial.recording_available, true);
   if (!stablePackage) {
     assert.equal(initial.preferences.setup_completed, false);
-    await expect(page.locator('nav button[data-tab="setup"]')).toBeVisible();
-    await expect(page.locator("nav button[data-tab]")).toHaveCount(1);
-    await expect(page.locator('nav button[data-tab="general"]')).toHaveCount(0);
+    await expect(page.locator("main.setup-main #setup-title")).toBeVisible();
+    await expect(page.locator("#dictation-workspace, #settings-dialog")).toHaveCount(0);
+    await page.locator("[data-setup-next]").click();
+    for (let step = 0; step < 6; step += 1) await page.locator("[data-setup-next]").click();
     await page.locator('[data-command="complete_setup"]').click();
     await expect.poll(async () => (await state()).preferences.setup_completed).toBe(true);
     checks.push("fresh Dev profile exposes Setup only until Finish setup persists completion");
@@ -727,9 +744,9 @@ async function main(): Promise<void> {
     assert.equal(initial.updates.configured, true); assert.equal(initial.updates.status, "idle"); assert.equal(initial.updates.progress, 0);
     assert.equal(initial.preferences.auto_check_updates, false); await assertRendererIsolation(application, page);
     assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
-    await page.locator('[data-tab="about"]').click();
+    await openSettingsTab(page, "about");
     await expect(page.locator('[data-pref="auto_check_updates"]')).not.toBeChecked();
-    await expect(page.locator('[data-command="check_updates"]')).toBeEnabled();
+    await expect(page.locator("#about-update-action")).toBeEnabled();
     const observation = page.evaluate(() => new Promise<string[]>((accept, reject) => {
       const bridge = window.openwhisper; if (!bridge) { reject(new Error("OWNED_BRIDGE_UNAVAILABLE")); return; }
       const statuses: string[] = [];
@@ -744,11 +761,11 @@ async function main(): Promise<void> {
         if (updates.status === "error") finish(statuses.includes("checking"));
       });
     })); void observation.catch(() => {});
-    await page.locator('[data-command="check_updates"]').click();
+    await page.locator("#about-update-action").click();
     const statuses = await observation; assert.ok(statuses.includes("checking")); assert.equal(statuses.at(-1), "error");
     const after = await state(); assert.equal(after.updates.configured, true); assert.equal(after.updates.status, "error"); assert.equal(after.updates.progress, 0);
     assert.equal(after.preferences.auto_check_updates, false); assert.equal(after.recording_available, true); assert.equal(after.recovery_available, true);
-    await expect(page.locator('[data-command="check_updates"]')).toBeEnabled();
+    await expect(page.locator("#about-update-action")).toBeEnabled();
     assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
     assert.equal(await readFile(autostartPath, "utf8"), legacyAutostart); await assertStableOriginals(); await assertNoDevControl(); await assertInstalledPackage();
     const desktopAfter = await lstat(autostartPath);
@@ -966,7 +983,7 @@ async function main(): Promise<void> {
   assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "", "Initialization and enumeration must open no recording stream.");
   await checkpoint("actual-ui-complete-setup");
   if (stockKde) await page.screenshot({ path: join(evidence, "initial-ui.png"), timeout: 5000 });
-  await page.locator('[data-tab="general"]').click();
+  await openSettingsTab(page, "general");
   if (installedDebian || appImageAdmission) {
     await checkpoint("installed-autostart-ui-enable");
     const checkbox = page.locator('[data-pref="launch_at_login"]'); await expect(checkbox).toBeEnabled();
@@ -981,8 +998,10 @@ async function main(): Promise<void> {
       : "ordinary shared UI enables the verified private fixed-name desktop entry at the permanent Debian executable; focus/status leave its identity and bytes unchanged");
   }
   await checkpoint("actual-ui-language");
+  await openSettingsTab(page, "recording");
   await page.locator('[data-pref="language"]').selectOption("en");
   await until(async () => (await state()).preferences.language === "en");
+  await closeSettings(page);
   await checkpoint("renderer-security");
   const security = await assertRendererIsolation(application, page);
   checks.push("normal main/shared UI/preload; private Tiny inventory; enumeration with zero streams; sandboxed renderer");
@@ -1033,6 +1052,7 @@ async function main(): Promise<void> {
     await writeFile(join(evidence, "owned-app-focus.json"), JSON.stringify(await application.evaluate(({ BrowserWindow }) =>
       ({ focused: BrowserWindow.getAllWindows()[0]?.isFocused() }))), { mode: 0o600 });
     await checkpoint("actual-kde-key-capture");
+    await openSettingsTab(page, "recording");
     await page.locator('[data-portal="enable_shortcut"]').click();
     await until(async () => !!(await state()).recording_shortcut);
     await stockPress();
@@ -1052,6 +1072,7 @@ async function main(): Promise<void> {
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await until(async () => !(await state()).recording_shortcut);
     assert.equal((await state()).shortcut, "F8");
+    await closeSettings(page);
     if (kdeOverlay || kdeWaylandOverlay) {
       const mainUrl = "app://openwhisper/index.html", overlayUrl = `${mainUrl}?overlay=1`;
       await checkpoint("actual-overlay-default-hidden");
@@ -1065,8 +1086,8 @@ async function main(): Promise<void> {
       assert.ok(overlayPage); const overlay = overlayPage;
       const outputBounds = kdeWaylandOverlay ? await application.evaluate(({ screen }) => screen.getPrimaryDisplay().bounds) : undefined;
       if (outputBounds) assert.deepEqual(outputBounds, { x: 0, y: 0, width: 1100, height: 750 });
-      const surfaceBounds = outputBounds ? { x: outputBounds.x + (outputBounds.width - 360) / 2,
-        y: outputBounds.y + outputBounds.height - 24 - 64, width: 360, height: 64 } : undefined;
+      const surfaceBounds = outputBounds ? { x: outputBounds.x + (outputBounds.width - OVERLAY_WIDTH) / 2,
+        y: outputBounds.y + outputBounds.height - 24 - OVERLAY_HEIGHT, width: OVERLAY_WIDTH, height: OVERLAY_HEIGHT } : undefined;
       let surfacePid: number | undefined;
       if (kdeWaylandOverlay) {
         await until(async () => {
@@ -1116,14 +1137,14 @@ async function main(): Promise<void> {
           await writeFile(join(evidence, name), Buffer.from(rendered.desktop), { mode: 0o600 });
           await writeFile(join(evidence, name.replace(/\.png$/u, "-surface.png")), Buffer.from(rendered.surface), { mode: 0o600 });
           if (matchTrustedFrame) {
-            assert.equal(rendered.reference.length, 360 * 64 * 4); assert.equal(rendered.bitmap.length, rendered.reference.length);
+            assert.equal(rendered.reference.length, OVERLAY_WIDTH * OVERLAY_HEIGHT * 4); assert.equal(rendered.bitmap.length, rendered.reference.length);
             let samples = 0, matched = 0;
-            for (let y = 1; y < 63; y++) for (let x = 1; x < 359; x++) {
-              const offset = (y * 360 + x) * 4;
+            for (let y = 1; y < OVERLAY_HEIGHT - 1; y++) for (let x = 1; x < OVERLAY_WIDTH - 1; x++) {
+              const offset = (y * OVERLAY_WIDTH + x) * 4;
               if (rendered.reference[offset + 3] !== 255) continue;
               let solid = true;
               for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-                const neighbor = ((y + dy) * 360 + x + dx) * 4;
+                const neighbor = ((y + dy) * OVERLAY_WIDTH + x + dx) * 4;
                 for (let channel = 0; channel < 4; channel++) if (rendered.reference[neighbor + channel] !== rendered.reference[offset + channel]) solid = false;
               }
               if (!solid) continue; samples++;
@@ -1210,9 +1231,11 @@ async function main(): Promise<void> {
       checks.push("trusted actual overlay is hidden by default; sandbox/context isolation and Linux kernel renderer isolation; no renderer Node API");
 
       await checkpoint("actual-overlay-idle-preference");
+      await openSettingsTab(page, "recording");
       await page.locator('[data-pref="show_idle_overlay"]').check();
       await until(async () => (await state()).preferences.show_idle_overlay === true &&
         (kdeWaylandOverlay || (await windowState()).overlayVisible));
+      await closeSettings(page);
       await assertFocusRetained();
       await expect(overlay.locator("#record-control")).toHaveAttribute("data-status", "idle");
       assert.equal(await overlay.evaluate(async () => {
@@ -1347,8 +1370,10 @@ async function main(): Promise<void> {
       }
 
       await checkpoint("actual-overlay-idle-hidden-again");
+      await openSettingsTab(page, "recording");
       await page.locator('[data-pref="show_idle_overlay"]').uncheck();
       await until(async () => (await state()).preferences.show_idle_overlay === false && !(await windowState()).overlayVisible);
+      await closeSettings(page);
       if (!kdeWaylandOverlay) await assertFocusRetained();
       else {
         // This explicit main-settings action follows all four keyboard gates;
@@ -1396,10 +1421,12 @@ async function main(): Promise<void> {
       await checkpoint("actual-keyboard-session-allow");
       await until(async () => (await state()).paste_portal);
       assert.equal((await state()).paste_ready, false);
+      await openSettingsTab(page, "recording");
       await page.locator('[data-portal="enable_paste"]').click();
       await until(async () => (await state()).paste_ready && !(await state()).paste_configuring, 20_000);
       await page.evaluate(() => window.openwhisper?.invoke("save_preferences", { changes: { output: "paste" } }));
       await until(async () => (await state()).preferences.output === "paste");
+      await closeSettings(page);
       checks.push("explicit shared-UI Allow grants the actual stock KDE keyboard-only session; legacy immediate grant, dialog denial not established");
 
       const ownedRuntime = env.XDG_RUNTIME_DIR!;
@@ -1559,7 +1586,7 @@ async function main(): Promise<void> {
       const bindAfterRestart = async () => {
         assert.ok(application && page);
         await checkpoint(`lifecycle-${appOwners.length}-focus-window`);
-        await page.locator('[data-tab="general"]').click();
+        await openSettingsTab(page, "recording");
         await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.focus());
         await until(async () => application!.evaluate(({ BrowserWindow }) => !!BrowserWindow.getAllWindows()[0]?.isFocused()));
         await checkpoint(`lifecycle-${appOwners.length}-capture-key`);
@@ -1568,6 +1595,7 @@ async function main(): Promise<void> {
         await stockPress();
         await checkpoint(`lifecycle-${appOwners.length}-await-confirmation`);
         await until(async () => (await state()).shortcut === "F8" && !(await state()).shortcut_configuring);
+        await closeSettings(page);
       };
       const firstLease = await journal(); assert.equal(firstLease.length, 1);
       assert.equal(await available(), false); assert.equal(await hasOwner(firstLease[0]!.connection), true);
@@ -1646,6 +1674,7 @@ async function main(): Promise<void> {
     assert.equal(serverFocus, nativeWindow);
     await writeFile(join(evidence, "native-x11-focus.json"), JSON.stringify({ ownedWindow: nativeWindow, serverFocus,
       electronFocused: await application.evaluate(({ BrowserWindow }) => !!BrowserWindow.getAllWindows()[0]?.isFocused()) }), { mode: 0o600 });
+    await openSettingsTab(page, "recording");
     await page.locator('[data-portal="enable_shortcut"]').click();
     await checkpoint("actual-x11-native-capture-started");
     await until(async () => !!(await state()).recording_shortcut);
@@ -1674,6 +1703,7 @@ async function main(): Promise<void> {
     await until(async () => !(await state()).recording_shortcut && !(await state()).shortcut_configuring);
     assert.equal((await state()).shortcut, "F8"); assert.deepEqual((await state()).preferences.x11_trigger, trigger);
     checks.push("native X11 setup captures actual F8 keycode/keysym/group into legacy x11_trigger; real Escape preserves its original binding without recording");
+    await closeSettings(page);
     await checkpoint("actual-x11-repeat-hold-stale-release");
     await page.evaluate(() => window.openwhisper?.invoke("save_preferences", { changes: { hold_to_record: true } }));
     await nativeKey(true); await until(async () => (await state()).status === "recording");
@@ -1689,6 +1719,7 @@ async function main(): Promise<void> {
     checks.push("actual native X11 held/repeated F8 owns one capture; GUI Cancel then later GUI Start; stale key release cannot stop the later owner");
     await captureResources("after-x11-second-cancel");
   } else {
+  await openSettingsTab(page, "recording");
   await portal("PortalMode", "pending"); await page.locator('[data-portal="enable_shortcut"]').click();
   await until(async () => !!(await state()).shortcut_configuring);
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -1707,6 +1738,7 @@ async function main(): Promise<void> {
   await page.evaluate(() => window.openwhisper?.invoke("save_preferences", { changes: { hold_to_record: false } }));
   checks.push("actual native D-Bus portal protocol: cancelled pending consent, explicit retry, granted binding, session loss and hold binding revoke close only the original private capture");
   }
+  await closeSettings(page);
   await checkpoint("actual-ui-cancel");
   await page.locator("#record").click(); await until(async () => (await state()).status === "recording");
   await page.locator("#cancel").click(); await until(async () => (await state()).status === "idle");
@@ -1734,7 +1766,9 @@ async function main(): Promise<void> {
   if (stockKde) await stockPress();
   else if (nativeX11) await nativePress();
   else {
+    await openSettingsTab(page, "recording");
     await page.locator('[data-portal="enable_shortcut"]').click(); await until(async () => (await state()).shortcut === "Ctrl+Alt+Space");
+    await closeSettings(page);
     await portal("Press"); await portal("Release");
   }
   await until(async () => (await state()).status === "recording");
@@ -1769,8 +1803,7 @@ async function main(): Promise<void> {
   const maps = await readFile(`/proc/${security.pid}/maps`, "utf8");
   assert.equal(maps.includes("openwhisper_capture.node"), false); assert.equal(maps.includes("openwhisper_speech.node"), false);
   checks.push(`${stockKde ? "actual stock KGlobalAccel F8" : nativeX11 ? "actual native X11 F8" : "actual owned portal"} Start${packaged ? "; no-display package CLI Stop" : "/Stop"}; real CPU Tiny recognition; private clipboard exact readback; history confirmation; recovery removal; native capture/speech absent from main`);
-  if (stockKde || nativeX11) await page.evaluate(() => window.openwhisper?.invoke("clear_shortcut", {}));
-  else await page.locator('[data-portal="clear_shortcut"]').click();
+  await page.evaluate(() => window.openwhisper?.invoke("clear_shortcut", {}));
   await until(async () => (await state()).shortcut === null && !(await state()).shortcut_configuring);
   if (stockKde) {
     assert.deepEqual(JSON.parse(await readFile(join(profile.paths.settings, "kde-keyboard-lease.json"), "utf8")), []);
@@ -1784,7 +1817,7 @@ async function main(): Promise<void> {
   }
   if (!stockKde && !nativeX11) assert.match(await portal("PortalStatus"), /uint32 0/u);
   await checkpoint("actual-source-loss-retry");
-  await expect(page.locator("#record-label")).toHaveText("Start dictation");
+  await expect(page.locator("#record-label")).toHaveText("Start recording");
   await page.locator("#record").click(); await until(async () => (await state()).status === "recording");
   await until(async () => (await pactl(["list", "short", "source-outputs"])).trim().split("\n").filter(Boolean).length === 1);
   await checkpoint("retry-case-second-capture-running");
@@ -1813,7 +1846,7 @@ async function main(): Promise<void> {
   const secondModule = (await pactl(["load-module", "module-null-sink", `sink_name=${sink}`, "rate=48000", "channels=1"])).trim(); assert.match(secondModule, /^\d+$/u);
   await pactl(["set-default-sink", sink]); await pactl(["set-default-source", source]);
   await until(async () => JSON.stringify(await sourceNames()) === JSON.stringify([source]));
-  await expect(page.locator("#record-label")).toHaveText("Start dictation");
+  await expect(page.locator("#record-label")).toHaveText("Start recording");
   await page.locator("#record").click(); await until(async () => (await state()).status === "recording");
   await until(async () => (await pactl(["list", "short", "source-outputs"])).trim().split("\n").filter(Boolean).length === 1);
   const fragment = join(root, "public-fragment.f32"); await writeFile(fragment, audio.subarray(0, 48000 * 4), { mode: 0o600 });
@@ -1867,7 +1900,7 @@ async function main(): Promise<void> {
     assert.equal(restartedMaps.includes("openwhisper_capture.node"), false); assert.equal(restartedMaps.includes("openwhisper_speech.node"), false);
     if (installedDebian || appImageAdmission) {
       assert.equal(restarted.launch_at_login_available, true); assert.equal(restarted.preferences.launch_at_login, true); await assertAutostart(true);
-      await page.locator('[data-tab="general"]').click(); await checkpoint("installed-autostart-ui-disable");
+      await openSettingsTab(page, "general"); await checkpoint("installed-autostart-ui-disable");
       const checkbox = page.locator('[data-pref="launch_at_login"]'); await expect(checkbox).toBeEnabled(); await expect(checkbox).toBeChecked();
       await checkbox.uncheck(); await until(async () => !(await state()).preferences.launch_at_login && !(await persistedLogin()));
       await assertAutostart(false); const disabledIdentity = await lstat(autostartPath);
@@ -1885,7 +1918,7 @@ async function main(): Promise<void> {
         await assertAutostart(false); const unchangedDisabled = await lstat(autostartPath);
         assert.equal(unchangedDisabled.dev, disabledIdentity.dev); assert.equal(unchangedDisabled.ino, disabledIdentity.ino);
         assert.equal(unchangedDisabled.mtimeMs, disabledIdentity.mtimeMs); assert.equal(unchangedDisabled.ctimeMs, disabledIdentity.ctimeMs);
-        await page.locator('[data-tab="general"]').click(); const reenable = page.locator('[data-pref="launch_at_login"]');
+        await openSettingsTab(page, "general"); const reenable = page.locator('[data-pref="launch_at_login"]');
         await expect(reenable).not.toBeChecked(); await reenable.check();
         await until(async () => (await state()).preferences.launch_at_login === true && await persistedLogin());
         await assertAutostart(true); enabledAutostartIdentity = await lstat(autostartPath);

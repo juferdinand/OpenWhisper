@@ -22,7 +22,7 @@ async function fixture(operation: (input: { root: string; configHome: string; co
   finally { await filesystem.rm(root, { recursive: true, force: true }); }
 }
 function desktop(executable: string, additional = "", image = false): string {
-  return `[Desktop Entry]\nType=Application\nName=OpenWhisper\nComment=Free, local dictation\nExec=${image ? "env APPIMAGE_EXTRACT_AND_RUN=1 " : ""}${linuxAutostartArgument(executable)}\nIcon=io.github.whisperfree\nStartupWMClass=io.github.whisperfree\nTerminal=false\n${additional}`;
+  return `[Desktop Entry]\nType=Application\nName=OpenWhisper\nComment=Free, local speech recognition\nExec=${image ? "env APPIMAGE_EXTRACT_AND_RUN=1 " : ""}${linuxAutostartArgument(executable)}\nIcon=io.github.whisperfree\nStartupWMClass=io.github.whisperfree\nTerminal=false\n${additional}`;
 }
 async function write(path: string, text: string): Promise<void> {
   await filesystem.mkdir(dirname(path), { recursive: true, mode: 0o700 }); await filesystem.writeFile(path, text, { mode: 0o600 });
@@ -67,6 +67,17 @@ test("Opening and status are read-only; explicit enable, reopen and disable pres
   assert.equal(await filesystem.readFile(sentinel, "utf8"), "keep saved opt-ins/data");
 }));
 
+test("Existing canonical autostart comments remain recognized and rewrite with current copy", { skip: !supported }, async () => fixture(async (input) => {
+  const oldCanonical = desktop(input.executable).replace("Comment=Free, local speech recognition", "Comment=Free, local dictation");
+  await write(input.entry, oldCanonical);
+  assert.deepEqual(await input.service.status(), { requested: true });
+  await input.service.set(false);
+  assert.deepEqual(await input.service.status(), { requested: false });
+  await input.service.set(true);
+  assert.equal(await filesystem.readFile(input.entry, "utf8"), desktop(input.executable));
+  assert.deepEqual(await input.service.status(), { requested: true });
+}));
+
 test("Development autostart uses its own desktop identity and pins the explicit private profile", { skip: !supported }, async () => fixture(async (input) => {
   const profile = join(input.root, "private-dev-profile"), stableEntry = input.entry;
   const devEntry = join(input.configHome, "autostart/io.github.whisperfree.dev.desktop");
@@ -78,7 +89,7 @@ test("Development autostart uses its own desktop identity and pins the explicit 
   await write(stableEntry, stableBefore);
   await dev.set(true);
   assert.equal(await filesystem.readFile(devEntry, "utf8"), ["[Desktop Entry]", "Type=Application", "Name=OpenWhisper Dev",
-    "Comment=Free, local dictation", `Exec=${linuxAutostartArgument(input.executable)} --dev-profile ${linuxAutostartArgument(profile)}`,
+    "Comment=Free, local speech recognition", `Exec=${linuxAutostartArgument(input.executable)} --dev-profile ${linuxAutostartArgument(profile)}`,
     "Icon=io.github.whisperfree.dev", "StartupWMClass=io.github.whisperfree.dev", "Terminal=false", ""].join("\n"));
   assert.deepEqual(await dev.status(), { requested: true });
   assert.equal(await filesystem.readFile(stableEntry, "utf8"), stableBefore);

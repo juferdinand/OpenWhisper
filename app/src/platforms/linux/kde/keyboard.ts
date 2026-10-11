@@ -173,7 +173,7 @@ export class KdeKeyboard {
       pending = { component, owner, componentPath: "", key, subscriptions: [],
         recording: new ShortcutRecording(this.capture, () => this.hold, () => this.publish({ result: "FAILED" })) };
       await this.journal.update((entries) => [...entries, { component, connection: this.bus.uniqueName }]); journaled = true;
-      const description = strings([component, action, this.appId === "io.github.whisperfree.dev" ? "OpenWhisper Dev" : "OpenWhisper", "Start or stop dictation"]);
+      const description = strings([component, action, this.appId === "io.github.whisperfree.dev" ? "OpenWhisper Dev" : "OpenWhisper", "Start or stop recording"]);
       await this.call(owner, "doRegister", "as", "", [description], signal);
       const result = await this.call(owner, "getComponent", "s", "o", [text(component)], signal);
       if (result[0]?.type !== "o") throw new BusFailure("INVALID_FRAME"); pending.componentPath = result[0].value;

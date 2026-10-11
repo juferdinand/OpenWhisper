@@ -155,15 +155,56 @@ try {
   const original = application.process();
   const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((accept) => original.once("close", (code, signal) => accept({ code, signal })));
   page = await application.firstWindow();
-  await expect(page.locator(".sidebar-brand strong")).toHaveText(capturedBuild.productName, { timeout: 15_000 });
+  await expect(page.locator(".window-wordmark")).toHaveText("openwhisper", { timeout: 15_000 });
+  await expect(page.locator(".window-dev-badge")).toHaveCount(stable ? 0 : 1);
+  assert.equal(await application.evaluate(({ app }) => app.getName()), capturedBuild.productName);
   assert.equal(page.url(), "app://openwhisper/index.html");
   const state = async () => appStateSchema.parse(await page!.evaluate(() => window.openwhisper!.invoke("get_state", {})));
+  const openSettingsTab = async (target: Page, tab: string) => {
+    const dialog = target.locator("#settings-dialog");
+    if (!(await dialog.evaluate((element) => (element as HTMLDialogElement).open))) await target.locator("#open-settings").click();
+    await expect(dialog).toBeVisible();
+    await target.locator(`.settings-dialog-nav [data-tab="${tab}"]`).click();
+  };
   const finishSetupIfNeeded = async (setupPage: Page) => {
-    const current = await state();
+    let current = await state();
     if (current.preferences.setup_completed) return;
-    await expect(setupPage.locator('nav button[data-tab="setup"]')).toBeVisible();
-    await expect(setupPage.locator("nav button[data-tab]")).toHaveCount(1);
-    await expect(setupPage.locator('nav button[data-tab="general"]')).toHaveCount(0);
+    const tinyFixture = join(fixtures, "ggml-tiny.bin");
+    if (!current.installed.includes("tiny")) {
+      assert.equal(await realpath(fixtures), fixtures);
+      const fixtureInfo = await lstat(tinyFixture);
+      assert.ok(fixtureInfo.isFile() && !fixtureInfo.isSymbolicLink());
+      const fixtureBytes = await readFile(tinyFixture);
+      assert.equal(fixtureBytes.length, 77_691_713);
+      assert.equal(digest(fixtureBytes), "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21");
+      const app = application;
+      assert.ok(app);
+      await app.evaluate(({ dialog }, path) => {
+        if (Reflect.has(globalThis, Symbol.for("OpenWhisper.ownedMacSmoke.showOpenDialog"))) throw new Error("OWNED_DIALOG_STUB_ALREADY_ACTIVE");
+        Reflect.set(globalThis, Symbol.for("OpenWhisper.ownedMacSmoke.showOpenDialog"), Reflect.get(dialog, "showOpenDialog"));
+        Reflect.set(dialog, "showOpenDialog", async () => ({ canceled: false, filePaths: [path] }));
+      }, tinyFixture);
+      try {
+        await setupPage.evaluate(() => window.openwhisper!.invoke("import_model", {}));
+      } finally {
+        await app.evaluate(({ dialog }) => {
+          const key = Symbol.for("OpenWhisper.ownedMacSmoke.showOpenDialog"), original = Reflect.get(globalThis, key);
+          if (typeof original !== "function") throw new Error("OWNED_DIALOG_STUB_ORIGINAL_MISSING");
+          Reflect.set(dialog, "showOpenDialog", original);
+          Reflect.deleteProperty(globalThis, key);
+        });
+      }
+      await expect.poll(async () => (await state()).installed.includes("tiny")).toBe(true);
+    }
+    if (current.preferences.model !== "tiny") await setupPage.evaluate(() => window.openwhisper!.invoke("save_preferences", { changes: { model: "tiny" } }));
+    await expect.poll(async () => {
+      current = await state();
+      return current.installed.includes("tiny") && current.preferences.model === "tiny";
+    }).toBe(true);
+    await expect(setupPage.locator("main.setup-main #setup-title")).toBeVisible();
+    await expect(setupPage.locator("#dictation-workspace, #settings-dialog")).toHaveCount(0);
+    await setupPage.locator("[data-setup-next]").click();
+    for (let step = 0; step < 6; step += 1) await setupPage.locator("[data-setup-next]").click();
     await setupPage.locator('[data-command="complete_setup"]').click();
     await expect.poll(async () => (await state()).preferences.setup_completed).toBe(true);
   };
@@ -401,9 +442,8 @@ try {
   assert.equal(initial.status, "idle"); assert.deepEqual(initial.installed, stable ? ["tiny"] : []); assert.equal(initial.microphones.length, 0);
   assert.equal(initial.preferences.macos_shortcut ?? null, null);
   if (!initial.preferences.setup_completed) {
-    await expect(page.locator('nav button[data-tab="setup"]')).toBeVisible();
-    await expect(page.locator("nav button[data-tab]")).toHaveCount(1);
-    await expect(page.locator('nav button[data-tab="general"]')).toHaveCount(0);
+    await expect(page.locator("main.setup-main #setup-title")).toBeVisible();
+    await expect(page.locator("#dictation-workspace, #settings-dialog")).toHaveCount(0);
   }
   checks.push("Normal production main factory initializes from signed packaged retirement/native descriptors");
   if (stable) {
@@ -463,11 +503,13 @@ try {
       readiness: "ordinary packaged main reached UI after its pre-ready profile guard" };
     stage = "stable-migrated-ui";
     await finishSetupIfNeeded(page);
-    await page.locator('[data-tab="snippets"]').click();
+    await openSettingsTab(page, "text");
     await expect(page.locator('#snippet-form [name="trigger"]')).toHaveValue(ownedSnippet.trigger);
     await expect(page.locator('#snippet-form [name="expansion"]')).toHaveValue(ownedSnippet.expansion);
-    await page.locator('[data-tab="models"]').click();
+    await page.locator("#close-settings").click();
+    await page.locator("#open-model-drawer").click();
     await expect(page.locator('[data-delete="tiny"]')).toBeVisible();
+    await page.locator("#close-model-drawer").click();
     checks.push("Normal stable migration agrees actual empty native domain, real login/hardware/language defaults, exact raw snippets backup and legacy Tiny inventory");
   }
   if (!stable) await finishSetupIfNeeded(page);
@@ -664,12 +706,14 @@ try {
   const accelerator = "Command+Shift+F8";
   assert.equal(await application.evaluate(({ globalShortcut }, key) => globalShortcut.isRegistered(key), accelerator), false);
   stage = "shortcut-focus";
+  await openSettingsTab(page, "general");
   await page.locator('[data-ui-language="en"]').click();
-  await page.locator('[data-tab="general"]').click();
+  await openSettingsTab(page, "general");
   await application.evaluate(({ app, BrowserWindow }) => { app.focus({ steal: true });
     const window = BrowserWindow.getAllWindows().find((item) => item.webContents.getURL() === "app://openwhisper/index.html"); window?.show(); window?.focus(); });
   await expect.poll(() => application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some((item) =>
     item.webContents.getURL() === "app://openwhisper/index.html" && item.isFocused())), { timeout: 10_000 }).toBe(true);
+  await openSettingsTab(page, "recording");
   stage = "shortcut-capture-start";
   await page.locator('[data-portal="enable_shortcut"]').click();
   await expect.poll(async () => (await state()).macos?.recording_shortcut, { timeout: 10_000 }).toBe(true);
@@ -687,16 +731,33 @@ try {
   assert.equal((await state()).status, "idle");
   checks.push("Owned-window CDP Command+Shift+F8 input commits through normal setup; actual globalShortcut registration");
   stage = "shortcut-remove";
-  await page.locator('[data-portal="clear_shortcut"]').click();
+  await page.evaluate(() => window.openwhisper!.invoke("clear_shortcut", {}));
   await expect.poll(async () => (await state()).preferences.macos_shortcut, { timeout: 10_000 }).toBe(null);
   assert.equal(await application.evaluate(({ globalShortcut }, key) => globalShortcut.isRegistered(key), accelerator), false);
-  checks.push("Normal Remove trigger unregisters the actual shortcut");
+  checks.push("Typed clear-shortcut command unregisters the actual shortcut");
   if (stable) {
     stage = "stable-preference-edit";
+    await openSettingsTab(page, "text");
     await page.locator("#vocabulary").fill(vocabulary); await page.locator("#save-vocabulary").click();
     await expect.poll(async () => (await state()).preferences.vocabulary, { timeout: 10_000 }).toBe(vocabulary);
     await preserved();
   }
+  stage = "close-to-background";
+  const settingsDialog = page.locator("#settings-dialog");
+  if (await settingsDialog.evaluate((element) => (element as HTMLDialogElement).open)) {
+    await page.locator("#close-settings").click();
+    await expect(settingsDialog).toBeHidden();
+  }
+  await page.locator('[data-window-action="close"]').click();
+  const mainWindow = () => application!.evaluate(({ BrowserWindow }) => {
+    const item = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL() === "app://openwhisper/index.html");
+    return item ? { visible: item.isVisible(), destroyed: item.isDestroyed() } : undefined;
+  });
+  await expect.poll(mainWindow, { timeout: 10_000 }).toEqual({ visible: false, destroyed: false });
+  assert.equal(application.process().exitCode, null);
+  await application.evaluate(({ app }) => app.emit("activate"));
+  await expect.poll(mainWindow, { timeout: 10_000 }).toEqual({ visible: true, destroyed: false });
+  checks.push("Production window close hides the main window while the packaged app stays alive; native app activation reopens it");
   stage = "original-quit";
   await application.close();
   const exit = await closed; application = undefined;
@@ -709,7 +770,8 @@ try {
     const restartedClosed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((accept) =>
       restarted.once("close", (code, signal) => accept({ code, signal })));
     page = await application.firstWindow();
-    await expect(page.locator(".sidebar-brand strong")).toHaveText(capturedBuild.productName, { timeout: 15_000 });
+    await expect(page.locator(".window-wordmark")).toHaveText("openwhisper", { timeout: 15_000 });
+    await expect(page.locator(".window-dev-badge")).toHaveCount(stable ? 0 : 1);
     assert.equal(page.url(), "app://openwhisper/index.html");
     const retained = await state();
     assert.equal(retained.updates.configured, packageMetadata.updateConfigured);
@@ -718,7 +780,7 @@ try {
     assert.equal(retained.profile, undefined); assert.equal(retained.status, "idle"); assert.deepEqual(retained.installed, ["tiny"]);
     assert.equal(retained.preferences.vocabulary, vocabulary); assert.deepEqual(retained.preferences.snippets, [ownedSnippet]);
     assert.equal(retained.preferences.macos_shortcut ?? null, null);
-    await page.locator('[data-tab="general"]').click(); await expect(page.locator("#vocabulary")).toHaveValue(vocabulary);
+    await openSettingsTab(page, "text"); await expect(page.locator("#vocabulary")).toHaveValue(vocabulary);
     await preserved(); stage = "restarted-original-quit";
     await application.close(); restartExit = await restartedClosed; application = undefined;
     assert.equal(restartExit.code, 0); assert.equal(restartExit.signal, null); await preserved();

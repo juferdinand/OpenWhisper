@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { updateDetailsSchema, type UpdateDetails } from "../../../contracts/ui/state.js";
 
 export const LINUX_UPDATE_REPOSITORY = "https://github.com/juferdinand/OpenWhisper";
 export const LINUX_UPDATE_FEED_URL = `${LINUX_UPDATE_REPOSITORY}/releases/latest/download/latest.json`;
@@ -43,12 +44,13 @@ export function macosUpdateEndpoint(repository: unknown): string {
   return `https://api.github.com/repos/${macosRepository(repository)}/releases/latest`;
 }
 const utf8 = (bytes: number) => z.string().max(bytes).refine((value) => Buffer.byteLength(value, "utf8") <= bytes);
-const assetSchema = z.object({ name: utf8(256).min(1), browser_download_url: utf8(2048).min(1) });
+const assetSchema = z.object({ name: utf8(256).min(1), browser_download_url: utf8(2048).min(1),
+  size: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional() });
 const macReleaseSchema = z.object({ tag_name: utf8(63).min(1), html_url: utf8(2048).min(1), draft: z.literal(false),
   prerelease: z.literal(false), body: utf8(UPDATE_POLICY_LIMITS.notesBytes).nullable().optional(),
   assets: z.array(assetSchema).max(UPDATE_POLICY_LIMITS.assets) });
 const linuxTargetSchema = z.object({ url: utf8(2048).min(1), signature: utf8(UPDATE_POLICY_LIMITS.signatureBytes)
-  .refine((value) => value.trim().length > 0) });
+  .refine((value) => value.trim().length > 0), size: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional() });
 const linuxReleaseSchema = z.object({ version: utf8(62).min(1), notes: utf8(UPDATE_POLICY_LIMITS.notesBytes).optional() });
 function record(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new UpdatePolicyError("INVALID_METADATA");
@@ -66,8 +68,38 @@ function metadata<T>(operation: () => T): T {
   }
 }
 interface Candidate {
-  readonly authentication: "unauthenticated";
+  readonly authentication: "unauthenticated"; readonly details: UpdateDetails;
   readonly version: string; readonly notes: string; readonly assetName: string; readonly assetURL: string; readonly pageURL: string;
+}
+
+function boundedHighlight(value: string): string {
+  let result = "";
+  for (const character of value) {
+    if (Buffer.byteLength(result + character, "utf8") > 512) break;
+    result += character;
+  }
+  return result.trim();
+}
+function plainMarkdown(value: string): string {
+  return value.replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1").replace(/`([^`]+)`/gu, "$1")
+    .replace(/\*\*([^*]+)\*\*/gu, "$1").replace(/\*([^*]+)\*/gu, "$1").replace(/_([^_]+)_/gu, "$1").trim();
+}
+/** Extract only the curated What's new bullets; raw Markdown remains available to release tooling only. */
+export function extractUpdateHighlights(notes: string): readonly string[] {
+  if (Buffer.byteLength(notes, "utf8") > UPDATE_POLICY_LIMITS.notesBytes) throw new UpdatePolicyError("INVALID_METADATA");
+  const lines = notes.replace(/\r\n?/gu, "\n").split("\n"), heading = lines.findIndex((line) => /^#{1,6}\s+what['’]s\s+new\b/iu.test(line));
+  if (heading < 0) return Object.freeze([]);
+  const bullets: string[] = [];
+  for (const line of lines.slice(heading + 1)) {
+    if (/^#{1,6}\s+/u.test(line)) break;
+    const bullet = /^\s*[-*+]\s+(.+?)\s*$/u.exec(line);
+    if (bullet) { if (bullets.length === 5) break; bullets.push(bullet[1]!); }
+    else if (bullets.length && /^\s{2,}\S/u.test(line)) bullets[bullets.length - 1] += ` ${line.trim()}`;
+  }
+  return Object.freeze(bullets.map((item) => boundedHighlight(plainMarkdown(item))).filter(Boolean));
+}
+function details(notes: string, size: number | undefined): UpdateDetails {
+  return updateDetailsSchema.parse({ highlights: extractUpdateHighlights(notes), ...(size === undefined ? {} : { size }) });
 }
 export interface MacosUpdateCandidate extends Candidate { readonly package: "macos"; readonly repository: string }
 export interface LinuxUpdateCandidate extends Candidate {
@@ -87,7 +119,8 @@ export function projectMacosUpdateRelease(options: {
     if (!Array.isArray(assets) || assets.length > UPDATE_POLICY_LIMITS.assets) throw new UpdatePolicyError("INVALID_METADATA");
     const release = macReleaseSchema.parse({ tag_name: own(source, "tag_name"), html_url: own(source, "html_url"),
       draft: own(source, "draft"), prerelease: own(source, "prerelease"), body: optional(source, "body"),
-      assets: assets.map((item: unknown) => { const asset = record(item); return { name: own(asset, "name"), browser_download_url: own(asset, "browser_download_url") }; }) });
+      assets: assets.map((item: unknown) => { const asset = record(item), size = optional(asset, "size"); return { name: own(asset, "name"), browser_download_url: own(asset, "browser_download_url"),
+        ...(size === undefined ? {} : { size }) }; }) });
     if (!release.tag_name.startsWith("v")) throw new UpdatePolicyError("INVALID_VERSION");
     const version = release.tag_name.slice(1); requireNewer(version, options.currentVersion);
     const matches = release.assets.filter((asset) => asset.name === MACOS_UPDATE_ASSET);
@@ -95,6 +128,7 @@ export function projectMacosUpdateRelease(options: {
     const pageURL = `https://github.com/${repository}/releases/tag/v${version}`;
     if (matches.length !== 1 || matches[0]?.browser_download_url !== assetURL || release.html_url !== pageURL) throw new UpdatePolicyError("INVALID_SOURCE");
     return Object.freeze({ authentication: "unauthenticated", package: "macos", repository, version, notes: release.body ?? "",
+      details: details(release.body ?? "", matches[0]!.size),
       assetName: MACOS_UPDATE_ASSET, assetURL, pageURL });
   });
 }
@@ -112,10 +146,12 @@ export function projectLinuxUpdateFeed(options: {
     const target = packageKind === "deb" ? "linux-x86_64-deb" : "linux-x86_64-appimage";
     const assetName = packageKind === "deb" ? "OpenWhisper-Linux-amd64.deb" : "OpenWhisper-Linux-x86_64.AppImage";
     const announced = record(own(record(own(source, "platforms")), target));
-    const artifact = linuxTargetSchema.parse({ url: own(announced, "url"), signature: own(announced, "signature") });
+    const size = optional(announced, "size");
+    const artifact = linuxTargetSchema.parse({ url: own(announced, "url"), signature: own(announced, "signature"), ...(size === undefined ? {} : { size }) });
     const assetURL = `${LINUX_UPDATE_REPOSITORY}/releases/download/v${release.version}/${assetName}`;
     if (artifact.url !== assetURL) throw new UpdatePolicyError("INVALID_SOURCE");
     return Object.freeze({ authentication: "unauthenticated", package: packageKind, version: release.version, notes: release.notes ?? "",
+      details: details(release.notes ?? "", artifact.size),
       assetName, assetURL, pageURL: `${LINUX_UPDATE_REPOSITORY}/releases/tag/v${release.version}`, feedURL: LINUX_UPDATE_FEED_URL,
       target, signature: artifact.signature });
   });

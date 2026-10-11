@@ -13,6 +13,10 @@ const catalogModelSchema = modelSchema.extend({ file: filename, repository }).re
 export type CatalogModel = z.infer<typeof catalogModelSchema>;
 const hardwareTierSchema = z.enum(["strong", "weak", "cpuOnly"]);
 export type HardwareTier = z.infer<typeof hardwareTierSchema>;
+export function recommendationTier(input: Readonly<{ gpuAvailable: boolean; gpuEnabled: boolean; gpuFallback: boolean; memoryBytes: number }>): HardwareTier {
+  if (!input.gpuAvailable || !input.gpuEnabled || input.gpuFallback) return "cpuOnly";
+  return input.memoryBytes >= 8 * 1024 ** 3 ? "strong" : "weak";
+}
 const pickSchema = z.strictObject({ parakeet: z.string().min(1).max(1024), whisper: z.string().min(1).max(1024) }).readonly();
 export const catalogSchema = z.strictObject({
   $comment: z.string().max(8192).optional(),

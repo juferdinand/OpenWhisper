@@ -56,19 +56,21 @@ npm run dev -- --dev-profile /absolute/private/path/openwhisper-dev
 Existing Dev directories must be owned by the current user with mode `0700`; stored
 preferences use `0600`. Stable storage, overlapping bases, symlink paths and unsafe
 existing directories are refused. No stable preferences, models or recovery files are
-imported automatically. Closing the main window quits this Dev host so it stays
-reachable without assuming a working tray host.
+imported automatically.
 
 ## Desktop controls
 
-The tray uses the existing app icon and shared English/German labels. Its Settings,
-Start/Stop, Cancel and Quit actions use the same recording handlers as the shared UI.
-Unavailable recording actions stay disabled; closing the main window still quits.
-Native tray presentation on each desktop remains an acceptance item.
+Closing the main window hides it while the app stays running in the Linux tray or macOS
+menu bar. Tray click or Settings, and normal app activation, reopen the main window.
+Explicit Quit runs normal cleanup and exits. Tray Settings, Start/Stop, Cancel and Quit
+use the shared UI handlers; unavailable recording actions stay disabled. The owned Xvfb
+lifecycle check does not establish native tray presentation on every desktop.
 
 The floating control loads the same trusted shared UI through a sandboxed, restricted
-overlay bridge. It shows during recording/transcription/recovery, or when the existing
-idle-overlay preference is enabled. Built-in non-activating presentation is enabled on
+overlay bridge. It shows only while the main window is in the background, during
+recording/transcription/recovery or when the existing idle-overlay preference is enabled.
+Returning to the main window hides it immediately; leaving or minimizing the window
+restores it when needed. Built-in non-activating presentation is enabled on
 macOS and X11, including an explicitly selected XWayland backend. The owned KDE XWayland
 test covers actual pointer Cancel without moving keyboard focus.
 
@@ -120,7 +122,7 @@ at Quit; missing tools or failed publication leave stopped audio available for r
 Large output is not cut to fit the bounded UI preview: Copy retrieves the complete text;
 with history enabled it is also saved as a private `.txt` in the Dev transcripts directory.
 History and models remain separate from the installed release. Recording is independent
-of the optional text-model preview. Packaged/signed replacement remains separate migration work.
+of the optional text-model adapters. Packaged/signed replacement remains separate migration work.
 
 The recording build also connects an authenticated, same-user D-Bus control service to the
 same recording owner used by the window. Its Dev name is `io.github.whisperfree.dev.Control`,
@@ -196,6 +198,13 @@ is needed. The script preserves package/build metadata, checks captured native
 inputs, copies the locked production dependencies and retains notices. It uses
 the separate Dev package, launcher and `/opt/openwhisper-dev` destination. Archives
 are unsigned previews and do not replace the stable application.
+
+Linux desktop launchers set the desktop identity to the matching application ID. On
+Wayland, a directory-only Dev package needs its matching
+`io.github.whisperfree.dev.desktop` entry and icon registered with the desktop
+environment for taskbar and window grouping to resolve the Dev identity. The `.deb`
+layout includes that entry and icon for package installation. A directory-only
+preview does not register them and may display a generic compositor icon.
 
 Native inputs must be built on the intended distribution baseline. A fresh private
 Ubuntu22 build of the existing production recording scripts now produces a Dev
@@ -485,19 +494,15 @@ a macOS 14 runtime, hardware/default-input behavior, TCC, signed-helper loading 
 retirement from a generic Electron exit event. Reproduce only in the owned Apple CI VM using
 the [synthetic capture procedure](../app/tests/owned-macos-capture/README.md).
 
-## Optional text-model preview
+## Optional text-model groundwork
 
-P5 adds a disabled-by-default manual preview at the end of **Models**. Its numeric-loopback
-LM Studio/Ollama requests originate in the host and use separate private settings. Input
-and replies are transient and are not persisted by the host; the renderer retains them for
-that session and the selected server receives the submitted input. They do not change dictation, history,
-clipboard delivery or recovery. See [manual model preview](LOCAL_MODELS.md) for setup,
-privacy, limits and acceptance steps. This development feature is absent from release 0.2.5.
-Live LM Studio/Ollama trials are deferred to #11 and do not block release 0.3.0.
+The Dev host retains disabled-by-default model adapters and their separate private settings.
+The former manual preview form is removed from the redesigned UI; Connections remains deferred.
+Ordinary dictation, history, clipboard delivery and recovery stay independent of these adapters.
+See [local model groundwork](LOCAL_MODELS.md) for privacy, limits and synthetic protocol evidence.
+Live LM Studio/Ollama trials remain follow-up work under #11.
 
-The owned UI fixture also exercises actual Dev IPC against its own synthetic model server:
-send, cancel, retry, categorical HTTP errors, transient multilingual text, English/German
-controls, private profile persistence and unchanged synthetic stable data. These fixtures
-prove protocol/UI behavior, not the quality of a user-selected model. Native capture,
-platform adapters, universal packaging, existing-data migration and signed old-client
-updates remain separate gates. Keep the existing application hosts until those gates pass.
+The owned UI fixture checks real preference IPC, English/German controls, private profile
+persistence, unchanged synthetic stable data and absence of automatic provider traffic.
+These fixtures do not assess recognition or model quality. Consult [release status](ELECTRON-STATUS.md)
+and [Linux status](LINUX.md) for the separate package and platform evidence.

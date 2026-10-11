@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AppState } from "../../src/contracts/ui/state.js";
-import { overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "../../src/main/recording-overlay.js";
+import { overlayWindowBounds, overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "../../src/main/recording-overlay.js";
 
 function state(): AppState {
   return {
@@ -58,7 +58,7 @@ test("overlay starts hidden and cannot activate or resize the transparent floati
   assert.equal(options.transparent, true); assert.equal(options.frame, false);
   assert.equal(options.skipTaskbar, true); assert.equal(options.alwaysOnTop, true);
   assert.equal(options.resizable, false); assert.equal(options.hasShadow, false);
-  assert.equal(options.width, 360); assert.equal(options.height, 64);
+  assert.equal(options.width, 476); assert.equal(options.height, 68);
 });
 
 test("native Wayland renders the shared controls offscreen without mapping a BrowserWindow", () => {
@@ -70,35 +70,81 @@ test("native Wayland renders the shared controls offscreen without mapping a Bro
   assert.equal(options.webPreferences?.nodeIntegration, false);
 });
 
+test("overlay stays centered with a 24-pixel bottom inset on offset displays", () => {
+  for (const area of [{ x: 0, y: 0, width: 1920, height: 1080 },
+    { x: -1920, y: -100, width: 1920, height: 1080 }]) {
+    const bounds = overlayWindowBounds(area);
+    assert.equal(bounds.x + bounds.width / 2, area.x + area.width / 2);
+    assert.equal(area.y + area.height - bounds.y - bounds.height, 24);
+  }
+});
+
 test("overlay follows active recording and transcription then hides completed or failed phases", () => {
   const current = state(), visible: boolean[] = [];
   for (const status of ["idle", "recording", "transcribing", "done", "idle", "recording", "error"] as const) {
-    current.status = status; visible.push(shouldShowRecordingOverlay(current));
+    current.status = status; visible.push(shouldShowRecordingOverlay(current, false));
   }
   assert.deepEqual(visible, [false, true, true, false, false, true, false]);
 });
 
 test("saved recovery keeps retry controls visible until delivery or explicit discard", () => {
   const current = state(); current.status = "error"; current.recovery_available = true;
-  assert.equal(shouldShowRecordingOverlay(current), true);
-  current.status = "idle"; assert.equal(shouldShowRecordingOverlay(current), true);
-  current.status = "transcribing"; assert.equal(shouldShowRecordingOverlay(current), true);
+  assert.equal(shouldShowRecordingOverlay(current, false), true);
+  current.status = "idle"; assert.equal(shouldShowRecordingOverlay(current, false), true);
+  current.status = "transcribing"; assert.equal(shouldShowRecordingOverlay(current, false), true);
   current.status = "done"; current.recovery_available = false;
-  assert.equal(shouldShowRecordingOverlay(current), false);
+  assert.equal(shouldShowRecordingOverlay(current, false), false);
   current.status = "error"; current.recovery_available = true;
-  assert.equal(shouldShowRecordingOverlay(current), true);
-  current.recovery_available = false; assert.equal(shouldShowRecordingOverlay(current), false);
+  assert.equal(shouldShowRecordingOverlay(current, false), true);
+  current.recovery_available = false; assert.equal(shouldShowRecordingOverlay(current, false), false);
 });
 
 test("idle overlay preference applies immediately without hiding active or recoverable work", () => {
-  const current = state(); assert.equal(shouldShowRecordingOverlay(current), false);
+  const current = state(); assert.equal(shouldShowRecordingOverlay(current, false), false);
   current.preferences.show_idle_overlay = true;
   for (const status of ["idle", "done", "error"] as const) {
-    current.status = status; assert.equal(shouldShowRecordingOverlay(current), true);
+    current.status = status; assert.equal(shouldShowRecordingOverlay(current, false), true);
   }
-  current.preferences.show_idle_overlay = false; assert.equal(shouldShowRecordingOverlay(current), false);
-  current.status = "recording"; assert.equal(shouldShowRecordingOverlay(current), true);
-  current.status = "transcribing"; assert.equal(shouldShowRecordingOverlay(current), true);
+  current.preferences.show_idle_overlay = false; assert.equal(shouldShowRecordingOverlay(current, false), false);
+  current.status = "recording"; assert.equal(shouldShowRecordingOverlay(current, false), true);
+  current.status = "transcribing"; assert.equal(shouldShowRecordingOverlay(current, false), true);
   current.status = "error"; current.recovery_available = true;
-  assert.equal(shouldShowRecordingOverlay(current), true);
+  assert.equal(shouldShowRecordingOverlay(current, false), true);
 });
+
+test(
+  "foreground suppresses the overlay across recording and idle states, then focus return restores it without telemetry",
+  () => {
+    const current = state();
+    current.status = "idle";
+    assert.equal(shouldShowRecordingOverlay(current, true), false);
+    assert.equal(shouldShowRecordingOverlay(current, false), false);
+    current.preferences.show_idle_overlay = true;
+    for (const status of [
+      "idle",
+      "done",
+      "recording",
+      "transcribing",
+      "error",
+    ] as const) {
+      current.status = status;
+      current.recovery_available = status === "error";
+      assert.equal(
+        shouldShowRecordingOverlay(current, true),
+        false,
+        `${status} stays hidden while the main window is foreground`,
+      );
+      assert.equal(
+        shouldShowRecordingOverlay(current, false),
+        true,
+        `${status} appears after the main window loses focus`,
+      );
+    }
+
+    current.status = "recording";
+    current.recovery_available = false;
+    assert.equal(shouldShowRecordingOverlay(current, false), true);
+    assert.equal(shouldShowRecordingOverlay(current, true), false);
+    assert.equal(shouldShowRecordingOverlay(current, false), true);
+  },
+);

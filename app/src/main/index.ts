@@ -4,12 +4,12 @@ import { WaylandClipboard } from "../services/platforms/linux/wayland-clipboard.
 import { portalPasteStateSchema } from "../platforms/linux/shared/portal-paste.js";
 import type { IpcMainInvokeEvent } from "electron";
 import { readFile, realpath } from "node:fs/promises";
-import { cpus, homedir } from "node:os";
+import { cpus, homedir, totalmem } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
-  appStateSchema, hardwareDeviceNameSchema, modelSchema, preferencesSchema, validateEvent, isSteadyRecordingUpdate,
+  appStateSchema, hardwareDeviceNameSchema, preferencesSchema, validateEvent, isSteadyRecordingUpdate,
   MAX_USER_TEXT_BYTES, MAX_UI_REQUEST_BYTES,
   type AppState, type EventName, type EventPayload, type UpdateState,
 } from "../contracts/ui/state.js";
@@ -29,7 +29,7 @@ import {
 } from "../contracts/speech/local-processing.js";
 import { prepareDevelopmentProfile, resolveDevelopmentProfile } from "../services/settings/profiles.js";
 import { CONTENT_SECURITY_POLICY, MAIN_URL, OVERLAY_URL, readApplicationAsset } from "./assets.js";
-import { createUiDispatcher, uiFailure, type UiSender } from "./ipc.js";
+import { createUiDispatcher, performWindowAction, uiFailure, type UiSender } from "./ipc.js";
 import { ModelInventory, type InstalledModel } from "../services/models/model-inventory.js";
 import { ModelDownloads } from "../services/models/model-download.js";
 import { recordingRequestSchema } from "../core/recording/recording.js";
@@ -45,7 +45,7 @@ import { portalShortcutStateSchema } from "../platforms/linux/shared/portal-shor
 import { KdeKeyCapture } from "../platforms/linux/kde/key-capture.js";
 import { modifierOnly } from "../platforms/linux/kde/keyboard.js";
 import { buildTrayMenu } from "./tray-menu.js";
-import { overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "./recording-overlay.js";
+import { overlayWindowBounds, overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "./recording-overlay.js";
 import { WaylandRecordingOverlay } from "./wayland-recording-overlay.js";
 import type { SurfaceUnavailableReason } from "../contracts/platforms/wayland-surface.js";
 import { MacosShortcut } from "./macos-shortcut.js";
@@ -66,6 +66,8 @@ import { routeControlStartup } from "./control-startup.js";
 import { createControlAdapter } from "../platforms/linux/shared/control-adapter.js";
 import { LinuxBus } from "../platforms/linux/shared/bus.js";
 import { verifyDevelopmentLinuxBusArtifact } from "../services/development/development-artifact.js";
+import { parseModelCatalog, recommendationsFor, recommendationTier } from "../core/models/catalog.js";
+import { isNewerUpdateVersion } from "../services/update/common/update-policy.js";
 
 const distribution = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let window: BrowserWindow | undefined;
@@ -175,7 +177,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   app.on("activate", () => {
     if (window && !window.isDestroyed()) { window.show(); window.focus(); }
   });
-  app.on("window-all-closed", () => { app.quit(); });
+  // Keep the tray resident when the main window is closed on macOS and Linux.
+  app.on("window-all-closed", () => undefined);
   await app.whenReady();
   const devAutostart = process.platform === "linux" && identity.kind === "development" && app.isPackaged
     ? admitLinuxDevelopmentAutostart({ build: identity, platform: process.platform, packaged: app.isPackaged,
@@ -188,7 +191,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   );
   const processing = new LocalProcessingService();
   const rawCatalog: unknown = JSON.parse(await readFile(join(distribution, "resources/models.json"), "utf8"));
-  const catalog = z.object({ models: z.array(modelSchema).min(1).max(128) }).parse(rawCatalog);
+  const catalog = parseModelCatalog(rawCatalog);
   const inventory = await ModelInventory.open(profile, rawCatalog);
   let installed: readonly InstalledModel[] = await inventory.installed();
   let sources: readonly RecordingSource[] = [];
@@ -417,6 +420,13 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       preferences: { ...preferenceSnapshot, ...(loginFact ? { launch_at_login: loginFact.requested } : {}) },
       models: [...catalog.models, ...installed.filter((item) => !catalog.models.some((model) => model.id === item.model.id)).map((item) => item.model)],
       installed: installed.map((item) => item.model.id), microphones: sources.map((source) => source.id),
+      microphone_labels: sources.map((source) => ({ id: source.id, name: source.name })),
+      recommended_models: recommendationsFor(catalog, recommendationTier({
+        gpuAvailable: gpuSelection.available && gpuSelection.supported,
+        gpuEnabled: preferenceSnapshot.gpu,
+        gpuFallback: gpuSelection.fallback,
+        memoryBytes: totalmem(),
+      }), preferenceSnapshot.language === "auto" ? preferenceSnapshot.ui_language : preferenceSnapshot.language).map((model) => model.id),
       session: process.env["XDG_SESSION_TYPE"] ?? "unknown",
       desktop: process.env["XDG_CURRENT_DESKTOP"] ?? "unknown", clipboard_available: descriptor !== null,
       shortcut_portal: shortcut.available, paste_portal: pasteState.available, shortcut: macShortcutState?.label ?? shortcut.label,
@@ -442,6 +452,33 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       local_processing_invalid_profile: processingProfile.invalidContent,
     });
   };
+  let latestSnapshot: AppState | undefined;
+  const syncOverlayVisibility = (snapshot: AppState): void => {
+    if (shutdownInProgress || !overlayReady || !overlay || overlay.isDestroyed())
+      return;
+    const mainWindow = window;
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      if (waylandOverlay) waylandOverlay.setVisible(false);
+      else if (overlay.isVisible()) overlay.hide();
+      return;
+    }
+    const foreground =
+      mainWindow.isVisible() &&
+      mainWindow.isFocused() &&
+      !mainWindow.isMinimized();
+    const visible = shouldShowRecordingOverlay(snapshot, foreground);
+    if (waylandOverlay) waylandOverlay.setVisible(visible);
+    else if (visible && !overlay.isVisible()) overlay.showInactive();
+    else if (!visible && overlay.isVisible()) overlay.hide();
+  };
+  const syncOverlayAfterWindowEvent = (): void => {
+    if (shutdownInProgress) return;
+    try {
+      syncOverlayVisibility(latestSnapshot ?? state());
+    } catch {
+      console.error("OpenWhisper Dev could not sync its recording overlay.");
+    }
+  };
 
   const uiSession = session.defaultSession;
   uiSession.setPermissionRequestHandler((_contents, _permission, callback) => { callback(false); });
@@ -466,10 +503,13 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     { label: profile.productName, submenu: [{ role: "quit" }] },
     { role: "editMenu" },
   ]));
+  const workspaceArea = screen.getPrimaryDisplay().workArea;
   window = new BrowserWindow({
+    frame: false,
     title: profile.productName,
-    width: 980, height: 740, minWidth: 740, minHeight: 560,
-    backgroundColor: "#141a21", show: false,
+    width: Math.min(1280, workspaceArea.width), height: Math.min(800, workspaceArea.height), minWidth: 740, minHeight: 560,
+    backgroundColor: "#121017", show: false,
+    ...(process.platform === "linux" ? { icon: join(distribution, "ui/app-icon.png") } : {}),
     webPreferences: {
       preload: join(distribution, "preload/index.cjs"),
       sandbox: true, contextIsolation: true, nodeIntegration: false,
@@ -491,7 +531,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         { title: `${profile.productName} Recording`, preloadPath: join(distribution, "preload/index.cjs") });
       const area = screen.getPrimaryDisplay().workArea;
       overlay = new BrowserWindow({ ...options,
-        x: Math.floor(area.x + (area.width - 360) / 2), y: Math.floor(area.y + area.height - 88),
+        ...overlayWindowBounds(area),
         webPreferences: { ...options.webPreferences, webSecurity: true, devTools: false },
       });
       overlay.on("closed", () => {
@@ -524,13 +564,11 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let updateTray = (_state: AppState): void => {};
   notify = () => {
     try {
-      const snapshot = state(); emit("state", snapshot); updateTray(snapshot);
-      if (overlayReady && overlay && !overlay.isDestroyed()) {
-        const visible = shouldShowRecordingOverlay(snapshot);
-        if (waylandOverlay) waylandOverlay.setVisible(visible);
-        else if (visible && !overlay.isVisible()) overlay.showInactive();
-        else if (!visible && overlay.isVisible()) overlay.hide();
-      }
+      const snapshot = state();
+      latestSnapshot = snapshot;
+      emit("state", snapshot);
+      updateTray(snapshot);
+      syncOverlayVisibility(snapshot);
     }
     catch { console.error("OpenWhisper Dev could not publish its UI state."); }
   };
@@ -772,11 +810,14 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       void finishShutdown(true).catch(() => {}); return;
     }
     const value = response.state;
+    const checking = updateReserved === "check", idle = value.status === "idle";
     if (updateReserved === "check" && (value.status === "idle" || value.status === "available")) automaticUpdateCheckAllowed = true;
     updates = { ...updates, error: null, progress: 0,
       status: value.status === "idle" ? "current" : value.status === "checking" ? "checking"
         : value.status === "available" ? "available" : value.status === "failed" ? "error" : "installing",
-      version: "updateVersion" in value ? value.updateVersion : null,
+      version: "updateVersion" in value ? value.updateVersion : checking || idle ? null : updates.version,
+      details: value.status === "available" ? value.details : checking || idle ? undefined
+        : "updateVersion" in value && value.updateVersion !== updates.version ? undefined : updates.details,
       ...(value.status === "failed" ? { error: value.code === "CANCELLED" ? "The update was cancelled." : "The update could not be completed." } : {}) };
     if (!["checking", "preparing", "prepared"].includes(value.status)) updateReserved = undefined;
     notify();
@@ -788,7 +829,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       throw new Error("Finish the current recording, download or setup before installing an update.");
     }
     // A request resolves after its write, not its terminal response. Keep the reservation until that response or retirement.
-    updateReserved = kind; updates = { ...updates, status: kind === "check" ? "checking" : "installing", error: null, progress: 0 }; notify();
+    updateReserved = kind; updates = { ...updates, status: kind === "check" ? "checking" : "installing", error: null, progress: 0,
+      ...(kind === "check" ? { version: null, details: undefined } : {}) }; notify();
     if (macUpdates) {
       const controller = new AbortController(); macUpdateAbort = controller;
       try {
@@ -797,7 +839,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           const candidate = await task;
           if (macUpdateOperation === task) macUpdateOperation = undefined;
           if (shutdownInProgress) return;
-          updates = { ...updates, status: candidate ? "available" : "current", version: candidate?.version ?? null, error: null };
+          updates = { ...updates, status: candidate ? "available" : "current", version: candidate?.version ?? null,
+            details: candidate?.details, error: null };
           updateReserved = undefined; notify();
         } else {
           const task = macUpdates.prepareInstall(controller.signal).then((prepared) => { macPrepared = prepared; return prepared; });
@@ -854,6 +897,17 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     windows: [{ webContentsId: contents.id, role: "main" }, ...(overlay ? [{ webContentsId: overlay.webContents.id, role: "overlay" as const }] : [])],
     handlers: {
       get_state: () => state(),
+      window_action: ({ action: windowAction }) => performWindowAction(window, windowAction),
+      open_project_link: async ({ target }) => {
+        let url: string;
+        if (target === "repository") url = "https://github.com/juferdinand/OpenWhisper";
+        else if (target === "issues") url = "https://github.com/juferdinand/OpenWhisper/issues";
+        else if (target === "license") url = "https://github.com/juferdinand/OpenWhisper/blob/main/LICENSE";
+        else if (["available", "downloading", "installing", "error"].includes(updates.status) && updates.version &&
+          isNewerUpdateVersion(updates.version, version)) url = `https://github.com/juferdinand/OpenWhisper/releases/tag/v${updates.version}`;
+        else throw new Error("No update release is available.");
+        await shell.openExternal(url);
+      },
       check_updates: () => requestUpdate("check"),
       install_update: () => requestUpdate("install"),
       save_preferences: ({ changes }) => withRecordingControl(async () => {
@@ -895,6 +949,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         return current;
       }),
       complete_setup: () => withRecordingControl(async () => {
+        await refreshModels();
+        if (!installed.some((item) => item.model.id === preferences.snapshot().model)) {
+          throw new Error("Download and select an installed speech model before completing setup.");
+        }
         await preferences.completeSetup();
         emit("state", state());
       }),
@@ -1029,9 +1087,15 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     target.on("will-navigate", (event) => { event.preventDefault(); });
     target.on("will-attach-webview", (event) => { event.preventDefault(); });
   }
-  window.on("close", (event) => { if (!shutdownComplete) { event.preventDefault(); app.quit(); } });
-  window.on("closed", () => { processing.close(); ipcMain.removeHandler("openwhisper:invoke"); window = undefined; });
+  window.on("close", (event) => { if (!shutdownComplete) { event.preventDefault(); window?.hide(); } });
+  window.on("closed", () => { processing.close(); ipcMain.removeHandler("openwhisper:invoke"); window = undefined; syncOverlayAfterWindowEvent(); });
   window.once("ready-to-show", () => { window?.show(); });
+  window.on("focus", syncOverlayAfterWindowEvent);
+  window.on("blur", syncOverlayAfterWindowEvent);
+  window.on("show", syncOverlayAfterWindowEvent);
+  window.on("hide", syncOverlayAfterWindowEvent);
+  window.on("minimize", syncOverlayAfterWindowEvent);
+  window.on("restore", syncOverlayAfterWindowEvent);
   if (macRecording) window.on("focus", () => {
     microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted";
     accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(false); notify();

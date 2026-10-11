@@ -18,6 +18,9 @@ declare global {
 
 const enabled = process.env.OPENWHISPER_OWNED_UI_TEST === "1";
 const packageRoot = resolve(fileURLToPath(new URL("../../", import.meta.url)));
+const packagedDevDirectory = process.env.OPENWHISPER_PACKAGED_DEV_DIRECTORY;
+const packagedAppRoot = packagedDevDirectory ? join(packagedDevDirectory, "resources/app") : packageRoot;
+const packagedExecutable = packagedDevDirectory ? join(packagedDevDirectory, "openwhisper-dev") : undefined;
 
 // Playwright executes transpiled TypeScript in Electron's isolated preload world.
 // The function has no closures or imported values; no authored JavaScript fixture
@@ -53,11 +56,20 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
   }
   const evidence = process.env.OPENWHISPER_UI_EVIDENCE;
   assert.equal(evidence, "/evidence", "Evidence must stay in the owned container filesystem.");
+  const screenshot = async (page: Page, name: string) => page.screenshot({
+    path: join(evidence, name),
+    mask: [page.locator(".dictation-device, .dictation-change-model, .window-tab-subtitle, .dictation-feature-card:first-child .dictation-feature-description, .compute-mode small, #recognition-backend, .model-drawer-heading p")],
+  });
+  const openSettings = async (page: Page, tab: "general" | "recording" | "text" | "history" | "about") => {
+    if (!await page.locator("#settings-dialog").isVisible()) await page.locator("#open-settings").click();
+    await page.locator(`#settings-dialog nav [data-tab="${tab}"]`).click();
+  };
   const root = await mkdtemp("/tmp/openwhisper-owned-ui-");
   await chmod(root, 0o700);
   const home = join(root, "home");
   const runtime = join(root, "runtime");
-  for (const path of [home, runtime, join(home, "config"), join(home, "data"), join(home, "cache")]) {
+  const systemConfig = join(root, "system-config");
+  for (const path of [home, runtime, join(home, "config"), join(home, "data"), join(home, "cache"), systemConfig]) {
     await mkdir(path, { mode: 0o700 });
   }
   // Synthetic stable-profile sentinels prove separation without reading live data.
@@ -76,29 +88,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     stableFiles.push(path);
   }
   const stableBefore = await Promise.all(stableFiles.map(hash));
-  let previewMode: "normal" | "hold" | "reject" = "normal";
-  let previewRequests = 0;
-  const previewText = "Owned Deutsch 👩‍💻 العربية 日本語 <img src=x onerror=alert(1)>";
-  const previewResult = "Owned structured plan: Deutsch 👩‍💻 العربية 日本語 <script>fixture</script>";
-  const previewBodies: unknown[] = [];
-  const server = createServer((request, response) => {
-    if (request.method === "POST" && request.url === "/v1/chat/completions") {
-      previewRequests += 1;
-      const blocks: Buffer[] = [];
-      request.on("data", (block: Buffer) => { blocks.push(block); });
-      request.on("end", () => {
-        const input: unknown = JSON.parse(Buffer.concat(blocks).toString("utf8"));
-        previewBodies.push(input);
-        if (previewMode === "hold") return;
-        if (previewMode === "reject") {
-          response.writeHead(401); response.end("Owned private diagnostic must never appear in the UI"); return;
-        }
-        response.writeHead(200, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({ choices: [{ finish_reason: "stop",
-          message: { role: "assistant", content: previewResult } }] }));
-      });
-      return;
-    }
+  const server = createServer((_request, response) => {
     requests += 1;
     response.writeHead(200, { "Content-Type": "text/plain" });
     response.end("Owned network control");
@@ -119,7 +109,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     LANG: "C.UTF-8", LC_ALL: "C.UTF-8",
     HOME: home,
     XDG_CONFIG_HOME: join(home, "config"), XDG_DATA_HOME: join(home, "data"),
-    XDG_CACHE_HOME: join(home, "cache"), XDG_RUNTIME_DIR: runtime,
+    XDG_CACHE_HOME: join(home, "cache"), XDG_RUNTIME_DIR: runtime, XDG_CONFIG_DIRS: systemConfig,
     DBUS_SESSION_BUS_ADDRESS: `unix:path=${runtime}/disabled-session-bus`,
     DBUS_SYSTEM_BUS_ADDRESS: `unix:path=${runtime}/disabled-system-bus`,
     PULSE_SERVER: `unix:${runtime}/disabled-pulse`,
@@ -147,12 +137,18 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
   });
   environment.DISPLAY = display;
   const profile = join(root, "dev-profile");
+  const executable = packagedExecutable ?? join(packageRoot, "node_modules/electron/dist/electron");
+  const launchWrapper = join(root, "playwright-electron");
+  const shellArgument = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+  // Match Playwright's normal preload ordering before its debug switches. This
+  // instrumentation belongs only to the private fixture, never the Dev package.
+  await writeFile(launchWrapper, `#!/bin/sh\nexec ${shellArgument(executable)} -r ${shellArgument(join(packageRoot, "node_modules/playwright-core/lib/server/electron/loader.js"))} "$@"\n`, { mode: 0o700 });
   let application: ElectronApplication | undefined;
   let currentPage: Page | undefined;
   const launch = async (): Promise<ElectronApplication> => {
     const app = await _electron.launch({
-      executablePath: join(packageRoot, "node_modules/electron/dist/electron"),
-      args: [packageRoot, "--dev", "--dev-profile", profile],
+      executablePath: packagedExecutable ?? launchWrapper,
+      args: packagedDevDirectory ? ["--dev-profile", profile] : [packageRoot, "--dev", "--dev-profile", profile],
       env: environment,
       chromiumSandbox: true,
       timeout: 30_000,
@@ -165,7 +161,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     let app = await launch();
     let page = await app.firstWindow();
     currentPage = page;
-    await expect(page.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev");
+    await expect(page.locator(".window-wordmark")).toHaveText("openwhisper");
     assert.equal(page.url(), "app://openwhisper/index.html");
     const security = await app.evaluate(({ app: host, BrowserWindow }) => {
       const window = BrowserWindow.getAllWindows()[0];
@@ -178,6 +174,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
         argv: process.argv, mainUid: process.getuid?.(),
       };
     });
+    await writeFile(join(evidence, "app-launch.json"), JSON.stringify({ executable, appArgv: security.argv }, null, 2));
     assert.equal(security.name, "OpenWhisper Dev");
     assert.equal(security.userData.startsWith(`${profile}/`), true);
     assert.equal(security.sessionData.startsWith(`${profile}/`), true);
@@ -191,6 +188,8 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await page.evaluate(() => { Reflect.deleteProperty(globalThis, "ownedMainWorldMarker"); });
     assert.equal(security.devToolsOpen, false);
     assert.equal(security.mainUid, 1000);
+    assert.deepEqual(security.argv, packagedDevDirectory ? [packagedExecutable, "--inspect=0", "--remote-debugging-port=0", "--dev-profile", profile]
+      : [join(packageRoot, "node_modules/electron/dist/electron"), packageRoot, "--dev", "--dev-profile", profile]);
     assert.equal(security.argv.some((arg) => arg.includes("no-sandbox")), false);
     const rendererStatus = await readFile(`/proc/${security.rendererPid}/status`, "utf8");
     const rendererCmdline = (await readFile(`/proc/${security.rendererPid}/cmdline`, "utf8")).split("\0");
@@ -215,40 +214,125 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
 
     const beforeSetup = validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {})));
     assert.equal(beforeSetup.preferences.setup_completed, false);
-    await expect(page.locator('nav button[data-tab="setup"]')).toBeVisible();
-    await expect(page.locator("nav button[data-tab]")).toHaveCount(1);
+    await expect(page.locator(".setup-logo")).toBeVisible();
+    await expect(page.locator("nav button[data-tab]")).toHaveCount(0);
     await expect(page.locator('nav button[data-tab="general"]')).toHaveCount(0);
+    assert.equal(await page.evaluate(async () => {
+      try { await window.openwhisper?.invoke("complete_setup", {}); return false; }
+      catch { return true; }
+    }), true);
+    assert.equal(validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.setup_completed, false);
+    assert.equal(beforeSetup.model_directory, join(profile, "data", "models"));
+    const otherModel = beforeSetup.models.find((model) => model.id === "base");
+    const selectedModel = beforeSetup.models.find((model) => model.id === beforeSetup.preferences.model);
+    assert.ok(otherModel?.file && selectedModel?.file);
+    assert.notEqual(otherModel.id, selectedModel.id);
+    // Private inventory sentinels exercise setup admission, never speech inference or model quality.
+    await writeFile(join(beforeSetup.model_directory, otherModel.file), "Owned unselected inventory fixture", { mode: 0o600 });
+    assert.equal(await page.evaluate(async () => {
+      try { await window.openwhisper?.invoke("complete_setup", {}); return false; }
+      catch { return true; }
+    }), true);
+    assert.equal(validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.setup_completed, false);
+    await writeFile(join(beforeSetup.model_directory, selectedModel.file), "Owned selected inventory fixture", { mode: 0o600 });
+    await app.close();
+    application = undefined;
+    app = await launch();
+    page = await app.firstWindow();
+    currentPage = page;
+    await expect(page.locator(".setup-logo")).toBeVisible();
+    for (let step = 0; step < 7; step++) {
+      await page.locator("[data-setup-next]").click();
+      if (step === 0) {
+        await expect(page.getByRole("heading", { name: "Choose recognition hardware", exact: true })).toBeVisible();
+        await expect(page.getByText("Step 1 of 7", { exact: true })).toBeVisible();
+        await expect(page.locator('input[name="gpu-mode"][value="false"]')).toBeChecked();
+        await expect(page.locator('input[name="gpu-mode"][value="true"]')).toBeDisabled();
+      } else if (step === 1) {
+        await expect(page.getByRole("heading", { name: "Download a speech model", exact: true })).toBeVisible();
+        await expect(page.getByText("Step 2 of 7", { exact: true })).toBeVisible();
+      }
+    }
     await page.locator('[data-command="complete_setup"]').click();
     await expect.poll(async () => validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.setup_completed).toBe(true);
+    await expect(page.getByRole("heading", { name: "Recording", exact: true })).toBeVisible();
+    await expect(page.locator(".dictation-workspace")).toBeVisible();
+    await expect(page.locator("#dictation-timer")).toHaveText("0:00");
+    await expect(page.locator("#copy-dictation")).toBeHidden();
+    assert.equal(await page.locator("main").evaluate((main) => main.scrollWidth <= main.clientWidth), true);
+    await screenshot(page, "dev-dictation.png");
+    await page.locator(".dictation-change-model").click();
+    await expect(page.locator("#model-drawer")).toBeVisible();
+    await expect(page.locator("#model-drawer").getByRole("heading", { name: "Speech model for recording", exact: true })).toBeVisible();
+    const drawerBounds = await page.locator("#model-drawer").evaluate((drawer) => {
+      const bounds = drawer.getBoundingClientRect();
+      const titlebar = document.querySelector(".window-titlebar")!.getBoundingClientRect();
+      return { right: bounds.right, top: bounds.top, bottom: bounds.bottom, width: innerWidth, height: innerHeight, titlebarBottom: titlebar.bottom };
+    });
+    assert.ok(Math.abs(drawerBounds.right - drawerBounds.width) <= 1);
+    assert.ok(Math.abs(drawerBounds.top - drawerBounds.titlebarBottom) <= 1);
+    assert.ok(Math.abs(drawerBounds.bottom - drawerBounds.height) <= 1);
+    await screenshot(page, "dev-model-drawer.png");
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#model-drawer")).toBeHidden();
+    await expect(page.locator(".dictation-change-model")).toBeFocused();
+    await expect(page.locator(".model-drawer-body")).toBeEmpty();
+    await expect(page.locator("#toggle-history")).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("#dictation-history")).toBeVisible();
+    await expect(page.locator("#dictation-history .history-row")).toHaveCount(0);
+    await screenshot(page, "dev-history-rail.png");
+    await page.locator("#toggle-history").click();
+    await expect(page.locator("#toggle-history")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator("#dictation-history .dictation-history-list")).toBeHidden();
+    checks.push("setup rejects missing or unselected installed models through real IPC; a selected private inventory fixture permits completion");
+    checks.push("completed setup opens the dictation workspace without inventing a transcript or recording availability");
+    checks.push("native model drawer closes with Escape and restores focus; the empty history rail remains optional");
     const state = validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {})));
     assert.equal(state.profile, "development");
     assert.equal(state.recording_available, false);
     assert.equal(state.history.length, 0);
     assert.equal(state.microphones.length, 0);
+    await expect(page.locator("#header-update")).toBeHidden();
+    await expect(page.locator("#discard-result")).toBeDisabled();
     const metadata = z.strictObject({
       commit: z.string().regex(/^([a-f0-9]{40}|source)$/), modified: z.boolean(),
-    }).parse(JSON.parse(await readFile(join(packageRoot, "dist/resources/development-build.json"), "utf8")));
+    }).parse(JSON.parse(await readFile(join(packagedAppRoot, "dist/resources/development-build.json"), "utf8")));
     const buildIdentifier = `${metadata.commit.slice(0, 12)}${metadata.modified ? "+modified" : ""}`;
     assert.equal(state.development_build, buildIdentifier);
     assert.equal(state.model_directory, join(profile, "data", "models"));
     const modelDirectory = await lstat(state.model_directory);
     assert.equal(modelDirectory.uid, 1000);
     assert.equal(modelDirectory.mode & 0o777, 0o700);
-    await page.locator('[data-tab="about"]').click();
-    await expect(page.locator(".version-badge")).toHaveText(`Version ${state.version} · Dev ${buildIdentifier} · Linux`);
-    assert.equal(await page.locator(".about-brand img").evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth === 256), true);
+    await openSettings(page, "about");
+    await expect(page.locator("#dictation-workspace")).toBeVisible();
+    await expect(page.locator("#settings-dialog")).toHaveJSProperty("open", true);
+    await expect(page.locator(".version-badge")).toHaveText(`Version ${state.version} · Dev build ${buildIdentifier}`);
+    await expect(page.locator(".about-brand img")).toHaveAttribute("src", "./branding/icon-bordered.svg");
+    await expect.poll(async () => page.locator(".about-brand img").evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth === 512)).toBe(true);
     assert.equal(await page.evaluate(async () => {
       await document.fonts.ready;
-      return Array.from(document.fonts).some((font) => font.family === "OpenWhisper Inter" && font.status === "loaded");
+      return ["OpenWhisper Instrument Sans", "OpenWhisper Newsreader"].every((family) =>
+        Array.from(document.fonts).some((font) => font.family === family && font.status === "loaded"));
     }), true);
-    await page.screenshot({ path: join(evidence, "dev-about.png") });
-    await page.locator('[data-tab="models"]').click();
-    await expect(page.locator("#development-model-directory")).toHaveText(state.model_directory);
-    await page.screenshot({ path: join(evidence, "dev-models.png") });
-    checks.push("visible Dev build identifier, original 256px icon/Inter assets and private model directory");
+    await screenshot(page, "dev-about.png");
+    await openSettings(page, "general");
+    const loginToggle = page.locator('[data-pref="launch_at_login"]');
+    // Packaged Electron ignores Node CLI preloads. Playwright's debug switches
+    // therefore correctly fail the exact normal-launch admission. Cover its
+    // positive path in the focused admission/autostart tests, without relaxing it.
+    assert.equal(state.launch_at_login_available, false);
+    await expect(loginToggle).toBeDisabled();
+    assert.equal(await absent(join(home, "config/autostart/io.github.whisperfree.dev.desktop")), true);
+    checks.push(packagedDevDirectory ? "instrumented packaged Dev refuses autostart with extra debug arguments"
+      : "source-run Dev keeps login launch unavailable");
+    await screenshot(page, "dev-general.png");
+    checks.push("visible Dev build identifier, supplied SVG branding, bundled reference fonts and private model directory");
     await expect(page.locator("#record")).toBeDisabled();
     await expect(page.locator("#status-title")).toHaveText("Recording is unavailable");
-    await expect(page.locator("#status")).toHaveText("The recording service could not start. Restart OpenWhisper and try again.");
+    assert.ok(state.recording_unavailable_reason === "host" || state.recording_unavailable_reason === "audio");
+    await expect(page.locator("#status")).toHaveText(state.recording_unavailable_reason === "audio"
+      ? "No audio input is available. Check your microphone and audio settings."
+      : "The recording service could not start. Restart OpenWhisper and try again.");
     checks.push("unsupported recording truthfully disabled, no device inventory");
 
     const refusals = await page.evaluate(async () => {
@@ -277,6 +361,63 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     const windowUrls = async () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((window) => window.webContents.getURL()).sort());
     const expectedWindows = ["app://openwhisper/index.html", "app://openwhisper/index.html?overlay=1"];
     await expect.poll(windowUrls).toEqual(expectedWindows);
+    const overlayPage = app.windows().find((candidate) => candidate.url().endsWith("?overlay=1"));
+    assert.ok(overlayPage);
+    await expect(overlayPage.locator(".window-titlebar")).toHaveCount(0);
+    assert.deepEqual(await overlayPage.evaluate(() => ({ width: innerWidth, height: innerHeight })), { width: 476, height: 68 });
+    assert.equal(await overlayPage.evaluate(async () => {
+      try { await window.openwhisper?.invoke("window_action", { action: "close" }); return false; }
+      catch { return true; }
+    }), true);
+    checks.push("recording overlay has no titlebar and cannot close the main window through IPC");
+    await page.evaluate(async () => {
+      await window.openwhisper?.invoke("save_preferences", {
+        changes: { show_idle_overlay: true },
+      });
+    });
+    const overlayVisible = async () =>
+      app.evaluate(({ BrowserWindow }) => {
+        const overlay = BrowserWindow.getAllWindows().find((window) =>
+          window.webContents.getURL().endsWith("?overlay=1"),
+        );
+        return overlay?.isVisible() ?? false;
+      });
+    const mainFocused = async () =>
+      app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows().find(
+          (window) =>
+            window.webContents.getURL() === "app://openwhisper/index.html",
+        )?.isFocused() ?? false,
+      );
+    const showMainWindow = async (show: boolean) =>
+      app.evaluate(({ BrowserWindow }, visible: boolean) => {
+        const main = BrowserWindow.getAllWindows().find(
+          (window) =>
+            window.webContents.getURL() === "app://openwhisper/index.html",
+        );
+        if (!main) throw new Error("The owned main window is missing.");
+        if (visible) {
+          main.show();
+          main.focus();
+        } else main.hide();
+      }, show);
+    await showMainWindow(true);
+    await expect.poll(mainFocused).toBe(true);
+    await expect.poll(overlayVisible).toBe(false);
+    await showMainWindow(false);
+    await expect.poll(overlayVisible).toBe(true);
+    await showMainWindow(true);
+    await expect.poll(mainFocused).toBe(true);
+    await expect.poll(overlayVisible).toBe(false);
+    const idleAfterFocusSwitch = validateCommandOutput(
+      "get_state",
+      await page.evaluate(() => window.openwhisper?.invoke("get_state", {})),
+    );
+    assert.equal(idleAfterFocusSwitch.status, "idle");
+    assert.equal(idleAfterFocusSwitch.preferences.show_idle_overlay, true);
+    checks.push(
+      "idle overlay hides for the focused main window and returns after focus changes without recording telemetry",
+    );
     await page.evaluate((url) => { window.open(url, "_blank"); }, target);
     await expect.poll(windowUrls).toEqual(expectedWindows);
     await page.evaluate((url) => {
@@ -286,7 +427,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     // Chromium correctly cancels the navigation. Playwright may retain a pending
     // navigation marker; inspect the actual unchanged document and a functioning
     // UI event before reopening the same private profile for later driver input.
-    assert.equal(await page.evaluate(() => document.querySelector(".sidebar-brand strong")?.textContent), "OpenWhisper Dev");
+    assert.equal(await page.evaluate(() => document.querySelector(".window-wordmark")?.textContent), "openwhisper");
     assert.equal(page.url(), "app://openwhisper/index.html");
     assert.equal(requests, 1);
     await page.evaluate(() => {
@@ -302,88 +443,61 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     app = await launch();
     page = await app.firstWindow();
     currentPage = page;
-    await expect(page.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev");
+    await expect(page.locator(".window-wordmark")).toHaveText("openwhisper");
+    await expect(page.getByRole("heading", { name: "Recording", exact: true })).toBeVisible();
 
-    await page.locator('[data-tab="general"]').click();
+    await page.getByRole("button", { name: /Vocabulary/ }).click();
+    await expect(page.locator("#page-title")).toHaveText("Text processing");
     const vocabulary = page.locator("#vocabulary");
+    const settingsUrl = page.url();
+    assert.equal(page.url(), settingsUrl, "Settings section navigation must preserve the trusted renderer URL.");
+    await expect(vocabulary).toBeInViewport();
     await vocabulary.fill("Kubernetes, Grüß Gott, 東京");
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#settings-dialog")).toBeVisible();
+    await expect(vocabulary).toHaveValue("Kubernetes, Grüß Gott, 東京");
+    await expect(page.locator("#settings-notice")).toBeVisible();
+    // The modal blocks pointer input to the titlebar; exercise its close handler directly.
+    await page.evaluate(() => document.querySelector<HTMLButtonElement>('[data-window-action="close"]')?.click());
+    await expect(page.locator("#settings-dialog")).toBeVisible();
+    await expect(vocabulary).toHaveValue("Kubernetes, Grüß Gott, 東京");
+    await expect(page.locator("#settings-notice")).toBeVisible();
     await page.locator("#save-vocabulary").click();
     await expect.poll(async () => validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.vocabulary).toBe("Kubernetes, Grüß Gott, 東京");
-    await vocabulary.focus();
-    const savedToggle = await page.locator('[data-pref="launch_at_login"]').elementHandle();
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#settings-dialog")).toBeHidden();
+    await expect(page.locator('.dictation-feature-card[data-settings-section="settings-vocabulary"]')).toBeFocused();
+    await openSettings(page, "recording");
+    const mode = page.locator('[data-pref="hold_to_record"]');
+    await mode.focus();
+    const savedToggle = await page.locator('[data-pref="show_idle_overlay"]').elementHandle();
     assert.ok(savedToggle);
     await page.evaluate(async () => { await window.openwhisper?.invoke("save_preferences", { changes: { hold_to_record: true } }); });
-    await expect(vocabulary).toBeFocused();
-    assert.equal(await savedToggle.evaluate((node) => node === document.querySelector('[data-pref="launch_at_login"]')), true);
-    await expect(page.locator('[data-pref="hold_to_record"]')).toHaveValue("true");
+    await expect(mode).toBeFocused();
+    assert.equal(await savedToggle.evaluate((node) => node === document.querySelector('[data-pref="show_idle_overlay"]')), true);
+    await expect(mode).toHaveValue("true");
+    await openSettings(page, "general");
     await page.locator('[data-ui-language="de"]').click();
     await expect(page.locator("#page-title")).toHaveText("Allgemein");
     await expect(page.locator('[data-ui-language="de"]')).toHaveAttribute("aria-pressed", "true");
-    await expect(page.locator("#vocabulary")).toHaveValue("Kubernetes, Grüß Gott, 東京");
-    await page.screenshot({ path: join(evidence, "dev-general-de.png") });
+    await screenshot(page, "dev-general-de.png");
+    await openSettings(page, "text");
+    await expect(vocabulary).toHaveValue("Kubernetes, Grüß Gott, 東京");
+    await openSettings(page, "general");
     await page.locator('[data-ui-language="en"]').click();
     await expect(page.locator("#page-title")).toHaveText("General");
-    await page.screenshot({ path: join(evidence, "dev-general-en.png") });
-    await page.locator('[data-tab="models"]').click();
-    await expect(page.locator("#processing-preview h2")).toHaveText("Text processing preview");
-    await expect(page.locator("#processing-enabled")).not.toBeChecked();
-    assert.equal(previewRequests, 0, "Opening optional controls must not contact a model server.");
-    await page.locator("#processing-endpoint").fill(`http://127.0.0.1:${address.port}/v1`);
-    await page.locator("#processing-model").fill("owned-model 日本語");
-    await page.locator("#processing-enabled").check();
-    await expect.poll(async () => {
-      const value = validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {})));
-      return value.local_processing;
-    }).toMatchObject({ enabled: true, model: "owned-model 日本語", endpoint: `http://127.0.0.1:${address.port}/v1` });
-    const enabledNode = await page.locator("#processing-enabled").elementHandle();
-    assert.ok(enabledNode);
-    await page.locator("#processing-input").fill(previewText);
-    await page.locator("#processing-send").click();
-    await expect(page.locator("#processing-result")).toHaveValue(previewResult);
-    await expect(page.locator("#processing-feedback")).toHaveText("Preview ready. Review it before using it.");
-    assert.equal(await enabledNode.evaluate((node) => node === document.querySelector("#processing-enabled")), true);
-    const body = z.object({ model: z.string(), messages: z.array(z.object({ role: z.string(), content: z.string() })) }).parse(previewBodies[0]);
-    assert.equal(body.model, "owned-model 日本語");
-    assert.equal(body.messages.find((message) => message.role === "user")?.content, previewText);
-    assert.equal(await page.locator("#processing-preview script").count(), 0);
-    assert.equal(await page.locator("#processing-preview img").count(), 0);
-    const previewState = validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {})));
-    assert.equal(previewState.transcript, "");
-    assert.deepEqual(previewState.history, []);
-    const featureFile = join(profile, "config", "settings", "local-processing.json");
-    assert.equal((await lstat(featureFile)).mode & 0o777, 0o600);
-    assert.equal((await readFile(featureFile, "utf8")).includes(previewText), false);
-    assert.equal((await readFile(featureFile, "utf8")).includes(previewResult), false);
-    previewMode = "hold";
-    await page.locator("#processing-send").click();
-    await expect.poll(() => previewRequests).toBe(2);
-    await page.locator("#processing-cancel").click();
-    await expect(page.locator("#processing-feedback")).toHaveText("Text processing cancelled; your dictation is unchanged");
-    await expect(page.locator("#processing-input")).toHaveValue(previewText);
-    previewMode = "normal";
-    await page.locator("#processing-send").click();
-    await expect(page.locator("#processing-result")).toHaveValue(previewResult);
-    await expect.poll(() => previewRequests).toBe(3);
-    previewMode = "reject";
-    await page.locator("#processing-send").click();
-    await expect(page.locator("#processing-feedback")).toHaveText("The local server rejected the request; check its model and authentication settings");
-    await expect(page.locator("#processing-input")).toHaveValue(previewText);
-    assert.equal((await page.locator("body").textContent())?.includes("Owned private diagnostic"), false);
-    await page.locator('[data-ui-language="de"]').click();
-    await expect(page.locator("#processing-preview h2")).toHaveText("Textverarbeitung ausprobieren");
-    await expect(page.locator("#processing-input")).toHaveValue(previewText);
-    await page.locator("#processing-preview h2").scrollIntoViewIfNeeded();
-    await page.screenshot({ path: join(evidence, "dev-processing-profile-de.png") });
-    await page.locator("#processing-result").scrollIntoViewIfNeeded();
-    await page.screenshot({ path: join(evidence, "dev-processing-de.png") });
-    await page.locator('[data-ui-language="en"]').click();
-    await expect(page.locator("#processing-preview h2")).toHaveText("Text processing preview");
-    await page.locator("#processing-preview h2").scrollIntoViewIfNeeded();
-    await page.screenshot({ path: join(evidence, "dev-processing-profile-en.png") });
-    await page.locator("#processing-result").scrollIntoViewIfNeeded();
-    await page.screenshot({ path: join(evidence, "dev-processing-en.png") });
-    assert.equal(await page.locator("main").evaluate((main) => main.scrollWidth <= main.clientWidth + 1), true);
-    checks.push("actual Dev model-preview IPC, intact multilingual request, escaped renderer-only result, manual cancel/retry, categorical HTTP error, private 0600 profile and EN/DE");
+    await screenshot(page, "dev-general-en.png");
+    await openSettings(page, "text");
+    await expect(page.locator("#vocabulary")).toHaveValue("Kubernetes, Grüß Gott, 東京");
+    await expect(page.locator("#snippet-form")).toBeVisible();
+    await expect(page.locator("#processing-preview")).toHaveCount(0);
+    await expect(page.locator('nav [data-tab="models"], nav [data-tab="snippets"]')).toHaveCount(0);
+    await screenshot(page, "dev-text-processing.png");
+    await openSettings(page, "history");
+    await expect(page.locator('[data-command="show_transcripts_folder"]')).toBeVisible();
+    await screenshot(page, "dev-history-settings.png");
+    assert.equal(requests, 1, "Settings must not contact an optional model server.");
+    checks.push("vocabulary and snippets share Text processing; no optional model preview or automatic provider traffic; history exposes its actual folder action");
     const saved = validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {})));
     assert.equal(saved.preferences.hold_to_record, true);
     assert.equal(saved.preferences.vocabulary, "Kubernetes, Grüß Gott, 東京");
@@ -393,55 +507,48 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     const restarted = await launch();
     const reopened = await restarted.firstWindow();
     currentPage = reopened;
-    await expect(reopened.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev");
+    await expect(reopened.locator(".window-wordmark")).toHaveText("openwhisper");
     const restored = validateCommandOutput("get_state", await reopened.evaluate(() => window.openwhisper?.invoke("get_state", {})));
     assert.deepEqual(restored.preferences, saved.preferences);
     assert.deepEqual(restored.local_processing, saved.local_processing);
-    await reopened.locator('[data-tab="models"]').click();
-    await expect(reopened.locator("#processing-enabled")).toBeChecked();
-    await expect(reopened.locator("#processing-input")).toHaveValue("");
-    await expect(reopened.locator("#processing-result")).toHaveValue("");
+    await openSettings(reopened, "text");
+    await expect(reopened.locator("#vocabulary")).toHaveValue("Kubernetes, Grüß Gott, 東京");
+    await expect(reopened.locator("#processing-preview")).toHaveCount(0);
     assert.equal(restored.transcript, "");
     assert.deepEqual(restored.history, []);
-    await restarted.close();
-    application = undefined;
-    await writeFile(featureFile, "{owned invalid optional profile", { mode: 0o600 });
-    const recoveredApp = await launch();
-    const recoveredPage = await recoveredApp.firstWindow();
-    currentPage = recoveredPage;
-    await expect(recoveredPage.locator(".sidebar-brand strong")).toHaveText("OpenWhisper Dev");
-    const recovered = validateCommandOutput("get_state", await recoveredPage.evaluate(() => window.openwhisper?.invoke("get_state", {})));
-    assert.deepEqual(recovered.preferences, saved.preferences);
-    assert.equal(recovered.local_processing?.enabled, false);
-    assert.equal(recovered.local_processing_invalid_profile, true);
-    assert.equal(await readFile(featureFile, "utf8"), "{owned invalid optional profile");
-    await recoveredPage.locator('[data-tab="models"]').click();
-    await expect(recoveredPage.locator("#processing-profile-warning")).toBeVisible();
-    await expect(recoveredPage.locator("#processing-enabled")).not.toBeChecked();
-    await recoveredPage.locator("#processing-model").fill("owned repaired profile");
-    await recoveredPage.locator("#processing-model").press("Tab");
-    await expect(recoveredPage.locator("#processing-profile-warning")).toBeHidden();
-    assert.equal((await readFile(featureFile, "utf8")).includes("owned repaired profile"), true);
-    assert.equal(previewRequests, 4, "Corrupt profile recovery must not silently send any text.");
-    checks.push("actual Dev startup preserves invalid optional bytes with disabled defaults; explicit edit repairs only its profile");
     assert.deepEqual(await Promise.all(stableFiles.map(hash)), stableBefore);
     const persisted = join(profile, "config", "settings", "preferences.json");
     assert.equal((await lstat(persisted)).mode & 0o777, 0o600);
+    await reopened.locator("#close-settings").click();
+    await expect(reopened.locator("#settings-dialog")).toBeHidden();
+    await reopened.locator('[data-window-action="close"]').click();
+    const mainWindowState = () => restarted.evaluate(({ BrowserWindow }) => {
+      const main = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL() === "app://openwhisper/index.html");
+      return main ? { visible: main.isVisible(), destroyed: main.isDestroyed() } : undefined;
+    });
+    await expect.poll(mainWindowState).toEqual({ visible: false, destroyed: false });
+    assert.equal(restarted.process().exitCode, null);
+    await restarted.evaluate(({ app }) => app.emit("activate"));
+    await expect.poll(mainWindowState).toEqual({ visible: true, destroyed: false });
+    await Promise.all([restarted.waitForEvent("close"), restarted.evaluate(({ app }) => app.quit())]);
+    application = undefined;
+    checks.push("custom close hides the main window, activate reopens it, and explicit application quit shuts down cleanly");
     checks.push("EN/DE patches, focused editor and stable toggle node, restart persistence, stable sentinels unchanged");
     await writeFile(join(evidence, "result.json"), JSON.stringify({
-      result: "PASS", scope: "P1/P5 owned development UI with fake model protocol; no dictation or real model quality parity", checks,
+      result: "PASS", scope: "Owned development UI and real preference IPC; no microphone, physical input or model quality test", checks,
       root, display, stableBefore, stableAfter: await Promise.all(stableFiles.map(hash)),
       driverNote: "Canceled external navigation leaves Playwright pending; actual URL, DOM and General click were verified before private profile restart.",
-      preferenceFileMode: "0600", screenshotFiles: ["dev-general-de.png", "dev-general-en.png", "dev-about.png", "dev-models.png", "dev-processing-profile-de.png", "dev-processing-profile-en.png", "dev-processing-de.png", "dev-processing-en.png"],
+      preferenceFileMode: "0600", screenshotFiles: ["dev-dictation.png", "dev-model-drawer.png", "dev-history-rail.png", "dev-general-de.png", "dev-general-en.png", "dev-about.png", "dev-general.png", "dev-text-processing.png", "dev-history-settings.png"],
     }, null, 2));
   } catch (error: unknown) {
     await writeFile(join(evidence, "failure.json"), JSON.stringify({
       checks, url: currentPage?.url(), requests,
-      body: await currentPage?.locator("body").textContent({ timeout: 1000 }).catch(() => "unavailable"),
-      message: error instanceof Error ? error.message : "Unknown owned UI failure",
+      errorType: error instanceof Error ? error.name : "Unknown owned UI failure",
+      stack: error instanceof Error ? error.stack?.split("\n").filter((line) => line.startsWith("    at ")).slice(0, 8) : [],
     }, null, 2));
-    await currentPage?.screenshot({ path: join(evidence, "failure.png"), timeout: 1000 }).catch(() => undefined);
-    throw error;
+    if (currentPage) await screenshot(currentPage, "failure.png").catch(() => undefined);
+    // Playwright's full error includes the live accessibility tree and device labels.
+    throw new Error("Owned UI check failed; inspect the bounded failure receipt and masked screenshot.");
   } finally {
     await application?.close();
     xvfb.kill("SIGTERM");

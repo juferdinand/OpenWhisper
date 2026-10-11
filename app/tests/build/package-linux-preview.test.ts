@@ -11,6 +11,12 @@ import { SPEECH_ENTRY_FILES } from "../../src/services/speech/speech-entry-graph
 
 const supportedHost = process.platform === "linux" && process.arch === "x64";
 const nobleSource = new URL("../../node_modules/@noble/hashes/", import.meta.url);
+const rendererNotices = {
+  "licenses/elevenlabs-ui-LICENSE.txt": "Fixture ElevenLabs UI notice; inert test text",
+  "licenses/inter-LICENSE.txt": "Fixture font license",
+  "licenses/instrument-sans-OFL.txt": "Fixture Instrument Sans notice; inert test text",
+  "licenses/newsreader-OFL.txt": "Fixture Newsreader notice; inert test text",
+} as const;
 
 async function fixture() {
   const base = await mkdtemp(join(tmpdir(), "openwhisper-package-preview-")), root = join(base, "source/app");
@@ -45,9 +51,9 @@ async function fixture() {
   await write("dist/resources/development-build.json", build);
   await write("dist/resources/VERSION", "0.3.0\n");
   await write("dist/ui/app-icon.png", "Fixture existing icon");
-  await write("dist/ui/fonts/LICENSE.txt", "Fixture font license");
+  for (const [path, text] of Object.entries(rendererNotices)) await write(`dist/ui/${path}`, text);
   await write("../LICENSE", "Fixture OpenWhisper license");
-  return { base, root, metadata, build, write, output: join(base, "preview") };
+  return { base, root, metadata, build, write, output: join(base, "preview"), rendererNotices };
 }
 
 async function stableRecording(input: Awaited<ReturnType<typeof fixture>>) {
@@ -92,6 +98,8 @@ test("preview stages the runtime, exact app metadata, installed optional depende
     const app = join(result.directory, "resources/app");
     assert.equal(await readFile(join(app, "package.json"), "utf8"), input.metadata);
     assert.equal(await readFile(join(app, "dist/resources/development-build.json"), "utf8"), input.build);
+    for (const [path, text] of Object.entries(input.rendererNotices))
+      assert.deepEqual(await readFile(join(app, "dist/ui", path)), Buffer.from(text));
     assert.equal(await readFile(join(app, "node_modules/@fixture/linux-x64/inert.node"), "utf8"), "Inert fixture addon; never executed");
     assert.equal((await lstat(join(result.directory, "openwhisper-dev"))).mode & 0o777, 0o755);
     assert.equal((await lstat(join(input.root, "node_modules/electron/dist/electron"))).mode & 0o777, 0o755);

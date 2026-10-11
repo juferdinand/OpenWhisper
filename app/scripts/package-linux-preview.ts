@@ -169,7 +169,7 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
       !(await lstat(join(root, "dist/cli/linux-supervisor-bootstrap.js"))).isFile())) throw new Error("Stable packaging requires its compiled Linux supervisor entry.");
   const libcFloor = await nativeLibcFloor(root, recording);
   const noticeInputs = [[resolve(root, "../LICENSE"), "OpenWhisper-LICENSE"],
-    [join(root, "dist/ui/fonts/LICENSE.txt"), "Inter-LICENSE.txt"],
+    [join(root, "dist/ui/licenses/inter-LICENSE.txt"), "Inter-LICENSE.txt"],
     [join(root, "node_modules/@noble/hashes/LICENSE"), "noble-hashes-LICENSE"],
     ...(metadata.dependencies["tar"] ? [[join(root, "node_modules/tar/LICENSE.md"), "tar-LICENSE.md"]] : []),
     ...(recording ? [[join(root, "vendor/whisper.cpp/LICENSE"), "whisper.cpp-LICENSE"],
@@ -229,9 +229,9 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
   await mkdir(iconDirectory, { recursive: true });
   await mkdir(docDirectory, { recursive: true });
   await writeFile(join(desktopDirectory, `${appId}.desktop`), [
-    "[Desktop Entry]", "Type=Application", `Name=${identity.productName}`, `Comment=${stable ? "Local dictation validation package" : "Isolated local development preview"}`,
+    "[Desktop Entry]", "Type=Application", `Name=${identity.productName}`, `Comment=${stable ? "Local speech recognition validation package" : "Isolated local development preview"}`,
     `Exec=/opt/${executableName}/${stable ? "openwhisper-launch" : `${executableName} --dev`}`, `Icon=${appId}`, "Terminal=false",
-    "Categories=AudioVideo;Audio;", `StartupWMClass=${stable ? appId : executableName}`, "",
+    "Categories=AudioVideo;Audio;", `StartupWMClass=${appId}`, "",
   ].join("\n"));
   await cp(join(root, "dist/ui/app-icon.png"), join(iconDirectory, `${appId}.png`));
   await cp(join(notices, "OpenWhisper-LICENSE"), join(docDirectory, "copyright"));

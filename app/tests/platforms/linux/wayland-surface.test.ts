@@ -44,8 +44,8 @@ test("surface frame bounds require fixed PNG metadata and at most two contained 
   }
   assert.equal(surfaceRegionsSchema.safeParse([{ x: 0, y: 0, width: WIDTH, height: HEIGHT }]).success, true);
   for (const input of [[...regions, regions[0]], [{ x: -1, y: 0, width: 1, height: 1 }],
-    [{ x: 0, y: 0, width: 0, height: 1 }], [{ x: 359, y: 0, width: 2, height: 1 }],
-    [{ x: 0, y: 63, width: 1, height: 2 }]]) assert.equal(surfaceRegionsSchema.safeParse(input).success, false);
+    [{ x: 0, y: 0, width: 0, height: 1 }], [{ x: WIDTH - 1, y: 0, width: 2, height: 1 }],
+    [{ x: 0, y: HEIGHT - 1, width: 1, height: 2 }]]) assert.equal(surfaceRegionsSchema.safeParse(input).success, false);
 });
 
 test("surface replies exclude nonfinite or out of bounds pointer coordinates", () => {

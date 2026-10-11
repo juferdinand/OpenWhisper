@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { lstat, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
@@ -171,18 +171,31 @@ export async function finalizeLinuxRelease(
     throw new Error("LINUX_RELEASE_SIGNED_ARTIFACT_DIFFERS_FROM_CONSTRUCTION");
   }
   const [debianSignature, imageSignature] = signed;
+  const notes = await readFile(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "../../.github/release-notes.md",
+    ),
+  );
+  if (notes.byteLength > UPDATE_POLICY_LIMITS.notesBytes)
+    throw new Error("LINUX_RELEASE_NOTES_OVERSIZED");
+  const releaseNotes = notes.toString("utf8");
+  if (!Buffer.from(releaseNotes, "utf8").equals(notes))
+    throw new Error("LINUX_RELEASE_NOTES_INVALID_UTF8");
   const feed = {
     version,
-    notes: `OpenWhisper ${version}. See the GitHub release for changes and platform notes.`,
+    notes: releaseNotes,
     pub_date: new Date().toISOString(),
     platforms: {
       "linux-x86_64-appimage": {
         url: `${LINUX_UPDATE_REPOSITORY}/releases/download/v${version}/${imageName}`,
         signature: imageSignature.signature,
+        size: imageInfo.bytes,
       },
       "linux-x86_64-deb": {
         url: `${LINUX_UPDATE_REPOSITORY}/releases/download/v${version}/${debianName}`,
         signature: debianSignature.signature,
+        size: debianInfo.bytes,
       },
     },
   };

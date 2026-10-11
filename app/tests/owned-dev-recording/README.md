@@ -257,7 +257,7 @@ utility paints its frames with keyboard mode NONE. The driver identifies that
 original utility and its loaded libraries, reads the actual compositor output
 bounds, and captures the verified outer KWin surface through Xlib using pinned
 Koffi 3.3.2. These desktop PNGs include the native surface, rather than only the
-offscreen renderer. Pointer coordinates combine the 360×64 bottom-centered
+offscreen renderer. Pointer coordinates combine the 476×68 bottom-centered
 surface with the existing shared buttons' actual DOM bounds.
 
 The case checks default-hidden and idle visibility, overlay preference refusal,

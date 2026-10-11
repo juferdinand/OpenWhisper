@@ -198,7 +198,7 @@ export async function stageMacPreview(options: MacPreviewStageOptions): Promise<
   await files(runtime, true); await files(join(root, "dist"));
   const selected = await dependencies(root, metadata.dependencies, options.architecture);
   const notices = [[join(distribution, "LICENSE"), "Electron-LICENSE"], [join(distribution, "LICENSES.chromium.html"), "LICENSES.chromium.html"],
-    [resolve(root, "../LICENSE"), "OpenWhisper-LICENSE"], [join(root, "dist/ui/fonts/LICENSE.txt"), "Inter-LICENSE.txt"],
+    [resolve(root, "../LICENSE"), "OpenWhisper-LICENSE"], [join(root, "dist/ui/licenses/inter-LICENSE.txt"), "Inter-LICENSE.txt"],
     [join(root, "node_modules/@noble/hashes/LICENSE"), "noble-hashes-LICENSE"],
     ...(metadata.dependencies["tar"] ? [[join(root, "node_modules/tar/LICENSE.md"), "tar-LICENSE.md"]] : []),
     [join(root, "vendor/whisper.cpp/LICENSE"), "whisper.cpp-LICENSE"], [join(root, "native/build-cpu/build-manifest.json"), "speech-cpu-unsigned-build.json"],

@@ -16,7 +16,7 @@ const CONTROL_REGIONS = `(() => ["record", "cancel"].flatMap((id) => {
       getComputedStyle(button).visibility !== "visible") return [];
   const rect = button.getBoundingClientRect();
   const x = Math.max(0, Math.floor(rect.x)), y = Math.max(0, Math.floor(rect.y));
-  const right = Math.min(360, Math.ceil(rect.right)), bottom = Math.min(64, Math.ceil(rect.bottom));
+  const right = Math.min(${WIDTH}, Math.ceil(rect.right)), bottom = Math.min(${HEIGHT}, Math.ceil(rect.bottom));
   return right > x && bottom > y ? [{x, y, width: right - x, height: bottom - y}] : [];
 }))()`;
 
@@ -52,7 +52,7 @@ export class WaylandRecordingOverlay {
   constructor(private readonly renderer: BrowserWindow, entry: string,
     private readonly unavailable: () => void) {
     // Renderer setup can fail synchronously; do it before allocating the helper.
-    renderer.webContents.setFrameRate(15);
+    renderer.webContents.setFrameRate(60);
     renderer.webContents.stopPainting();
     this.child = utilityProcess.fork(entry, [], {
       serviceName: "OpenWhisper Wayland Recording Surface", execArgv: [], stdio: "ignore",

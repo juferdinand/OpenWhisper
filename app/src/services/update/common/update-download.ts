@@ -39,10 +39,12 @@ function candidate(input: UpdateDownloadInput): LinuxUpdateCandidate | MacosUpda
       if (value.repository !== input.repository) return fail("INVALID_INPUT");
       return projectMacosUpdateRelease({ repository: input.repository, currentVersion: input.currentVersion,
         release: { tag_name: `v${value.version}`, html_url: value.pageURL, body: value.notes, draft: false, prerelease: false,
-          assets: [{ name: value.assetName, browser_download_url: value.assetURL }] } });
+          assets: [{ name: value.assetName, browser_download_url: value.assetURL,
+            ...(value.details.size === undefined ? {} : { size: value.details.size }) }] } });
     }
     const projected = projectLinuxUpdateFeed({ sourceURL: value.feedURL, package: value.package, currentVersion: input.currentVersion,
-      feed: { version: value.version, notes: value.notes, platforms: { [value.target]: { url: value.assetURL, signature: value.signature } } } });
+      feed: { version: value.version, notes: value.notes, platforms: { [value.target]: { url: value.assetURL, signature: value.signature,
+        ...(value.details.size === undefined ? {} : { size: value.details.size }) } } } });
     if (projected.assetName !== value.assetName || projected.pageURL !== value.pageURL) return fail("INVALID_INPUT");
     return projected;
   } catch { return fail("INVALID_INPUT"); }

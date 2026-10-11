@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { access, lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
@@ -9,13 +9,38 @@ const packageRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const fixtureRoot = join(packageRoot, "tests", "owned-ui");
 const id = randomUUID();
 const args = process.argv.slice(2);
-if (args.length !== 0 && (args.length !== 2 || args[0] !== "--output" || !args[1])) {
-  throw new Error("Usage: node --import tsx scripts/test-owned-ui.ts [--output NEW_DIRECTORY]");
+let outputArgument: string | undefined;
+let packageDirectoryArgument: string | undefined;
+for (let index = 0; index < args.length; index += 2) {
+  const option = args[index];
+  const value = args[index + 1];
+  if (!value || (option !== "--output" && option !== "--package-directory") ||
+      (option === "--package-directory" && !isAbsolute(value)) ||
+      (option === "--output" ? outputArgument !== undefined : packageDirectoryArgument !== undefined)) {
+    throw new Error("Usage: node --import tsx scripts/test-owned-ui.ts [--output ABSOLUTE_NEW_DIRECTORY] [--package-directory ABSOLUTE_DEV_PACKAGE]");
+  }
+  if (option === "--output") outputArgument = value;
+  else packageDirectoryArgument = value;
 }
 if (process.platform !== "linux" || process.arch !== "x64" || process.getuid?.() === 0) {
   throw new Error("Run the owned UI launcher on x86_64 Linux as an ordinary user.");
 }
-const output = resolve(args[1] ?? join(packageRoot, ".local", "owned-ui", id));
+const output = resolve(outputArgument ?? join(packageRoot, ".local", "owned-ui", id));
+let packagedDev: string | undefined;
+let packagedDevManifest: Record<string, string> | undefined;
+if (packageDirectoryArgument) {
+  const candidate = resolve(packageDirectoryArgument);
+  const metadata = await lstat(candidate);
+  if (!metadata.isDirectory() || metadata.isSymbolicLink() || await realpath(candidate) !== candidate ||
+      basename(candidate) !== "OpenWhisper-Dev-Linux-x64") {
+    throw new Error("The packaged Dev input must be the exact OpenWhisper-Dev-Linux-x64 directory.");
+  }
+  for (const path of ["openwhisper-dev", "resources/app/dist/main/index.js", "resources/app/dist/preload/index.cjs"]) {
+    const item = await lstat(join(candidate, path));
+    if (!item.isFile() || item.isSymbolicLink()) throw new Error("The packaged Dev input is incomplete or unsafe.");
+  }
+  packagedDev = candidate;
+}
 await mkdir(dirname(output), { recursive: true, mode: 0o700 });
 await mkdir(output, { recursive: false, mode: 0o700 });
 const container = `openwhisper-owned-ui-${id}`;
@@ -90,6 +115,7 @@ try {
     await access(join(packageRoot, path));
   }
   const distBefore = await fileManifest(join(packageRoot, "dist"));
+  if (packagedDev) packagedDevManifest = await fileManifest(packagedDev);
   const policyBytes = await pinnedDownload(policy.upstream.url, policy.upstream.sha256, join(output, "moby-default-seccomp.json"));
   await pinnedDownload(policy.upstream.licenseUrl, policy.upstream.licenseSha256, join(output, "LICENSE-moby"));
   const upstream = z.object({
@@ -114,6 +140,7 @@ try {
   for (const path of ["dist", "src", "tests", "node_modules", "package.json", "package-lock.json", "tsconfig.json"]) {
     await required(["cp", join(packageRoot, path), `${container}:/owned-app/`]);
   }
+  if (packagedDev) await required(["cp", packagedDev, `${container}:/owned-app/`]);
   if (JSON.stringify(await fileManifest(join(packageRoot, "src"))) !== JSON.stringify(source)) {
     throw new Error("Application source changed while copying the owned acceptance inputs.");
   }
@@ -132,18 +159,22 @@ try {
   console.log("Running only the Dev UI on a private display with Chromium sandbox enabled.");
   const run = await docker(["exec", "--user", "1000:1000", "--env", "DEBUG=pw:browser",
     "--env", "OPENWHISPER_OWNED_UI_TEST=1", "--env", "OPENWHISPER_UI_EVIDENCE=/evidence",
+    ...(packagedDev ? ["--env", "OPENWHISPER_PACKAGED_DEV_DIRECTORY=/owned-app/OpenWhisper-Dev-Linux-x64"] : []),
     container, "/opt/node/bin/node", "--import", "tsx", "--test", "tests/application/electron-ui.test.ts"], 180_000);
   await required(["cp", `${container}:/evidence/.`, output]);
   if (run.code !== 0) throw new Error(`Owned Electron UI failed; inspect ${output}.`);
   if (JSON.stringify(await fileManifest(join(packageRoot, "dist"))) !== JSON.stringify(distBefore)) {
     throw new Error("Application build changed during owned acceptance; rerun the frozen candidate.");
   }
-  await writeFile(join(output, "input-provenance.json"), JSON.stringify({ image, dist: distBefore, source,
+  if (packagedDev && JSON.stringify(await fileManifest(packagedDev)) !== JSON.stringify(packagedDevManifest)) {
+    throw new Error("The packaged Dev input changed during owned acceptance.");
+  }
+  await writeFile(join(output, "input-provenance.json"), JSON.stringify({ image, dist: distBefore, source, packagedDev: packagedDevManifest,
     electron: await sha(join(packageRoot, "node_modules/electron/dist/electron")),
     test: await sha(join(packageRoot, "tests/application/electron-ui.test.ts")),
     launcher: await sha(fileURLToPath(import.meta.url)),
     policy: await sha(join(fixtureRoot, "seccomp.json")), dockerfile: await sha(join(fixtureRoot, "Dockerfile")),
-    nodeVersion: "24.21.0", scope: "Owned P1/P5 Dev UI and fake model protocol; no microphone, clipboard, trigger, dictation or real model quality acceptance",
+    nodeVersion: "24.21.0", scope: "Playwright-instrumented owned Dev UI preferences, security and profile isolation; the pinned Playwright loader removes debug switches from app argv; no real login session, microphone, clipboard, trigger, dictation or model quality acceptance",
   }, null, 2), { mode: 0o600 });
   result = "PASS";
 } finally {

@@ -385,7 +385,7 @@ try {
     assert.deepEqual(await inventory(join(archiveRoot, "opt/openwhisper"), "", archiveModes), packageBefore);
     assert.deepEqual(archiveModes, packageModes);
     const expected = Object.fromEntries(Object.entries(packageBefore).map(([path, artifact]) => [`opt/openwhisper/${path}`, artifact]));
-    const desktop = "[Desktop Entry]\nType=Application\nName=OpenWhisper\nComment=Local dictation validation package\nExec=/opt/openwhisper/openwhisper\nIcon=io.github.whisperfree\nTerminal=false\nCategories=AudioVideo;Audio;\nStartupWMClass=io.github.whisperfree\n";
+    const desktop = "[Desktop Entry]\nType=Application\nName=OpenWhisper\nComment=Local speech recognition validation package\nExec=/opt/openwhisper/openwhisper\nIcon=io.github.whisperfree\nTerminal=false\nCategories=AudioVideo;Audio;\nStartupWMClass=io.github.whisperfree\n";
     const desktopPath = "usr/share/applications/io.github.whisperfree.desktop";
     const expectedDesktop = supervisedLaunch ? desktop.replace("Exec=/opt/openwhisper/openwhisper\n", "Exec=/opt/openwhisper/openwhisper-launch\n") : desktop;
     assert.equal(await readFile(join(archiveRoot, desktopPath), "utf8"), expectedDesktop);

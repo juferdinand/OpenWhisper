@@ -172,6 +172,8 @@ test(
         });
         assert.equal(candidate.version, version);
         assert.equal(candidate.package, kind);
+        assert.ok(candidate.details.highlights.length > 0);
+        assert.equal(candidate.details.size, (await lstat(join(directory, candidate.assetName))).size);
         assert.equal(
           candidate.assetName,
           kind === "deb" ? debianName : imageName,
@@ -186,6 +188,8 @@ test(
           ).trim(),
         );
       }
+      const publishedNotes = JSON.parse(await readFile(join(directory, "latest.json"), "utf8")) as { notes: string };
+      assert.match(publishedNotes.notes, /^## What's new in OpenWhisper\s/m);
       const checksums = await readFile(join(directory, "SHA256SUMS"), "utf8");
       const checksumNames = new Set(
         checksums

@@ -51,6 +51,14 @@ test("legacy Linux catalog and macOS capability snapshots remain valid without a
   assert.equal(appStateSchema.safeParse({ ...state(), platform: "macos" }).success, false);
 });
 
+test("microphone labels and recommended model IDs are optional validated state fields", () => {
+  const enriched = { ...state(), microphone_labels: [{ id: "alsa_input.card_1", name: "USB Microphone" }], recommended_models: ["tiny"] };
+  assert.deepEqual(appStateSchema.parse(enriched), enriched);
+  assert.equal(appStateSchema.safeParse({ ...enriched, microphone_labels: [{ id: "", name: "USB Microphone" }] }).success, false);
+  assert.deepEqual(validateCommandInput("window_action", { action: "minimize" }), { action: "minimize" });
+  assert.throws(() => validateCommandInput("window_action", { action: "quit" }));
+});
+
 test("optional CPU and GPU device labels are bounded plain hardware names", () => {
   const valid = { ...state(), cpu_device: "AMD Ryzen 5 5600X", gpu_device: "NVIDIA GeForce RTX 3060" };
   assert.deepEqual(appStateSchema.parse(valid), valid);
@@ -73,8 +81,22 @@ test("schema-derived command maps cover all current renderer actions", async () 
     "enable_paste", "disable_paste", "enable_shortcut", "desktop_shortcut", "clear_shortcut",
     "retry_transcription", "discard_recovery", "toggle_recording", "cancel_recording", "check_updates", "install_update",
   ]) assert.doesNotThrow(() => validateCommandName(name));
-  assert.equal(Object.keys(commandInputSchemas).length, 32);
+  assert.equal(Object.keys(commandInputSchemas).length, 34);
   assert.deepEqual(Object.keys(commandOutputSchemas).sort(), Object.keys(commandInputSchemas).sort());
+});
+
+test("update metadata and project links are bounded fixed capabilities", () => {
+  assert.deepEqual(validateCommandInput("open_project_link", { target: "repository" }), { target: "repository" });
+  for (const target of ["https://attacker.invalid", "file:///etc/passwd", "release/0.3.1", "unknown", null]) {
+    assert.throws(() => validateCommandInput("open_project_link", { target }));
+  }
+  const valid = { ...state(), updates: { ...state().updates, status: "available", version: "0.3.1",
+    details: { highlights: ["Local speech recognition", "Keyboard improvements"], size: 1024 } } };
+  assert.deepEqual(appStateSchema.parse(valid), valid);
+  for (const details of [{ highlights: ["x".repeat(513)] }, { highlights: Array.from({ length: 6 }, () => "item") },
+    { highlights: [], size: 0 }, { highlights: [], size: Number.MAX_SAFE_INTEGER + 1 }]) {
+    assert.equal(appStateSchema.safeParse({ ...valid, updates: { ...valid.updates, details } }).success, false);
+  }
 });
 
 test("unknown commands, shell/path authority and extra arguments are rejected", () => {

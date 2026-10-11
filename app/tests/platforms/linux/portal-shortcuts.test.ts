@@ -94,6 +94,11 @@ test("binding consumes the early Response signal and renders only the confirmed 
   const { bus, capture, service } = await enabled();
   assert.deepEqual(bus.methods.map((value) => value.member), ["Get", "Register", "CreateSession", "BindShortcuts"]);
   assert.deepEqual(parseBusValues(bus.methods.find((value) => value.member === "Register")!.body)[0], text("io.github.whisperfree.dev"));
+  const binding = parseBusValues(bus.methods.find((value) => value.member === "BindShortcuts")!.body)[1];
+  assert.ok(binding?.type === "a");
+  const shortcut = binding.value[0];
+  assert.ok(shortcut?.type === "r");
+  assert.deepEqual(get(shortcut.value[1], "description"), text("Start or stop recording"));
   assert.equal(service.state().result, "ENABLED"); assert.equal(capture.started, 0);
   bus.edge("Activated", bus.session, ":1.99"); bus.edge("Activated", "/foreign/session"); await delay(5);
   assert.equal(capture.started, 0);

@@ -771,7 +771,8 @@ jobs:
               test "$(jq -er .head_sha "$RUNNER_TEMP/mac-handoff-producer-run.json")" = "$source_commit"
             else
               base_sha="$(jq -er '.pull_requests | select(length == 1) | .[0].base.sha' "$RUNNER_TEMP/mac-handoff-producer-run.json")"
-              head_sha="$(jq -er '.pull_requests | select(length == 1) | .[0].head.sha' "$RUNNER_TEMP/mac-handoff-producer-run.json")"
+              # PR metadata follows later pushes; the run's head SHA identifies the original input.
+              head_sha="$(jq -er '.head_sha' "$RUNNER_TEMP/mac-handoff-producer-run.json")"
               gh api "repos/$GITHUB_REPOSITORY/commits/$source_commit" > "$RUNNER_TEMP/mac-handoff-producer-source.json"
               jq -e --arg source "$source_commit" --arg base "$base_sha" --arg head "$head_sha" '
                 .sha == $source and ([.parents[].sha] == [$base, $head])

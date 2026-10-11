@@ -134,7 +134,7 @@ export class PortalShortcuts {
         const returned = field(created, "session_handle");
         if (returned?.type !== "s" || returned.value !== session) throw new BusFailure("INVALID_FRAME");
         const list: BusValue = { type: "a", element: "(sa{sv})", value: [{ type: "r", value: [string("dictate"),
-          dictionary({ description: string("Start or stop dictation"), preferred_trigger: string("CTRL+ALT+space") })] }] };
+          dictionary({ description: string("Start or stop recording"), preferred_trigger: string("CTRL+ALT+space") })] }] };
         const bound = await this.request(owner, "BindShortcuts", [object(session), list, string("")], {}, setup.signal);
         const label = description(field(bound, "shortcuts")); this.publish({ label, result: label ? "ENABLED" : "UNASSIGNED" });
       } catch (error: unknown) {

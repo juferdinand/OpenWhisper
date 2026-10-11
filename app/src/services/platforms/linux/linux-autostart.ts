@@ -104,9 +104,11 @@ function interpret(bytes: Buffer, appId: LinuxApplicationId): { requested: boole
   const productName = appId === "io.github.whisperfree.dev" ? "OpenWhisper Dev" : "OpenWhisper";
   if (fields.get("Type") !== "Application" || fields.get("Name") !== productName) return fail("CONFLICT");
   if (fields.size === 3 && fields.get("Hidden") === "true") return { requested: false };
-  const fixed = { Comment: "Free, local dictation", Icon: appId, StartupWMClass: appId, Terminal: "false" };
-  if (Object.entries(fixed).some(([key, value]) => fields.get(key) !== value) || !fields.has("Exec") ||
-      [...fields.keys()].some((key) => !["Type", "Name", "Exec", ...Object.keys(fixed), "Hidden", "X-GNOME-Autostart-enabled"].includes(key))) return fail("CONFLICT");
+  const fixed = { Icon: appId, StartupWMClass: appId, Terminal: "false" };
+  const recognizedComments = new Set(["Free, local speech recognition", "Free, local dictation"]);
+  if (Object.entries(fixed).some(([key, value]) => fields.get(key) !== value) ||
+      !recognizedComments.has(fields.get("Comment") ?? "") || !fields.has("Exec") ||
+      [...fields.keys()].some((key) => !["Type", "Name", "Exec", "Comment", ...Object.keys(fixed), "Hidden", "X-GNOME-Autostart-enabled"].includes(key))) return fail("CONFLICT");
   for (const key of ["Hidden", "X-GNOME-Autostart-enabled"]) if (fields.has(key) && !["true", "false"].includes(fields.get(key)!)) return fail("CONFLICT");
   return { requested: fields.get("Hidden") !== "true" && fields.get("X-GNOME-Autostart-enabled") !== "false",
     ...interpretedLaunch(fields.get("Exec")!, appId) };
@@ -198,7 +200,7 @@ export class LinuxAutostart {
       }
       const launch = [linuxAutostartArgument(this.options.executable), ...(this.options.launchArguments ? [this.options.launchArguments[0], linuxAutostartArgument(this.options.launchArguments[1])] : []),
         ...(this.options.appImage ? [linuxAutostartArgument(this.options.appImage.image)] : [])].join(" ");
-      const content = requested ? ["[Desktop Entry]", "Type=Application", `Name=${this.productName()}`, "Comment=Free, local dictation",
+      const content = requested ? ["[Desktop Entry]", "Type=Application", `Name=${this.productName()}`, "Comment=Free, local speech recognition",
         `Exec=${launch}`, `Icon=${this.options.appId}`, `StartupWMClass=${this.options.appId}`, "Terminal=false", ""].join("\n")
         : `[Desktop Entry]\nType=Application\nName=${this.productName()}\nHidden=true\n`;
       const filename = this.filename();

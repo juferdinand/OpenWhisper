@@ -74,6 +74,7 @@ test("stable KDE bindings use persistent components and the stable display name"
   assert.match(bus.component, /^io\.github\.whisperfree\.trigger\.[a-f0-9]{32}$/);
   const description = parseBusValues(bus.calls.find((call) => call.member === "doRegister")!.body)[0];
   assert.ok(description?.type === "a"); assert.deepEqual(description.value[2], text("OpenWhisper"));
+  assert.deepEqual(description.value[3], text("Start or stop recording"));
   assert.equal(journal.entries[0]?.component, bus.component);
   bus.edge(true); await until(() => capture.started === 1);
   await keyboard.close(); assert.deepEqual(capture.cancels, [1]);
