@@ -1,17 +1,14 @@
-<!-- Prepared for the gated 0.3.1 release workflow; repository status lives in README.md. -->
+<!-- Prepared for the gated 0.4.0 release workflow; repository status lives in README.md. -->
 
-## What's new in OpenWhisper 0.3.1
+## What's new in OpenWhisper 0.4.0
 
-- Restore Linux Vulkan acceleration with an explicit CPU/GPU choice and detected hardware names.
-  Fix recording startup when GPU recognition is selected and explain missing model prerequisites.
-- Restore KDE Wayland mouse triggers where compositor capabilities and safe bindings permit them.
-  Middle-button rebinding requires Plasma 6.3 or later.
-- Enable the floating Wayland recording controls by default and fix overlapping status/timer text
-  in English and German. Main-window controls remain available when the overlay is unavailable.
-- Show Setup only before first-run completion, including inline model and microphone selection;
-  expose the regular tabs afterward and preserve completion across restarts.
-- Extend long-memo regression coverage for bounded inference retries and complete audio coverage.
-  Recording continues until explicit stop or cancel; longer recordings use more RAM.
+- Redesigned setup, recording workspace, model selection, history and settings with the new logo.
+- Choose recognition hardware during setup and download/select a model before completing it.
+- Show a scrolling waveform in the main and floating recording views; display the floating controls
+  while the main window is in the background.
+- Close the window without quitting on macOS and Linux; reopen it through the tray or app launcher.
+- View available updates and concise release highlights from the header. Request keyboard access
+  when choosing automatic text insertion, and improve Linux autostart and desktop icon integration.
 
 Recognition runs locally. Exact package, desktop and test scope is recorded in
 [Electron status](https://github.com/juferdinand/OpenWhisper/blob/main/docs/ELECTRON-STATUS.md) and
@@ -19,7 +16,7 @@ Recognition runs locally. Exact package, desktop and test scope is recorded in
 
 ## Updating from 0.2.5
 
-For the first transition from the native 0.2.5 application to Electron, install 0.3.1 manually
+For the first transition from the native 0.2.5 application to Electron, install 0.4.0 manually
 from the packages below. The original application's GUI updater has not been verified for this
 host transition. The earlier 0.2.4-to-0.2.5 transition also required manual installation;
 the 0.2.4 updater cannot apply 0.2.5. Older versions may need to be reopened from the application launcher

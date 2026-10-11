@@ -13,7 +13,7 @@ the app requires no account or subscription.
 
 ## Delivery and acceptance
 
-- The current release is Electron 0.3.1 for macOS and Linux. Consult [release status](docs/ELECTRON-STATUS.md)
+- The current release is Electron 0.4.0 for macOS and Linux. Consult [release status](docs/ELECTRON-STATUS.md)
   for tested scope and limitations; do not claim untested desktop, device, or distribution coverage.
 - Work in an isolated branch/worktree, keep changes reviewable, and run focused checks while
   editing. Run the required common checks once for a complete increment. Prepare functional

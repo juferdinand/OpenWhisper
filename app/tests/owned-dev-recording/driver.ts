@@ -594,7 +594,7 @@ async function main(): Promise<void> {
         version: process.env["OPENWHISPER_RESTART_VERSION"], protocolPresent: process.env["OPENWHISPER_UPDATE_PROTOCOL"] !== undefined,
         packageVersion: app.getVersion() };
     });
-    assert.equal(actual.socket, true); assert.equal(actual.packageVersion, updateCheck ? "0.3.1" : "0.3.0");
+    assert.equal(actual.socket, true); assert.equal(actual.packageVersion, updateCheck ? "0.4.0" : "0.3.0");
     assert.equal(actual.noncePresent, !updateCheck); assert.equal(actual.version, updateCheck ? undefined : "0.3.0");
     assert.equal(actual.protocolPresent, false);
     assert.notEqual(actual.guiPid, actual.supervisorPid);
