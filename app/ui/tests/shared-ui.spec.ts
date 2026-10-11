@@ -655,7 +655,8 @@ test("saved Linux recordings can be retried or discarded without starting captur
   await page.screenshot({ path: "test-results/linux-recovery.png" });
   await page.evaluate(() => {
     const host = window as any;
-    host.testState.updates.status = "available";
+    host.testState.updates.status = "ready";
+    host.testState.updates.progress = 1;
     host.testState.updates.version = "0.2.2";
     host.publishState();
   });
@@ -847,7 +848,8 @@ async function start(
               size: 1234,
             },
           });
-        if (command === "install_update") state.updates.status = "downloading";
+        if (command === "download_update") state.updates.status = "downloading";
+        if (command === "install_update") state.updates.status = "installing";
         if (command === "download_model") {
           state.download = args.id;
           state.progress = 0;
@@ -4323,7 +4325,7 @@ for (const platform of ["linux", "macos"] as const) {
       ).toHaveText(longFriendlyName);
     }
   });
-  test(`${platform}: header opens update details and Download alone starts installation`, async ({
+  test(`${platform}: update can download, verify, wait, and install explicitly`, async ({
     page,
   }) => {
     await start(page, platform);
@@ -4346,6 +4348,16 @@ for (const platform of ["linux", "macos"] as const) {
             "Updated translations",
             "Reduced memory use",
           ],
+          localized_highlights: {
+            en: [
+              "Improved keyboard access",
+              "Fixed desktop startup handling",
+              "<img src=x onerror=window.__ownedUpdateXss=1>",
+              "Updated translations",
+              "Reduced memory use",
+            ],
+            de: ["Verbesserte Tastaturbedienung", "Korrigierter Desktop-Start"],
+          },
           size: 1234,
         },
       });
@@ -4353,11 +4365,11 @@ for (const platform of ["linux", "macos"] as const) {
     });
     await expect(update).toBeVisible();
     await expect(update).toBeEnabled();
-    const installRequests = () =>
+    const commandRequests = (name: string) =>
       page.evaluate(
-        () =>
-          window.calls.filter((call) => call.command === "install_update")
-            .length,
+        (command) =>
+          window.calls.filter((call) => call.command === command).length,
+        name,
       );
     await page.screenshot({
       path: resolve(
@@ -4388,7 +4400,8 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(
       page.locator("#update-dialog-highlights").locator("img,script,svg"),
     ).toHaveCount(0);
-    expect(await installRequests()).toBe(0);
+    expect(await commandRequests("download_update")).toBe(0);
+    expect(await commandRequests("install_update")).toBe(0);
 
     await later.click();
     await expect(dialog).toBeHidden();
@@ -4423,6 +4436,7 @@ for (const platform of ["linux", "macos"] as const) {
     await page.evaluate(() => {
       const w = window as any;
       w.testState.updates.status = "checking";
+      w.testState.updates.version = "0.2.2";
       w.publishState();
     });
     await expect(page.locator("#update-dialog-status")).toContainText(
@@ -4432,11 +4446,12 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(later).toBeFocused();
     await page.evaluate(() => {
       const w = window as any;
-      w.testState.updates.status = "available";
+      w.testState.updates.status = "ready";
       w.testState.updates.version = "0.2.2";
       w.testState.updates.progress = 0;
       w.publishState();
     });
+    await expect(action).toHaveText("Restart now");
     await expect(action).toBeEnabled();
     await expect(later).toBeFocused();
 
@@ -4446,6 +4461,9 @@ for (const platform of ["linux", "macos"] as const) {
       w.publishState();
     });
     await expect(action).toBeDisabled();
+    await expect(page.locator("#update-dialog-hint")).toHaveText(
+      "Finish the current recording before installing an update.",
+    );
     await page.evaluate(() => {
       const w = window as any;
       w.testState.status = "idle";
@@ -4487,25 +4505,80 @@ for (const platform of ["linux", "macos"] as const) {
     });
     await expect(action).toBeDisabled();
     await expect(later).toBeFocused();
-    expect(await installRequests()).toBe(0);
+    expect(await commandRequests("install_update")).toBe(0);
 
     await page.evaluate(() => {
       const w = window as any;
       w.testState.updates.status = "downloading";
       w.testState.updates.progress = 0.42;
+      w.testState.updates.download = { received: 420 };
       w.testState.paste_configuring = false;
       w.publishState();
     });
     await expect(action).toBeHidden();
     await expect(page.locator("#update-dialog-progress")).toBeVisible();
+    await expect(page.locator("#update-progress-bar")).not.toHaveAttribute(
+      "value",
+      /.+/,
+    );
     await expect(page.locator("#update-progress-label")).toHaveText(
-      "Downloading update: 42%",
+      "Downloaded 420 B",
+    );
+    await page.evaluate(() => {
+      window.testState.updates.download = { received: 420, total: 1000 };
+      window.publishState();
+    });
+    await expect(page.locator("#update-progress-label")).toHaveText(
+      "Downloaded 420 B of 1,000 B",
+    );
+    await expect(page.locator("#update-progress-bar")).toHaveAttribute(
+      "max",
+      "1000",
+    );
+    await expect(page.locator("#update-progress-bar")).toHaveAttribute(
+      "value",
+      "420",
     );
     await expect(later).toBeFocused();
     await page.evaluate(() => {
       const w = window as any;
-      w.testState.updates.status = "installing";
+      w.testState.updates.status = "verifying";
+      w.testState.updates.download = { received: 1000, total: 1000 };
       w.publishState();
+    });
+    await expect(action).toBeHidden();
+    await expect(page.locator("#update-dialog-status")).toContainText(
+      "Verifying",
+    );
+    await expect(page.locator("#update-progress-bar")).not.toHaveAttribute(
+      "value",
+      /.+/,
+    );
+    await expect(page.locator("#update-progress-label")).toHaveText(
+      "Verifying update …",
+    );
+    await page.evaluate(() => {
+      window.testState.updates.status = "ready";
+      window.publishState();
+    });
+    await expect(action).toHaveText("Restart now");
+    await expect(action).toBeEnabled();
+    await later.click();
+    await expect(dialog).toBeHidden();
+    await expect(update).toBeVisible();
+    await update.click();
+    await expect(dialog).toBeVisible();
+    await expect(action).toHaveText("Restart now");
+    await action.click();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)))
+      .toEqual({
+        command: "install_update",
+        args: {},
+      });
+    await page.evaluate(() => {
+      window.testState.updates.status = "installing";
+      window.publishState();
     });
     await expect(action).toBeHidden();
     await expect(page.locator("#update-dialog-status")).toContainText(
@@ -4525,9 +4598,10 @@ for (const platform of ["linux", "macos"] as const) {
       w.testState.updates.version = "0.2.2";
       w.testState.updates.error = "Network unavailable";
       w.testState.updates.progress = 0;
+      w.testState.updates.download = undefined;
       w.publishState();
     });
-    await expect(action).toBeHidden();
+    await expect(action).toHaveText("Download");
     await expect(page.locator("#update-dialog-message")).toContainText(
       "Network unavailable",
     );
@@ -4540,7 +4614,7 @@ for (const platform of ["linux", "macos"] as const) {
     );
     await expect(page.locator("#update-release-link")).toBeVisible();
     await expect(later).toBeFocused();
-    expect(await installRequests()).toBe(0);
+    expect(await commandRequests("install_update")).toBe(1);
     await page.locator("#update-release-link").click();
     await expect
       .poll(() => page.evaluate(() => window.calls.at(-1)))
@@ -4563,9 +4637,51 @@ for (const platform of ["linux", "macos"] as const) {
       .poll(() => page.evaluate(() => window.testState.updates.status))
       .toBe("downloading");
     await expect(later).toBeFocused();
-    expect(await installRequests()).toBe(1);
+    expect(await commandRequests("download_update")).toBe(1);
     await expect(page.locator("#record")).toBeDisabled();
     await expect(action).toBeHidden();
+  });
+
+  test(`${platform}: German ready action fits a narrow update dialog`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 360, height: 760 });
+    await start(page, platform);
+    await closeSettings(page);
+    await page.evaluate(() => {
+      window.testState.preferences.ui_language = "de";
+      Object.assign(window.testState.updates, {
+        status: "ready",
+        version: "0.2.2",
+        details: {
+          highlights: ["English fallback"],
+          localized_highlights: { de: ["Verbesserte Tastaturbedienung"] },
+        },
+      });
+      window.publishState();
+    });
+    await page.locator("#header-update").click();
+    await expect(page.locator("#update-main-action")).toHaveText(
+      "Jetzt neu starten",
+    );
+    await expect(page.locator("#update-dialog-highlights li")).toHaveText(
+      "Verbesserte Tastaturbedienung",
+    );
+    const widths = await page.locator("#update-dialog").evaluate((dialog) => {
+      const shell = dialog.querySelector(".update-dialog-shell")!;
+      const footer = dialog.querySelector(".update-dialog-footer")!;
+      return [
+        shell.scrollWidth <= shell.clientWidth,
+        footer.scrollWidth <= footer.clientWidth,
+      ];
+    });
+    expect(widths).toEqual([true, true]);
+    await page.screenshot({
+      path: resolve(
+        recordingPolishScreenshots,
+        `${platform}-update-ready-de-narrow.png`,
+      ),
+    });
   });
 
   test(`${platform}: About update details, fixed project links, and localized overflow`, async ({
@@ -4790,7 +4906,7 @@ for (const platform of ["linux", "macos"] as const) {
     });
   });
 
-  test(`${platform}: update download guard preserves dirty text and native capture`, async ({
+  test(`${platform}: update downloads remain available but restart preserves dirty text and native capture`, async ({
     page,
   }) => {
     await start(page, platform);
@@ -4810,6 +4926,15 @@ for (const platform of ["linux", "macos"] as const) {
 
     await page.evaluate(() => {
       window.testState.shortcut_configuring = true;
+      window.publishState();
+    });
+    await expect(action).toBeEnabled();
+    await expect(action).toHaveText("Download");
+    await expect(page.locator("#update-dialog-hint")).toHaveText(
+      "Ready to download this update.",
+    );
+    await page.evaluate(() => {
+      window.testState.updates.status = "ready";
       window.publishState();
     });
     await expect(action).toBeDisabled();

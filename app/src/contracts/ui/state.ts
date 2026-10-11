@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { updateDownloadProgressSchema } from "../update/update-download-progress.js";
 import { speechLanguageSchema } from "../speech/speech.js";
 import {
   localProcessingProfileSchema, localProcessingProfilePatchSchema, localProcessingOutputSchema,
@@ -27,6 +28,7 @@ const modelId = utf8(1024).min(1).refine(
 const fraction = z.number().finite().min(0).max(1);
 const userText = utf8(MAX_USER_TEXT_BYTES);
 export const updateDetailsSchema = z.strictObject({ highlights: z.array(utf8(512)).max(5),
+  localized_highlights: z.strictObject({ en: z.array(utf8(512)).max(5).optional(), de: z.array(utf8(512)).max(5).optional() }).optional(),
   size: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional() });
 export type UpdateDetails = z.infer<typeof updateDetailsSchema>;
 
@@ -128,9 +130,10 @@ const macStateSchema = z.strictObject({
 });
 const updateStateSchema = z.strictObject({
   configured: z.boolean(),
-  status: z.enum(["idle", "checking", "current", "available", "downloading", "installing", "error"]),
+  status: z.enum(["idle", "checking", "current", "available", "downloading", "verifying", "ready", "installing", "error"]),
   version: utf8(128).nullable(),
   progress: fraction,
+  download: updateDownloadProgressSchema.optional(),
   error: utf8(65536).nullable(),
   package: z.enum(["macos", "deb", "appimage", "development"]),
   details: updateDetailsSchema.optional(),
@@ -281,6 +284,7 @@ export const commandInputSchemas = {
   show_transcripts_folder: noArgs,
   open_login_settings: noArgs,
   check_updates: noArgs,
+  download_update: noArgs,
   install_update: noArgs,
   open_project_link: z.strictObject({ target: z.enum(["repository", "issues", "license", "release"]) }),
   window_action: z.strictObject({ action: z.enum(["minimize", "maximize", "close"]) }),
@@ -319,6 +323,7 @@ export const commandOutputSchemas = {
   show_transcripts_folder: actionResult,
   open_login_settings: actionResult,
   check_updates: actionResult,
+  download_update: actionResult,
   install_update: actionResult,
   open_project_link: actionResult,
   window_action: actionResult,

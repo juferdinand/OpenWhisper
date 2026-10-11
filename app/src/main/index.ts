@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, protocol, screen, session, shell, systemPreferences, Tray } from "electron";
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, protocol, screen, session, shell, systemPreferences, Tray } from "electron";
 import { deliverClipboard } from "../services/recording/clipboard-output.js";
 import { WaylandClipboard } from "../services/platforms/linux/wayland-clipboard.js";
 import { portalPasteStateSchema } from "../platforms/linux/shared/portal-paste.js";
@@ -54,6 +54,7 @@ import { MacosAutostart } from "./macos-autostart.js";
 import { APPLICATION_MACOS_UPDATE_BUILD } from "./macos-update-build.js";
 import { admitMacosUpdates, type MacosUpdateAdmission } from "./macos-update-admission.js";
 import { createMacosUpdateCoordinator, handoffMacosUpdate } from "./macos-update-coordinator.js";
+import { createUpdateCheckScheduler } from "./update-check-scheduler.js";
 import { ownedMacosUpdateFixtureEffects } from "./owned-macos-update-fixture.js";
 import type { PreparedMacosUpdateInstall } from "../services/update/macos/macos-update-install.js";
 import { LinuxAutostart } from "../services/platforms/linux/linux-autostart.js";
@@ -67,7 +68,7 @@ import { createControlAdapter } from "../platforms/linux/shared/control-adapter.
 import { LinuxBus } from "../platforms/linux/shared/bus.js";
 import { verifyDevelopmentLinuxBusArtifact } from "../services/development/development-artifact.js";
 import { parseModelCatalog, recommendationsFor, recommendationTier } from "../core/models/catalog.js";
-import { isNewerUpdateVersion } from "../services/update/common/update-policy.js";
+import { isNewerUpdateVersion, nextPatchVersion } from "../services/update/common/update-policy.js";
 
 const distribution = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let window: BrowserWindow | undefined;
@@ -211,14 +212,15 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let recordingOperation: Promise<unknown> | undefined;
   let shutdownInProgress = false, shutdownComplete = false;
   let shutdownTask: Promise<void> | undefined;
-  let updateReserved: "check" | "install" | undefined;
+  let updateReserved: "check" | "check_auto" | "download" | "install" | undefined;
   let updateChannel: LinuxUpdateGuiChannel | undefined;
   let macUpdateAdmission: MacosUpdateAdmission | undefined;
   let macUpdates: ReturnType<typeof createMacosUpdateCoordinator> | undefined;
   let macUpdateAbort: AbortController | undefined, macUpdateOperation: Promise<unknown> | undefined;
   let macPrepared: Readonly<PreparedMacosUpdateInstall> | undefined;
   let recordingRetired = false;
-  let autoCheckTimer: ReturnType<typeof setTimeout> | undefined;
+  let updateCheckScheduler: ReturnType<typeof createUpdateCheckScheduler> | undefined;
+  let resumeUpdateChecks = (): void => {};
   let updates: UpdateState = { configured: false, status: "idle", version: null, progress: 0, error: null,
     package: identity.kind === "stable" ? process.platform === "darwin" ? "macos" : "deb" : "development" };
   let overlay: BrowserWindow | undefined, overlayReady = false;
@@ -236,7 +238,6 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let notify = (): void => {};
   let autostart: LinuxAutostart | MacosAutostart | undefined;
   let updateAdmitted = false;
-  let automaticUpdateCheckAllowed = true;
   let loginFact: { readonly requested: boolean; readonly pending?: boolean } | undefined;
   let loginRefresh = 0;
   const refreshLogin = async (): Promise<void> => {
@@ -254,8 +255,6 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         updateAdmitted = launch !== undefined;
         if (launch?.kind === "appimage") {
           updates = { ...updates, package: "appimage" };
-          // A migrated preference must not silently fetch a missing/stale current-image signature.
-          automaticUpdateCheckAllowed = false;
         }
         if (launch) autostart = await LinuxAutostart.open({ appId: profile.appId,
           configHome: dirname(profile.roots.config),
@@ -753,7 +752,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     if (shutdownTask) return retiring || macHandoff ? Promise.reject(new Error("Shutdown already started.")) : shutdownTask;
     shutdownInProgress = true; cancelRequested = true; processing.close(); downloadAbort?.abort();
     if (!macHandoff) macUpdateAbort?.abort();
-    clearTimeout(autoCheckTimer); autoCheckTimer = undefined;
+    updateCheckScheduler?.close(); updateCheckScheduler = undefined;
+    powerMonitor.off("resume", resumeUpdateChecks);
     keyCapture = undefined; contents.setIgnoreMenuShortcuts(false);
     let nativeCleanupStarted = false;
     const closeOwners = async (): Promise<void> => {
@@ -810,49 +810,69 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       void finishShutdown(true).catch(() => {}); return;
     }
     const value = response.state;
-    const checking = updateReserved === "check", idle = value.status === "idle";
-    if (updateReserved === "check" && (value.status === "idle" || value.status === "available")) automaticUpdateCheckAllowed = true;
-    updates = { ...updates, error: null, progress: 0,
-      status: value.status === "idle" ? "current" : value.status === "checking" ? "checking"
-        : value.status === "available" ? "available" : value.status === "failed" ? "error" : "installing",
-      version: "updateVersion" in value ? value.updateVersion : checking || idle ? null : updates.version,
-      details: value.status === "available" ? value.details : checking || idle ? undefined
-        : "updateVersion" in value && value.updateVersion !== updates.version ? undefined : updates.details,
-      ...(value.status === "failed" ? { error: value.code === "CANCELLED" ? "The update was cancelled." : "The update could not be completed." } : {}) };
-    if (!["checking", "preparing", "prepared"].includes(value.status)) updateReserved = undefined;
+    if (value.status === "checking") updates = { ...updates, status: "checking", error: null };
+    else if (value.status === "available") updates = { ...updates, status: "available", version: value.updateVersion,
+      details: value.details, progress: 0, download: undefined, error: null };
+    else if (value.status === "downloading") updates = { ...updates, status: "downloading",
+      ...(value.updateVersion ? { version: value.updateVersion } : {}), download: value.download,
+      progress: value.download.total ? value.download.received / value.download.total : 0, error: null };
+    else if (value.status === "verifying") updates = { ...updates, status: "verifying", version: value.updateVersion,
+      progress: 1, download: undefined, error: null };
+    else if (value.status === "ready") updates = { ...updates, status: "ready", version: value.updateVersion,
+      details: value.details, progress: 1, download: undefined, error: null };
+    else if (value.status === "preparing" || value.status === "prepared") updates = { ...updates, status: "installing",
+      ...(value.status === "prepared" ? { version: value.updateVersion } : {}),
+      progress: 1, download: undefined, error: null };
+    else if (value.status === "idle") updates = { ...updates, status: updates.version ? "available" : "current", error: null };
+    else if (value.status === "failed") updates = { ...updates, status: "error",
+      download: undefined, error: value.code === "CANCELLED" ? "The update was cancelled." : "The update could not be completed." };
+    if (!["checking", "preparing", "prepared", "downloading", "verifying"].includes(value.status)) updateReserved = undefined;
     notify();
   }
-  const requestUpdate = async (kind: "check" | "install"): Promise<void> => {
+  const requestUpdate = async (kind: "check" | "check_auto" | "download" | "install"): Promise<void> => {
+    if ((kind === "check" || kind === "check_auto") && updates.status === "ready") return;
     if ((!updateChannel && !macUpdates) || !updates.configured || updateReserved || shutdownInProgress) throw new Error("Update services are unavailable or busy.");
-    if (kind === "install" && (updates.status !== "available" || recordingControl || recording.busy || recording.recoveryAvailable || downloading ||
+    if (kind === "download" && !(updates.status === "available" || (updates.status === "error" && updates.version !== null))) throw new Error("No update is available to download.");
+    if (kind === "install" && (updates.status !== "ready" || recordingControl || recording.busy || recording.recoveryAvailable || downloading ||
         keyCapture || shortcut.configuring || pasteState.configuring || macShortcut?.state().configuring || !preferences.snapshot().setup_completed)) {
       throw new Error("Finish the current recording, download or setup before installing an update.");
     }
     // A request resolves after its write, not its terminal response. Keep the reservation until that response or retirement.
-    updateReserved = kind; updates = { ...updates, status: kind === "check" ? "checking" : "installing", error: null, progress: 0,
-      ...(kind === "check" ? { version: null, details: undefined } : {}) }; notify();
+    updateReserved = kind; updates = { ...updates,
+      status: kind === "check" || kind === "check_auto" ? "checking" : kind === "download" ? "downloading" : "installing",
+      error: null, progress: 0, download: undefined }; notify();
     if (macUpdates) {
       const controller = new AbortController(); macUpdateAbort = controller;
       try {
-        if (kind === "check") {
+        if (kind === "check" || kind === "check_auto") {
+          if (macPrepared) { updateReserved = undefined; updates = { ...updates, status: "ready", version: macPrepared.version }; notify(); return; }
           const task = macUpdates.check(controller.signal); macUpdateOperation = task;
           const candidate = await task;
           if (macUpdateOperation === task) macUpdateOperation = undefined;
           if (shutdownInProgress) return;
-          updates = { ...updates, status: candidate ? "available" : "current", version: candidate?.version ?? null,
-            details: candidate?.details, error: null };
+          updates = candidate ? { ...updates, status: "available", version: candidate.version, details: candidate.details, error: null }
+            : { ...updates, status: updates.version ? "available" : "current", error: null };
           updateReserved = undefined; notify();
-        } else {
-          const task = macUpdates.prepareInstall(controller.signal).then((prepared) => { macPrepared = prepared; return prepared; });
+        } else if (kind === "download") {
+          const task = macUpdates.prepareInstall(controller.signal, {
+            onProgress: (download) => { if (shutdownInProgress) return; updates = { ...updates, status: "downloading", download,
+              progress: download.total ? download.received / download.total : 0 }; notify(); },
+            onVerifying: () => { if (shutdownInProgress) return; updates = { ...updates, status: "verifying", progress: 1, download: undefined }; notify(); },
+          }).then((prepared) => { macPrepared = prepared; return prepared; });
           macUpdateOperation = task;
           const prepared = await task;
           if (macUpdateOperation === task) macUpdateOperation = undefined;
           if (shutdownInProgress) return;
+          updates = { ...updates, status: "ready", version: prepared.version, progress: 1, download: undefined, error: null };
+          updateReserved = undefined; notify();
+        } else {
+          const prepared = macPrepared;
+          if (!prepared) throw new Error("The verified update is not ready.");
           await finishShutdown(false, prepared);
         }
       } catch {
         if (!shutdownInProgress) {
-          updateReserved = undefined; updates = { ...updates, status: "error", error: "The update could not be completed." }; notify();
+          updateReserved = undefined; updates = { ...updates, status: "error", error: "The update could not be completed.", download: undefined }; notify();
         }
         throw new Error("The update could not be completed.");
       } finally {
@@ -870,17 +890,25 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   if (process.argv.filter((argument) => argument === ownedMacUpdateFixture).length > 1) throw new Error("Invalid owned Mac updater test mode.");
   if (process.argv.includes(ownedMacUpdateFixture)) {
     if (process.platform !== "darwin" || identity.kind !== "stable" || !app.isPackaged || !macUpdateAdmission || !macUpdates ||
-      version !== "0.4.1" || macUpdateAdmission.repository !== "juferdinand/OpenWhisper") throw new Error("Owned Mac updater test mode is unavailable.");
-    let invoked = false;
-    Object.defineProperty(app, "openWhisperRunOwnedMacUpdateFixture", { configurable: false, enumerable: false, value: async (): Promise<void> => {
-      if (invoked || shutdownInProgress || !preferences.snapshot().setup_completed) throw new Error("Owned Mac updater fixture is not ready.");
-      invoked = true;
-      macUpdates = createMacosUpdateCoordinator({ admission: macUpdateAdmission!, identity, currentVersion: version,
+      macUpdateAdmission.repository !== "juferdinand/OpenWhisper") throw new Error("Owned Mac updater test mode is unavailable.");
+    const expectedVersion = nextPatchVersion(version);
+    let fixturePhase: "idle" | "ready" | "installing" = "idle";
+    Object.defineProperty(app, "openWhisperPrepareMacUpdateFixture", { configurable: false, enumerable: false, value: async (): Promise<void> => {
+      if (fixturePhase !== "idle" || shutdownInProgress || !preferences.snapshot().setup_completed) throw new Error("Owned Mac updater fixture is not ready.");
+      const coordinator = createMacosUpdateCoordinator({ admission: macUpdateAdmission!, identity, currentVersion: version,
         cacheDirectory: profile.paths.cache }, ownedMacosUpdateFixtureEffects({ archive: join(profile.paths.cache, "owned-macos-successor.zip"),
-        repository: macUpdateAdmission!.repository, currentVersion: version, expectedVersion: "0.4.2" }));
-      const candidate = await macUpdates.check(new AbortController().signal);
-      if (!candidate || candidate.version !== "0.4.2") throw new Error("Owned Mac updater fixture was not admitted.");
+        repository: macUpdateAdmission!.repository, currentVersion: version, expectedVersion }));
+      macUpdates = coordinator;
+      const candidate = await coordinator.check(new AbortController().signal);
+      if (!candidate || candidate.version !== expectedVersion) throw new Error("Owned Mac updater fixture was not admitted.");
       updates = { ...updates, status: "available", version: candidate.version, error: null, progress: 0 }; notify();
+      await requestUpdate("download");
+      if (updates.status !== "ready" || !macPrepared) throw new Error("Owned Mac update was not prepared.");
+      fixturePhase = "ready";
+    } });
+    Object.defineProperty(app, "openWhisperInstallMacUpdateFixture", { configurable: false, enumerable: false, value: async (): Promise<void> => {
+      if (fixturePhase !== "ready" || shutdownInProgress || !macPrepared) throw new Error("Owned Mac update is not ready for explicit restart.");
+      fixturePhase = "installing";
       await requestUpdate("install");
     } });
   }
@@ -903,12 +931,13 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         if (target === "repository") url = "https://github.com/juferdinand/OpenWhisper";
         else if (target === "issues") url = "https://github.com/juferdinand/OpenWhisper/issues";
         else if (target === "license") url = "https://github.com/juferdinand/OpenWhisper/blob/main/LICENSE";
-        else if (["available", "downloading", "installing", "error"].includes(updates.status) && updates.version &&
+        else if (["available", "downloading", "verifying", "ready", "installing", "error"].includes(updates.status) && updates.version &&
           isNewerUpdateVersion(updates.version, version)) url = `https://github.com/juferdinand/OpenWhisper/releases/tag/v${updates.version}`;
         else throw new Error("No update release is available.");
         await shell.openExternal(url);
       },
       check_updates: () => requestUpdate("check"),
+      download_update: () => requestUpdate("download"),
       install_update: () => requestUpdate("install"),
       save_preferences: ({ changes }) => withRecordingControl(async () => {
         if (changes.auto_check_updates === true && !updates.configured) throw new Error("Update services are not configured in this build.");
@@ -1121,12 +1150,14 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     }
   }
   if (updateChannel || macUpdates) {
-    const autoCheck = (): void => {
-      if (shutdownInProgress) return;
-      if (automaticUpdateCheckAllowed && updates.configured && preferences.snapshot().auto_check_updates && !updateReserved) void requestUpdate("check").catch(() => {});
-      autoCheckTimer = setTimeout(autoCheck, 24 * 60 * 60 * 1000);
-    };
-    autoCheckTimer = setTimeout(autoCheck, 10_000);
+    updateCheckScheduler = createUpdateCheckScheduler({
+      allowed: () => updates.configured && preferences.snapshot().auto_check_updates === true && !updateReserved && !shutdownInProgress &&
+        !["downloading", "verifying", "ready", "installing"].includes(updates.status),
+      check: async () => { await requestUpdate("check_auto"); },
+    });
+    resumeUpdateChecks = () => updateCheckScheduler?.resume();
+    powerMonitor.on("resume", resumeUpdateChecks);
+    updateCheckScheduler.start();
   }
   notify();
 }

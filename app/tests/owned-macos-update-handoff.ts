@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { _electron, expect, type ElectronApplication, type Page } from "@playwright/test";
 import { appStateSchema, preferencesSchema } from "../src/contracts/ui/state.js";
 import { parseApplicationBuildModule } from "../src/contracts/application/build-identity.js";
@@ -10,6 +11,8 @@ import { pinnedRuntimeEnvironment } from "../scripts/runtime.js";
 import { validateMacBundleMetadata } from "../src/main/build-selection.js";
 import { MAIN_URL, OVERLAY_URL } from "../src/main/assets.js";
 import { validateUniversalMacPackageMetadata } from "./fixtures/mac-package-metadata.js";
+import { releaseContextFromCommit } from "../scripts/release-context.js";
+import { usesBundleBackedMacHandoffPacket } from "../scripts/mac-handoff-protocol.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
@@ -35,8 +38,26 @@ const run = (command: string, argv: readonly string[], timeout = 15_000): string
   if (result.error || result.signal !== null || result.status !== 0) throw new Error(`Owned Mac update command failed: ${command}.`);
   return `${result.stdout ?? ""}${result.stderr ?? ""}`;
 };
+const repository = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+const releaseContext = releaseContextFromCommit(repository, expectedSourceCommit);
+const currentVersion = releaseContext.currentVersion, successorVersion = releaseContext.successorVersion;
+const producerMain = run("git", ["show", `${expectedSourceCommit}:app/src/main/index.ts`]);
+const legacyUpdaterHook = producerMain.includes('"openWhisperRunOwnedMacUpdateFixture"') &&
+  !producerMain.includes('"openWhisperPrepareMacUpdateFixture"') && !producerMain.includes('"openWhisperInstallMacUpdateFixture"');
+const splitUpdaterHooks = producerMain.includes('"openWhisperPrepareMacUpdateFixture"') &&
+  producerMain.includes('"openWhisperInstallMacUpdateFixture"') && !producerMain.includes('"openWhisperRunOwnedMacUpdateFixture"');
+assert.ok(legacyUpdaterHook || splitUpdaterHooks, "Producer source must expose a recognized owned updater fixture API.");
+const producerWorkflow = run("git", ["show", `${expectedSourceCommit}:.github/workflows/ci.yml`]);
+const bundleBackedPacket = usesBundleBackedMacHandoffPacket(producerWorkflow);
+assert.equal(bundleBackedPacket, splitUpdaterHooks, "Producer workflow packet and owned updater hook generations must match.");
+if (bundleBackedPacket) {
+  assert.equal(run("git", ["rev-parse", `${expectedSuccessorCommit}^`]).trim(), expectedSourceCommit);
+  assert.equal(run("git", ["show", `${expectedSuccessorCommit}:VERSION`]).trim(), successorVersion);
+  assert.equal(JSON.parse(run("git", ["show", `${expectedSuccessorCommit}:app/package.json`])).version, successorVersion);
+  assert.equal(JSON.parse(run("git", ["show", `${expectedSuccessorCommit}:app/package-lock.json`])).packages[""]?.version, successorVersion);
+}
 const versionFrom = (bundle: string): string => run("/usr/bin/plutil", ["-extract", "CFBundleShortVersionString", "raw", "-o", "-", join(bundle, "Contents/Info.plist")]).trim();
-const currentVersion = versionFrom(sourceBundle); assert.equal(currentVersion, "0.4.1");
+assert.equal(versionFrom(sourceBundle), currentVersion);
 const source = z.object({ commit: z.string().regex(/^[a-f0-9]{40}$/u), modified: z.literal(false) });
 const sourceInfo = source.parse(JSON.parse(await readFile(join(sourceBundle, "Contents/Resources/app/dist/resources/development-build.json"), "utf8")) as unknown);
 assert.equal(sourceInfo.commit, expectedSourceCommit);
@@ -59,11 +80,11 @@ assert.equal(currentMetadata.updateConfigured, true);
 run("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--all-architectures", sourceBundle], 30_000);
 const successorRoot = join(evidence, "successor-check"); await mkdir(successorRoot, { mode: 0o700 });
 run("/usr/bin/ditto", ["-x", "-k", successorArchive, successorRoot], 120_000);
-const successorBundle = join(successorRoot, "OpenWhisper.app"); assert.equal(versionFrom(successorBundle), "0.4.2");
+const successorBundle = join(successorRoot, "OpenWhisper.app"); assert.equal(versionFrom(successorBundle), successorVersion);
 const successorSource = source.parse(JSON.parse(await readFile(join(successorBundle, "Contents/Resources/app/dist/resources/development-build.json"), "utf8")) as unknown);
 assert.match(successorSource.commit, /^[a-f0-9]{40}$/u); assert.notEqual(successorSource.commit, sourceInfo.commit);
 assert.equal(successorSource.commit, expectedSuccessorCommit);
-assert.equal((await readFile(join(successorBundle, "Contents/Resources/app/dist/resources/VERSION"), "utf8")).trim(), "0.4.2");
+assert.equal((await readFile(join(successorBundle, "Contents/Resources/app/dist/resources/VERSION"), "utf8")).trim(), successorVersion);
 run("/usr/bin/codesign", ["--verify", "--deep", "--strict", successorBundle], 30_000);
 const installationRoot = join(evidence, "Installation Slot"), bundle = join(installationRoot, "OpenWhisper.app");
 await mkdir(installationRoot, { mode: 0o700 }); run("/usr/bin/ditto", [sourceBundle, bundle], 120_000);
@@ -95,7 +116,7 @@ try {
   assert.equal(await application.evaluate(({ app }) => app.getName()), currentBuild.productName);
   assert.equal(page.url(), "app://openwhisper/index.html");
   const state = async () => appStateSchema.parse(await page!.evaluate(() => window.openwhisper!.invoke("get_state", {})));
-  const before = await state(); assert.equal(before.version, "0.4.1"); assert.equal(before.updates.configured, true);
+  const before = await state(); assert.equal(before.version, currentVersion); assert.equal(before.updates.configured, true);
   assert.equal(before.macos?.updates_configured, true); assert.equal(before.preferences.setup_completed, false);
   await page.evaluate(() => window.openwhisper!.invoke("save_preferences", { changes: { model: "tiny" } }));
   const selected = await state();
@@ -119,12 +140,30 @@ try {
   await writeFile(fixturePath, archiveBytes, { flag: "wx", mode: 0o600 }); await chmod(fixturePath, 0o600);
   const originalPids = await application.evaluate(({ app }) => app.getAppMetrics().map((entry) => entry.pid));
   const originalOwnedPids = [...new Set([originalPid, ...originalPids])];
-  stage = "normal-main-install-request";
-  const started = await application.evaluate(({ app }) => {
-    const operation: unknown = Reflect.get(app, "openWhisperRunOwnedMacUpdateFixture");
-    if (typeof operation !== "function") throw new Error("Owned updater composition hook unavailable.");
+  if (legacyUpdaterHook) {
+    stage = "legacy-owned-main-install-request";
+  } else {
+    stage = "download-and-verify-without-retiring-predecessor";
+    const beforePrepare = await state();
+    await application.evaluate(({ app }) => {
+      const operation: unknown = Reflect.get(app, "openWhisperPrepareMacUpdateFixture");
+      if (typeof operation !== "function") throw new Error("Owned updater preparation hook unavailable.");
+      return (operation as () => Promise<void>)();
+    });
+    const ready = await state();
+    assert.equal(ready.updates.status, "ready"); assert.equal(ready.updates.version, successorVersion);
+    assert.equal(ready.recording_available, beforePrepare.recording_available);
+    assert.equal(versionFrom(bundle), currentVersion);
+    for (const pid of originalOwnedPids) assert.doesNotThrow(() => process.kill(pid, 0));
+    stage = "explicit-restart-now-request";
+  }
+  const hookName = legacyUpdaterHook ? "openWhisperRunOwnedMacUpdateFixture" : "openWhisperInstallMacUpdateFixture";
+  const started = await application.evaluate(({ app }, operationName: string) => {
+    const hookName = operationName;
+    const operation: unknown = Reflect.get(app, hookName);
+    if (typeof operation !== "function") throw new Error("Owned updater install hook unavailable.");
     void (operation as () => Promise<void>)(); return true;
-  });
+  }, hookName);
   assert.equal(started, true);
   let updateTimer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_accept, reject) => { updateTimer = setTimeout(() => reject(new Error("Owned Mac updater did not close the original process.")), 120_000); });
@@ -136,7 +175,7 @@ try {
   const successorExecutable = join(bundle, "Contents/MacOS/OpenWhisper");
   const successorPid = await waitForSuccessor(successorExecutable, originalPid);
   assert.notEqual(successorPid, originalPid);
-  const installedVersion = versionFrom(bundle); assert.equal(installedVersion, "0.4.2");
+  const installedVersion = versionFrom(bundle); assert.equal(installedVersion, successorVersion);
   const installedBuild = source.parse(JSON.parse(await readFile(join(bundle, "Contents/Resources/app/dist/resources/development-build.json"), "utf8")) as unknown);
   assert.deepEqual(installedBuild, successorSource);
   const installedIdentity = parseApplicationBuildModule(await readFile(join(bundle, "Contents/Resources/app/dist/main/application-build.js"), "utf8"));
@@ -152,29 +191,29 @@ try {
   stage = "normal-successor-inspector-start";
   await assertInspectorPortVacant(); process.kill(successorPid, "SIGUSR1");
   const observedSuccessor = await waitForInspectorSuccessor({ executable: successorExecutable, appPath: join(bundle, "Contents/Resources/app"),
-    sourceCommit: successorSource.commit, version: "0.4.2", expectedPid: successorPid, uid: process.getuid!(), quitReceipt, quitNonce,
+    sourceCommit: successorSource.commit, version: successorVersion, expectedPid: successorPid, uid: process.getuid!(), quitReceipt, quitNonce,
     vocabulary: preferences.vocabulary }, (nextStage) => { stage = nextStage; });
   assert.equal(observedSuccessor.pid, successorPid); assert.equal(observedSuccessor.executable, successorExecutable);
   assert.equal(observedSuccessor.uid, process.getuid!()); assert.equal(observedSuccessor.argv.some((argument) => forbiddenRuntimeArgument.test(argument)), false);
-  assert.equal(observedSuccessor.appPath, join(bundle, "Contents/Resources/app")); assert.equal(observedSuccessor.version, "0.4.2");
+  assert.equal(observedSuccessor.appPath, join(bundle, "Contents/Resources/app")); assert.equal(observedSuccessor.version, successorVersion);
   assert.equal(observedSuccessor.sourceCommit, successorSource.commit);
   assert.equal(observedSuccessor.state.preferences.setup_completed, true);
   assert.equal(observedSuccessor.state.preferences.vocabulary, preferences.vocabulary);
-  assert.equal(observedSuccessor.state.updates.configured, true); assert.equal(observedSuccessor.state.version, "0.4.2");
+  assert.equal(observedSuccessor.state.updates.configured, true); assert.equal(observedSuccessor.state.version, successorVersion);
   await waitForPidExit(successorPid);
   const quit = z.object({ pid: z.int().positive(), exitCode: z.int(), nonce: z.string().uuid() })
     .parse(JSON.parse(await readFile(quitReceipt, "utf8")) as unknown);
   assert.deepEqual(quit, { pid: successorPid, exitCode: 0, nonce: quitNonce });
   for (const pid of successorPids) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
   assert.deepEqual(await readFile(preferencesPath), preferenceBytes);
-  result = { status: "PASS", stage, harnessCommit, producerCommit: expectedSourceCommit, oldVersion: "0.4.1", successorVersion: installedVersion,
+  result = { status: "PASS", stage, harnessCommit, producerCommit: expectedSourceCommit, oldVersion: currentVersion, successorVersion: installedVersion,
     oldSourceCommit: sourceInfo.commit, successorSourceCommit: installedBuild.commit,
     modelFixture: "Private owned ggml-tiny.bin inventory placeholder only; speech weights and inference are not tested",
     originalMainPid: originalPid, originalOwnedPids, successorPid, successorOwnedPids: successorPids,
     originalProcessExit: exit, preferences: { setupCompleted: retainedPreferences.setup_completed,
       vocabularySha256: createHash("sha256").update(retainedPreferences.vocabulary).digest("hex"), byteIdentical: true },
     migrationFilesByteIdentical: true, ordinarySuccessorQuit: "Electron app.quit() receipt exit code 0; all recorded PIDs absent",
-    scope: "Actual persistent same-identity Universal 0.4.1 predecessor to private arm64 0.4.2 successor install on an Apple Silicon runner through the normal main coordinator, real native-owner retirement, filesystem transaction and fixed-path relaunch; successor is arm64 thin only; 0.2.5 is publisher-continuity oracle only; offline fixture feed/download, no microphone, physical input, notarization, production HTTPS feed or release." };
+    scope: `Actual persistent same-identity Universal ${currentVersion} predecessor to private arm64 ${successorVersion} successor install on an Apple Silicon runner through the normal main coordinator, real native-owner retirement, filesystem transaction and fixed-path relaunch; successor is arm64 thin only; 0.2.5 is publisher-continuity oracle only; offline fixture feed/download, no microphone, physical input, notarization, production HTTPS feed or release.` };
 } finally {
   if (application) await application.close().catch(() => {});
   await writeFile(join(evidence, "result.json"), `${JSON.stringify({ ...result, stage }, null, 2)}\n`, { mode: 0o600 });

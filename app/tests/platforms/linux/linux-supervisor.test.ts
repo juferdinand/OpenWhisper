@@ -11,6 +11,10 @@ import type { LinuxInstalledLaunch } from "../../../src/main/linux-installed-lau
 
 const launch: LinuxInstalledLaunch = { kind: "debian", executable: "/opt/openwhisper/openwhisper", arguments: [] };
 const turn = (): Promise<void> => new Promise((accept) => setImmediate(accept));
+async function until(predicate: () => boolean): Promise<void> {
+  for (let turns = 0; turns < 100 && !predicate(); turns++) await turn();
+  assert.equal(predicate(), true, "expected supervisor channel state before timeout");
+}
 function fixture() {
   const pipe = new PassThrough({ autoDestroy: false }), calls: string[] = [], terminations: Array<"SIGTERM" | "SIGKILL"> = [];
   let acceptExit!: (time: number) => void, closeOriginal!: (value: { code: number | null; signal: NodeJS.Signals | null }) => void;
@@ -167,25 +171,31 @@ test("replacement synchronous work is inside the absolute callback deadline", as
 
 // Inert original-channel composition: no feed, download, installer, process or executable is substituted into production.
 function updateFixture(install: LinuxSupervisorUpdates["installPrepared"], target: LinuxInstalledLaunch = launch) {
-  const input = fixture(), [parent, peer] = duplexPair(); let retired = false;
+  const input = fixture(), [parent, peer] = duplexPair(), responses: import("../../../src/main/linux-update-channel.js").LinuxUpdateResponse[] = []; let retired = false;
   const effects: LinuxSupervisorEffects = { ...input.effects,
     launch(argv, env) { return { ...input.effects.launch(argv, env), pipe: parent }; } };
   const original = runLinuxSupervisor({ launch: target, currentVersion: "0.3.0", argv: ["literal value"],
-    revalidateReplacement: async () => { assert.fail("V2 must not invoke the historical V1 validator."); },
+    revalidateReplacement: async () => { assert.fail("V3 must not invoke the historical V1 validator."); },
     updates: {
       async action(kind) { input.calls.push(kind); return kind === "check"
-        ? { status: "available", updateVersion: "0.3.1" } : { status: "prepared", updateVersion: "0.3.1" }; },
+        ? { status: "available", updateVersion: "0.3.1" }
+        : kind === "download" ? { status: "ready", updateVersion: "0.3.1" }
+          : { status: "prepared", updateVersion: "0.3.1" }; },
       installPrepared: install,
       async discardPrepared() { input.calls.push("discard"); },
     } }, effects);
   void original.catch(() => {});
   const gui = createLinuxUpdateGuiChannel(peer, { currentVersion: "0.3.0", nonce: input.environment()![LINUX_RESTART_NONCE]! }, (response) => {
+    responses.push(response);
     if (response.type === "retire") { retired = true; input.calls.push("retire"); }
   });
   const prepare = async (): Promise<void> => {
+    await gui.request("check"); await until(() => responses.some((response) => response.type === "state" && response.state.status === "available"));
+    await gui.request("download"); await until(() => responses.some((response) => response.type === "state" && response.state.status === "ready"));
+    assert.equal(retired, false);
     await gui.request("install");
     for (let turnCount = 0; turnCount < 100 && !retired; turnCount++) await turn();
-    assert.equal(retired, true); assert.equal(input.environment()![LINUX_UPDATE_PROTOCOL], "2");
+    assert.equal(retired, true); assert.equal(input.environment()![LINUX_UPDATE_PROTOCOL], "3");
   };
   const cleanup = async (): Promise<void> => {
     await gui.close(); input.acceptClose({ code: 0, signal: null }); await original.catch(() => {});
@@ -193,28 +203,28 @@ function updateFixture(install: LinuxSupervisorUpdates["installPrepared"], targe
   return { ...input, original, gui, prepare, cleanup };
 }
 
-test("V2 install waits for original retired duplex and GUI close; long authorization stays outside the final fence", async (t) => {
+test("V3 explicit install waits for original retired duplex and GUI close; long authorization stays outside the final fence", async (t) => {
   let now = 0, release!: () => void, installing = false;
-  t.mock.method(performance, "now", () => now); t.mock.timers.enable({ apis: ["setTimeout"] });
+  t.mock.method(performance, "now", () => now);
   const held = new Promise<void>((accept) => { release = accept; });
   const input = updateFixture(async (version) => {
     assert.equal(version, "0.3.1"); installing = true; input.calls.push("install"); await held;
     return { assertForExec() { input.calls.push("final-check"); } };
   });
   try {
-    await input.prepare(); assert.equal(installing, false);
+    await input.prepare(); t.mock.timers.enable({ apis: ["setTimeout"] }); assert.equal(installing, false);
     await input.gui.acknowledgeRetired(); await input.gui.closed; await turn(); assert.equal(installing, false);
     input.acceptClose({ code: 0, signal: null }); await turn(); assert.equal(installing, true);
     now += 60_000; t.mock.timers.tick(60_000); await turn();
     assert.equal(input.calls.includes("exec"), false); release();
     await assert.rejects(input.original, { code: "EXEC_FAILED" });
-    assert.deepEqual(input.calls, ["spawn", "install", "retire", "install", "final-check", "exec", "discard"]);
+    assert.deepEqual(input.calls, ["spawn", "check", "download", "install", "retire", "install", "final-check", "exec", "discard"]);
     assert.equal(input.replacement()?.executable, "/opt/openwhisper/openwhisper-launch");
     assert.equal(input.replacement()?.environment[LINUX_UPDATE_PROTOCOL], undefined);
   } finally { release(); await input.cleanup(); }
 });
 
-test("V2 crash or missing original retirement never starts the privileged installer", async () => {
+test("V3 crash or missing original retirement never starts the privileged installer", async () => {
   for (const crash of [true, false]) {
     let installations = 0;
     const input = updateFixture(async () => { installations++; return { assertForExec() {} }; });
@@ -232,11 +242,10 @@ test("V2 crash or missing original retirement never starts the privileged instal
 });
 
 test("external termination before original close skips the prepared installer", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
   let installations = 0;
   const input = updateFixture(async () => { installations++; return { assertForExec() {} }; });
   try {
-    await input.prepare(); await input.gui.acknowledgeRetired(); await input.gui.closed;
+    await input.prepare(); t.mock.timers.enable({ apis: ["setTimeout"] }); await input.gui.acknowledgeRetired(); await input.gui.closed;
     assert.equal(process.emit("SIGINT"), true); input.acceptClose({ code: 0, signal: null });
     t.mock.timers.tick(1000); await turn();
     assert.equal(await input.original, 130); assert.equal(installations, 0);
@@ -245,7 +254,6 @@ test("external termination before original close skips the prepared installer", 
 });
 
 test("external termination during prepared async installation prevents restart and rolls back when supported", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
   let release!: () => void, rollbacks = 0;
   const held = new Promise<void>((accept) => { release = accept; });
   const input = updateFixture(async () => {
@@ -253,7 +261,7 @@ test("external termination during prepared async installation prevents restart a
     return { assertForExec() { input.calls.push("final-check"); }, async rollbackBeforeExec() { rollbacks++; } };
   });
   try {
-    await input.prepare(); await input.gui.acknowledgeRetired(); await input.gui.closed;
+    await input.prepare(); t.mock.timers.enable({ apis: ["setTimeout"] }); await input.gui.acknowledgeRetired(); await input.gui.closed;
     input.acceptClose({ code: 0, signal: null }); await turn();
     assert.equal(input.calls.includes("install"), true);
     assert.equal(process.emit("SIGTERM"), true); release(); await turn();
@@ -263,7 +271,7 @@ test("external termination during prepared async installation prevents restart a
   } finally { release(); await input.cleanup(); }
 });
 
-test("V2 final synchronous refusal or deadline prevents fixed exec after the long phase", async (t) => {
+test("V3 final synchronous refusal or deadline prevents fixed exec after the long phase", async (t) => {
   let now = 0; t.mock.method(performance, "now", () => now);
   for (const timeout of [false, true]) {
     const input = updateFixture(async () => ({ assertForExec() {
@@ -278,7 +286,7 @@ test("V2 final synchronous refusal or deadline prevents fixed exec after the lon
   }
 });
 
-test("AppImage V2 uses its captured permanent pair and rolls back once after final refusal or exec failure", async () => {
+test("AppImage V3 uses its captured permanent pair and rolls back once after final refusal or exec failure", async () => {
   for (const finalRefusal of [false, true]) {
     let rollbacks = 0;
     const image = join(homedir(), ".local/lib/whisperfree/OpenWhisper.AppImage"), launcher = join(homedir(), ".local/lib/whisperfree/openwhisper-launch");

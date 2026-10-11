@@ -1,6 +1,6 @@
 # Linux installation and evidence
 
-OpenWhisper 0.4.1 provides x86_64 AppImage and Debian packages. Download them from the
+The current OpenWhisper release provides x86_64 AppImage and Debian packages. Download them from the
 [official Releases page](https://github.com/juferdinand/OpenWhisper/releases) and verify against
 the release `SHA256SUMS`.
 
@@ -22,7 +22,7 @@ Ubuntu, install the package:
 sudo apt install ./OpenWhisper-Linux-amd64.deb
 ```
 
-If upgrading from the original 0.2.5 app, download and install 0.4.1 manually. The original app's
+If upgrading from the original 0.2.5 app, download and install the current version manually. The original app's
 GUI updater has not been demonstrated to update to Electron. A Debian package transition component
 was checked against the exact signed 0.2.5 and 0.3.0 packages on one pinned Kubuntu 24 baseline;
 this does not establish a GUI update or behavior on every distribution. Back up needed data before

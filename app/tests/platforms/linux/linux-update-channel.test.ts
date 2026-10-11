@@ -2,24 +2,37 @@ import assert from "node:assert/strict";
 import { duplexPair } from "node:stream";
 import { test } from "node:test";
 import { createLinuxUpdateParentChannel, createLinuxUpdateGuiChannel, LINUX_UPDATE_CHANNEL_FRAME_BYTES,
-  LINUX_UPDATE_PROTOCOL, openLinuxUpdateGuiChannel, type LinuxUpdateResponse } from "../../../src/main/linux-update-channel.js";
+  LINUX_UPDATE_PROTOCOL, openLinuxUpdateGuiChannel, type LinuxUpdateIntermediateState, type LinuxUpdateResponse } from "../../../src/main/linux-update-channel.js";
 import { LINUX_RESTART_NONCE, LINUX_RESTART_VERSION } from "../../../src/main/linux-restart.js";
 const binding = { currentVersion: "0.3.0", nonce: "a".repeat(64) };
 const turn = (): Promise<void> => new Promise((accept) => setImmediate(accept));
-const frame = (fields: Record<string, unknown>) => Buffer.from(`${JSON.stringify({ version: 2, ...binding, ...fields })}\n`);
+const frame = (fields: Record<string, unknown>) => Buffer.from(`${JSON.stringify({ version: 3, ...binding, ...fields })}\n`);
 function gate() { let accept!: () => void; const promise = new Promise<void>((yes) => { accept = yes; }); return { promise, accept }; }
 async function until(check: () => boolean) { for (let count=0; count<100; count++) { if(check()) return; await turn(); } assert.fail("Expected channel phase was not reached."); }
 
-test("callback-chained commands and retirement settle without publication turns", async () => {
+test("download progress and ready do not retire; explicit install alone retires", async () => {
   const [a, b] = duplexPair(), received: LinuxUpdateResponse[] = [], actions: string[] = [];
   const details = { highlights: Array.from({ length: 5 }, () => "x".repeat(512)), size: 4096 };
-  const entered = gate(); let chainedInstall: Promise<void> | undefined, retiring: Promise<void> | undefined, acknowledgment: Promise<void> | undefined;
-  const parent = createLinuxUpdateParentChannel(a, binding, async (kind) => {
-    actions.push(kind); return kind === "check" ? { status: "available", updateVersion: "0.3.1", details } : { status: "prepared", updateVersion: "0.3.1" };
+  const entered = gate(); let chainedDownload: Promise<void> | undefined, chainedInstall: Promise<void> | undefined;
+  let retiring: Promise<void> | undefined, acknowledgment: Promise<void> | undefined;
+  const parent = createLinuxUpdateParentChannel(a, binding, async (kind, _signal, reportState) => {
+    actions.push(kind);
+    if (kind === "check") return { status: "available", updateVersion: "0.3.1", details };
+    if (kind === "download") {
+      reportState({ status: "downloading", updateVersion: "0.3.1", download: { received: 100, total: 1000 } });
+      reportState({ status: "downloading", updateVersion: "0.3.1", download: { received: 500, total: 1000 } });
+      reportState({ status: "verifying", updateVersion: "0.3.1" });
+      return { status: "ready", updateVersion: "0.3.1", details };
+    }
+    return { status: "prepared", updateVersion: "0.3.1" };
   });
   const gui = createLinuxUpdateGuiChannel(b, binding, (response) => {
     received.push(response);
     if (response.type === "state" && response.state.status === "available") {
+      chainedDownload = gui.request("download"); void chainedDownload.catch(() => {});
+    } else if (response.type === "state" && response.state.status === "ready") {
+      // Reaching ready is a user deferral point, not install authorization.
+      assert.equal(received.some((item) => item.type === "retire"), false);
       chainedInstall = gui.request("install"); void chainedInstall.catch(() => {});
     } else if (response.type === "state" && response.state.status === "prepared") {
       retiring = parent.requestRetirement(); void retiring.catch(() => {});
@@ -32,12 +45,48 @@ test("callback-chained commands and retirement settle without publication turns"
     await gui.request("check"); await entered.promise;
     assert.deepEqual(await parent.retirement, { updateVersion: "0.3.1" });
     await chainedInstall; await retiring; await acknowledgment;
-    assert.deepEqual(actions, ["check", "install"]);
+    assert.deepEqual(actions, ["check", "download", "install"]);
     const available = received.find((response) => response.type === "state" && response.state.status === "available");
     assert.deepEqual(available?.type === "state" ? available.state : undefined, { status: "available", updateVersion: "0.3.1", details });
     assert.deepEqual(received.map((response) => response.type === "state" ? response.state.status : response.type),
-      ["checking", "available", "preparing", "prepared", "retire"]);
+      ["checking", "available", "downloading", "downloading", "verifying", "ready", "preparing", "prepared", "retire"]);
+    const latestProgress = received.findLast((response) => response.type === "state" && response.state.status === "downloading");
+    assert.deepEqual(latestProgress?.type === "state" ? latestProgress.state : undefined,
+      { status: "downloading", updateVersion: "0.3.1", download: { received: 500, total: 1000 } });
     assert.equal(a.closed, true); assert.equal(b.closed, true);
+  } finally { await Promise.all([parent.close(), gui.close()]); }
+});
+
+test("download and Later leave the GUI live without retirement; progress coalesces and closes at ready", async () => {
+  const [a, b] = duplexPair(), received: LinuxUpdateResponse[] = [];
+  let reportLate: ((state: LinuxUpdateIntermediateState) => void) | undefined;
+  const parent = createLinuxUpdateParentChannel(a, binding, async (kind, _signal, reportState) => {
+    if (kind === "check") return { status: "available", updateVersion: "0.3.1" };
+    assert.equal(kind, "download"); reportLate = reportState;
+    for (let bytes = 256 * 1024; bytes <= 150 * 1024 * 1024; bytes += 256 * 1024) {
+      reportState({ status: "downloading", updateVersion: "0.3.1", download: { received: bytes } });
+    }
+    reportState({ status: "verifying", updateVersion: "0.3.1" });
+    return { status: "ready", updateVersion: "0.3.1" };
+  });
+  const ready = gate(), available = gate();
+  const gui = createLinuxUpdateGuiChannel(b, binding, (response) => {
+    received.push(response);
+    if (response.type === "state" && response.state.status === "available") available.accept();
+    if (response.type === "state" && response.state.status === "ready") ready.accept();
+  });
+  try {
+    await gui.request("check"); await available.promise; await gui.request("download"); await ready.promise;
+    assert.equal(received.some((response) => response.type === "retire"), false);
+    const progress = received.filter((response) => response.type === "state" && response.state.status === "downloading");
+    assert.ok(progress.length <= 3, `bounded progress frame count: ${progress.length}`);
+    const last = progress.at(-1);
+    const lastState = last?.type === "state" ? last.state : undefined;
+    assert.equal(lastState?.status, "downloading");
+    if (lastState?.status === "downloading") assert.deepEqual(lastState.download, { received: 150 * 1024 * 1024 });
+    reportLate?.({ status: "downloading", updateVersion: "0.3.1", download: { received: 151 * 1024 * 1024 } });
+    await turn(); assert.equal(received.some((response) => response.type === "retire"), false);
+    gui.quit(); await gui.closed; assert.equal(await parent.retirement, undefined);
   } finally { await Promise.all([parent.close(), gui.close()]); }
 });
 
@@ -46,11 +95,25 @@ test("ordinary EOF grants none and living GUI has no idle timer", async t=>{
  const gui=createLinuxUpdateGuiChannel(b,binding,()=>{});t.mock.timers.enable({apis:["setTimeout"]});t.mock.timers.tick(86_400_000);
  assert.equal(a.destroyed,false);assert.equal(b.destroyed,false);gui.quit();assert.equal(await parent.retirement,undefined);
 });
+test("GUI cannot download before a candidate or install before verified ready", async () => {
+ const [a,b]=duplexPair();let calls=0;
+ const parent=createLinuxUpdateParentChannel(a,binding,async()=>{calls++;return {status:"idle"};});
+ const gui=createLinuxUpdateGuiChannel(b,binding,()=>{});
+ try{
+  await assert.rejects(gui.request("download"),{code:"INVALID_STATE"});
+  await assert.rejects(gui.request("install"),{code:"INVALID_STATE"});
+  assert.equal(calls,0);gui.quit();await gui.closed;assert.equal(await parent.retirement,undefined);
+ }finally{await Promise.all([parent.close(),gui.close()]);}
+});
 test("cancel aborts one action but retains original settlement",async()=>{
  const [a,b]=duplexPair(),entered=gate(),release=gate(),received:LinuxUpdateResponse[]=[];let signal:AbortSignal|undefined;
- const parent=createLinuxUpdateParentChannel(a,binding,async(_kind,cancellation)=>{signal=cancellation;entered.accept();await release.promise;return {status:"prepared",updateVersion:"0.3.1"};});
+ const parent=createLinuxUpdateParentChannel(a,binding,async(kind,cancellation)=>{
+  if(kind==="check")return {status:"available",updateVersion:"0.3.1"};
+  signal=cancellation;entered.accept();await release.promise;return {status:"ready",updateVersion:"0.3.1"};
+ });
  const gui=createLinuxUpdateGuiChannel(b,binding,response=>{received.push(response);});
- try{await gui.request("install");await entered.promise;await gui.request("cancel");await until(()=>signal?.aborted===true);
+ try{await gui.request("check");await until(()=>received.some(x=>x.type==="state"&&x.state.status==="available"));
+ await gui.request("download");await entered.promise;await gui.request("cancel");await until(()=>signal?.aborted===true);
  await assert.rejects(gui.request("check"),{code:"INVALID_STATE"});assert.equal(received.some(x=>x.type==="state"&&x.state.status==="failed"),false);
  release.accept();await until(()=>received.some(x=>x.type==="state"&&x.state.status==="failed"&&x.state.code==="CANCELLED"));gui.quit();assert.equal(await parent.retirement,undefined);
  }finally{release.accept();await parent.close();await gui.close();}
@@ -69,9 +132,17 @@ test("fragmentation accepts exact frames; foreign, partial, oversized and extra-
  b.resume();const bytes=frame({type:"check"});b.write(bytes.subarray(0,7));b.write(bytes.subarray(7));await until(()=>calls===1);await turn();b.end();assert.equal(await parent.retirement,undefined);
 });
 test("overlap and old prepared versions poison while retaining private callbacks",async()=>{
- const [a,b]=duplexPair(),release=gate(),entered=gate();const parent=createLinuxUpdateParentChannel(a,binding,async()=>{entered.accept();await release.promise;return {status:"idle"};});
+ const [a,b]=duplexPair(),release=gate(),entered=gate();const parent=createLinuxUpdateParentChannel(a,binding,async(kind)=>{
+  entered.accept();await release.promise;
+  return kind==="check"?{status:"available",updateVersion:"0.3.1"}:{status:"ready",updateVersion:"0.3.1"};
+ });
  b.resume();b.write(frame({type:"check"}));await entered.promise;b.write(frame({type:"install"}));await turn();release.accept();await assert.rejects(parent.retirement,{code:"CHANNEL_FAILED"});b.destroy();
- const [c,d]=duplexPair(),invalid=createLinuxUpdateParentChannel(c,binding,async()=>({status:"prepared",updateVersion:"0.3.0"}));d.resume();d.write(frame({type:"install"}));await assert.rejects(invalid.retirement,{code:"CHANNEL_FAILED",message:"CHANNEL_FAILED"});d.destroy();
+ const [c,d]=duplexPair(),received:LinuxUpdateResponse[]=[],invalid=createLinuxUpdateParentChannel(c,binding,async(kind)=>kind==="check"
+  ?{status:"available",updateVersion:"0.3.1"}:kind==="download"?{status:"ready",updateVersion:"0.3.1"}:{status:"prepared",updateVersion:"0.3.0"});
+ const gui=createLinuxUpdateGuiChannel(d,binding,response=>received.push(response));
+ await gui.request("check");await until(()=>received.some(x=>x.type==="state"&&x.state.status==="available"));
+ await gui.request("download");await until(()=>received.some(x=>x.type==="state"&&x.state.status==="ready"));
+ await gui.request("install");await assert.rejects(invalid.retirement,{code:"CHANNEL_FAILED",message:"CHANNEL_FAILED"});await gui.close();c.destroy();
 });
 
 test("GUI rejects unsolicited state, unprepared retirement and action-mismatched replies",async()=>{
@@ -98,15 +169,21 @@ test("original close settles an unread outgoing write without starting its actio
 
 test("prepared publication callback waits for the original terminal write and can initiate retirement", async () => {
   const [a, b] = duplexPair({ highWaterMark: 1 }), release = gate();
+  const received: LinuxUpdateResponse[] = [];
   let preparing = false, published = 0, retiring: Promise<void> | undefined;
-  const parent = createLinuxUpdateParentChannel(a, binding, async () => {
+  const parent = createLinuxUpdateParentChannel(a, binding, async (kind) => {
+    if (kind === "check") return { status: "available", updateVersion: "0.3.1" };
+    if (kind === "download") return { status: "ready", updateVersion: "0.3.1" };
     await release.promise; return { status: "prepared", updateVersion: "0.3.1" };
   }, () => { published++; retiring = parent.requestRetirement(); void retiring.catch(() => {}); });
   const gui = createLinuxUpdateGuiChannel(b, binding, (response) => {
+    received.push(response);
     if (response.type === "state" && response.state.status === "preparing") { preparing = true; b.pause(); }
     if (response.type === "retire") void gui.acknowledgeRetired().catch(() => {});
   });
   try {
+    await gui.request("check"); await until(() => received.some((response) => response.type === "state" && response.state.status === "available"));
+    await gui.request("download"); await until(() => received.some((response) => response.type === "state" && response.state.status === "ready"));
     await gui.request("install"); await until(() => preparing); release.accept();
     await until(() => a.writableLength > 0); assert.equal(published, 0);
     b.resume(); assert.deepEqual(await parent.retirement, { updateVersion: "0.3.1" });
@@ -125,15 +202,15 @@ test("GUI closed waits for both original directions and rejects a partial respon
   await assert.rejects(malformed.closed, { code: "CHANNEL_FAILED", message: "CHANNEL_FAILED" }); c.destroy();
 });
 
-test("inherited GUI opener preserves absent V2 hints and consumes invalid V2 without adopting fd3", () => {
+test("inherited GUI opener preserves absent V3 hints and consumes invalid V3 without adopting fd3", () => {
   const keys = [LINUX_UPDATE_PROTOCOL, LINUX_RESTART_NONCE, LINUX_RESTART_VERSION], saved = keys.map(key => process.env[key]);
   try {
     delete process.env[LINUX_UPDATE_PROTOCOL]; process.env[LINUX_RESTART_NONCE] = binding.nonce; process.env[LINUX_RESTART_VERSION] = binding.currentVersion;
     assert.equal(openLinuxUpdateGuiChannel(binding.currentVersion, () => {}), undefined);
     assert.equal(process.env[LINUX_RESTART_NONCE], binding.nonce); assert.equal(process.env[LINUX_RESTART_VERSION], binding.currentVersion);
     for (const hints of [{ protocol: "1", nonce: binding.nonce, version: binding.currentVersion },
-      { protocol: "2", nonce: "PRIVATE INVALID VALUE", version: binding.currentVersion },
-      { protocol: "2", nonce: binding.nonce, version: "0.2.5" }]) {
+      { protocol: "3", nonce: "PRIVATE INVALID VALUE", version: binding.currentVersion },
+      { protocol: "3", nonce: binding.nonce, version: "0.2.5" }]) {
       process.env[LINUX_UPDATE_PROTOCOL] = hints.protocol; process.env[LINUX_RESTART_NONCE] = hints.nonce; process.env[LINUX_RESTART_VERSION] = hints.version;
       assert.throws(() => openLinuxUpdateGuiChannel(binding.currentVersion, () => {}), { code: "CHANNEL_FAILED", message: "CHANNEL_FAILED" });
       assert.ok(keys.every(key => process.env[key] === undefined));

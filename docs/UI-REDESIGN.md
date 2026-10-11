@@ -129,11 +129,15 @@ and link to the complete release for installation and platform details. Missing 
 must not block an otherwise valid update. Avoid a second independently maintained `.txt`
 asset or displaying the entire generated pull-request list in the dialog.
 
-Display package size only when supplied by validated metadata. Keep installation behind the
-explicit Download action and the existing recording, recovery, setup and download guards.
-The current updater prepares and installs in one controlled operation; show its real status
-instead of promising continued recording or inventing a separate restart-ready stage. Keep
-the preview-channel selector deferred until a reviewed release-channel implementation exists
+Display package size only when supplied by validated metadata. Keep downloading behind the
+explicit Download action; keep installation behind the explicit Install action and existing
+recording, recovery, setup and download guards.
+Download and verify the update while the current app remains usable. Show actual transfer
+progress, with an indeterminate bar when the server omits its total, then offer **Install and
+restart now** or **Later** from a ready state. Later keeps the update discoverable from the
+header. Installation remains behind the existing recording, recovery, setup and download guards;
+show its real status instead of inventing a restart-ready phase before verification completes.
+Keep the preview-channel selector deferred until a reviewed release-channel implementation exists
 ([#49](https://github.com/juferdinand/OpenWhisper/issues/49)).
 
 ## Recording-level presentation

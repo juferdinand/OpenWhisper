@@ -6,6 +6,11 @@
   desktop entries and icons.
 - Notify KDE's icon loader after a successful refresh.
 
+## Neu in OpenWhisper 0.4.1
+
+- Aktualisiert das verwaltete Desktop-Symbol des Linux-AppImages nach einem Update und erhält angepasste Desktop-Einträge und Symbole.
+- Benachrichtigt KDE nach erfolgreicher Aktualisierung über das geänderte Symbol.
+
 Recognition runs locally. Exact package, desktop and test scope is recorded in
 [Electron status](https://github.com/juferdinand/OpenWhisper/blob/main/docs/ELECTRON-STATUS.md) and
 [Linux evidence](https://github.com/juferdinand/OpenWhisper/blob/main/docs/LINUX.md).

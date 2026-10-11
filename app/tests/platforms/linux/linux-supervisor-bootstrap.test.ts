@@ -106,7 +106,10 @@ async function appImageFixture() {
     async signature(input) { events.push("current-signature-fetch"); assert.equal(input.currentVersion, "0.3.0"); return "inert current signature"; },
     async repair(input) { events.push("repair-current"); assert.equal(input.version, "0.3.0"); assert.equal(input.signature, "inert current signature"); return guard; },
     async feed(input) { events.push("feed"); assert.equal(input.package, "appimage"); return selected; },
-    async download(input) { events.push("download"); assert.equal(input.candidate, selected); return download; },
+    async download(input) {
+      events.push("download"); assert.equal(input.candidate, selected);
+      input.onProgress?.({ received: 128, total: 512 }); return download;
+    },
     async prepare(input) { events.push("prepare"); assert.equal(input.download, download); assert.equal(input.signature, selected.signature); return prepared; },
   };
   const launch = { kind: "appimage" as const, executable: join(home, ".local/lib/whisperfree/openwhisper-launch"),
@@ -115,7 +118,7 @@ async function appImageFixture() {
     async cleanup() { if (!closed) await file.close(); await rm(home, { recursive: true, force: true }); } };
 }
 
-test("AppImage channel grants no install or network authority at startup or after failed current-signature acquisition", async () => {
+test("AppImage automatic check never fetches or repairs a missing current signature", async () => {
   const input = await appImageFixture(), signal = new AbortController().signal;
   input.dependencies.signature = async () => { input.events.push("unavailable-current-signature"); throw new Error("Owned network unavailable."); };
   try {
@@ -123,9 +126,35 @@ test("AppImage channel grants no install or network authority at startup or afte
     assert.deepEqual(input.events, []);
     await assert.rejects(updates.action("install", signal), { code: "INVALID_REQUEST" });
     await assert.rejects(updates.installPrepared("0.3.1"), { code: "INVALID_REQUEST" });
+    await assert.rejects(updates.action("check_auto", signal), { code: "UNAVAILABLE" });
     await assert.rejects(updates.action("check", signal), /network unavailable/);
     await assert.rejects(updates.action("install", signal), { code: "INVALID_REQUEST" });
-    assert.deepEqual(input.events, ["local-current-auth", "unavailable-current-signature"]);
+    assert.deepEqual(input.events, ["local-current-auth", "local-current-auth", "unavailable-current-signature"]);
+  } finally { await input.cleanup(); }
+});
+
+test("first automatic check admits a valid current pair and keeps discovered and ready candidates across rechecks", async () => {
+  const input = await appImageFixture(), signal = new AbortController().signal;
+  input.local(); let transientFailure = false;
+  const originalFeed = input.dependencies.feed;
+  input.dependencies.feed = async (value) => {
+    if (transientFailure) throw new Error("Owned temporary feed failure.");
+    return originalFeed(value);
+  };
+  try {
+    const updates = appImageUpdates("0.3.0", input.launch, input.dependencies);
+    assert.deepEqual(await updates.action("check_auto", signal),
+      { status: "available", updateVersion: "0.3.1", details: { highlights: [] } });
+    assert.equal(input.events.includes("current-signature-fetch"), false);
+    transientFailure = true;
+    await assert.rejects(updates.action("check_auto", signal), /temporary feed failure/);
+    assert.deepEqual(await updates.action("download", signal),
+      { status: "ready", updateVersion: "0.3.1", details: { highlights: [] } });
+    const feedCalls = input.events.filter((event) => event === "feed").length;
+    assert.deepEqual(await updates.action("check_auto", signal),
+      { status: "ready", updateVersion: "0.3.1", details: { highlights: [] } });
+    assert.equal(input.events.filter((event) => event === "feed").length, feedCalls);
+    await updates.discardPrepared();
   } finally { await input.cleanup(); }
 });
 
@@ -136,6 +165,10 @@ test("explicit AppImage repair authenticates current before discovery and closes
     input.dependencies.signature = async () => { assert.fail("Later effects must not replace captured parent authority."); };
     assert.deepEqual(await updates.action("check", signal), { status: "available", updateVersion: "0.3.1", details: { highlights: [] } });
     assert.ok(input.events.indexOf("repair-current") < input.events.indexOf("feed"));
+    const progress: string[] = [];
+    assert.deepEqual(await updates.action("download", signal, (state) => progress.push(state.status)),
+      { status: "ready", updateVersion: "0.3.1", details: { highlights: [] } });
+    assert.deepEqual(progress, ["downloading", "verifying"]);
     assert.deepEqual(await updates.action("install", signal), { status: "prepared", updateVersion: "0.3.1" });
     const installed = await updates.installPrepared("0.3.1"); installed.assertForExec();
     assert.deepEqual(input.events.slice(-6), ["replace-pair", "settled-continuation", "full-installed-auth", "source-guard", "source-close", "final-guard"]);
@@ -150,8 +183,8 @@ test("changed current AppImage refuses replacement and abandons only the uninsta
   try {
     const updates = appImageUpdates("0.3.0", input.launch, input.dependencies);
     await updates.action("check", signal); assert.equal(input.events.includes("current-signature-fetch"), false);
-    await updates.action("install", signal); input.change();
-    await assert.rejects(updates.installPrepared("0.3.1"), /current pair changed/);
+    await updates.action("download", signal); input.change();
+    await assert.rejects(updates.action("install", signal), /current pair changed/);
     await updates.discardPrepared();
     assert.equal(input.events.includes("replace-pair"), false);
     assert.deepEqual(input.events.slice(-2), ["discard", "source-close"]);

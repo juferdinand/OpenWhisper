@@ -22,6 +22,12 @@ export function parseUpdateVersion(value: unknown): Version {
   if (numbers.some((number) => number > uint64Max)) throw new UpdatePolicyError("INVALID_VERSION");
   return Object.freeze([numbers[0]!, numbers[1]!, numbers[2]!]);
 }
+/** Return the next patch using the same UInt64 policy as release admission. */
+export function nextPatchVersion(value: unknown): string {
+  const [major, minor, patch] = parseUpdateVersion(value);
+  if (patch === uint64Max) throw new UpdatePolicyError("INVALID_VERSION");
+  return `${major}.${minor}.${patch + 1n}`;
+}
 function newer(candidate: Version, current: Version): boolean {
   for (const component of [0, 1, 2] as const) if (candidate[component] !== current[component]) return candidate[component] > current[component];
   return false;
@@ -85,9 +91,11 @@ function plainMarkdown(value: string): string {
     .replace(/\*\*([^*]+)\*\*/gu, "$1").replace(/\*([^*]+)\*/gu, "$1").replace(/_([^_]+)_/gu, "$1").trim();
 }
 /** Extract only the curated What's new bullets; raw Markdown remains available to release tooling only. */
-export function extractUpdateHighlights(notes: string): readonly string[] {
+export function extractUpdateHighlights(notes: string, language: "en" | "de" = "en"): readonly string[] {
   if (Buffer.byteLength(notes, "utf8") > UPDATE_POLICY_LIMITS.notesBytes) throw new UpdatePolicyError("INVALID_METADATA");
-  const lines = notes.replace(/\r\n?/gu, "\n").split("\n"), heading = lines.findIndex((line) => /^#{1,6}\s+what['’]s\s+new\b/iu.test(line));
+  const lines = notes.replace(/\r\n?/gu, "\n").split("\n"), heading = lines.findIndex((line) => language === "de"
+    ? /^#{1,6}\s+neu\s+in\s+openwhisper\b/iu.test(line)
+    : /^#{1,6}\s+what['’]s\s+new\b/iu.test(line));
   if (heading < 0) return Object.freeze([]);
   const bullets: string[] = [];
   for (const line of lines.slice(heading + 1)) {
@@ -99,7 +107,10 @@ export function extractUpdateHighlights(notes: string): readonly string[] {
   return Object.freeze(bullets.map((item) => boundedHighlight(plainMarkdown(item))).filter(Boolean));
 }
 function details(notes: string, size: number | undefined): UpdateDetails {
-  return updateDetailsSchema.parse({ highlights: extractUpdateHighlights(notes), ...(size === undefined ? {} : { size }) });
+  const highlights = extractUpdateHighlights(notes, "en"), german = extractUpdateHighlights(notes, "de");
+  return updateDetailsSchema.parse({ highlights,
+    ...(german.length ? { localized_highlights: { en: highlights, de: german } } : {}),
+    ...(size === undefined ? {} : { size }) });
 }
 export interface MacosUpdateCandidate extends Candidate { readonly package: "macos"; readonly repository: string }
 export interface LinuxUpdateCandidate extends Candidate {

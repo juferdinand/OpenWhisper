@@ -7,6 +7,8 @@ import { _electron, expect, type ElectronApplication, type Page } from "@playwri
 import { z } from "zod";
 import { appStateSchema, preferencesSchema, snippetSchema } from "../src/contracts/ui/state.js";
 import { buildIdentitySchema, parseApplicationBuildModule } from "../src/contracts/application/build-identity.js";
+import { parseUpdateVersion } from "../src/services/update/common/update-policy.js";
+import { releaseContextFromCommit } from "../scripts/release-context.js";
 import { validateMacBundleMetadata } from "../src/main/build-selection.js";
 import { legacyMacosMigrationContextSchema } from "../src/services/migration/legacy-macos-data.js";
 import { decodedLegacyMacosPlistSchema } from "../src/workers/migration/macos-legacy-plist.js";
@@ -50,11 +52,15 @@ const packageMetadata = packageFormat === "universal"
   : await (async () => {
     const receipt: unknown = JSON.parse(await readFile(join(sourceBundle,
       `Contents/Resources/notices/${stable ? "mac-stable-validation-package" : "mac-dev-package"}.json`), "utf8"));
-    return { ...z.object({ architecture: z.literal(process.arch), sourceVersion: z.string().regex(/^\d+\.\d+\.\d+$/u),
+    return { ...z.object({ architecture: z.literal(process.arch), sourceVersion: z.string().refine((value) => { try { parseUpdateVersion(value); return true; } catch { return false; } }),
       runtimeVersion: z.literal("44.7.0"), applicationBuild: buildIdentitySchema,
       signingMode: z.enum(["ad-hoc", "persistent-validation"]) }).parse(receipt),
       updateConfigured: validateMacPackageUpdateConfiguration(receipt) };
   })();
+const packageSource = z.object({ commit: z.string().regex(/^[a-f0-9]{40}$/u), modified: z.literal(false) })
+  .parse(JSON.parse(await readFile(join(sourceRoot, "dist/resources/development-build.json"), "utf8")) as unknown);
+assert.equal(packageMetadata.sourceVersion,
+  releaseContextFromCommit(resolve(process.cwd(), ".."), packageSource.commit).currentVersion);
 assert.deepEqual(packageMetadata.applicationBuild, capturedBuild);
 
 const ownedHome = join(evidence, "home"), legacyRoot = join(ownedHome, "Library/Application Support/WhisperFree");
@@ -142,7 +148,7 @@ try {
     stage = "fresh-dev-installation";
     installation = z.object({ installationRoot: z.literal(installationRoot), application: z.literal(bundle),
       executable: z.literal(executable), profile: z.literal(profile), desktopFile: z.null(), sourceDigest: z.string().regex(/^[a-f0-9]{64}$/u),
-      version: z.literal("0.4.1"), launchArguments: z.tuple([z.literal("--dev-profile"), z.literal(profile)]) }).parse(JSON.parse(
+      version: z.literal(packageMetadata.sourceVersion), launchArguments: z.tuple([z.literal("--dev-profile"), z.literal(profile)]) }).parse(JSON.parse(
         execFileSync(sourceExecutable, installArguments, { env: installEnvironment, encoding: "utf8", timeout: 120_000, maxBuffer: 256 * 1024 })));
     await assert.rejects(lstat(profile), { code: "ENOENT" });
     checks.push("Embedded Node CLI copies and verifies a fresh signed Dev app, preserving source inputs and leaving the explicit profile nonexistent");

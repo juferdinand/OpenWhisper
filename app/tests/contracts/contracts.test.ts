@@ -8,6 +8,7 @@ import {
   validateEventName, type AppState, type CommandInput, type CommandOutput,
 } from "../../src/contracts/ui/state.js";
 import { defaultLocalProcessingProfile } from "../../src/contracts/speech/local-processing.js";
+import { updateDownloadProgressSchema } from "../../src/contracts/update/update-download-progress.js";
 
 function state(): AppState {
   return {
@@ -79,10 +80,18 @@ test("schema-derived command maps cover all current renderer actions", async () 
   // Conditional attributes/recording branches are part of the fixed contract as well.
   for (const name of [
     "enable_paste", "disable_paste", "enable_shortcut", "desktop_shortcut", "clear_shortcut",
-    "retry_transcription", "discard_recovery", "toggle_recording", "cancel_recording", "check_updates", "install_update",
+    "retry_transcription", "discard_recovery", "toggle_recording", "cancel_recording", "check_updates", "download_update", "install_update",
   ]) assert.doesNotThrow(() => validateCommandName(name));
-  assert.equal(Object.keys(commandInputSchemas).length, 34);
+  assert.equal(Object.keys(commandInputSchemas).length, 35);
   assert.deepEqual(Object.keys(commandOutputSchemas).sort(), Object.keys(commandInputSchemas).sort());
+});
+
+test("update download progress is bounded, byte-based, and cannot exceed a validated total", () => {
+  assert.deepEqual(updateDownloadProgressSchema.parse({ received: 0, total: 42 }), { received: 0, total: 42 });
+  assert.deepEqual(updateDownloadProgressSchema.parse({ received: 42, total: 42 }), { received: 42, total: 42 });
+  assert.deepEqual(updateDownloadProgressSchema.parse({ received: 43 }), { received: 43 });
+  for (const value of [{ received: 43, total: 42 }, { received: -1 }, { received: 0.5 }, { received: 0, total: 0 },
+    { received: Number.MAX_SAFE_INTEGER + 1 }]) assert.equal(updateDownloadProgressSchema.safeParse(value).success, false);
 });
 
 test("update metadata and project links are bounded fixed capabilities", () => {
@@ -93,6 +102,11 @@ test("update metadata and project links are bounded fixed capabilities", () => {
   const valid = { ...state(), updates: { ...state().updates, status: "available", version: "0.3.1",
     details: { highlights: ["Local speech recognition", "Keyboard improvements"], size: 1024 } } };
   assert.deepEqual(appStateSchema.parse(valid), valid);
+  const ready = { ...state(), updates: { configured: true, status: "ready" as const, version: "0.3.1", progress: 1,
+    download: { received: 1024, total: 1024 }, error: null, package: "macos" as const,
+    details: { highlights: ["English note"], localized_highlights: { en: ["English note"], de: ["Deutsche Notiz"] }, size: 1024 } } };
+  assert.deepEqual(appStateSchema.parse(ready), ready);
+  assert.equal(appStateSchema.safeParse({ ...ready, updates: { ...ready.updates, download: { received: 1025, total: 1024 } } }).success, false);
   for (const details of [{ highlights: ["x".repeat(513)] }, { highlights: Array.from({ length: 6 }, () => "item") },
     { highlights: [], size: 0 }, { highlights: [], size: Number.MAX_SAFE_INTEGER + 1 }]) {
     assert.equal(appStateSchema.safeParse({ ...valid, updates: { ...valid.updates, details } }).success, false);

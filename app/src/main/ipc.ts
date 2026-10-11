@@ -207,6 +207,7 @@ export function createUiDispatcher(options: {
     show_transcripts_folder: route("show_transcripts_folder", handlers.show_transcripts_folder),
     open_login_settings: route("open_login_settings", handlers.open_login_settings),
     check_updates: route("check_updates", handlers.check_updates),
+    download_update: route("download_update", handlers.download_update),
     install_update: route("install_update", handlers.install_update),
     open_project_link: route("open_project_link", handlers.open_project_link),
     window_action: route("window_action", handlers.window_action),

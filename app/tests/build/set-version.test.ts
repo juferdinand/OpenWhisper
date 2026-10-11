@@ -119,7 +119,7 @@ test("rejects invalid versions without writing any manifest", async () => {
     const before = await snapshot(root);
     await assert.rejects(
       synchronizeVersion(root, "01.2.3"),
-      /Version must use X\.Y\.Z/,
+      /INVALID_VERSION/,
     );
     assert.deepEqual(await snapshot(root), before);
   } finally {

@@ -21,6 +21,10 @@ export interface MacosUpdateCoordinatorEffects {
   prepare: typeof prepareMacosUpdateInstall;
   cleanup: typeof cleanupMacUpdateArchiveDownload;
 }
+export interface MacosUpdateObserver {
+  readonly onProgress?: Parameters<typeof downloadUpdateCandidate>[0]["onProgress"];
+  readonly onVerifying?: () => void;
+}
 
 /** The caller has already admitted the running persistent publisher and owns UI/native lifetime. */
 export function createMacosUpdateCoordinator(input: Readonly<{ admission: MacosUpdateAdmission; identity: BuildIdentity;
@@ -39,7 +43,7 @@ export function createMacosUpdateCoordinator(input: Readonly<{ admission: MacosU
     try { if (failedDownloadCleanup) fail("CLEANUP_FAILED"); return await operation(); } finally { busy = false; }
   };
   const check = (signal: AbortSignal): Promise<MacosUpdateCandidate | undefined> => run(async () => {
-    candidate = undefined; active(signal);
+    const retainedCandidate = candidate; active(signal);
     const found = await io.read({ package: "macos", repository: admission.repository, currentVersion, signal });
     active(signal);
     if (found) {
@@ -47,17 +51,20 @@ export function createMacosUpdateCoordinator(input: Readonly<{ admission: MacosU
       // Copy through the existing exact source/version projection; retain no mutable feed object.
       candidate = projectMacosUpdateRelease({ repository: admission.repository, currentVersion,
         release: { tag_name: `v${found.version}`, html_url: found.pageURL, body: found.notes, draft: false, prerelease: false,
-          assets: [{ name: found.assetName, browser_download_url: found.assetURL }] } });
-    }
+          assets: [{ name: found.assetName, browser_download_url: found.assetURL,
+            ...(found.details.size === undefined ? {} : { size: found.details.size }) }] } });
+    } else candidate = retainedCandidate;
     return candidate;
   });
-  const prepareInstall = (signal: AbortSignal): Promise<Readonly<PreparedMacosUpdateInstall>> => run(async () => {
-    active(signal); const selected = candidate; candidate = undefined;
+  const prepareInstall = (signal: AbortSignal, observer: MacosUpdateObserver = {}): Promise<Readonly<PreparedMacosUpdateInstall>> => run(async () => {
+    active(signal); const selected = candidate;
     if (!selected) return fail("UNAVAILABLE");
     let download: Readonly<OwnedUpdateDownload> | undefined, extracted: Readonly<ExtractedMacUpdate> | undefined;
     let prepared: Readonly<PreparedMacosUpdateInstall> | undefined, failed = false, failure: unknown;
     try {
-      download = await io.download({ candidate: selected, repository: admission.repository, currentVersion, cacheDirectory, signal }); active(signal);
+      download = await io.download({ candidate: selected, repository: admission.repository, currentVersion, cacheDirectory, signal,
+        ...(observer.onProgress ? { onProgress: observer.onProgress } : {}) }); active(signal);
+      observer.onVerifying?.();
       extracted = await io.extract({ download, build: identity, expectedVersion: selected.version, currentVersion }); active(signal);
       prepared = await io.prepare({ download, extracted, build: identity, currentBundle: admission.bundle,
         currentVersion, expectedVersion: selected.version }); active(signal);
@@ -85,6 +92,7 @@ export function createMacosUpdateCoordinator(input: Readonly<{ admission: MacosU
       }
       throw failure;
     }
+    candidate = undefined;
     return prepared!;
   });
   const finalize = (): Promise<void> => {

@@ -9,6 +9,8 @@ import { z } from "zod";
 import { buildSpeechEntryGraph } from "../../scripts/build-speech-entry-graph.js";
 import { developmentRecordingDescriptorSchema } from "../../src/main/development-recording-descriptor.js";
 import { parseApplicationBuildModule, type BuildIdentity } from "../../src/contracts/application/build-identity.js";
+import { parseUpdateVersion } from "../../src/services/update/common/update-policy.js";
+import { releaseContextFromCommit } from "../../scripts/release-context.js";
 import { waitForOriginalCommandClose } from "../owned-supervisor/run.js";
 
 const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
@@ -43,7 +45,7 @@ const appImageBundle = appImage ? absolute.parse(args[11]) : undefined;
 const artifactSchema = z.strictObject({ bytes: z.number().int().nonnegative().max(1024 * 1024 * 1024), sha256: z.string().regex(/^[a-f0-9]{64}$/u) });
 const updateInputSchema = z.strictObject({ version: z.literal(1), classification: z.literal("CANONICAL_STABLE_VALIDATION_ONLY"),
   source: z.strictObject({ commit: z.string().regex(/^[a-f0-9]{40}$/u), modified: z.literal(false) }),
-  sourceVersion: z.literal("0.4.1"), files: z.record(z.string(), artifactSchema),
+  sourceVersion: z.string().refine((value) => { try { parseUpdateVersion(value); return true; } catch { return false; } }), files: z.record(z.string(), artifactSchema),
   modes: z.record(z.string(), z.number().int().min(0).max(0o7777)) });
 let updateInput: z.infer<typeof updateInputSchema> | undefined;
 const supervisorInputSchema = z.strictObject({ version: z.literal(1), classification: z.literal("OWNED_SUPERVISOR_RUNTIME_INPUT"),
@@ -64,6 +66,7 @@ if (supervisedLaunch) {
   const receipt: unknown = JSON.parse(supervisorReceiptBytes.toString("utf8"));
   if (updateCheck) {
     updateInput = updateInputSchema.parse(receipt);
+    assert.equal(updateInput.sourceVersion, releaseContextFromCommit(resolve(root, ".."), updateInput.source.commit).currentVersion);
     assert.ok(Object.keys(updateInput.files).length <= 20_000 && Object.keys(updateInput.modes).length <= 25_000);
   } else {
     supervisorInput = supervisorInputSchema.parse(receipt);
@@ -436,6 +439,7 @@ try {
       ...(installPackage ? ["OPENWHISPER_INSTALL_PACKAGE=1"] : []), ...(stablePackage ? ["OPENWHISPER_STABLE_PACKAGE=1"] : []),
       ...(installedDebian ? ["OPENWHISPER_INSTALLED_DEBIAN=1"] : []), ...(supervisedLaunch ? ["OPENWHISPER_SUPERVISED_LAUNCH=1"] : []), ...(resourceDiagnostic ? ["OPENWHISPER_RESOURCE_DIAGNOSTIC=1"] : []), ...(appImage ? ["OPENWHISPER_APPIMAGE=1"] : []),
       ...(updateCheck ? ["OPENWHISPER_UPDATE_CHECK=1"] : []),
+      ...(updateCheck ? [`OPENWHISPER_UPDATE_SOURCE_VERSION=${updateInput!.sourceVersion}`] : []),
       ...(appImageAdmission ? ["OPENWHISPER_APPIMAGE_ADMISSION=1", `OPENWHISPER_APPIMAGE_SHA256=${appImageInput!.image.sha256}`] : []),
       ...(appImageStartupOnly ? ["OPENWHISPER_APPIMAGE_STARTUP_ONLY=1"] : []), "/payload/node", "/payload/driver.mjs"]
     : ["/opt/node/bin/node", "/payload/driver.mjs"];

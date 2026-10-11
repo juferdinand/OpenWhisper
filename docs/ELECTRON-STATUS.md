@@ -1,7 +1,7 @@
 # Release and platform status
 
-OpenWhisper **0.4.1** is the current Electron release for macOS and Linux. Download packages from
-the [v0.4.1 release](https://github.com/juferdinand/OpenWhisper/releases/tag/v0.4.1). Its assets include
+OpenWhisper's current Electron release is for macOS and Linux. Download packages from the
+[latest release](https://github.com/juferdinand/OpenWhisper/releases/latest). Its assets include
 the macOS DMG/ZIP, Linux AppImage/DEB and signatures, `latest.json`, and `SHA256SUMS`. This page records
 automated coverage and its limits; it does not claim support for every device, desktop,
 distribution, or installation history.
@@ -57,7 +57,7 @@ support on every distribution.
 
 ## Upgrading from 0.2.5
 
-Install 0.4.1 manually from the Releases page using its DMG/ZIP or Linux package. Do not infer that
+Install the current version manually from the Releases page using its DMG/ZIP or Linux package. Do not infer that
 preferences, models, recordings, or history have moved between app generations. Back up data you
 need before changing installations. The immutable [0.2.5 source and platform record](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4)
 describes the former native hosts and their historical evidence.

@@ -9,6 +9,7 @@ import { downloadUpdateCandidate, UpdateDownloadError } from "../../../src/servi
 import type { UpdateDownloadInput } from "../../../src/services/update/common/update-download.js";
 import { LINUX_UPDATE_FEED_URL, projectLinuxUpdateFeed, projectMacosUpdateRelease } from "../../../src/services/update/common/update-policy.js";
 import { verifyOwnedLinuxUpdateFile } from "../../../src/services/update/linux/linux-update-file.js";
+import type { UpdateDownloadProgress } from "../../../src/contracts/update/update-download-progress.js";
 import { deferred, FakeTransport, type ResponseScript } from "../../fixtures/model-download-fixtures.js";
 
 const unixTest = ["linux", "darwin"].includes(process.platform) ? test : test.skip;
@@ -46,6 +47,20 @@ unixTest("an inert HTTPS transfer stages the original private ZIP with partial p
   assert.equal(transport.requests.length, 1); assert.equal(transport.requests[0]?.url.href, candidate.assetURL);
   assert.equal(Object.hasOwn(stage, "authentication"), false);
   await stage.cleanup(); assert.deepEqual(await readdir(input.cacheDirectory), []);
+}));
+unixTest("download progress reports only bytes actually written and uses only validated response length", async () => fixture(async (input) => {
+  const progress: UpdateDownloadProgress[] = [];
+  const stage = await downloadUpdateCandidate({ ...input, onProgress: (value) => progress.push(value) },
+    { transport: () => new FakeTransport([response()]) });
+  assert.deepEqual(progress[0], { received: 0, total: bytes.length });
+  assert.deepEqual(progress.at(-1), { received: bytes.length, total: bytes.length });
+  assert.ok(progress.every((value) => value.received <= bytes.length));
+  await stage.cleanup();
+  const withoutLength: UpdateDownloadProgress[] = [];
+  const unknown = await downloadUpdateCandidate({ ...input, onProgress: (value) => withoutLength.push(value) },
+    { transport: () => new FakeTransport([{ headers: { status: 200, raw: [] }, chunks: [bytes] }]) });
+  assert.deepEqual(withoutLength.at(-1), { received: bytes.length });
+  await unknown.cleanup();
 }));
 unixTest("tampered policy candidates and already canceled requests perform no transport or staging effects", async () => fixture(async (input) => {
   let factories = 0; const effects = { transport: () => { factories++; return new FakeTransport([]); } };

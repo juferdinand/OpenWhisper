@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { parseApplicationBuildModule } from "../src/contracts/application/build-identity.js";
 import { packageMacPreview } from "./package-macos-preview.js";
+import { releaseContextFromCommit } from "./release-context.js";
 
 function canonical(value: string): string {
   assert.ok(value.startsWith("/") && resolve(value) === value && !/[\u0000-\u001f\u007f]/u.test(value)); return value;
@@ -27,16 +28,23 @@ const run = (command: string, argv: readonly string[]): string => {
 const producer = JSON.parse(await readFile(join(source, "app/dist/resources/development-build.json"), "utf8")) as unknown;
 const sourceInfo = z.object({ commit: z.string().regex(/^[a-f0-9]{40}$/u), modified: z.literal(false) }).parse(producer);
 assert.equal(run("/usr/bin/git", ["status", "--porcelain"]), "");
+const parentCommit = run("/usr/bin/git", ["rev-parse", `${sourceInfo.commit}^`]).trim();
+const releaseContext = releaseContextFromCommit(source, parentCommit);
+const expectedVersion = releaseContext.successorVersion;
 const identity = parseApplicationBuildModule(await readFile(join(source, "app/dist/main/application-build.js"), "utf8"));
 assert.deepEqual(identity, { version: 1, kind: "stable", appId: "io.github.whisperfree", productName: "OpenWhisper" });
-assert.equal((await readFile(join(source, "VERSION"), "utf8")).trim(), "0.4.2");
+assert.equal((await readFile(join(source, "VERSION"), "utf8")).trim(), expectedVersion);
+assert.equal(JSON.parse(await readFile(join(source, "app/package.json"), "utf8")).version, expectedVersion);
+const lock = JSON.parse(await readFile(join(source, "app/package-lock.json"), "utf8")) as { version?: unknown; packages?: { ""?: { version?: unknown } } };
+assert.equal(lock.version, expectedVersion);
+assert.equal(lock.packages?.[""]?.version, expectedVersion);
 assert.equal(run("/usr/bin/git", ["rev-parse", "HEAD"]).trim(), sourceInfo.commit);
 assert.equal(run("/usr/bin/git", ["rev-parse", `${sourceInfo.commit}^`]).trim(), process.env["GITHUB_SHA"]);
 assert.deepEqual(run("/usr/bin/git", ["diff-tree", "--no-commit-id", "--name-only", "-r", sourceInfo.commit]).trim().split("\n").sort(),
   ["VERSION", "app/package-lock.json", "app/package.json"]);
 const result = await packageMacPreview(output, join(source, "app"), { signingMode: "persistent-validation", enableUpdates: true });
 await writeFile(join(output, "successor-package-result.json"), `${JSON.stringify({ status: "PASS", sourceCommit: sourceInfo.commit,
-  version: "0.4.2", directory: result.directory, archive: result.archive, sha256: result.sha256,
+  version: expectedVersion, directory: result.directory, archive: result.archive, sha256: result.sha256,
   signingMode: "persistent-validation", updateConfigured: true, scope: "Private signed same-source successor package; no publication." })}\n`,
   { flag: "wx", mode: 0o600 });
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.stdout.write("PASS: private Mac successor package signed.\n");

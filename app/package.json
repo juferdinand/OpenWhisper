@@ -11,6 +11,7 @@
     "setup": "tsx scripts/setup.ts",
     "preflight": "tsx scripts/preflight.ts",
     "set-version": "tsx scripts/set-version.ts",
+    "prepare-release": "tsx scripts/prepare-release.ts",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --type-aware --deny-warnings --report-unused-disable-directives src scripts tests ui/src",
     "check:unused": "knip",

@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { readReleaseContext } from "./release-context.js";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const digest = async (path: string): Promise<string> => createHash("sha256").update(await readFile(path)).digest("hex");
@@ -28,10 +29,8 @@ await mkdir(output, { mode: 0o700 }); assert.equal(await (await lstat(output)).i
 const original = run("/usr/bin/git", ["rev-parse", "HEAD"]).trim();
 assert.match(original, /^[a-f0-9]{40}$/u); assert.equal(original, process.env["GITHUB_SHA"]);
 assert.equal(run("/usr/bin/git", ["status", "--porcelain"]), "");
-const current = (await readFile(resolve(root, "../VERSION"), "utf8")).trim();
-const version = z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u).parse(current);
-const fields = version.split(".").map(Number); const successor = `${fields[0]}.${fields[1]}.${fields[2]! + 1}`;
-assert.equal(version, "0.4.1"); assert.equal(successor, "0.4.2");
+const releaseContext = await readReleaseContext(workspace);
+const version = releaseContext.currentVersion, successor = releaseContext.successorVersion;
 
 const nativePaths = ["native/macos-capture/build/arm64/openwhisper_macos_capture.node",
   "native/macos-retirement/build-production/arm64/openwhisper_macos_retirement.node", "native/build-cpu/openwhisper_speech.node"];
