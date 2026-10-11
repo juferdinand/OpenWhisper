@@ -1,14 +1,10 @@
-<!-- Prepared for the gated 0.4.0 release workflow; repository status lives in README.md. -->
+<!-- Prepared for the gated 0.4.1 release workflow; repository status lives in README.md. -->
 
-## What's new in OpenWhisper 0.4.0
+## What's new in OpenWhisper 0.4.1
 
-- Redesigned setup, recording workspace, model selection, history and settings with the new logo.
-- Choose recognition hardware during setup and download/select a model before completing it.
-- Show a scrolling waveform in the main and floating recording views; display the floating controls
-  while the main window is in the background.
-- Close the window without quitting on macOS and Linux; reopen it through the tray or app launcher.
-- View available updates and concise release highlights from the header. Request keyboard access
-  when choosing automatic text insertion, and improve Linux autostart and desktop icon integration.
+- Refresh the managed Linux AppImage desktop icon after an update, while preserving customized
+  desktop entries and icons.
+- Notify KDE's icon loader after a successful refresh.
 
 Recognition runs locally. Exact package, desktop and test scope is recorded in
 [Electron status](https://github.com/juferdinand/OpenWhisper/blob/main/docs/ELECTRON-STATUS.md) and
@@ -16,7 +12,7 @@ Recognition runs locally. Exact package, desktop and test scope is recorded in
 
 ## Updating from 0.2.5
 
-For the first transition from the native 0.2.5 application to Electron, install 0.4.0 manually
+For the first transition from the native 0.2.5 application to Electron, install 0.4.1 manually
 from the packages below. The original application's GUI updater has not been verified for this
 host transition. The earlier 0.2.4-to-0.2.5 transition also required manual installation;
 the 0.2.4 updater cannot apply 0.2.5. Older versions may need to be reopened from the application launcher
