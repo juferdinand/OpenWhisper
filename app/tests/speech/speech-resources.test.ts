@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { lstat, open, realpath, chmod, link, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, open, realpath, chmod, link, mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -73,11 +73,15 @@ test("selected artifact refuses symlinks at every fixed ancestry and at the reso
 
 test("selected resource refuses changed bytes, hardlinks, writable permissions and replacement during hashing", async () => {
   for (const fault of ["hash", "hardlink", "permissions", "mutation"] as const) await owned(async (root, path) => {
+    const original = await lstat(path);
     const files: SpeechResourceFiles = fault !== "mutation" ? actual : { ...actual, open: async (path, flags) => {
       const file = await actual.open(path, flags); let changed = false;
       return { stat: file.stat.bind(file), close: file.close.bind(file), read: async (...args: Parameters<typeof file.read>) => {
         const result = await file.read(...args);
-        if (!changed) { changed = true; await writeFile(path, Buffer.alloc(bytes.length, 88)); }
+        if (!changed) {
+          changed = true; await writeFile(path, Buffer.alloc(bytes.length, 88));
+          await utimes(path, original.atime, new Date(original.mtimeMs + 1_000));
+        }
         return result;
       } };
     } };

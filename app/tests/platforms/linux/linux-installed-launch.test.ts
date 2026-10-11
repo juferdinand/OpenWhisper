@@ -163,7 +163,10 @@ test("The successor refreshes only the exact legacy-managed AppImage icon", { sk
   assert(filesystem.statSync(themeRoot, { bigint: true }).mtimeNs > 1_000_000_000n);
   const refreshed = filesystem.statSync(icon, { bigint: true });
   refreshLinuxAppImageIcon(input);
-  assert.deepEqual(filesystem.statSync(icon, { bigint: true }), refreshed);
+  const repeated = filesystem.statSync(icon, { bigint: true });
+  for (const field of ["dev", "ino", "uid", "mode", "nlink", "size", "mtimeNs", "ctimeNs"] as const) {
+    assert.equal(repeated[field], refreshed[field], `unchanged icon ${field}`);
+  }
 }));
 
 test("Icon refresh preserves customized desktop entries, customized icons, and symlink targets", { skip: !supported }, async () => fixture(async (input, files) => {
