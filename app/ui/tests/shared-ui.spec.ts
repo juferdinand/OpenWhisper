@@ -987,6 +987,10 @@ async function waveformPixels(page: Page, selector: string) {
       cssWidth: rect.width,
       cssHeight: rect.height,
       pixelRatio: rect.width ? width / rect.width : 0,
+      cssPeakRight:
+        peakX >= 0 && rect.width
+          ? rect.width - peakX / (width / rect.width)
+          : -1,
       paintedPixels,
       peakX,
       peakRight: peakX >= 0 ? width - peakX : -1,
@@ -1299,6 +1303,90 @@ test("recording canvas moves accepted historical peaks left without changing the
   expect(highDensity.paintedPixels).toBeGreaterThan(0);
   expect(
     await page.evaluate(() => (window as any).__syntheticMicrophoneRequests),
+  ).toBe(0);
+});
+
+test("main and overlay waveforms share telemetry timing and level mapping", async ({
+  page,
+}) => {
+  const overlayPage = await page.context().newPage();
+  const fixedTime = new Date("2026-10-11T12:00:00.000Z");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await overlayPage.emulateMedia({ reducedMotion: "no-preference" });
+  await page.clock.install({ time: fixedTime });
+  await page.clock.pauseAt(fixedTime);
+  await blockMicrophoneInput(page);
+  await blockMicrophoneInput(overlayPage);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await overlayPage.setViewportSize({ width: 476, height: 68 });
+  await start(page, "linux", false, false, false, null);
+  await start(overlayPage, "linux", true, false, false, null);
+
+  const mainSelector =
+    '.dictation-waveform canvas.live-waveform[data-waveform="main"]';
+  const overlaySelector =
+    '.audio-mark canvas.live-waveform[data-waveform="overlay"]';
+  const publishPulse = async (target: Page, elapsed: number, level: number) => {
+    await target.evaluate(
+      ({ elapsed, level }) => {
+        Object.assign(window.testState, {
+          status: "recording",
+          recording_generation: 41,
+          elapsed,
+          level: 0,
+        });
+        window.publishState();
+        window.publishTelemetry({ generation: 41, elapsed, level });
+      },
+      { elapsed, level },
+    );
+  };
+  const advanceContext = async (duration: number) => {
+    await page.clock.runFor(duration);
+  };
+  const assertParity = async () => {
+    const main = await waveformPixels(page, mainSelector);
+    const overlay = await waveformPixels(overlayPage, overlaySelector);
+    const normalizedHeight = (waveform: typeof main) => {
+      const halfHeight = waveform.peakDistance / waveform.pixelRatio;
+      return (2 * halfHeight - 4) / (waveform.cssHeight * 0.94 - 4);
+    };
+    expect(main.paintedPixels).toBeGreaterThan(0);
+    expect(overlay.paintedPixels).toBeGreaterThan(0);
+    expect(
+      Math.abs(main.cssPeakRight - overlay.cssPeakRight),
+    ).toBeLessThanOrEqual(2);
+    expect(
+      Math.abs(normalizedHeight(main) - normalizedHeight(overlay)),
+    ).toBeLessThanOrEqual(0.12);
+    return { main, overlay };
+  };
+
+  await publishPulse(page, 0, 0.86);
+  await publishPulse(overlayPage, 0, 0.86);
+  await advanceContext(200);
+  await publishPulse(page, 1, 0.35);
+  await publishPulse(overlayPage, 1, 0.35);
+  await advanceContext(200);
+  const at400ms = await assertParity();
+  await publishPulse(page, 2, 0.35);
+  await publishPulse(overlayPage, 2, 0.35);
+  await advanceContext(200);
+  const at600ms = await assertParity();
+
+  const mainTravel = at600ms.main.cssPeakRight - at400ms.main.cssPeakRight;
+  const overlayTravel =
+    at600ms.overlay.cssPeakRight - at400ms.overlay.cssPeakRight;
+  expect(mainTravel).toBeCloseTo(12.8, 0);
+  expect(overlayTravel).toBeCloseTo(12.8, 0);
+  expect(Math.abs(mainTravel - overlayTravel)).toBeLessThanOrEqual(2);
+  expect(
+    await page.evaluate(() => (window as any).__syntheticMicrophoneRequests),
+  ).toBe(0);
+  expect(
+    await overlayPage.evaluate(
+      () => (window as any).__syntheticMicrophoneRequests,
+    ),
   ).toBe(0);
 });
 

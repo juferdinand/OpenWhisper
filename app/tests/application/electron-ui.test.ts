@@ -306,7 +306,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await openSettings(page, "about");
     await expect(page.locator("#dictation-workspace")).toBeVisible();
     await expect(page.locator("#settings-dialog")).toHaveJSProperty("open", true);
-    await expect(page.locator(".version-badge")).toHaveText(`Version ${state.version} · Electron · Dev build ${buildIdentifier}`);
+    await expect(page.locator(".version-badge")).toHaveText(`Version ${state.version} · Dev build ${buildIdentifier}`);
     await expect(page.locator(".about-brand img")).toHaveAttribute("src", "./branding/icon-bordered.svg");
     await expect.poll(async () => page.locator(".about-brand img").evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth === 512)).toBe(true);
     assert.equal(await page.evaluate(async () => {

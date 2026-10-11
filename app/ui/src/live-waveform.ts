@@ -5,13 +5,13 @@ const MAX_HISTORY = 512;
 const BAR_WIDTH = 2.5;
 const BAR_STEP = 4;
 const BAR_BASE = 4;
+const EDGE_FADE_WIDTH = 10;
 const SCROLL_PIXELS_PER_SECOND = 64;
 const COLUMN_INTERVAL_MS = (BAR_STEP / SCROLL_PIXELS_PER_SECOND) * 1000;
 const STALE_AFTER_MS = 500;
 
 export interface LiveWaveformOptions {
   readonly mode: "scrolling" | "static";
-  readonly fadeWidth?: number;
 }
 
 interface Column {
@@ -304,7 +304,7 @@ export class LiveWaveform {
   }
 
   private applyEdgeFade(context: CanvasRenderingContext2D): void {
-    const fadeWidth = this.options.fadeWidth ?? 20;
+    const fadeWidth = EDGE_FADE_WIDTH;
     if (!fadeWidth || this.width <= fadeWidth * 2) return;
     if (!this.fadeGradient) {
       const gradient = context.createLinearGradient(0, 0, this.width, 0);

@@ -52,7 +52,7 @@ export class WaylandRecordingOverlay {
   constructor(private readonly renderer: BrowserWindow, entry: string,
     private readonly unavailable: () => void) {
     // Renderer setup can fail synchronously; do it before allocating the helper.
-    renderer.webContents.setFrameRate(15);
+    renderer.webContents.setFrameRate(60);
     renderer.webContents.stopPainting();
     this.child = utilityProcess.fork(entry, [], {
       serviceName: "OpenWhisper Wayland Recording Surface", execArgv: [], stdio: "ignore",
