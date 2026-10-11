@@ -279,9 +279,10 @@ export class LiveWaveform {
   }
 
   private barHeight(level: number): number {
+    const maximum = this.height * 0.94;
     return Math.min(
-      this.height,
-      BAR_BASE + level * Math.max(0, this.height * 0.8 - BAR_BASE),
+      maximum,
+      BAR_BASE + Math.sqrt(level) * Math.max(0, maximum - BAR_BASE),
     );
   }
 
