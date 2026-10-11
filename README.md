@@ -36,10 +36,10 @@ vocabulary correction, snippets, history, a shared settings interface, and Engli
 interface translations. Platform integrations and validation differ; consult the applicable
 [Linux evidence](docs/LINUX.md) and [platform overview](docs/PLATFORMS.md).
 
-Optional LM Studio and Ollama text processing is available only as a manual preview in the
-isolated Electron Dev build; it is not part of the 0.3.1 release. Speech output and structured
-Obsidian notes are planned integrations, with prerequisites and delivery order in the
-[roadmap](docs/ROADMAP.md).
+Optional LM Studio and Ollama adapters are development groundwork. Their former manual
+preview is hidden while the redesigned Connections interface is deferred; ordinary dictation
+does not call them. Speech output and structured Obsidian notes are planned integrations,
+with prerequisites and delivery order in the [roadmap](docs/ROADMAP.md).
 
 Recording continues until you stop or cancel it. Audio remains in memory while recording, so
 longer sessions use more RAM. Model downloads require a network connection. Recognition runs
@@ -151,7 +151,7 @@ export all keychain identities or commit signing material.
 - [Platform architecture](docs/PLATFORMS.md)
 - [Release signing](docs/SIGNING.md)
 - [Security policy](SECURITY.md)
-- [Local model communication preview](docs/LOCAL_MODELS.md)
+- [Local model communication groundwork](docs/LOCAL_MODELS.md)
 - [Frontend redesign plan](docs/UI-REDESIGN.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Report an issue](https://github.com/juferdinand/OpenWhisper/issues)

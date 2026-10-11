@@ -34,7 +34,7 @@ dashboard cards in the dictation view. Keep the accepted seven-step setup flow.
 | Collapsible history rail | Restyle the current bounded text list with full-text copy and clear controls |
 | Setup and settings | Choose recognition hardware before the model, then preserve microphone, language, output, permission and shortcut controls and platform capability checks |
 | Floating recording controls | Apply the same visual language while preserving host-specific availability and usable main-window fallback |
-| Local model preview | Retain the existing optional Dev-only manual preview; do not advertise stable chat functionality |
+| Text processing | Group existing vocabulary and snippet editing together; hide the former model-server preview until Connections is implemented |
 
 The reference is an interactive simulation: recognition, downloads, hardware, history,
 chat and processing changes use demo data. Screenshots establish its appearance only.
@@ -55,8 +55,8 @@ state. A live recording waveform indicates input level, not live transcription.
    or completing setup. Pending, cancelled and failed downloads do not satisfy this check;
    permission and shortcut fallbacks remain optional.
 2. **Foundation and recording view.** Reproduce the reference's single transcript
-   workspace, shown by default after setup. Place the existing settings, models, snippets,
-   history and About views inside the settings dialog. Keep the
+   workspace, shown by default after setup. Group General, Recording & shortcuts, Text processing,
+   History and About inside the settings dialog. Keep the
    renderer-only dictation view separate from host settings-navigation contracts.
    Show the actual selected model and recognition device, an elapsed timer and input level
    from host telemetry, and the latest final transcript. Do not imply live transcription;
@@ -66,20 +66,24 @@ state. A live recording waveform indicates input level, not live transcription.
    cancel, retry and discard visible in the states where they are valid. Review screenshots
    at the actual 740 × 560 minimum window size and at larger sizes.
 3. **Models, history and settings.** Reuse existing model operations and history actions;
-   open a right-edge model chooser drawer from Dictation with Whisper/Parakeet family
-   selection, while retaining the full Models management view inside settings.
+   open the right-edge model chooser drawer from Dictation and General with Whisper/Parakeet
+   family selection. Do not duplicate it as a primary settings tab.
    Keep the native dialog stable through download progress, show command failures
    inside it, and support keyboard navigation, Escape and focus restoration.
-   Add a collapsible history rail at the right edge of the workspace using the existing text list,
-   complete-copy and clear commands, without inventing dates or durations. Keep the full
-   History view available. Use a centered settings dialog with internal navigation and a
+   Add a collapsible history rail with selectable, two-line entries and complete-copy/clear
+   commands, without inventing dates or durations. Keep history preferences, the actual folder
+   action and clear controls in History settings. Use a centered dialog with internal navigation and a
    scrollable content area; adapt snippets and About, including the supplied SVG branding,
    without removing current controls. Both dialogs must support keyboard navigation, Escape,
    focus restoration, and retained unsaved edits. Keep
-   setup exclusive until completion, then remove it from normal navigation.
+   setup exclusive until completion, then remove it from normal navigation. Put the shortcut,
+   segmented output choice and floating indicator first in Recording & shortcuts; retain useful
+   microphone, language, mode and permission controls in secondary groups. Group vocabulary
+   and snippet editors in Text processing, without adding simulated cleanup or correction counts.
 4. **Overlay and regression review.** Restyle floating controls separately from the main
    window, check both host layouts and capability fallbacks, and present one functional
-   candidate for owner acceptance before merge.
+   candidate for owner acceptance before merge. Display input levels as a rolling history:
+   actual new telemetry enters on the right and moves left; do not animate invented samples.
 
 Use strict TypeScript and the existing renderer. Do not import the prototype's dynamic
 React/Babel runtime, remote fonts or demo scripts, relax the content security policy, or

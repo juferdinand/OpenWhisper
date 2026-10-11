@@ -30,7 +30,6 @@ const userText = utf8(MAX_USER_TEXT_BYTES);
 const tabSchema = z.enum(["setup", "general", "models", "snippets", "history", "about"]);
 export type Tab = z.infer<typeof tabSchema>;
 const uiLanguageSchema = z.enum(["en", "de"]);
-export type UILanguage = z.infer<typeof uiLanguageSchema>;
 
 export const snippetSchema = z.strictObject({
   // Linux legacy snippets may have an empty generated ID; macOS persists empty drafts.

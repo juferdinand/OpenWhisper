@@ -120,7 +120,7 @@ at Quit; missing tools or failed publication leave stopped audio available for r
 Large output is not cut to fit the bounded UI preview: Copy retrieves the complete text;
 with history enabled it is also saved as a private `.txt` in the Dev transcripts directory.
 History and models remain separate from the installed release. Recording is independent
-of the optional text-model preview. Packaged/signed replacement remains separate migration work.
+of the optional text-model adapters. Packaged/signed replacement remains separate migration work.
 
 The recording build also connects an authenticated, same-user D-Bus control service to the
 same recording owner used by the window. Its Dev name is `io.github.whisperfree.dev.Control`,
@@ -485,19 +485,15 @@ a macOS 14 runtime, hardware/default-input behavior, TCC, signed-helper loading 
 retirement from a generic Electron exit event. Reproduce only in the owned Apple CI VM using
 the [synthetic capture procedure](../app/tests/owned-macos-capture/README.md).
 
-## Optional text-model preview
+## Optional text-model groundwork
 
-P5 adds a disabled-by-default manual preview at the end of **Models**. Its numeric-loopback
-LM Studio/Ollama requests originate in the host and use separate private settings. Input
-and replies are transient and are not persisted by the host; the renderer retains them for
-that session and the selected server receives the submitted input. They do not change dictation, history,
-clipboard delivery or recovery. See [manual model preview](LOCAL_MODELS.md) for setup,
-privacy, limits and acceptance steps. This development feature is absent from release 0.2.5.
-Live LM Studio/Ollama trials are deferred to #11 and do not block release 0.3.0.
+The Dev host retains disabled-by-default model adapters and their separate private settings.
+The former manual preview form is removed from the redesigned UI; Connections remains deferred.
+Ordinary dictation, history, clipboard delivery and recovery stay independent of these adapters.
+See [local model groundwork](LOCAL_MODELS.md) for privacy, limits and synthetic protocol evidence.
+Live LM Studio/Ollama trials remain follow-up work under #11.
 
-The owned UI fixture also exercises actual Dev IPC against its own synthetic model server:
-send, cancel, retry, categorical HTTP errors, transient multilingual text, English/German
-controls, private profile persistence and unchanged synthetic stable data. These fixtures
-prove protocol/UI behavior, not the quality of a user-selected model. Native capture,
-platform adapters, universal packaging, existing-data migration and signed old-client
-updates remain separate gates. Keep the existing application hosts until those gates pass.
+The owned UI fixture checks real preference IPC, English/German controls, private profile
+persistence, unchanged synthetic stable data and absence of automatic provider traffic.
+These fixtures do not assess recognition or model quality. Consult [release status](ELECTRON-STATUS.md)
+and [Linux status](LINUX.md) for the separate package and platform evidence.

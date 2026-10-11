@@ -471,5 +471,20 @@
   "Manage models": "Manage models",
   "History is not saved.": "History is not saved.",
   "Saved only on this device.": "Saved only on this device.",
-  "Microphone permission is required. Check Recording settings.": "Microphone permission is required. Check Recording settings."
+  "Microphone permission is required. Check Recording settings.": "Microphone permission is required. Check Recording settings.",
+  "Local recognition": "Local recognition",
+  "Press Record or the shortcut. Your text will appear here.": "Press Record or the shortcut. Your text will appear here.",
+  "Recording & shortcuts": "Recording & shortcuts",
+  "Text processing": "Text processing",
+  "More recording settings": "More recording settings",
+  "Launch at login is available in an installed version of OpenWhisper.": "Launch at login is available in an installed version of OpenWhisper.",
+  "Clear": "Clear",
+  "Trigger options": "Trigger options",
+  "Keeps the floating recording indicator visible while OpenWhisper is idle.": "Keeps the floating recording indicator visible while OpenWhisper is idle.",
+  "Insert uses Accessibility access; Copy uses the clipboard.": "Insert uses Accessibility access; Copy uses the clipboard.",
+  "Insert uses keyboard access; Copy uses the clipboard.": "Insert uses keyboard access; Copy uses the clipboard.",
+  "Key, shortcut, or mouse button": "Key, shortcut, or mouse button",
+  "Key or shortcut": "Key or shortcut",
+  "Say a trigger word to insert its saved text. Matching ignores letter case, hyphens, and trailing punctuation.": "Say a trigger word to insert its saved text. Matching ignores letter case, hyphens, and trailing punctuation.",
+  "Save history": "Save history"
 }

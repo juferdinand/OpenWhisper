@@ -58,7 +58,6 @@ export const localProcessingProfilePatchSchema = z.strictObject(profileFields).p
   (patch) => Object.values(patch).every((value) => value !== undefined),
   { message: "Preference patch values must be defined" },
 );
-export type LocalProcessingProfilePatch = z.infer<typeof localProcessingProfilePatchSchema>;
 
 export function defaultLocalProcessingProfile(): LocalProcessingProfile {
   return localProcessingProfileSchema.parse({

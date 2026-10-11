@@ -1,5 +1,5 @@
 import { test, expect, Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { DesktopBridge } from "../../src/contracts/ui/bridge.js";
@@ -186,22 +186,19 @@ test("missing selected model gives a direct model download path and translates u
   );
   await expect(page.locator("#record")).toBeDisabled();
   await openSettings(page);
-  await selectSettingsTab(page, "recording");
+  await selectSettingsTab(page, "text");
   await page.locator("#vocabulary").fill("Unsaved vocabulary");
-  await page.locator('.settings-dialog-nav [data-tab="models"]').click();
+  await page.locator('.settings-dialog-nav [data-tab="history"]').click();
   await expect(page.locator("#settings-notice")).toHaveText(
     "Save or discard your changes before switching tabs or language.",
   );
   await expect(page.locator("#vocabulary")).toHaveValue("Unsaved vocabulary");
-  await page.locator("[data-discard]").click();
+  await page.locator("[data-discard-vocabulary]").click();
   await closeSettings(page);
   await page.locator("#record-unavailable-action").click();
-  await expect(page.locator("dialog#settings-dialog")).toBeVisible();
-  await expect(
-    page.locator('.settings-dialog-nav [data-tab="models"]'),
-  ).toHaveClass(/selected/);
+  await expect(page.locator("dialog#model-drawer")).toBeVisible();
   await expect(page.locator('[data-download="base"]')).toHaveText("Download");
-  await closeSettings(page);
+  await page.keyboard.press("Escape");
 
   await page.evaluate(() => {
     window.testState.recording_unavailable_reason = "permission";
@@ -312,15 +309,15 @@ test("an omitted large transcript preview still exposes complete Copy in both in
     host.testState.transcript = "";
     host.publishState();
   });
-  await selectSettingsTab(page, "history");
+  await closeSettings(page);
   await expect(
     page
-      .locator("#content")
+      .locator(".dictation-transcript-body")
       .getByText(
         "The complete transcript is available with Copy; its preview is too large.",
       ),
   ).toBeVisible();
-  await page.locator("#copy-latest").click();
+  await page.locator("#copy-dictation").click();
   await expect
     .poll(() => page.evaluate(() => (window as any).calls.at(-1).command))
     .toBe("copy_transcript");
@@ -329,14 +326,19 @@ test("an omitted large transcript preview still exposes complete Copy in both in
     host.testState.preferences.ui_language = "de";
     host.publishState();
   });
+  await expect(page.locator("html")).toHaveAttribute("lang", "de");
   await expect(
     page
-      .locator("#content")
+      .locator(".dictation-transcript-body")
       .getByText(
         "Das vollständige Transkript ist über Kopieren verfügbar; seine Vorschau ist zu groß.",
       ),
   ).toBeVisible();
-  await expect(page.locator("#copy-latest")).toHaveText("Kopieren");
+  await expect(page.locator("#copy-dictation")).toHaveText("Kopieren");
+  await page.locator("#copy-dictation").click();
+  await expect
+    .poll(() => page.evaluate(() => (window as any).calls.at(-1).command))
+    .toBe("copy_transcript");
 });
 
 test("workspace command failure keeps the global notice visible above the workspace", async ({
@@ -697,7 +699,13 @@ async function closeSettings(page: Page, escape = false) {
 
 async function selectSettingsTab(page: Page, tab: string) {
   await openSettings(page);
-  const button = page.locator(`.settings-dialog-nav [data-tab="${tab}"]`);
+  const aliases: Record<string, string> = {
+    snippets: "text",
+    "text processing": "text",
+    "recording & shortcuts": "recording",
+  };
+  const view = aliases[tab.toLowerCase()] ?? tab;
+  const button = page.locator(`.settings-dialog-nav [data-tab="${view}"]`);
   await button.click();
   await expect(button).toHaveClass(/selected/);
   await expect(button).toHaveAttribute("aria-current", "page");
@@ -730,7 +738,7 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(opener).toBeFocused();
 
     await openSettings(page);
-    await selectSettingsTab(page, "recording");
+    await selectSettingsTab(page, "text");
     const vocabulary = page.locator("#vocabulary");
     await vocabulary.fill("Unsaved focused vocabulary");
     await page.evaluate(() => {
@@ -746,7 +754,7 @@ for (const platform of ["linux", "macos"] as const) {
       "Save or discard your changes before switching tabs or language.",
     );
     await expect(vocabulary).toHaveValue("Unsaved focused vocabulary");
-    await page.locator("[data-discard]").click();
+    await page.locator("[data-discard-vocabulary]").click();
     await expect(vocabulary).toHaveValue("");
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
@@ -759,30 +767,12 @@ test("recording telemetry follows the newest full state and ignores stale genera
 }) => {
   await start(page, "linux", false, false, true);
   await expect(page.locator("#record-label")).toHaveText("Recording · 0:05");
-  expect(
-    await page
-      .locator("#record-control")
-      .evaluate((element) =>
-        Number.parseFloat(
-          getComputedStyle(element).getPropertyValue("--voice-level"),
-        ),
-      ),
-  ).toBeCloseTo(0.76);
 
   await page.evaluate(() => {
     const host = window as any;
     host.publishTelemetry({ generation: 7, elapsed: 99, level: 1 });
   });
   await expect(page.locator("#record-label")).toHaveText("Recording · 0:05");
-  expect(
-    await page
-      .locator("#record-control")
-      .evaluate((element) =>
-        Number.parseFloat(
-          getComputedStyle(element).getPropertyValue("--voice-level"),
-        ),
-      ),
-  ).toBeCloseTo(0.76);
 
   await page.evaluate(() => {
     const host = window as any;
@@ -792,15 +782,59 @@ test("recording telemetry follows the newest full state and ignores stale genera
     host.publishTelemetry({ generation: 8, elapsed: 6, level: 1 });
   });
   await expect(page.locator("#record-label")).toHaveText("Start dictation");
-  expect(
-    await page
-      .locator("#record-control")
-      .evaluate((element) =>
-        Number.parseFloat(
-          getComputedStyle(element).getPropertyValue("--voice-level"),
-        ),
-      ),
-  ).toBeCloseTo(0.2);
+});
+
+test("recording waveform keeps a rolling history of accepted telemetry samples", async ({
+  page,
+}) => {
+  await start(page, "linux", false, false, false, null);
+  await page.evaluate(() => {
+    Object.assign(window.testState, {
+      status: "recording",
+      recording_generation: 7,
+      elapsed: 0,
+      level: 0,
+    });
+    window.publishState();
+    document
+      .querySelectorAll<HTMLElement>(".dictation-waveform i")
+      .forEach((bar) => (bar.style.transition = "none"));
+    for (const [elapsed, level] of [
+      [1, 0.2],
+      [2, 0.8],
+      [3, 0.4],
+    ])
+      window.publishTelemetry({ generation: 7, elapsed, level });
+  });
+
+  await expect(page.locator(".dictation-waveform i")).toHaveCount(64);
+  const lastBars = page
+    .locator(".dictation-waveform i")
+    .evaluateAll((bars) =>
+      bars
+        .slice(-3)
+        .map((bar) => Number.parseFloat(getComputedStyle(bar).height)),
+    );
+  const heights = await lastBars;
+  expect(heights[0]).toBeCloseTo(19.2, 1);
+  expect(heights[1]).toBeCloseTo(64.8, 1);
+  expect(heights[2]).toBeCloseTo(34.4, 1);
+  await expect(page.locator("#dictation-timer")).toHaveText("0:03");
+
+  await page.evaluate(() => {
+    window.publishTelemetry({ generation: 7, elapsed: 4, level: 0 });
+  });
+  const shifted = await page
+    .locator(".dictation-waveform i")
+    .evaluateAll((bars) =>
+      bars
+        .slice(-3)
+        .map((bar) => Number.parseFloat(getComputedStyle(bar).height)),
+    );
+  expect(shifted[0]).toBeCloseTo(64.8, 1);
+  expect(shifted[1]).toBeCloseTo(34.4, 1);
+  expect(shifted[2]).toBeCloseTo(4, 1);
+  await expect(page.locator("#dictation-timer")).toHaveText("0:04");
 });
 
 for (const platform of ["linux", "macos"] as const) {
@@ -818,9 +852,8 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(page.locator("dialog#settings-dialog")).toBeVisible();
     await expect(page.locator(".settings-dialog-nav [data-tab]")).toHaveText([
       "General",
-      "Recording",
-      "Models",
-      "Snippets",
+      "Recording & shortcuts",
+      "Text processing",
       "History",
       "About",
     ]);
@@ -895,11 +928,13 @@ for (const platform of ["linux", "macos"] as const) {
       page.getByText("Launch at login", { exact: true }),
     ).toBeVisible();
     await selectSettingsTab(page, "recording");
-    await expect(page.locator("#settings-recording")).toBeVisible();
+    await expect(page.locator("#settings-recording-primary")).toBeVisible();
+    await expect(page.locator("#settings-recording-secondary")).toBeVisible();
+    await expect(page.locator("#settings-recording-permissions")).toBeVisible();
     await expect(
-      page.locator("#content").getByRole("heading", { name: "Permissions" }),
+      page.locator("#settings-recording-primary .settings-output-segment"),
     ).toBeVisible();
-    await expect(page.locator("#settings-output")).toBeVisible();
+    await selectSettingsTab(page, "text");
     await expect(page.locator("#settings-vocabulary")).toBeVisible();
     await closeSettings(page);
     if (platform === "linux") {
@@ -933,7 +968,7 @@ for (const platform of ["linux", "macos"] as const) {
       );
     }
     await expect(page.locator(".dictation-empty")).toContainText(
-      "Your final transcript will appear here after you stop dictating.",
+      "Press Record or the shortcut. Your text will appear here.",
     );
     await page.locator("#record").click();
     await expect
@@ -959,17 +994,18 @@ for (const platform of ["linux", "macos"] as const) {
     await page.keyboard.press("Escape");
     await expect(modelDialog).toBeHidden();
     await expect(page.locator(".dictation-change-model")).toBeFocused();
-    await selectSettingsTab(page, "models");
-    await expect(
-      page.getByRole("heading", { name: "Models", exact: true }),
-    ).toBeVisible();
-    await closeSettings(page);
+    await page
+      .locator(".dictation-feature-card")
+      .filter({ hasText: "Recognition" })
+      .click();
+    await expect(page.locator("dialog#model-drawer")).toBeVisible();
+    await page.keyboard.press("Escape");
     await page.evaluate(() => {
       window.testState.status = "recording";
       window.publishState();
     });
     await expect(page.locator(".dictation-empty")).toContainText(
-      "Your final transcript will appear here after you stop dictating.",
+      "Press Record or the shortcut. Your text will appear here.",
     );
 
     const hostileTranscript =
@@ -1001,13 +1037,14 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(page.locator("#dictation-timer")).toHaveText("1:14");
     expect(
       await page
-        .locator(".dictation-waveform")
-        .evaluate((level) =>
+        .locator(".dictation-waveform i")
+        .last()
+        .evaluate((bar) =>
           Number.parseFloat(
-            getComputedStyle(level).getPropertyValue("--voice-level"),
+            (bar as HTMLElement).style.getPropertyValue("--wave-height"),
           ),
         ),
-    ).toBeCloseTo(0.65);
+    ).toBeCloseTo(53.4, 1);
     expect(await copy.evaluate((button) => button.isConnected)).toBe(true);
     await expect(copy).toBeFocused();
     await copy.click();
@@ -1099,20 +1136,25 @@ for (const platform of ["linux", "macos"] as const) {
         recording_available: false,
         recording_unavailable_reason: "model",
         transcript_preview_omitted: false,
+        installed: [],
       });
       window.publishState();
     });
     await page.locator("#record-unavailable-action").click();
-    await expect(page.locator("dialog#settings-dialog")).toBeVisible();
-    await expect(page.locator(".settings-dialog-nav .selected")).toHaveText(
-      "Models",
-    );
+    await expect(page.locator("dialog#model-drawer")).toBeVisible();
+    await expect(page.locator('[data-download="base"]')).toHaveText("Download");
+    await page.keyboard.press("Escape");
   });
 
   test(`${platform}: Dictation stays usable at minimum and large window sizes in English and German`, async ({
     page,
   }) => {
     await start(page, platform, false, false, false, null);
+    await page.evaluate(() => {
+      window.testState.profile = "development";
+      window.testState.development_build = "reference-test";
+      window.publishState();
+    });
     const longTranscript = "Synthetic long transcript. ".repeat(900);
     await page.evaluate((transcript) => {
       Object.assign(window.testState, {
@@ -1137,6 +1179,21 @@ for (const platform of ["linux", "macos"] as const) {
         { width: 1280, height: 800 },
       ]) {
         await page.setViewportSize(viewport);
+        if (language === "de" && viewport.width === 740) {
+          await expect(page.locator(".window-dev-badge")).toHaveText("Dev");
+          const windowActionsRight = await page
+            .locator(".window-actions")
+            .evaluate((element) => element.getBoundingClientRect().right);
+          expect(
+            windowActionsRight,
+            JSON.stringify({
+              platform,
+              language,
+              viewport,
+              windowActionsRight,
+            }),
+          ).toBeLessThanOrEqual(viewport.width);
+        }
         if (language === "en")
           await page.screenshot({
             path: `test-results/${platform}-dictation-${viewport.width}x${viewport.height}.png`,
@@ -1539,7 +1596,7 @@ for (const platform of ["linux", "macos"] as const) {
     });
   });
 
-  test(`${platform}: model chooser patches progress, cancels downloads, and keeps full Models navigation`, async ({
+  test(`${platform}: model chooser patches progress, cancels downloads, and exposes management actions`, async ({
     page,
   }) => {
     await start(page, platform, false, false, false, null);
@@ -1742,16 +1799,6 @@ for (const platform of ["linux", "macos"] as const) {
     await page.keyboard.press("Escape");
     await expect(page.locator(".dictation-change-model")).toBeFocused();
     await setWorkspaceLanguage(page, "en");
-    await selectSettingsTab(page, "models");
-    await expect(page.locator(".settings-dialog-nav .selected")).toHaveText(
-      "Models",
-    );
-    await expect(page.getByRole("heading", { name: "Models" })).toBeVisible();
-    const managedModel = page.locator("#content .model-row").first();
-    await expect(managedModel.locator(".model-title-row strong")).toBeVisible();
-    await expect(managedModel.locator(".model-size")).toBeVisible();
-    await expect(managedModel.locator(".model-note")).toBeVisible();
-    await closeSettings(page);
     await page.locator(".dictation-change-model").click();
     await expect(
       page.locator('#model-drawer [data-model-command="show_models_folder"]'),
@@ -1833,11 +1880,29 @@ for (const platform of ["linux", "macos"] as const) {
         await toggle.click();
         await expect(toggle).toHaveAttribute("aria-expanded", "true");
         await expect(history).toBeVisible();
-        await expect(history.locator(".history-row p")).toHaveCount(
-          entries.length,
+        const historyEntries = history.locator(
+          ".history-entry[data-history-select]",
         );
-        await expect(history.locator(".history-row p").nth(1)).toHaveText(
-          longEntry,
+        await expect(historyEntries).toHaveCount(entries.length);
+        await expect(historyEntries.nth(1)).toHaveText(longEntry);
+        const longTextGeometry = await historyEntries
+          .nth(1)
+          .locator(".history-entry-text")
+          .evaluate((element) => {
+            const style = getComputedStyle(element);
+            const rect = element.getBoundingClientRect();
+            return {
+              lineClamp: Number.parseInt(
+                style.getPropertyValue("-webkit-line-clamp"),
+                10,
+              ),
+              lineHeight: Number.parseFloat(style.lineHeight),
+              height: rect.height,
+            };
+          });
+        expect(longTextGeometry.lineClamp).toBe(2);
+        expect(longTextGeometry.height).toBeLessThanOrEqual(
+          longTextGeometry.lineHeight * 2 + 1,
         );
         expect(
           await page.evaluate(() => (window as any).historyCompromised),
@@ -1885,6 +1950,7 @@ for (const platform of ["linux", "macos"] as const) {
           await page.screenshot({
             path: `test-results/${platform}-history-${language}.png`,
           });
+          await historyEntries.nth(1).hover();
           await history.locator('[data-copy="1"]').click();
           await expect
             .poll(() => page.evaluate(() => window.calls.at(-1)))
@@ -1893,6 +1959,7 @@ for (const platform of ["linux", "macos"] as const) {
         const lastCopy = history.locator('[data-copy="13"]');
         await lastCopy.scrollIntoViewIfNeeded();
         await expect(lastCopy).toBeInViewport();
+        await historyEntries.nth(13).hover();
         await lastCopy.click();
         await expect
           .poll(() => page.evaluate(() => window.calls.at(-1)))
@@ -1916,27 +1983,41 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(history).toContainText("Noch keine Diktate im Verlauf.");
   });
 
-  test(`${platform}: Recording settings remain keyboard reachable and save vocabulary after navigation`, async ({
+  test(`${platform}: Text processing remains keyboard reachable and saves vocabulary after navigation`, async ({
     page,
   }) => {
     await start(page, platform);
     await page.setViewportSize({ width: 1280, height: 800 });
     const trustedUrl = page.url();
     await page.screenshot({ path: `test-results/${platform}-settings.png` });
-    const recordingTab = page.locator(
-      '.settings-dialog-nav [data-tab="recording"]',
-    );
-    await recordingTab.focus();
+    const textTab = page.locator('.settings-dialog-nav [data-tab="text"]');
+    await textTab.focus();
     await page.keyboard.press("Enter");
-    await expect(recordingTab).toHaveAttribute("aria-current", "page");
-    await expect(page.locator("#settings-recording")).toBeVisible();
-    await expect(page.locator("#settings-output")).toBeVisible();
+    await expect(textTab).toHaveAttribute("aria-current", "page");
+    await expect(page.locator("#settings-vocabulary")).toBeVisible();
     const vocabulary = page.locator("#vocabulary");
     await vocabulary.scrollIntoViewIfNeeded();
     await vocabulary.focus();
     await expect(vocabulary).toBeFocused();
     await expect(vocabulary).toBeInViewport();
     await vocabulary.fill("OpenWhisper, Kubernetes");
+    await page
+      .locator('[data-window-action="close"]')
+      .evaluate((button: HTMLButtonElement) => button.click());
+    await expect(page.locator("dialog#settings-dialog")).toBeVisible();
+    await expect(page.locator("#settings-notice")).toContainText(
+      "Save or discard your changes before switching tabs or language.",
+    );
+    await expect(vocabulary).toHaveValue("OpenWhisper, Kubernetes");
+    expect(
+      await page.evaluate(() =>
+        window.calls.some(
+          (call) =>
+            call.command === "window_action" &&
+            (call.args as { action?: string }).action === "close",
+        ),
+      ),
+    ).toBe(false);
     await page.locator("#save-vocabulary").click();
     await expect
       .poll(() => page.evaluate(() => window.calls.at(-1)))
@@ -1967,9 +2048,8 @@ for (const platform of ["linux", "macos"] as const) {
     await openSettings(page);
     await expect(page.locator(".settings-dialog-nav button")).toHaveText([
       "General",
-      "Recording",
-      "Models",
-      "Snippets",
+      "Recording & shortcuts",
+      "Text processing",
       "History",
       "About",
     ]);
@@ -2001,45 +2081,76 @@ for (const platform of ["linux", "macos"] as const) {
     await page.screenshot({ path: `test-results/${platform}-about.png` });
   });
 
-  test(`${platform}: vocabulary survives recording updates and snippets remain plain text`, async ({
+  test(`${platform}: vocabulary and snippet drafts discard and save independently`, async ({
     page,
   }) => {
     await start(page, platform);
-    await selectSettingsTab(page, "recording");
+    await selectSettingsTab(page, "text");
+    const vocabulary = page.getByRole("textbox", {
+      name: "Custom vocabulary",
+      exact: true,
+    });
+    const trigger = page.getByRole("textbox", {
+      name: "When I say",
+      exact: true,
+    });
+    const expansion = page.getByRole("textbox", {
+      name: "Insert",
+      exact: true,
+    });
+    await vocabulary.fill("WhisperFree, Kubernetes");
     await page
-      .getByRole("textbox", { name: "Custom vocabulary", exact: true })
-      .fill("WhisperFree, Kubernetes");
+      .getByRole("button", { name: "Add snippet", exact: true })
+      .click();
+    await trigger.fill("my signature");
+    await expansion.fill('<img src=x onerror="alert(1)"> $1');
     await page.evaluate(() => {
       const w = window as any;
       w.testState.elapsed = 2;
       w.publishState();
     });
-    await expect(
-      page.getByRole("textbox", { name: "Custom vocabulary", exact: true }),
-    ).toHaveValue("WhisperFree, Kubernetes");
-    await page.getByRole("button", { name: "Save", exact: true }).click();
-    await selectSettingsTab(page, "snippets");
-    await page
-      .getByRole("button", { name: "Add snippet", exact: true })
-      .click();
-    await page
-      .getByRole("textbox", { name: "When I say", exact: true })
-      .fill("my signature");
-    await page
-      .getByRole("textbox", { name: "Insert", exact: true })
-      .fill('<img src=x onerror="alert(1)"> $1');
-    await page
-      .getByRole("button", { name: "Save snippets", exact: true })
-      .click();
-    await expect(
-      page.getByRole("textbox", { name: "Insert", exact: true }),
-    ).toHaveValue('<img src=x onerror="alert(1)"> $1');
+    await expect(vocabulary).toHaveValue("WhisperFree, Kubernetes");
+    await expect(expansion).toHaveValue('<img src=x onerror="alert(1)"> $1');
+    await page.locator("[data-discard-vocabulary]").click();
+    await expect(vocabulary).toHaveValue("");
+    await expect(expansion).toHaveValue('<img src=x onerror="alert(1)"> $1');
+    await page.keyboard.press("Escape");
+    await expect(page.locator("dialog#settings-dialog")).toBeVisible();
+    await expect(page.locator("#settings-notice")).toContainText(
+      "Save or discard your changes before switching tabs or language.",
+    );
+    await page.locator("#snippet-actions button[type=submit]").click();
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as any).testState.preferences.snippets),
+      )
+      .toEqual([
+        {
+          id: expect.any(String),
+          trigger: "my signature",
+          expansion: '<img src=x onerror="alert(1)"> $1',
+          enabled: true,
+        },
+      ]);
+    await expect(vocabulary).toHaveValue("");
     await expect(page.locator("#snippets img")).toHaveCount(0);
+
+    await vocabulary.fill("Kubernetes");
+    await expansion.fill("Unsaved snippet draft");
+    await page.locator("[data-discard-snippets]").click();
+    await expect(expansion).toHaveValue('<img src=x onerror="alert(1)"> $1');
+    await expect(vocabulary).toHaveValue("Kubernetes");
+    await page.locator("#save-vocabulary").click();
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as any).testState.preferences.vocabulary),
+      )
+      .toBe("Kubernetes");
     expect(
       await page.evaluate(
-        () => (window as any).testState.preferences.vocabulary,
+        () => (window as any).testState.preferences.snippets[0].expansion,
       ),
-    ).toBe("WhisperFree, Kubernetes");
+    ).toBe('<img src=x onerror="alert(1)"> $1');
   });
 }
 
@@ -2057,9 +2168,8 @@ for (const platform of ["linux", "macos"] as const) {
         });
         for (const tab of [
           "General",
-          "Recording",
-          "Models",
-          "Snippets",
+          "Recording & shortcuts",
+          "Text processing",
           "History",
           "About",
         ]) {
@@ -2124,6 +2234,251 @@ for (const platform of ["linux", "macos"] as const) {
   }
 }
 
+test("workspace and General match the reference proportions in English and German", async ({
+  page,
+}) => {
+  await start(page, "linux", false, false, false, null);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const longTranscript =
+    "The review team approved the updated local dictation workflow and will share the final notes with the engineering group. ".repeat(
+      8,
+    );
+  const secondTranscript =
+    "Please move the planning session to Thursday morning and send the agenda to everyone attending.";
+  await page.evaluate(
+    ({ longTranscript, secondTranscript }) => {
+      Object.assign(window.testState, {
+        status: "idle",
+        elapsed: 0,
+        transcript: "",
+        history: [longTranscript, secondTranscript],
+        installed: ["base"],
+        recording_available: true,
+        recording_unavailable_reason: undefined,
+        recovery_available: false,
+      });
+      window.testState.preferences.model = "base";
+      window.testState.preferences.ui_language = "en";
+      window.publishState();
+    },
+    { longTranscript, secondTranscript },
+  );
+
+  const screenshotFolder = resolve(
+    "../../.local/validation/ui-redesign-setup/reference-parity",
+  );
+  mkdirSync(screenshotFolder, { recursive: true });
+  const measureWorkspace = async () =>
+    page.evaluate(() => {
+      const rect = (selector: string) =>
+        document.querySelector(selector)!.getBoundingClientRect();
+      const titlebar = rect("header.window-titlebar");
+      const activeTab = rect(".window-active-tab[aria-current='page']");
+      const rail = rect("aside#dictation-history");
+      const main = rect("main#dictation-content");
+      const transcript = rect(".dictation-transcript");
+      const record = rect("#record");
+      return {
+        titlebarHeight: titlebar.height,
+        activeTabCount: document.querySelectorAll(
+          ".window-active-tab[aria-current='page']",
+        ).length,
+        activeTabWidth: activeTab.width,
+        activeTabHeight: activeTab.height,
+        activeTabBottom: activeTab.bottom,
+        titlebarBottom: titlebar.bottom,
+        railWidth: rail.width,
+        railAfterCanvas: rail.left >= main.right - 1,
+        transcriptInsetLeft: transcript.left - main.left,
+        transcriptInsetRight: main.right - transcript.right,
+        recordCenterOffset: Math.abs(
+          record.left + record.width / 2 - (main.left + main.width / 2),
+        ),
+      };
+    });
+  const assertWorkspace = async (language: "en" | "de") => {
+    await expect(page.locator("html")).toHaveAttribute("lang", language);
+    await expect(
+      page.locator(".window-titlebar-tabs .window-active-tab"),
+    ).toHaveCount(1);
+    await expect(
+      page.locator(".window-active-tab .window-tab-title"),
+    ).toHaveText(language === "en" ? "Dictation" : "Diktat");
+    await expect(page.locator(".window-tab-subtitle")).toHaveText(
+      "Whisper Base",
+    );
+    const geometry = await measureWorkspace();
+    expect(geometry.titlebarHeight).toBeCloseTo(46, 0);
+    expect(geometry.activeTabCount).toBe(1);
+    expect(geometry.activeTabWidth).toBeGreaterThanOrEqual(150);
+    expect(geometry.activeTabHeight).toBeCloseTo(36, 0);
+    expect(
+      Math.abs(geometry.activeTabBottom - geometry.titlebarBottom),
+    ).toBeLessThanOrEqual(1);
+    expect(geometry.railWidth).toBeCloseTo(290, 0);
+    expect(geometry.railAfterCanvas).toBe(true);
+    expect(geometry.transcriptInsetLeft).toBeCloseTo(40, 0);
+    expect(geometry.transcriptInsetRight).toBeCloseTo(40, 0);
+    expect(geometry.recordCenterOffset).toBeLessThanOrEqual(2);
+    await expect(page.locator("#dictation-history time")).toHaveCount(0);
+    const entry = page.locator(
+      '#dictation-history .history-entry[data-history-select="0"]',
+    );
+    await expect(entry).toBeVisible();
+    await expect(entry).toHaveText(longTranscript);
+    const entryGeometry = await entry.evaluate((element) => {
+      const text = element.querySelector(".history-entry-text")!;
+      const buttonStyle = getComputedStyle(element);
+      const textStyle = getComputedStyle(text);
+      return {
+        fontSize: Number.parseFloat(textStyle.fontSize),
+        lineHeight: Number.parseFloat(textStyle.lineHeight),
+        paddingTop: Number.parseFloat(buttonStyle.paddingTop),
+        paddingBottom: Number.parseFloat(buttonStyle.paddingBottom),
+        lineClamp: Number.parseInt(
+          textStyle.getPropertyValue("-webkit-line-clamp"),
+          10,
+        ),
+        entryHeight: element.getBoundingClientRect().height,
+        textHeight: text.getBoundingClientRect().height,
+      };
+    });
+    expect(entryGeometry.fontSize).toBeCloseTo(13.5, 1);
+    expect(entryGeometry.lineHeight).toBeCloseTo(18.9, 1);
+    expect(entryGeometry.lineClamp).toBe(2);
+    expect(entryGeometry.entryHeight).toBeGreaterThanOrEqual(
+      2 * entryGeometry.lineHeight +
+        entryGeometry.paddingTop +
+        entryGeometry.paddingBottom -
+        1,
+    );
+    expect(entryGeometry.entryHeight).toBeLessThanOrEqual(64);
+    expect(entryGeometry.textHeight).toBeCloseTo(
+      2 * entryGeometry.lineHeight,
+      0,
+    );
+    if ((await entry.getAttribute("aria-pressed")) !== "true")
+      await entry.click();
+    await expect(entry).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      page.locator(".dictation-transcript-body .transcript"),
+    ).toHaveText(longTranscript);
+    const copy = page.locator("#copy-dictation");
+    await expect(copy).toBeVisible();
+    await expect(copy).toHaveText(language === "en" ? "Copy" : "Kopieren");
+    const copyGeometry = await page.evaluate(() => {
+      const copy = document
+        .querySelector("#copy-dictation")!
+        .getBoundingClientRect();
+      const panel = document
+        .querySelector(".dictation-transcript")!
+        .getBoundingClientRect();
+      return copy.left >= panel.left && copy.right <= panel.right;
+    });
+    expect(copyGeometry).toBe(true);
+    await copy.click();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)))
+      .toEqual({ command: "copy_history", args: { index: 0 } });
+  };
+
+  await assertWorkspace("en");
+  await page.screenshot({
+    path: resolve(screenshotFolder, "workspace-en.png"),
+  });
+  await openSettings(page);
+  await selectSettingsTab(page, "general");
+  const assertGeneral = async (language: "en" | "de") => {
+    const dialog = page.locator("dialog#settings-dialog");
+    const geometry = await page.evaluate(() => {
+      const dialog = document
+        .querySelector("#settings-dialog")!
+        .getBoundingClientRect();
+      const nav = document
+        .querySelector(".settings-dialog-nav")!
+        .getBoundingClientRect();
+      const cards = Array.from(
+        document.querySelectorAll<HTMLElement>(".compute-mode label"),
+      ).map((card) => card.getBoundingClientRect().height);
+      const caption = document
+        .querySelector("#recognition-backend")!
+        .getBoundingClientRect();
+      const manage = document
+        .querySelector("#manage-models")!
+        .getBoundingClientRect();
+      return {
+        width: dialog.width,
+        height: dialog.height,
+        right: dialog.right,
+        navWidth: nav.width,
+        cardHeights: cards,
+        captionCenter: caption.top + caption.height / 2,
+        manageCenter: manage.top + manage.height / 2,
+        captionLeft: caption.left,
+        captionRight: caption.right,
+        manageLeft: manage.left,
+        manageRight: manage.right,
+      };
+    });
+    expect(geometry.width).toBeCloseTo(880, 0);
+    expect(geometry.height).toBeCloseTo(600, 0);
+    expect(geometry.navWidth).toBeCloseTo(235, 0);
+    expect(geometry.cardHeights).toHaveLength(2);
+    for (const height of geometry.cardHeights) {
+      expect(height).toBeGreaterThanOrEqual(59);
+      expect(height).toBeLessThanOrEqual(61);
+    }
+    expect(
+      Math.abs(geometry.captionCenter - geometry.manageCenter),
+    ).toBeLessThanOrEqual(2);
+    expect(geometry.captionRight).toBeLessThan(geometry.manageLeft);
+    expect(geometry.manageRight).toBeLessThanOrEqual(geometry.right);
+    await expect(dialog.locator("#manage-models")).toBeVisible();
+    await expect(dialog.locator("#recognition-backend")).toBeVisible();
+    const name = language === "en" ? "general-en.png" : "general-de.png";
+    await page.screenshot({ path: resolve(screenshotFolder, name) });
+  };
+  const captureSettingsViews = async (language: "en" | "de") => {
+    for (const [tab, name] of [
+      ["recording", "recording"],
+      ["text", "text-processing"],
+      ["history", "history"],
+    ] as const) {
+      await selectSettingsTab(page, tab);
+      if (tab === "text")
+        await expect(
+          page.locator("#snippet-form .text-processing-description"),
+        ).toHaveText(
+          language === "en"
+            ? "Say a trigger word to insert its saved text. Matching ignores letter case, hyphens, and trailing punctuation."
+            : "Sage ein Auslösewort, um den gespeicherten Text einzufügen. Beim Abgleich werden Groß- und Kleinschreibung, Bindestriche und Satzzeichen am Ende ignoriert.",
+        );
+      if (tab === "history") {
+        await expect(page.locator("#settings-history-controls")).toBeVisible();
+        await expect(page.locator("#content .history-row")).toHaveCount(0);
+      }
+      await page.screenshot({
+        path: resolve(screenshotFolder, `${name}-${language}.png`),
+      });
+    }
+  };
+  await assertGeneral("en");
+  await captureSettingsViews("en");
+
+  await selectSettingsTab(page, "general");
+  await page.locator('[data-ui-language="de"]').click();
+  await expect(page.locator("html")).toHaveAttribute("lang", "de");
+  await closeSettings(page);
+  await assertWorkspace("de");
+  await page.screenshot({
+    path: resolve(screenshotFolder, "workspace-de.png"),
+  });
+  await openSettings(page);
+  await selectSettingsTab(page, "general");
+  await assertGeneral("de");
+  await captureSettingsViews("de");
+});
+
 test("Linux and macOS share the titlebar and recording controls while retaining platform mode labels", async ({
   browser,
 }) => {
@@ -2169,10 +2524,15 @@ test("macOS retains native trigger capture, model import, and update actions", a
   await expect(page.getByText("Press a key", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(page.getByLabel("Play start and stop sounds")).toBeChecked();
-  await selectSettingsTab(page, "models");
+  await closeSettings(page);
+  await page.locator(".dictation-change-model").click();
+  await expect(page.locator("dialog#model-drawer")).toBeVisible();
   await page
     .getByRole("button", { name: "Import a model …", exact: true })
     .click();
+  await expect(page.locator("dialog#model-drawer")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await openSettings(page);
   await selectSettingsTab(page, "about");
   await page.getByRole("button", { name: "Check now", exact: true }).click();
   const commands = await page.evaluate(() =>
@@ -2207,10 +2567,11 @@ for (const platform of ["linux", "macos"] as const) {
       page.getByRole("button", { name: "Diktat starten", exact: true }),
     ).toBeVisible();
     await selectSettingsTab(page, "history");
-    await expect(page.locator("#content .history-row p")).toHaveText([
-      "Recording",
-      "<script>private text</script>",
-    ]);
+    await expect(
+      page.locator("#dictation-history .history-entry[data-history-select]"),
+    ).toHaveText(["Recording", "<script>private text</script>"]);
+    await expect(page.locator("#settings-history-controls")).toBeVisible();
+    await expect(page.locator("#content .history-row")).toHaveCount(0);
     expect(
       await page.evaluate(() => (window as any).testState.preferences.language),
     ).toBe("en");
@@ -2914,7 +3275,7 @@ for (const platform of ["linux", "macos"] as const) {
       .click();
     await expect(page.locator("dialog#settings-dialog")).toBeHidden();
     await expect(page.locator(".settings-dialog-nav [data-tab]")).toHaveCount(
-      6,
+      5,
     );
     await openSettings(page);
     await selectSettingsTab(page, "general");
@@ -3089,22 +3450,22 @@ for (const platform of ["linux", "macos"] as const) {
     }
     await expect(page.locator("dialog#settings-dialog")).toBeHidden();
     await expect(page.locator(".settings-dialog-nav [data-tab]")).toHaveCount(
-      6,
+      5,
     );
     await expect(
       page.getByRole("heading", { name: "Diktat", exact: true }),
     ).toBeVisible();
     for (const title of [
       "Allgemein",
-      "Modelle",
-      "Textbausteine",
+      "Aufnahme & Tasten",
+      "Textverarbeitung",
       "Verlauf",
       "Über",
     ]) {
       const tab = {
         Allgemein: "general",
-        Modelle: "models",
-        Textbausteine: "snippets",
+        "Aufnahme & Tasten": "recording",
+        Textverarbeitung: "text",
         Verlauf: "history",
         Über: "about",
       }[title];
@@ -3212,10 +3573,7 @@ for (const platform of ["linux", "macos"] as const) {
     const afterLoginSave = await login.boundingBox();
     expect(afterLoginSave!.y).toBeCloseTo(before!.y, 0);
     await selectSettingsTab(page, "recording");
-    const overlay = page.getByRole("checkbox", {
-      name: "Show overlay when idle",
-      exact: true,
-    });
+    const overlay = page.locator('input[data-pref="show_idle_overlay"]');
     await overlay.click();
     await expect
       .poll(() =>
@@ -3271,10 +3629,7 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(login).not.toBeChecked();
     await selectSettingsTab(page, "recording");
     await expect(
-      page.getByRole("checkbox", {
-        name: "Show overlay when idle",
-        exact: true,
-      }),
+      page.locator('input[data-pref="show_idle_overlay"]'),
     ).not.toBeChecked();
   });
 }
@@ -3411,7 +3766,7 @@ test("macOS shows pending login approval without changing the idle overlay", asy
     .uncheck();
   await selectSettingsTab(page, "recording");
   await expect(
-    page.getByRole("checkbox", { name: "Show overlay when idle", exact: true }),
+    page.locator('input[data-pref="show_idle_overlay"]'),
   ).not.toBeChecked();
 });
 
@@ -3722,9 +4077,9 @@ test("Linux clipboard delivery failures fully translate while retaining raw dict
     );
   }
   await selectSettingsTab(page, "history");
-  await expect(page.locator("#content .history-row p")).toHaveText(
-    "Clipboard delivery timed out",
-  );
+  await expect(
+    page.locator('#dictation-history .history-entry[data-history-select="0"]'),
+  ).toHaveText("Clipboard delivery timed out");
   expect(await page.evaluate(() => (window as any).testState.transcript)).toBe(
     "Clipboard delivery timed out",
   );

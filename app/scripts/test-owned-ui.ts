@@ -143,7 +143,7 @@ try {
     test: await sha(join(packageRoot, "tests/application/electron-ui.test.ts")),
     launcher: await sha(fileURLToPath(import.meta.url)),
     policy: await sha(join(fixtureRoot, "seccomp.json")), dockerfile: await sha(join(fixtureRoot, "Dockerfile")),
-    nodeVersion: "24.21.0", scope: "Owned P1/P5 Dev UI and fake model protocol; no microphone, clipboard, trigger, dictation or real model quality acceptance",
+    nodeVersion: "24.21.0", scope: "Owned Dev UI preferences, security and profile isolation; no microphone, clipboard, trigger, dictation or real model quality acceptance",
   }, null, 2), { mode: 0o600 });
   result = "PASS";
 } finally {

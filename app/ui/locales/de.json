@@ -471,5 +471,20 @@
   "Manage models": "Modelle verwalten",
   "History is not saved.": "Der Verlauf wird nicht gespeichert.",
   "Saved only on this device.": "Nur auf diesem Gerät gespeichert.",
-  "Microphone permission is required. Check Recording settings.": "Mikrofonzugriff ist erforderlich. Prüfe die Einstellungen unter „Aufnahme“."
+  "Microphone permission is required. Check Recording settings.": "Mikrofonzugriff ist erforderlich. Prüfe die Einstellungen unter „Aufnahme“.",
+  "Local recognition": "Lokale Spracherkennung",
+  "Press Record or the shortcut. Your text will appear here.": "Drücke Aufnahme oder das Tastenkürzel. Dein Text erscheint hier.",
+  "Recording & shortcuts": "Aufnahme & Tasten",
+  "Text processing": "Textverarbeitung",
+  "More recording settings": "Weitere Aufnahmeeinstellungen",
+  "Launch at login is available in an installed version of OpenWhisper.": "Autostart ist in einer installierten Version von OpenWhisper verfügbar.",
+  "Clear": "Leeren",
+  "Trigger options": "Auslöseroptionen",
+  "Keeps the floating recording indicator visible while OpenWhisper is idle.": "Zeigt die schwebende Aufnahmeanzeige auch dann an, wenn OpenWhisper nicht aufnimmt.",
+  "Insert uses Accessibility access; Copy uses the clipboard.": "Einfügen benötigt Bedienungshilfen-Zugriff; Kopieren verwendet die Zwischenablage.",
+  "Insert uses keyboard access; Copy uses the clipboard.": "Einfügen benötigt Tastaturzugriff; Kopieren verwendet die Zwischenablage.",
+  "Key, shortcut, or mouse button": "Taste, Tastenkombination oder Maustaste",
+  "Key or shortcut": "Taste oder Tastenkombination",
+  "Say a trigger word to insert its saved text. Matching ignores letter case, hyphens, and trailing punctuation.": "Sage ein Auslösewort, um den gespeicherten Text einzufügen. Beim Abgleich werden Groß- und Kleinschreibung, Bindestriche und Satzzeichen am Ende ignoriert.",
+  "Save history": "Verlauf speichern"
 }
