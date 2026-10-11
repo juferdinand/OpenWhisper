@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { APPLICATION_BUILD } from "../main/application-build.js";
 import { selectApplicationBuild } from "../main/build-selection.js";
-import { admitLinuxInstalledLaunch, ensureLinuxAppImageLauncher, type LinuxInstalledLaunch } from "../main/linux-installed-launch.js";
+import { admitLinuxInstalledLaunch, ensureLinuxAppImageLauncher, refreshLinuxAppImageIcon, type LinuxInstalledLaunch } from "../main/linux-installed-launch.js";
 import { LinuxRestartError } from "../main/linux-restart.js";
 import { readCurrentAppImageSignature, readUpdateFeed } from "../services/update/common/update-feed.js";
 import { downloadUpdateCandidate, UpdateDownloadError } from "../services/update/common/update-download.js";
@@ -201,6 +201,7 @@ async function preparePackagedSupervisor(argv: readonly string[]): Promise<Boots
     catch { /* Optional update admission must not prevent ordinary dictation. */ }
   }
   if (launch?.kind === "appimage") {
+    refreshLinuxAppImageIcon(installedInput);
     try { updates = appImageUpdates(version, launch); }
     catch { /* Optional update admission must not prevent ordinary dictation. */ }
   }
