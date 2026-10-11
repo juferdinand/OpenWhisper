@@ -482,7 +482,7 @@
   "Launch at login is available in an installed version of OpenWhisper.": "Launch at login is available in an installed version of OpenWhisper.",
   "Clear": "Clear",
   "Trigger options": "Trigger options",
-  "Keeps the floating recording indicator visible while OpenWhisper is idle.": "Keeps the floating recording indicator visible while OpenWhisper is idle.",
+  "Also show the indicator while idle when OpenWhisper is in the background.": "Also show the indicator while idle when OpenWhisper is in the background.",
   "Insert uses Accessibility access; Copy uses the clipboard.": "Insert uses Accessibility access; Copy uses the clipboard.",
   "Insert uses keyboard access; Copy uses the clipboard.": "Insert uses keyboard access; Copy uses the clipboard.",
   "Key, shortcut, or mouse button": "Key, shortcut, or mouse button",

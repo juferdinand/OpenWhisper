@@ -82,32 +82,69 @@ test("overlay stays centered with a 24-pixel bottom inset on offset displays", (
 test("overlay follows active recording and transcription then hides completed or failed phases", () => {
   const current = state(), visible: boolean[] = [];
   for (const status of ["idle", "recording", "transcribing", "done", "idle", "recording", "error"] as const) {
-    current.status = status; visible.push(shouldShowRecordingOverlay(current));
+    current.status = status; visible.push(shouldShowRecordingOverlay(current, false));
   }
   assert.deepEqual(visible, [false, true, true, false, false, true, false]);
 });
 
 test("saved recovery keeps retry controls visible until delivery or explicit discard", () => {
   const current = state(); current.status = "error"; current.recovery_available = true;
-  assert.equal(shouldShowRecordingOverlay(current), true);
-  current.status = "idle"; assert.equal(shouldShowRecordingOverlay(current), true);
-  current.status = "transcribing"; assert.equal(shouldShowRecordingOverlay(current), true);
+  assert.equal(shouldShowRecordingOverlay(current, false), true);
+  current.status = "idle"; assert.equal(shouldShowRecordingOverlay(current, false), true);
+  current.status = "transcribing"; assert.equal(shouldShowRecordingOverlay(current, false), true);
   current.status = "done"; current.recovery_available = false;
-  assert.equal(shouldShowRecordingOverlay(current), false);
+  assert.equal(shouldShowRecordingOverlay(current, false), false);
   current.status = "error"; current.recovery_available = true;
-  assert.equal(shouldShowRecordingOverlay(current), true);
-  current.recovery_available = false; assert.equal(shouldShowRecordingOverlay(current), false);
+  assert.equal(shouldShowRecordingOverlay(current, false), true);
+  current.recovery_available = false; assert.equal(shouldShowRecordingOverlay(current, false), false);
 });
 
 test("idle overlay preference applies immediately without hiding active or recoverable work", () => {
-  const current = state(); assert.equal(shouldShowRecordingOverlay(current), false);
+  const current = state(); assert.equal(shouldShowRecordingOverlay(current, false), false);
   current.preferences.show_idle_overlay = true;
   for (const status of ["idle", "done", "error"] as const) {
-    current.status = status; assert.equal(shouldShowRecordingOverlay(current), true);
+    current.status = status; assert.equal(shouldShowRecordingOverlay(current, false), true);
   }
-  current.preferences.show_idle_overlay = false; assert.equal(shouldShowRecordingOverlay(current), false);
-  current.status = "recording"; assert.equal(shouldShowRecordingOverlay(current), true);
-  current.status = "transcribing"; assert.equal(shouldShowRecordingOverlay(current), true);
+  current.preferences.show_idle_overlay = false; assert.equal(shouldShowRecordingOverlay(current, false), false);
+  current.status = "recording"; assert.equal(shouldShowRecordingOverlay(current, false), true);
+  current.status = "transcribing"; assert.equal(shouldShowRecordingOverlay(current, false), true);
   current.status = "error"; current.recovery_available = true;
-  assert.equal(shouldShowRecordingOverlay(current), true);
+  assert.equal(shouldShowRecordingOverlay(current, false), true);
 });
+
+test(
+  "foreground suppresses the overlay across recording and idle states, then focus return restores it without telemetry",
+  () => {
+    const current = state();
+    current.status = "idle";
+    assert.equal(shouldShowRecordingOverlay(current, true), false);
+    assert.equal(shouldShowRecordingOverlay(current, false), false);
+    current.preferences.show_idle_overlay = true;
+    for (const status of [
+      "idle",
+      "done",
+      "recording",
+      "transcribing",
+      "error",
+    ] as const) {
+      current.status = status;
+      current.recovery_available = status === "error";
+      assert.equal(
+        shouldShowRecordingOverlay(current, true),
+        false,
+        `${status} stays hidden while the main window is foreground`,
+      );
+      assert.equal(
+        shouldShowRecordingOverlay(current, false),
+        true,
+        `${status} appears after the main window loses focus`,
+      );
+    }
+
+    current.status = "recording";
+    current.recovery_available = false;
+    assert.equal(shouldShowRecordingOverlay(current, false), true);
+    assert.equal(shouldShowRecordingOverlay(current, true), false);
+    assert.equal(shouldShowRecordingOverlay(current, false), true);
+  },
+);

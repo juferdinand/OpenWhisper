@@ -1953,7 +1953,7 @@ function render() {
       section(t("System"), systemDetails);
   } else if (tab === "recording") {
     const overlayDescription = t(
-      "Keeps the floating recording indicator visible while OpenWhisper is idle.",
+      "Also show the indicator while idle when OpenWhisper is in the background.",
     );
     const overlayControl =
       isMac() || state.overlay_available

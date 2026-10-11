@@ -370,6 +370,54 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
       catch { return true; }
     }), true);
     checks.push("recording overlay has no titlebar and cannot close the main window through IPC");
+    await page.evaluate(async () => {
+      await window.openwhisper?.invoke("save_preferences", {
+        changes: { show_idle_overlay: true },
+      });
+    });
+    const overlayVisible = async () =>
+      app.evaluate(({ BrowserWindow }) => {
+        const overlay = BrowserWindow.getAllWindows().find((window) =>
+          window.webContents.getURL().endsWith("?overlay=1"),
+        );
+        return overlay?.isVisible() ?? false;
+      });
+    const mainFocused = async () =>
+      app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows().find(
+          (window) =>
+            window.webContents.getURL() === "app://openwhisper/index.html",
+        )?.isFocused() ?? false,
+      );
+    const showMainWindow = async (show: boolean) =>
+      app.evaluate(({ BrowserWindow }, visible: boolean) => {
+        const main = BrowserWindow.getAllWindows().find(
+          (window) =>
+            window.webContents.getURL() === "app://openwhisper/index.html",
+        );
+        if (!main) throw new Error("The owned main window is missing.");
+        if (visible) {
+          main.show();
+          main.focus();
+        } else main.hide();
+      }, show);
+    await showMainWindow(true);
+    await expect.poll(mainFocused).toBe(true);
+    await expect.poll(overlayVisible).toBe(false);
+    await showMainWindow(false);
+    await expect.poll(overlayVisible).toBe(true);
+    await showMainWindow(true);
+    await expect.poll(mainFocused).toBe(true);
+    await expect.poll(overlayVisible).toBe(false);
+    const idleAfterFocusSwitch = validateCommandOutput(
+      "get_state",
+      await page.evaluate(() => window.openwhisper?.invoke("get_state", {})),
+    );
+    assert.equal(idleAfterFocusSwitch.status, "idle");
+    assert.equal(idleAfterFocusSwitch.preferences.show_idle_overlay, true);
+    checks.push(
+      "idle overlay hides for the focused main window and returns after focus changes without recording telemetry",
+    );
     await page.evaluate((url) => { window.open(url, "_blank"); }, target);
     await expect.poll(windowUrls).toEqual(expectedWindows);
     await page.evaluate((url) => {

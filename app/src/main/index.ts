@@ -451,6 +451,33 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       local_processing_invalid_profile: processingProfile.invalidContent,
     });
   };
+  let latestSnapshot: AppState | undefined;
+  const syncOverlayVisibility = (snapshot: AppState): void => {
+    if (shutdownInProgress || !overlayReady || !overlay || overlay.isDestroyed())
+      return;
+    const mainWindow = window;
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      if (waylandOverlay) waylandOverlay.setVisible(false);
+      else if (overlay.isVisible()) overlay.hide();
+      return;
+    }
+    const foreground =
+      mainWindow.isVisible() &&
+      mainWindow.isFocused() &&
+      !mainWindow.isMinimized();
+    const visible = shouldShowRecordingOverlay(snapshot, foreground);
+    if (waylandOverlay) waylandOverlay.setVisible(visible);
+    else if (visible && !overlay.isVisible()) overlay.showInactive();
+    else if (!visible && overlay.isVisible()) overlay.hide();
+  };
+  const syncOverlayAfterWindowEvent = (): void => {
+    if (shutdownInProgress) return;
+    try {
+      syncOverlayVisibility(latestSnapshot ?? state());
+    } catch {
+      console.error("OpenWhisper Dev could not sync its recording overlay.");
+    }
+  };
 
   const uiSession = session.defaultSession;
   uiSession.setPermissionRequestHandler((_contents, _permission, callback) => { callback(false); });
@@ -535,13 +562,11 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let updateTray = (_state: AppState): void => {};
   notify = () => {
     try {
-      const snapshot = state(); emit("state", snapshot); updateTray(snapshot);
-      if (overlayReady && overlay && !overlay.isDestroyed()) {
-        const visible = shouldShowRecordingOverlay(snapshot);
-        if (waylandOverlay) waylandOverlay.setVisible(visible);
-        else if (visible && !overlay.isVisible()) overlay.showInactive();
-        else if (!visible && overlay.isVisible()) overlay.hide();
-      }
+      const snapshot = state();
+      latestSnapshot = snapshot;
+      emit("state", snapshot);
+      updateTray(snapshot);
+      syncOverlayVisibility(snapshot);
     }
     catch { console.error("OpenWhisper Dev could not publish its UI state."); }
   };
@@ -1061,8 +1086,14 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     target.on("will-attach-webview", (event) => { event.preventDefault(); });
   }
   window.on("close", (event) => { if (!shutdownComplete) { event.preventDefault(); app.quit(); } });
-  window.on("closed", () => { processing.close(); ipcMain.removeHandler("openwhisper:invoke"); window = undefined; });
+  window.on("closed", () => { processing.close(); ipcMain.removeHandler("openwhisper:invoke"); window = undefined; syncOverlayAfterWindowEvent(); });
   window.once("ready-to-show", () => { window?.show(); });
+  window.on("focus", syncOverlayAfterWindowEvent);
+  window.on("blur", syncOverlayAfterWindowEvent);
+  window.on("show", syncOverlayAfterWindowEvent);
+  window.on("hide", syncOverlayAfterWindowEvent);
+  window.on("minimize", syncOverlayAfterWindowEvent);
+  window.on("restore", syncOverlayAfterWindowEvent);
   if (macRecording) window.on("focus", () => {
     microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted";
     accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(false); notify();

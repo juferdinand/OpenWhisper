@@ -33,7 +33,8 @@ export function waylandOverlayWindowOptions(options: Readonly<{ title: string; p
   } };
 }
 
-export function shouldShowRecordingOverlay(state: AppState): boolean {
+export function shouldShowRecordingOverlay(state: AppState, foreground: boolean): boolean {
+  if (foreground) return false;
   return state.status === "recording" || state.status === "transcribing" ||
     state.recovery_available === true || state.preferences.show_idle_overlay === true;
 }

@@ -67,8 +67,10 @@ Unavailable recording actions stay disabled; closing the main window still quits
 Native tray presentation on each desktop remains an acceptance item.
 
 The floating control loads the same trusted shared UI through a sandboxed, restricted
-overlay bridge. It shows during recording/transcription/recovery, or when the existing
-idle-overlay preference is enabled. Built-in non-activating presentation is enabled on
+overlay bridge. It shows only while the main window is in the background, during
+recording/transcription/recovery or when the existing idle-overlay preference is enabled.
+Returning to the main window hides it immediately; leaving or minimizing the window
+restores it when needed. Built-in non-activating presentation is enabled on
 macOS and X11, including an explicitly selected XWayland backend. The owned KDE XWayland
 test covers actual pointer Cancel without moving keyboard focus.
 
