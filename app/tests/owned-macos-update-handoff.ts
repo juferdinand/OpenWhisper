@@ -73,6 +73,9 @@ await mkdir(ownedHome, { mode: 0o700 });
 const legacySnippets = join(ownedHome, "Library/Application Support/WhisperFree/snippets.json");
 await mkdir(join(ownedHome, "Library/Application Support/WhisperFree"), { recursive: true, mode: 0o700 });
 await writeFile(legacySnippets, "[]\n", { flag: "wx", mode: 0o600 });
+const inventoryOnlyModel = join(ownedHome, "Library/Application Support/WhisperFree/Models/ggml-tiny.bin");
+await mkdir(join(ownedHome, "Library/Application Support/WhisperFree/Models"), { recursive: true, mode: 0o700 });
+await writeFile(inventoryOnlyModel, "Owned model inventory placeholder; speech inference is not tested.\n", { flag: "wx", mode: 0o600 });
 const executable = join(bundle, "Contents/MacOS/OpenWhisper"); assert.equal((await lstat(executable)).isFile(), true);
 const environment: Record<string, string> = {};
 for (const [key, value] of Object.entries(pinnedRuntimeEnvironment(process.env))) if (value !== undefined) environment[key] = value;
@@ -94,6 +97,9 @@ try {
   const state = async () => appStateSchema.parse(await page!.evaluate(() => window.openwhisper!.invoke("get_state", {})));
   const before = await state(); assert.equal(before.version, "0.3.1"); assert.equal(before.updates.configured, true);
   assert.equal(before.macos?.updates_configured, true); assert.equal(before.preferences.setup_completed, false);
+  await page.evaluate(() => window.openwhisper!.invoke("save_preferences", { changes: { model: "tiny" } }));
+  const selected = await state();
+  assert.ok(selected.installed.includes("tiny")); assert.equal(selected.preferences.model, "tiny");
   await page.evaluate(() => window.openwhisper!.invoke("complete_setup", {}));
   await page.evaluate(() => window.openwhisper!.invoke("save_preferences", { changes: {
     ui_language: "en", vocabulary: "OwnedMacUpdatePreservationFixture", auto_check_updates: false } }));
@@ -163,6 +169,7 @@ try {
   assert.deepEqual(await readFile(preferencesPath), preferenceBytes);
   result = { status: "PASS", stage, harnessCommit, producerCommit: expectedSourceCommit, oldVersion: "0.3.1", successorVersion: installedVersion,
     oldSourceCommit: sourceInfo.commit, successorSourceCommit: installedBuild.commit,
+    modelFixture: "Private owned ggml-tiny.bin inventory placeholder only; speech weights and inference are not tested",
     originalMainPid: originalPid, originalOwnedPids, successorPid, successorOwnedPids: successorPids,
     originalProcessExit: exit, preferences: { setupCompleted: retainedPreferences.setup_completed,
       vocabularySha256: createHash("sha256").update(retainedPreferences.vocabulary).digest("hex"), byteIdentical: true },
