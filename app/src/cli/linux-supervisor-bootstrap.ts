@@ -16,6 +16,8 @@ import { admitSignedAppImageLaunch, prepareAppImageUpdate, repairSignedAppImageL
 import { resolveStableProfile, validateStableProfile } from "../services/settings/stable-profile.js";
 import type { LinuxUpdateCandidate } from "../services/update/common/update-policy.js";
 import type { OwnedUpdateDownload } from "../services/update/common/update-staging.js";
+import type { UpdateDownloadProgress } from "../contracts/update/update-download-progress.js";
+import type { LinuxUpdateAction, LinuxUpdateIntermediateState } from "../main/linux-update-channel.js";
 import { bypassLinuxControl, execLinuxGui, runLinuxSupervisor, type LinuxSupervisorEffects, type LinuxSupervisorUpdates } from "./linux-supervisor.js";
 export { linuxSupervisorLauncher } from "./linux-supervisor.js";
 
@@ -48,25 +50,34 @@ export function debianUpdates(currentVersion: string, dependencies: DebianUpdate
     await download?.cleanup(); download = undefined; prepared = undefined; audit = undefined;
   };
   return Object.freeze({
-    async action(kind: "check" | "install", signal: AbortSignal) {
+    async action(kind: LinuxUpdateAction, signal: AbortSignal, reportState: (state: LinuxUpdateIntermediateState) => void = () => {}) {
       if (installationStarted) throw new LinuxRestartError("INVALID_REQUEST");
       validateStableProfile(profile);
       const active = (): void => { if (signal.aborted) throw new LinuxRestartError("INVALID_REQUEST"); };
       active();
-      if (kind === "check") {
-        await discardPrepared(); candidate = undefined;
+      if (kind === "check" || kind === "check_auto") {
+        if (download && prepared && candidate) return { status: "ready", updateVersion: candidate.version, details: candidate.details } as const;
         const result = await dependencies.feed({ package: "deb", currentVersion, signal }); active();
-        if (!result) return { status: "idle" } as const;
+        if (!result) return candidate
+          ? { status: "available", updateVersion: candidate.version, details: candidate.details } as const
+          : { status: "idle" } as const;
         if (result.package !== "deb") throw new LinuxRestartError("INVALID_REQUEST");
         candidate = result; return { status: "available", updateVersion: result.version, details: result.details } as const;
       }
       const selected = candidate;
-      if (!selected || download || prepared || failedCleanup) throw new LinuxRestartError("INVALID_REQUEST");
+      if (!selected || failedCleanup) throw new LinuxRestartError("INVALID_REQUEST");
+      if (kind === "install") {
+        if (!download || !prepared || !audit) throw new LinuxRestartError("INVALID_REQUEST");
+        return { status: "prepared", updateVersion: selected.version } as const;
+      }
+      if (download || prepared || failedCleanup) throw new LinuxRestartError("INVALID_REQUEST");
       try {
-        download = await dependencies.download({ candidate: selected, currentVersion, cacheDirectory: profile.paths.cache, signal }); active();
+        download = await dependencies.download({ candidate: selected, currentVersion, cacheDirectory: profile.paths.cache, signal,
+          onProgress: (value: UpdateDownloadProgress) => reportState({ status: "downloading", updateVersion: selected.version, download: value }) }); active();
+        reportState({ status: "verifying", updateVersion: selected.version });
         prepared = await dependencies.prepare({ download, signature: selected.signature, currentVersion, expectedVersion: selected.version }); active();
         audit = await prepareDebianInstalledAudit({ download, signature: selected.signature, expectedVersion: selected.version, signal }); active();
-        return { status: "prepared", updateVersion: selected.version } as const;
+        return { status: "ready", updateVersion: selected.version, details: selected.details } as const;
       } catch (error: unknown) {
         if (error instanceof UpdateDownloadError) failedCleanup = error.cleanup;
         await discardPrepared(); throw error;
@@ -119,33 +130,45 @@ export function appImageUpdates(currentVersion: string, launch: Extract<LinuxIns
     await download?.cleanup(); download = undefined;
   };
   return Object.freeze({
-    async action(kind: "check" | "install", signal: AbortSignal) {
+    async action(kind: LinuxUpdateAction, signal: AbortSignal, reportState: (state: LinuxUpdateIntermediateState) => void = () => {}) {
       if (installationStarted) throw new LinuxRestartError("INVALID_REQUEST");
       validateStableProfile(profile);
       const active = (): void => { if (signal.aborted) throw new LinuxRestartError("INVALID_REQUEST"); };
       active();
-      if (kind === "check") {
-        await discardPrepared(); candidate = undefined; current = undefined;
-        try { current = await dependencies.admit({ home, version: currentVersion, launch }); }
+      if (kind === "check" || kind === "check_auto") {
+        if (download && prepared && candidate) return { status: "ready", updateVersion: candidate.version, details: candidate.details } as const;
+        let admitted: Awaited<ReturnType<typeof admitSignedAppImageLaunch>>;
+        try { admitted = await dependencies.admit({ home, version: currentVersion, launch }); }
         catch {
+          if (kind === "check_auto") throw new LinuxRestartError("UNAVAILABLE");
           active(); const signature = await dependencies.signature({ currentVersion, signal }); active();
-          current = await dependencies.repair({ home, version: currentVersion, launch, signature });
+          admitted = await dependencies.repair({ home, version: currentVersion, launch, signature });
         }
-        active(); current.assertUnchanged();
-        const result = await dependencies.feed({ package: "appimage", currentVersion, signal }); active(); current.assertUnchanged();
-        if (!result) return { status: "idle" } as const;
+        active(); admitted.assertUnchanged();
+        const result = await dependencies.feed({ package: "appimage", currentVersion, signal }); active(); admitted.assertUnchanged(); current = admitted;
+        if (!result) return candidate
+          ? { status: "available", updateVersion: candidate.version, details: candidate.details } as const
+          : { status: "idle" } as const;
         if (result.package !== "appimage") throw new LinuxRestartError("INVALID_REQUEST");
         candidate = result; return { status: "available", updateVersion: result.version, details: result.details } as const;
       }
       const selected = candidate;
-      if (!selected || !current || download || prepared || failedCleanup) throw new LinuxRestartError("INVALID_REQUEST");
+      if (!selected || !current || failedCleanup) throw new LinuxRestartError("INVALID_REQUEST");
+      if (kind === "install") {
+        if (!download || !prepared) throw new LinuxRestartError("INVALID_REQUEST");
+        current.assertUnchanged();
+        return { status: "prepared", updateVersion: selected.version } as const;
+      }
+      if (download || prepared) throw new LinuxRestartError("INVALID_REQUEST");
       current.assertUnchanged();
       try {
-        download = await dependencies.download({ candidate: selected, currentVersion, cacheDirectory: profile.paths.cache, signal });
+        download = await dependencies.download({ candidate: selected, currentVersion, cacheDirectory: profile.paths.cache, signal,
+          onProgress: (value: UpdateDownloadProgress) => reportState({ status: "downloading", updateVersion: selected.version, download: value }) });
         active(); current.assertUnchanged();
+        reportState({ status: "verifying", updateVersion: selected.version });
         prepared = await dependencies.prepare({ download, signature: selected.signature, expectedVersion: selected.version,
           currentVersion, home, launch }); active(); current.assertUnchanged();
-        return { status: "prepared", updateVersion: selected.version } as const;
+        return { status: "ready", updateVersion: selected.version, details: selected.details } as const;
       } catch (error: unknown) {
         if (error instanceof UpdateDownloadError) failedCleanup = error.cleanup;
         await discardPrepared(); throw error;

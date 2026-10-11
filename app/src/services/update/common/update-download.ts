@@ -5,6 +5,7 @@ import { createUpdateDownloadTransport, MODEL_DOWNLOAD_CHUNK_BYTES, type Downloa
 import { parseRawHTTPHeaders, RawHTTPHeadersError } from "../../http/raw-http-headers.js";
 import { projectLinuxUpdateFeed, projectMacosUpdateRelease, type LinuxUpdateCandidate, type MacosUpdateCandidate } from "./update-policy.js";
 import { assertPrivateUpdateDirectory, MAX_UPDATE_STAGE_BYTES, retainOwnedUpdateDownload, type OwnedUpdateDownload, type UpdateArtifactName } from "./update-staging.js";
+import { updateDownloadProgressSchema, type UpdateDownloadProgress } from "../../../contracts/update/update-download-progress.js";
 
 type Failure = "INVALID_INPUT" | "CANCELLED" | "TIMEOUT" | "REDIRECT_FAILED" | "METADATA_FAILED" | "PAYLOAD_TOO_LARGE" | "TRANSPORT_FAILED" | "WRITE_FAILED" | "CLEANUP_FAILED";
 export class UpdateDownloadError extends Error {
@@ -23,6 +24,8 @@ export interface UpdateDownloadInput {
   readonly cacheDirectory: string;
   readonly signal?: AbortSignal;
   readonly maximumBytes?: number;
+  /** Host-only progress observation; reports bytes actually written to the private stage. */
+  readonly onProgress?: (progress: UpdateDownloadProgress) => void;
   readonly limits?: Readonly<{ headersMs?: number; idleMs?: number; totalMs?: number }>;
 }
 /** Host-test effects only. Production always uses the fixed public HTTPS factory and positioned original writes. */
@@ -149,7 +152,15 @@ export async function downloadUpdateCandidate(input: UpdateDownloadInput, effect
     if (!same(named, fileIdentity) || !named.isFile() || named.nlink !== 1n || named.uid !== BigInt(process.getuid?.() ?? -1) ||
         (named.mode & 0o7777n) !== 0o600n) return fail("WRITE_FAILED");
     await stageGuard.assertUnchanged(); await cacheGuard.assertUnchanged(); active();
-    transport = io.transport(); let url = new URL(projected.assetURL), received = 0;
+    transport = io.transport(); let url = new URL(projected.assetURL), received = 0, declaredTotal: number | undefined;
+    let lastProgressAt = 0;
+    const reportProgress = (force = false): void => {
+      const now = Date.now();
+      if (!force && now - lastProgressAt < 100) return;
+      lastProgressAt = now;
+      const progress = updateDownloadProgressSchema.parse({ received, ...(declaredTotal === undefined ? {} : { total: declaredTotal }) });
+      try { input.onProgress?.(progress); } catch { /* Observers cannot alter transfer or cleanup authority. */ }
+    };
     const seen = new Set<string>(); let hops = 0;
     while (true) {
       active(); if (seen.has(url.href)) return fail("REDIRECT_FAILED"); seen.add(url.href);
@@ -167,6 +178,8 @@ export async function downloadUpdateCandidate(input: UpdateDownloadInput, effect
         if (!Number.isSafeInteger(expected)) return fail("METADATA_FAILED");
         if (expected > maximum) return fail("PAYLOAD_TOO_LARGE");
       }
+      declaredTotal = expected;
+      reportProgress(true);
       const iterator = exchange.body[Symbol.asyncIterator]();
       while (true) {
         reading = iterator.next(); const next = await wait(reading, idleMs); reading = undefined;
@@ -181,10 +194,12 @@ export async function downloadUpdateCandidate(input: UpdateDownloadInput, effect
           active(); if (!Number.isInteger(written) || written < 1 || written > chunk.length - offset) return fail("WRITE_FAILED"); offset += written;
         }
         received += chunk.length;
+        reportProgress();
       }
       await exchange.close(); active();
       const completed = exchange.completion();
       if (!completed.complete || completed.failed || !received || (expected !== undefined && expected !== received)) return fail("TRANSPORT_FAILED");
+      reportProgress(true);
       break;
     }
     await io.sync(file).catch(() => fail("WRITE_FAILED")); active();

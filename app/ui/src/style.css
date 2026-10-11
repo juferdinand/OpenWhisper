@@ -2208,6 +2208,18 @@ dialog#update-dialog {
   color: var(--button-text);
   font-weight: 600;
 }
+@media (max-width: 400px) {
+  .update-dialog-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .update-dialog-hint {
+    max-width: none;
+  }
+  .update-dialog-actions {
+    justify-content: flex-end;
+  }
+}
 @media (max-width: 800px), (max-height: 650px) {
   #settings-dialog[data-view="about"] .settings-dialog-shell {
     grid-template-columns: 190px minmax(0, 1fr);

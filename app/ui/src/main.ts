@@ -126,9 +126,14 @@ function syncWindowTitlebar() {
   if (updateButton) {
     updateButton.hidden =
       !state.updates.configured ||
-      (!["available", "downloading", "installing"].includes(
-        state.updates.status,
-      ) &&
+      (![
+        "available",
+        "downloading",
+        "verifying",
+        "ready",
+        "installing",
+      ].includes(state.updates.status) &&
+        !(state.updates.status === "checking" && !!state.updates.version) &&
         !(state.updates.status === "error" && !!state.updates.version));
     if (!state.updates.configured) return;
     updateButton.dataset.status = state.updates.status;
@@ -152,6 +157,10 @@ function updateKicker() {
       return t("Up to date");
     case "downloading":
       return t("Downloading update");
+    case "verifying":
+      return t("Verifying update …");
+    case "ready":
+      return t("Update ready to install");
     case "installing":
       return t("Installing update");
     case "error":
@@ -190,7 +199,7 @@ function updateInstallBlockReason(): string {
 function canInstallUpdate() {
   return (
     state.updates.configured &&
-    state.updates.status === "available" &&
+    state.updates.status === "ready" &&
     !!state.updates.version &&
     !updateInstallBlockReason()
   );
@@ -223,7 +232,11 @@ function syncUpdateDialog() {
   dialog.dataset.status = update.status;
   dialog.setAttribute(
     "aria-busy",
-    String(["checking", "downloading", "installing"].includes(update.status)),
+    String(
+      ["checking", "downloading", "verifying", "installing"].includes(
+        update.status,
+      ),
+    ),
   );
   const status = dialog.querySelector<HTMLElement>("#update-dialog-status");
   const version = dialog.querySelector<HTMLElement>("#update-dialog-version");
@@ -232,6 +245,9 @@ function syncUpdateDialog() {
   );
   const message = dialog.querySelector<HTMLElement>("#update-dialog-message");
   const notes = dialog.querySelector<HTMLElement>("#update-dialog-highlights");
+  const notesLanguage = dialog.querySelector<HTMLElement>(
+    "#update-dialog-notes-language",
+  );
   const releaseLink = dialog.querySelector<HTMLButtonElement>(
     "#update-release-link",
   );
@@ -258,7 +274,19 @@ function syncUpdateDialog() {
       update.status === "error" ? "update-dialog-message" : "visually-hidden";
   }
   if (notes) {
-    const highlights = update.details?.highlights ?? [];
+    const language = state.preferences.ui_language;
+    const localized = update.details?.localized_highlights?.[language];
+    const highlights = localized?.length
+      ? localized
+      : (update.details?.highlights ?? []);
+    if (notesLanguage) {
+      const usingEnglishFallback =
+        language === "de" && !localized?.length && highlights.length > 0;
+      notesLanguage.textContent = usingEnglishFallback
+        ? t("Release notes are shown in English.")
+        : "";
+      notesLanguage.hidden = !usingEnglishFallback;
+    }
     notes.replaceChildren(
       ...(highlights.length
         ? highlights.map((text) => {
@@ -280,33 +308,75 @@ function syncUpdateDialog() {
   if (releaseLink)
     releaseLink.hidden =
       !update.version ||
-      !["available", "downloading", "installing", "error"].includes(
-        update.status,
-      );
+      ![
+        "available",
+        "downloading",
+        "verifying",
+        "ready",
+        "installing",
+        "error",
+      ].includes(update.status);
   const downloading = update.status === "downloading";
-  if (progress) progress.hidden = !downloading;
-  if (progressBar) progressBar.value = update.progress;
-  if (progressLabel)
-    progressLabel.textContent = downloading
-      ? t("Downloading update: {progress}%", {
-          progress: String(Math.round(update.progress * 100)),
-        })
-      : "";
+  const showingProgress = downloading || update.status === "verifying";
+  if (progress) progress.hidden = !showingProgress;
+  if (progressBar) {
+    const transfer = update.download;
+    if (downloading && transfer?.total && transfer.total > 0) {
+      progressBar.max = transfer.total;
+      progressBar.value = Math.min(transfer.received, transfer.total);
+    } else if (showingProgress) {
+      progressBar.removeAttribute("value");
+    } else {
+      progressBar.max = 1;
+      progressBar.value = 0;
+    }
+    progressBar.setAttribute(
+      "aria-label",
+      t(downloading ? "Downloading update" : "Verifying update …"),
+    );
+  }
+  if (progressLabel) {
+    if (downloading) {
+      const received = formatUpdateSize(update.download?.received ?? 0);
+      const total = update.download?.total;
+      progressLabel.textContent =
+        total && total > 0
+          ? t("Downloaded {received} of {total}", {
+              received,
+              total: formatUpdateSize(total),
+            })
+          : t("Downloaded {received}", { received });
+    } else if (update.status === "verifying") {
+      progressLabel.textContent = t("Verifying update …");
+    } else {
+      progressLabel.textContent = "";
+    }
+  }
   if (hint) {
     hint.textContent =
       update.status === "available"
-        ? updateInstallBlockReason() || t("Ready to download this update.")
-        : ["downloading", "installing"].includes(update.status)
-          ? t("The update continues when you close this window.")
-          : "";
+        ? t("Ready to download this update.")
+        : update.status === "ready"
+          ? updateInstallBlockReason() ||
+            t("Install the downloaded update and restart now, or choose Later.")
+          : ["downloading", "verifying", "installing"].includes(update.status)
+            ? t("The update continues when you close this window.")
+            : "";
   }
   if (action) {
     const actionWasFocused = document.activeElement === action;
-    const available = update.status === "available";
-    action.hidden = !available;
-    action.disabled = available && !canInstallUpdate();
-    action.textContent = t("Download");
-    action.setAttribute("aria-label", t("Download"));
+    const available =
+      update.status === "available" ||
+      (update.status === "error" && !!update.version && update.configured);
+    const ready = update.status === "ready";
+    action.hidden = !available && !ready;
+    action.disabled =
+      (available && !update.configured) || (ready && !canInstallUpdate());
+    action.textContent = ready ? t("Restart now") : t("Download");
+    action.setAttribute(
+      "aria-label",
+      ready ? t("Install and restart now") : t("Download"),
+    );
     if (actionWasFocused && (action.hidden || action.disabled))
       dialog.querySelector<HTMLButtonElement>("#update-later")?.focus();
   }
@@ -323,7 +393,8 @@ function syncAboutUpdates() {
   const summary = document.querySelector<HTMLElement>("#about-update-summary");
   if (summary) {
     const text =
-      state.updates.status === "available" && state.updates.details?.size
+      ["available", "ready"].includes(state.updates.status) &&
+      state.updates.details?.size
         ? t("Download size: {size}", {
             size: formatUpdateSize(state.updates.details.size),
           })
@@ -339,9 +410,10 @@ function syncAboutUpdates() {
     action.hidden = !state.updates.configured;
     action.dataset.status = state.updates.status;
     const detailState =
-      ["available", "downloading", "installing"].includes(
+      ["available", "downloading", "verifying", "ready", "installing"].includes(
         state.updates.status,
       ) ||
+      (state.updates.status === "checking" && !!state.updates.version) ||
       (state.updates.status === "error" && !!state.updates.version);
     action.textContent =
       state.updates.status === "checking"
@@ -952,7 +1024,7 @@ function emptyModelDialog() {
   return '<dialog id="model-drawer" aria-labelledby="model-drawer-title"></dialog>';
 }
 function emptyUpdateDialog() {
-  return `<dialog id="update-dialog" aria-labelledby="update-dialog-version" aria-describedby="update-dialog-message"><div class="update-dialog-shell"><header class="update-dialog-header"><img src="./branding/icon-bordered.svg" width="52" height="52" alt=""><div class="update-dialog-identity"><span class="update-dialog-kicker" id="update-dialog-status"></span><h2 class="update-dialog-version" id="update-dialog-version"></h2><p class="update-dialog-installed" id="update-dialog-installed"></p></div></header><div class="update-dialog-body"><p class="visually-hidden" id="update-dialog-message"></p><h2>${esc(t("What’s new"))}</h2><ul class="update-highlights" id="update-dialog-highlights"></ul><button type="button" id="update-release-link" class="update-release-link" data-project-link="release">${esc(t("All changes on GitHub"))}</button></div><div class="update-dialog-progress" id="update-dialog-progress" hidden><progress id="update-progress-bar" max="1" value="0"></progress><span id="update-progress-label"></span></div><footer class="update-dialog-footer"><span class="update-dialog-hint" id="update-dialog-hint"></span><div class="update-dialog-actions"><button type="button" id="update-later">${esc(t("Later"))}</button><button type="button" id="update-main-action" class="primary"></button></div></footer></div></dialog>`;
+  return `<dialog id="update-dialog" aria-labelledby="update-dialog-version" aria-describedby="update-dialog-message"><div class="update-dialog-shell"><header class="update-dialog-header"><img src="./branding/icon-bordered.svg" width="52" height="52" alt=""><div class="update-dialog-identity"><span class="update-dialog-kicker" id="update-dialog-status"></span><h2 class="update-dialog-version" id="update-dialog-version"></h2><p class="update-dialog-installed" id="update-dialog-installed"></p></div></header><div class="update-dialog-body"><p class="visually-hidden" id="update-dialog-message"></p><h2>${esc(t("What’s new"))}</h2><p class="update-dialog-notes-language" id="update-dialog-notes-language" hidden></p><ul class="update-highlights" id="update-dialog-highlights"></ul><button type="button" id="update-release-link" class="update-release-link" data-project-link="release">${esc(t("All changes on GitHub"))}</button></div><div class="update-dialog-progress" id="update-dialog-progress" hidden><progress id="update-progress-bar" max="1" value="0"></progress><span id="update-progress-label"></span></div><footer class="update-dialog-footer"><span class="update-dialog-hint" id="update-dialog-hint"></span><div class="update-dialog-actions"><button type="button" id="update-later">${esc(t("Later"))}</button><button type="button" id="update-main-action" class="primary"></button></div></footer></div></dialog>`;
 }
 function bindDialogFocusTrap(dialog: HTMLDialogElement) {
   dialog.addEventListener("keydown", (event) => {
@@ -1019,17 +1091,29 @@ function bindUpdateDialogShell() {
   dialog
     .querySelector<HTMLButtonElement>("#update-main-action")
     ?.addEventListener("click", () => {
-      if (!canInstallUpdate()) return;
-      void command("install_update");
+      if (state.updates.status === "ready") {
+        if (canInstallUpdate()) void command("install_update");
+      } else if (
+        state.updates.configured &&
+        !!state.updates.version &&
+        ["available", "error"].includes(state.updates.status)
+      ) {
+        void command("download_update");
+      }
     });
   dialog
     .querySelector<HTMLButtonElement>("#update-release-link")
     ?.addEventListener("click", () => {
       if (
         state.updates.version &&
-        ["available", "downloading", "installing", "error"].includes(
-          state.updates.status,
-        )
+        [
+          "available",
+          "downloading",
+          "verifying",
+          "ready",
+          "installing",
+          "error",
+        ].includes(state.updates.status)
       )
         void command("open_project_link", { target: "release" });
     });
@@ -2246,7 +2330,7 @@ function render() {
     content.innerHTML = `<div class="about-brand"><img src="./branding/icon-bordered.svg" width="72" height="72" alt="${esc(t("OpenWhisper app icon"))}"><div class="about-copy">${wordmark()}<p>${esc(t("Local speech recognition for macOS and Linux"))}</p><span class="version-badge">${esc(t("Version {version}", { version: state.version }))}${state.profile === "development" && state.development_build ? ` · ${esc(t("Dev build {build}", { build: state.development_build }))}` : ""}</span></div></div><p class="about-description">${esc(t("Open source and free to use, with no account, subscription, or API key. Speech is recognized on your computer with Whisper or Parakeet; after the model is downloaded, dictation works offline."))}</p><div class="about-links"><button type="button" class="about-link" data-project-link="repository" aria-label="${esc(t("GitHub"))}"><span>${esc(t("GitHub"))}</span><small>${esc(t("Browse the source and project updates."))}</small></button><button type="button" class="about-link" data-project-link="issues" aria-label="${esc(t("Report an issue"))}"><span>${esc(t("Report an issue"))}</span><small>${esc(t("Report a bug or request a change."))}</small></button><button type="button" class="about-link" data-project-link="license" aria-label="${esc(t("MIT License"))}"><span>${esc(t("MIT License"))}</span><small>${esc(t("View the project license."))}</small></button></div>`;
     content.insertAdjacentHTML(
       "beforeend",
-      `<section id="about-updates" class="about-updates"><h2>${esc(t("Updates"))}</h2><div class="group"><div class="row about-update-row"><span><span class="about-update-title"><i class="about-update-dot" id="about-update-dot" aria-hidden="true"></i><span id="about-update-status" aria-live="polite"></span></span><small class="settings-row-description" id="about-update-summary" hidden></small></span><div class="control"><button type="button" id="about-update-action"></button></div></div><label class="row setting-description-row" id="about-auto-updates"><span><span>${esc(t("Automatically check for updates"))}</span><small class="settings-row-description">${esc(t("At startup, no more than once per day."))}</small></span><input class="switch" type="checkbox" data-pref="auto_check_updates" ${p.auto_check_updates ? "checked" : ""}></label></div></section>`,
+      `<section id="about-updates" class="about-updates"><h2>${esc(t("Updates"))}</h2><div class="group"><div class="row about-update-row"><span><span class="about-update-title"><i class="about-update-dot" id="about-update-dot" aria-hidden="true"></i><span id="about-update-status" aria-live="polite"></span></span><small class="settings-row-description" id="about-update-summary" hidden></small></span><div class="control"><button type="button" id="about-update-action"></button></div></div><label class="row setting-description-row" id="about-auto-updates"><span><span>${esc(t("Automatically check for updates"))}</span><small class="settings-row-description">${esc(t("At startup, at most once per hour, and after resuming."))}</small></span><input class="switch" type="checkbox" data-pref="auto_check_updates" ${p.auto_check_updates ? "checked" : ""}></label></div></section>`,
     );
     syncAboutUpdates();
   }
@@ -2275,9 +2359,14 @@ function render() {
     .querySelector<HTMLButtonElement>("#about-update-action")
     ?.addEventListener("click", (event) => {
       if (
-        ["available", "downloading", "installing"].includes(
-          state.updates.status,
-        ) ||
+        [
+          "available",
+          "downloading",
+          "verifying",
+          "ready",
+          "installing",
+        ].includes(state.updates.status) ||
+        (state.updates.status === "checking" && !!state.updates.version) ||
         (state.updates.status === "error" && !!state.updates.version)
       )
         openUpdateDialog(event.currentTarget as HTMLElement);
@@ -2383,12 +2472,22 @@ function updateStatus() {
       return t("You have the latest version.");
     case "available":
       return t("Version {version} is available.", { version: u.version ?? "" });
-    case "downloading":
-      return t("Downloading update: {progress}%", {
-        progress: Math.round(u.progress * 100),
-      });
+    case "downloading": {
+      const received = formatUpdateSize(u.download?.received ?? 0);
+      const total = u.download?.total;
+      return total && total > 0
+        ? t("Downloading update: {received} of {total}", {
+            received,
+            total: formatUpdateSize(total),
+          })
+        : t("Downloading update: {received}", { received });
+    }
+    case "verifying":
+      return t("Verifying update …");
+    case "ready":
+      return t("Update ready to install");
     case "installing":
-      return t("Verifying and installing update …");
+      return t("Installing update …");
     case "error":
       return t("Update failed: {error}", {
         error: t(u.error ?? "Unknown error"),
@@ -2406,7 +2505,13 @@ function updateButtonLabel() {
     case "checking":
       return t("Checking");
     case "downloading":
-      return `${Math.round(update.progress * 100)}%`;
+      return update.download?.total
+        ? `${Math.round((update.download.received / update.download.total) * 100)}%`
+        : t("Downloading update");
+    case "verifying":
+      return t("Verifying update …");
+    case "ready":
+      return t("Update ready");
     case "installing":
       return t("Update");
     case "current":

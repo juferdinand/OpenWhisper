@@ -1,0 +1,114 @@
+name: Prepare release review
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Canonical target release version (X.Y.Z)."
+        required: true
+        type: string
+      highlights:
+        description: 'Authored release highlights as JSON: {"en":[...],"de":[...]}. Do not paste user transcripts.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  prepare-review:
+    name: Prepare and open release review
+    if: github.repository == 'juferdinand/OpenWhisper' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            app/ui/package-lock.json
+      - name: Install locked development dependencies
+        run: |
+          npm ci --prefix app/ui
+          npm ci --prefix app
+      - name: Validate editorial input and preview changes
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_HIGHLIGHTS: ${{ inputs.highlights }}
+        run: |
+          set -euo pipefail
+          notes="$RUNNER_TEMP/release-highlights.json"
+          printf '%s' "$RELEASE_HIGHLIGHTS" > "$notes"
+          npm run prepare-release --prefix app -- --mode preview --version "$RELEASE_VERSION" --highlights "$notes"
+          npm run prepare-release --prefix app -- --mode apply --version "$RELEASE_VERSION" --highlights "$notes"
+      - name: Run deterministic preflight before remote writes
+        run: npm run preflight --prefix app
+      - name: Refuse existing release and branch, then open review PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v$RELEASE_VERSION"
+          branch="prepare/release-v$RELEASE_VERSION"
+          if [[ -n "$(git ls-remote --tags origin "refs/tags/$tag")" ]]; then
+            echo "Release tag $tag already exists." >&2
+            exit 1
+          fi
+          if release_response="$(gh api --include "repos/$GITHUB_REPOSITORY/releases/tags/$tag" 2>&1)"; then
+            echo "GitHub release $tag already exists." >&2
+            exit 1
+          elif [[ ! "$release_response" =~ HTTP/[0-9.]+[[:space:]]404([[:space:]]|$) ]]; then
+            echo "Could not confirm that release $tag is absent." >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION app/package.json app/package-lock.json app/ui/package.json app/ui/package-lock.json README.md .github/release-notes.md
+          if git diff --cached --quiet; then
+            echo "Release $RELEASE_VERSION is already prepared on main; no changes or PR are needed."
+            exit 0
+          fi
+          git commit -m "Prepare release $RELEASE_VERSION"
+          if [[ -n "$(git ls-remote --heads origin "refs/heads/$branch")" ]]; then
+            git fetch --no-tags origin "refs/heads/$branch:refs/remotes/origin/$branch"
+            if [[ "$(git rev-parse 'HEAD^{tree}')" != "$(git rev-parse "origin/$branch^{tree}")" ]]; then
+              echo "Existing preparation branch $branch has different content; refusing to overwrite it." >&2
+              echo "Review its PR or resolve it manually before rerunning this workflow." >&2
+              exit 1
+            fi
+          else
+            git push origin "HEAD:refs/heads/$branch"
+          fi
+          pr_url="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty')"
+          if [[ -z "$pr_url" ]]; then
+            if ! gh pr create --base main --head "$branch" --title "Prepare release $RELEASE_VERSION" \
+              --body "Automated release preparation for review. This workflow does not publish, sign, or create a release."; then
+              pr_url="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty')"
+              if [[ -z "$pr_url" ]]; then
+                echo "The branch is retained. Enable Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests, then recover with: gh pr create --base main --head $branch --title 'Prepare release $RELEASE_VERSION' --body 'Review-only release preparation; this does not publish.'" >&2
+                exit 1
+              fi
+            else
+              pr_url="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty')"
+            fi
+          fi
+          {
+            echo "## Release preparation review"
+            echo ""
+            echo "PR: $pr_url"
+            echo ""
+            echo "Review and merge only after acceptance. GitHub may require maintainer approval or a manual CI dispatch for pull request workflows created with GITHUB_TOKEN; confirm CI is green before merge."
+          } >> "$GITHUB_STEP_SUMMARY"

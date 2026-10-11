@@ -14,6 +14,36 @@ It does not replace the installed application or establish desktop/speech parity
 The About view shows the Dev build's source commit and whether the checkout was modified;
 the Models view exposes the selected private model directory.
 
+## Release preparation
+
+In an isolated branch with locked dependencies installed, supply the target version and an
+editorial JSON file with one to five short highlights per language:
+
+```json
+{"en":["Describe the user-visible change."],"de":["Beschreibe die sichtbare Änderung."]}
+```
+
+```bash
+npm run prepare-release --prefix app -- --mode preview --version X.Y.Z --highlights /path/highlights.json
+npm run prepare-release --prefix app -- --mode apply --version X.Y.Z --highlights /path/highlights.json
+```
+
+Replace `X.Y.Z` with the intended patch, minor, or major version. Preview writes nothing. Apply
+updates the five version files, the README release statement, and the bilingual curated notes;
+an identical repeat is a no-op. Existing historical notes and fixtures stay intact. CI derives its
+private next-patch test successor from the validated producer commit, without per-release edits.
+
+Alternatively, dispatch **Prepare release review** from `main` with the same version and JSON.
+It runs preflight before pushing a review branch. Enable the repository's **Allow GitHub Actions
+to create and approve pull requests** setting once; the workflow never approves or merges its PR.
+If PR creation fails after the push, use the recovery command in the job output or rerun with the
+same inputs. A rerun accepts only an identical branch tree and refuses an existing tag or release.
+Confirm the PR's CI, approving bot-created workflow runs or dispatching CI on that branch if needed.
+
+After acceptance and merge, explicitly dispatch **Release** from `main` with the committed version
+and `draft=true`. Verify its signed assets before publication. For a failed run, rerun only the failed
+jobs; keep the existing signing identities and never overwrite a published version.
+
 ## Build and run
 
 Use Node.js 24–26 and npm. Install the locked renderer dependencies, then the application

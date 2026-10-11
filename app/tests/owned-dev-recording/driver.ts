@@ -17,6 +17,7 @@ import { HEIGHT as OVERLAY_HEIGHT, WIDTH as OVERLAY_WIDTH } from "../../src/cont
 import { recordingHostErrorSchema } from "../../src/workers/recording/recording-host-protocol.js";
 import { kdeJournalSchema } from "../../src/platforms/linux/kde/keyboard.js";
 import { parseApplicationBuildModule } from "../../src/contracts/application/build-identity.js";
+import { parseUpdateVersion } from "../../src/services/update/common/update-policy.js";
 import { parseControlStatus, type ControlWireStatus } from "../../src/platforms/linux/shared/control-status.js";
 import { controlTarget } from "../../src/platforms/linux/shared/control-identity.js";
 import type { ControlCommand, ControlAction } from "../../src/cli/arguments.js";
@@ -42,6 +43,8 @@ const installedDebian = process.env.OPENWHISPER_INSTALLED_DEBIAN === "1";
 const supervisedLaunch = process.env.OPENWHISPER_SUPERVISED_LAUNCH === "1";
 const resourceDiagnostic = process.env.OPENWHISPER_RESOURCE_DIAGNOSTIC === "1";
 const updateCheck = process.env.OPENWHISPER_UPDATE_CHECK === "1";
+const updateSourceVersion = updateCheck ? z.string().refine((value) => { try { parseUpdateVersion(value); return true; } catch { return false; } })
+  .parse(process.env.OPENWHISPER_UPDATE_SOURCE_VERSION) : undefined;
 const diagnosticRoots: DiagnosticRoot[] = [];
 let resourceSequence = 0;
 async function captureResources(boundary: string): Promise<void> {
@@ -594,7 +597,7 @@ async function main(): Promise<void> {
         version: process.env["OPENWHISPER_RESTART_VERSION"], protocolPresent: process.env["OPENWHISPER_UPDATE_PROTOCOL"] !== undefined,
         packageVersion: app.getVersion() };
     });
-    assert.equal(actual.socket, true); assert.equal(actual.packageVersion, updateCheck ? "0.4.1" : "0.3.0");
+    assert.equal(actual.socket, true); assert.equal(actual.packageVersion, updateSourceVersion ?? "0.3.0");
     assert.equal(actual.noncePresent, !updateCheck); assert.equal(actual.version, updateCheck ? undefined : "0.3.0");
     assert.equal(actual.protocolPresent, false);
     assert.notEqual(actual.guiPid, actual.supervisorPid);

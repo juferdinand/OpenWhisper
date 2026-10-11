@@ -200,8 +200,6 @@
   "Checking for updates …": "Updates werden gesucht …",
   "You have the latest version.": "Du hast die neueste Version.",
   "Version {version} is available.": "Version {version} ist verfügbar.",
-  "Downloading update: {progress}%": "Update wird geladen: {progress}%",
-  "Verifying and installing update …": "Update wird geprüft und installiert …",
   "Update failed: {error}": "Update fehlgeschlagen: {error}",
   "Not checked yet.": "Noch nicht geprüft.",
   "Settings saved on this device.": "Einstellungen auf diesem Gerät gespeichert.",
@@ -514,6 +512,8 @@
   "Choose a keyboard key or shortcut. Press it to start recording and press it again to stop.": "Drücke eine Taste oder Tastenkombination, um die Aufnahme zu starten; erneut drücken, um sie zu beenden.",
   "Update available": "Update verfügbar",
   "Downloading update": "Update wird heruntergeladen",
+  "Downloading update: {received} of {total}": "Update wird heruntergeladen: {received} von {total}",
+  "Downloading update: {received}": "Update wird heruntergeladen: {received}",
   "Installing update": "Update wird installiert",
   "Installed: {version}": "Installiert: {version}",
   "Download size: {size}": "Downloadgröße: {size}",
@@ -541,5 +541,14 @@
   "View the project license.": "Open Source · MIT",
   "Update": "Update",
   "Automatically check for updates": "Automatisch nach Updates suchen",
-  "At startup, no more than once per day.": "Beim Start höchstens einmal täglich nach Updates suchen."
+  "At startup, at most once per hour, and after resuming.": "Beim Start, höchstens einmal pro Stunde und nach dem Reaktivieren.",
+  "Verifying update …": "Update wird überprüft …",
+  "Update ready to install": "Update kann installiert werden",
+  "Update ready": "Update bereit",
+  "Downloaded {received} of {total}": "Heruntergeladen: {received} von {total}",
+  "Downloaded {received}": "Heruntergeladen: {received}",
+  "Install and restart now": "Jetzt installieren und neu starten",
+  "Restart now": "Jetzt neu starten",
+  "Install the downloaded update and restart now, or choose Later.": "Installiere das heruntergeladene Update jetzt und starte neu oder wähle Später.",
+  "Release notes are shown in English.": "Die Versionshinweise werden auf Englisch angezeigt."
 }

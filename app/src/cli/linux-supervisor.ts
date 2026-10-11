@@ -8,7 +8,7 @@ import { Duplex, Readable } from "node:stream";
 import type { LinuxInstalledLaunch } from "../main/linux-installed-launch.js";
 import { LINUX_RESTART_NONCE, LINUX_RESTART_VERSION, LinuxRestartError, readLinuxRestartReceipt } from "../main/linux-restart.js";
 import { createLinuxUpdateParentChannel, LINUX_UPDATE_PROTOCOL, type LinuxUpdateParentChannel,
-  type LinuxUpdatePublicState } from "../main/linux-update-channel.js";
+  type LinuxUpdateAction, type LinuxUpdateIntermediateState, type LinuxUpdatePublicState } from "../main/linux-update-channel.js";
 import { parseUpdateVersion } from "../services/update/common/update-policy.js";
 
 interface OriginalChild {
@@ -26,7 +26,7 @@ export interface LinuxSupervisorEffects {
 }
 /** Host-owned callbacks retain the original candidate, download and installer; channel frames carry none of them. */
 export interface LinuxSupervisorUpdates {
-  action(kind: "check" | "install", signal: AbortSignal): Promise<LinuxUpdatePublicState>;
+  action(kind: LinuxUpdateAction, signal: AbortSignal, reportState?: (state: LinuxUpdateIntermediateState) => void): Promise<LinuxUpdatePublicState>;
   /** Long installation and full audit run after original GUI retirement, outside the final close/exec fence. */
   installPrepared(version: string): Promise<Readonly<{ assertForExec(): void; rollbackBeforeExec?(): Promise<void> }>>;
   /** Failed or uncertain installation must preserve its source; only safe abandoned preparation is discarded. */
@@ -179,7 +179,7 @@ export async function runLinuxSupervisor(options: Options, effects: LinuxSupervi
   try { parseUpdateVersion(currentVersion); } catch { throw new LinuxRestartError("INVALID_REQUEST"); }
   const target = capture(options.launch), argv = Object.freeze([...options.argv]), nonce = randomBytes(32).toString("hex"), initialEnvironment = Object.freeze(cleanEnvironment());
   const child = effects.launch(argv, { ...initialEnvironment, [LINUX_RESTART_NONCE]: nonce, [LINUX_RESTART_VERSION]: currentVersion,
-    ...(updates ? { [LINUX_UPDATE_PROTOCOL]: "2" } : {}) });
+    ...(updates ? { [LINUX_UPDATE_PROTOCOL]: "3" } : {}) });
   let terminationSignal: SupervisorSignal | undefined, cleanup: Promise<void> | undefined;
   let acceptTermination!: (signal: SupervisorSignal) => void;
   const terminated = new Promise<SupervisorSignal>((accept) => { acceptTermination = accept; });

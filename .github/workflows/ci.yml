@@ -470,6 +470,10 @@ jobs:
           npm ci --prefix app/ui
           npm ci --prefix app
           npm run setup --prefix app
+      - name: Read exact current release context
+        id: release_context
+        working-directory: app
+        run: node --import tsx scripts/release-context.ts --github-output "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: OpenWhisper-validation-macOS-macos-15-${{ github.sha }}
@@ -478,7 +482,7 @@ jobs:
         with:
           name: OpenWhisper-private-macOS-successor-${{ github.sha }}
           path: ${{ runner.temp }}/publisher-successor
-      - name: Reconstruct the genuine 0.4.2 source from the same-run arm64 artifact
+      - name: Reconstruct the genuine next-patch source from the same-run arm64 artifact
         working-directory: app
         env:
           OPENWHISPER_OWNED_MAC_PUBLISHER: '1'
@@ -555,6 +559,8 @@ jobs:
           CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
           CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
           OPENWHISPER_UNIVERSAL_DIAGNOSTIC: ${{ runner.temp }}/mac-publisher-evidence/construction-failure.json
+          CURRENT_VERSION: ${{ steps.release_context.outputs.current_version }}
+          SUCCESSOR_VERSION: ${{ steps.release_context.outputs.successor_version }}
         run: |
           set -euo pipefail
           set +x
@@ -616,7 +622,9 @@ jobs:
           /bin/bash "$private/cleanup.sh"
           trap - EXIT INT TERM
           /usr/bin/git worktree remove --force "$successor_source"
-          printf '%s\n' '{"status":"SIGNED","scope":"Persistent Universal 0.4.1 package and private arm64 thin 0.4.2 successor satisfy the original 0.2.5 requirement under the same identity; actual update handoff is measured separately"}' > "$evidence/signing.json"
+          jq -n --arg current "$CURRENT_VERSION" --arg successor "$SUCCESSOR_VERSION" \
+            '{status:"SIGNED",scope:("Persistent Universal " + $current + " package and private arm64 thin " + $successor + " successor satisfy the original 0.2.5 requirement under the same identity; actual update handoff is measured separately")}' \
+            > "$evidence/signing.json"
           printf '%s\n' 'available=true' >> "$GITHUB_OUTPUT"
       - name: Always remove owned signing material and restore keychain state
         if: always()
@@ -645,6 +653,9 @@ jobs:
         if: steps.publisher.outputs.available == 'true'
         working-directory: app
         shell: bash
+        env:
+          CURRENT_VERSION: ${{ steps.release_context.outputs.current_version }}
+          SUCCESSOR_VERSION: ${{ steps.release_context.outputs.successor_version }}
         run: |
           set -euo pipefail
           umask 077
@@ -656,32 +667,38 @@ jobs:
           successor_archive="$(jq -er '.archive' "$RUNNER_TEMP/mac-publisher-successor/successor-package-result.json")"
           successor_sha="$(jq -er '.sha256' "$RUNNER_TEMP/mac-publisher-successor/successor-package-result.json")"
           successor_commit="$(jq -er '.sourceCommit' "$RUNNER_TEMP/mac-publisher-successor/successor-package-result.json")"
+          successor_bundle="$RUNNER_TEMP/publisher-successor/successor.bundle"
+          successor_receipt="$RUNNER_TEMP/publisher-successor/successor-source.json"
           test "$universal_archive" = "$RUNNER_TEMP/mac-publisher-output/$(basename "$universal_archive")"
           test "$successor_archive" = "$RUNNER_TEMP/mac-publisher-successor/$(basename "$successor_archive")"
           test -f "$universal_archive" && test ! -L "$universal_archive"
           test -f "$successor_archive" && test ! -L "$successor_archive"
-          [[ "$universal_archive" =~ /OpenWhisper-validation-macOS-universal_0\.4\.1_[a-f0-9]{12}\.zip$ ]]
-          [[ "$successor_archive" =~ /OpenWhisper-validation-macOS-arm64_0\.4\.2_[a-f0-9]{12}\.zip$ ]]
+          [[ "$universal_archive" == "$RUNNER_TEMP/mac-publisher-output/OpenWhisper-validation-macOS-universal_${CURRENT_VERSION}_${GITHUB_SHA:0:12}.zip" ]]
+          [[ "$successor_archive" == "$RUNNER_TEMP/mac-publisher-successor/OpenWhisper-validation-macOS-arm64_${SUCCESSOR_VERSION}_${successor_commit:0:12}.zip" ]]
+          test -f "$successor_bundle" && test ! -L "$successor_bundle"
+          test -f "$successor_receipt" && test ! -L "$successor_receipt"
           test "$(jq -er '.status' "$RUNNER_TEMP/mac-publisher-successor/successor-package-result.json")" = PASS
-          test "$(jq -er '.version' "$RUNNER_TEMP/mac-publisher-successor/successor-package-result.json")" = 0.4.2
+          test "$(jq -er '.version' "$RUNNER_TEMP/mac-publisher-successor/successor-package-result.json")" = "$SUCCESSOR_VERSION"
           test "$(jq -er '.updateConfigured' "$RUNNER_TEMP/mac-publisher-successor/successor-package-result.json")" = true
           test "$(jq -er '.successorCommit' "$RUNNER_TEMP/publisher-successor-source/source-path.json")" = "$successor_commit"
           for receipt in old-requirement-staged.json old-requirement-zip.json successor-old-requirement-staged.json successor-old-requirement-zip.json; do
             jq -e '.status == "PASS" and .originalRequirement == "ACCEPTED" and .validSameIdDifferentPublisher == "REJECTED"' \
               "$evidence/$receipt" >/dev/null
           done
-          universal_name=OpenWhisper-universal-0.4.1.zip
-          successor_name=OpenWhisper-arm64-successor-0.4.2.zip
+          universal_name="OpenWhisper-universal-${CURRENT_VERSION}.zip"
+          successor_name="OpenWhisper-arm64-successor-${SUCCESSOR_VERSION}.zip"
           cp "$universal_archive" "$packet/$universal_name"
           cp "$successor_archive" "$packet/$successor_name"
-          chmod 600 "$packet/$universal_name" "$packet/$successor_name"
+          cp "$successor_bundle" "$packet/successor.bundle"
+          cp "$successor_receipt" "$packet/successor-source.json"
+          chmod 600 "$packet/$universal_name" "$packet/$successor_name" "$packet/successor.bundle" "$packet/successor-source.json"
           universal_actual="$(/usr/bin/shasum -a 256 "$packet/$universal_name" | awk '{print $1}')"
           successor_actual="$(/usr/bin/shasum -a 256 "$packet/$successor_name" | awk '{print $1}')"
           test "$universal_actual" = "$universal_sha"
           test "$successor_actual" = "$successor_sha"
-          jq -n --arg source "$GITHUB_SHA" --arg universal "$universal_actual" \
+          jq -n --arg source "$GITHUB_SHA" --arg current "$CURRENT_VERSION" --arg successor_version "$SUCCESSOR_VERSION" --arg universal "$universal_actual" \
             --arg successor "$successor_actual" --arg successor_commit "$successor_commit" \
-            '{schema:1,sourceCommit:$source,universal:{version:"0.4.1",sha256:$universal,publisherRequirement:"ACCEPTED"},successor:{parentCommit:$source,commit:$successor_commit,version:"0.4.2",sha256:$successor,publisherRequirement:"ACCEPTED"}}' \
+            '{schema:1,sourceCommit:$source,universal:{version:$current,sha256:$universal,publisherRequirement:"ACCEPTED"},successor:{parentCommit:$source,commit:$successor_commit,version:$successor_version,sha256:$successor,publisherRequirement:"ACCEPTED"}}' \
             > "$packet/input.json"
           chmod 600 "$packet/input.json"
       - name: Upload exact signed handoff inputs for a fresh Mac runner
@@ -690,8 +707,10 @@ jobs:
         with:
           name: OpenWhisper-mac-update-handoff-input-${{ github.sha }}
           path: |
-            ${{ runner.temp }}/mac-update-handoff-input/OpenWhisper-universal-0.4.1.zip
-            ${{ runner.temp }}/mac-update-handoff-input/OpenWhisper-arm64-successor-0.4.2.zip
+            ${{ runner.temp }}/mac-update-handoff-input/OpenWhisper-universal-${{ steps.release_context.outputs.current_version }}.zip
+            ${{ runner.temp }}/mac-update-handoff-input/OpenWhisper-arm64-successor-${{ steps.release_context.outputs.successor_version }}.zip
+            ${{ runner.temp }}/mac-update-handoff-input/successor.bundle
+            ${{ runner.temp }}/mac-update-handoff-input/successor-source.json
             ${{ runner.temp }}/mac-update-handoff-input/input.json
           if-no-files-found: error
           retention-days: 7
@@ -739,6 +758,7 @@ jobs:
         run: npm ci
       - name: Select and verify the exact publisher packet source
         id: source
+        working-directory: app
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -790,6 +810,8 @@ jobs:
               [.artifacts[] | select(.name == $name and .expired == false)] | length == 1
             ' "$RUNNER_TEMP/mac-handoff-producer-artifacts.json" >/dev/null
           fi
+          git fetch --no-tags origin "$source_commit"
+          node --import tsx scripts/release-context.ts --commit "$source_commit" --github-output "$GITHUB_OUTPUT"
           printf 'producer_sha=%s\nproducer_run_id=%s\n' "$source_commit" "$producer_run_id" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -799,32 +821,65 @@ jobs:
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/mac-update-handoff-input
       - name: Admit exact same-run signed package inputs
+        working-directory: app
         shell: bash
         env:
           PRODUCER_SOURCE_SHA: ${{ steps.source.outputs.producer_sha }}
+          CURRENT_VERSION: ${{ steps.source.outputs.current_version }}
+          SUCCESSOR_VERSION: ${{ steps.source.outputs.successor_version }}
         run: |
           set -euo pipefail
           umask 077
           packet="$RUNNER_TEMP/mac-update-handoff-input"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
-          test "$(find "$packet" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')" = 3
+          producer_workflow="$(git show "$PRODUCER_SOURCE_SHA:.github/workflows/ci.yml")"
+          if [[ "$producer_workflow" == *"mac-update-handoff-input/successor.bundle"* &&
+                "$producer_workflow" == *"mac-update-handoff-input/successor-source.json"* ]]; then
+            packet_protocol=5
+          elif [[ "$producer_workflow" == *"mac-update-handoff-input/input.json"* ]]; then
+            # Older successful publisher runs emitted three files after validating the
+            # exact successor tree and parent in the producer job itself.
+            packet_protocol=3
+          else
+            echo "Producer source does not declare a recognized private handoff packet protocol." >&2
+            exit 1
+          fi
+          test "$(find "$packet" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')" = "$packet_protocol"
           test -z "$(find "$packet" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
-          for name in input.json OpenWhisper-universal-0.4.1.zip OpenWhisper-arm64-successor-0.4.2.zip; do
+          for name in input.json "OpenWhisper-universal-${CURRENT_VERSION}.zip" "OpenWhisper-arm64-successor-${SUCCESSOR_VERSION}.zip"; do
             test -f "$packet/$name" && test ! -L "$packet/$name"
           done
-          jq -e --arg source "$PRODUCER_SOURCE_SHA" '
+          if test "$packet_protocol" = 5; then
+            for name in successor.bundle successor-source.json; do test -f "$packet/$name" && test ! -L "$packet/$name"; done
+          fi
+          jq -e --arg source "$PRODUCER_SOURCE_SHA" --arg current "$CURRENT_VERSION" --arg successor "$SUCCESSOR_VERSION" '
             .schema == 1 and .sourceCommit == $source and
-            .universal.version == "0.4.1" and .universal.publisherRequirement == "ACCEPTED" and
+            .universal.version == $current and .universal.publisherRequirement == "ACCEPTED" and
             (.universal.sha256 | test("^[a-f0-9]{64}$")) and
-            .successor.parentCommit == $source and .successor.version == "0.4.2" and
+            .successor.parentCommit == $source and .successor.version == $successor and
             .successor.publisherRequirement == "ACCEPTED" and .successor.commit != $source and
             (.successor.commit | test("^[a-f0-9]{40}$")) and (.successor.sha256 | test("^[a-f0-9]{64}$"))
           ' "$packet/input.json" >/dev/null
-          test "$(/usr/bin/shasum -a 256 "$packet/OpenWhisper-universal-0.4.1.zip" | awk '{print $1}')" = "$(jq -er '.universal.sha256' "$packet/input.json")"
-          test "$(/usr/bin/shasum -a 256 "$packet/OpenWhisper-arm64-successor-0.4.2.zip" | awk '{print $1}')" = "$(jq -er '.successor.sha256' "$packet/input.json")"
+          successor_commit="$(jq -er '.successor.commit' "$packet/input.json")"
+          test "$(git show "$PRODUCER_SOURCE_SHA:VERSION")" = "$CURRENT_VERSION"
+          if test "$packet_protocol" = 5; then
+            git fetch --no-tags "$packet/successor.bundle" HEAD
+            test "$(git rev-parse "$successor_commit^")" = "$PRODUCER_SOURCE_SHA"
+            test "$(git show "$successor_commit:VERSION")" = "$SUCCESSOR_VERSION"
+            test "$(git show "$successor_commit:app/package.json" | jq -er .version)" = "$SUCCESSOR_VERSION"
+            test "$(git show "$successor_commit:app/package-lock.json" | jq -er '.packages[""].version')" = "$SUCCESSOR_VERSION"
+            receipt="$packet/successor-source.json"
+            jq -e --arg source "$PRODUCER_SOURCE_SHA" --arg child "$successor_commit" --arg current "$CURRENT_VERSION" --arg successor "$SUCCESSOR_VERSION" '
+              .status == "PASS" and .originalCommit == $source and .parentCommit == $source and .successorCommit == $child and
+              .originalVersion == $current and .successorVersion == $successor and
+              .changedFiles == ["VERSION", "app/package-lock.json", "app/package.json"]
+            ' "$receipt" >/dev/null
+          fi
+          test "$(/usr/bin/shasum -a 256 "$packet/OpenWhisper-universal-${CURRENT_VERSION}.zip" | awk '{print $1}')" = "$(jq -er '.universal.sha256' "$packet/input.json")"
+          test "$(/usr/bin/shasum -a 256 "$packet/OpenWhisper-arm64-successor-${SUCCESSOR_VERSION}.zip" | awk '{print $1}')" = "$(jq -er '.successor.sha256' "$packet/input.json")"
           mkdir -m 700 "$RUNNER_TEMP/mac-update-handoff-predecessor"
-          /usr/bin/ditto -x -k "$packet/OpenWhisper-universal-0.4.1.zip" "$RUNNER_TEMP/mac-update-handoff-predecessor"
+          /usr/bin/ditto -x -k "$packet/OpenWhisper-universal-${CURRENT_VERSION}.zip" "$RUNNER_TEMP/mac-update-handoff-predecessor"
           test -d "$RUNNER_TEMP/mac-update-handoff-predecessor/OpenWhisper.app"
       - name: Install and relaunch one genuine same-identity successor on an isolated Mac runner
         working-directory: app
@@ -835,7 +890,7 @@ jobs:
           set -euo pipefail
           node --import tsx tests/owned-macos-update-handoff.ts \
             --package "$RUNNER_TEMP/mac-update-handoff-predecessor/OpenWhisper.app" \
-            --successor "$RUNNER_TEMP/mac-update-handoff-input/OpenWhisper-arm64-successor-0.4.2.zip" \
+            --successor "$RUNNER_TEMP/mac-update-handoff-input/OpenWhisper-arm64-successor-${{ steps.source.outputs.successor_version }}.zip" \
             --evidence "$RUNNER_TEMP/mac-update-handoff-evidence" \
             --source-commit "$(jq -er '.sourceCommit' "$RUNNER_TEMP/mac-update-handoff-input/input.json")" \
             --successor-commit "$(jq -er '.successor.commit' "$RUNNER_TEMP/mac-update-handoff-input/input.json")"

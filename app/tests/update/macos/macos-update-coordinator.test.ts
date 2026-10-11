@@ -36,7 +36,8 @@ async function fixture() {
   // Synthetic extraction and publisher/transaction authority; original file ownership and closure are real.
   const effects: Partial<MacosUpdateCoordinatorEffects> = {
     read: async (input) => { assert.equal(input.package, "macos"); events.push("read"); return candidate; },
-    download: async (input) => { assert.equal(input.candidate.version, nextVersion); assert.equal(input.repository, repository); events.push("download"); return download; },
+    download: async (input) => { assert.equal(input.candidate.version, nextVersion); assert.equal(input.repository, repository);
+      input.onProgress?.({ received: 4, total: 19 }); events.push("download"); return download; },
     extract: async (input) => { assert.equal(input.download, download); events.push("extract"); return {
       bundlePath: join(source, "OpenWhisper.app"), version: nextVersion,
       async cleanup() { events.push("extracted-close"); await rm(source, { recursive: true }); },
@@ -55,10 +56,11 @@ test("Mac preparation settles real original archive owners before yielding an in
   try {
     const updater = f.create(), signal = new AbortController().signal;
     assert.equal((await updater.check(signal))?.version, nextVersion);
-    const prepared = await updater.prepareInstall(signal);
+    const prepared = await updater.prepareInstall(signal, { onProgress: (value) => { assert.deepEqual(value, { received: 4, total: 19 }); f.events.push("progress"); },
+      onVerifying: () => f.events.push("verifying") });
     assert.equal(prepared, f.prepared); assert.ok(Object.isFrozen(updater));
     await assert.rejects(f.file.stat(), { code: "EBADF" }); await assert.rejects(stat(f.stage), { code: "ENOENT" });
-    assert.deepEqual(f.events, ["read", "download", "extract", "prepare", "extracted-close"]);
+    assert.deepEqual(f.events, ["read", "progress", "download", "verifying", "extract", "prepare", "extracted-close"]);
     await assert.rejects(updater.prepareInstall(signal), failure("UNAVAILABLE"));
     const retired = deferred<void>();
     const handoff = handoffMacosUpdate(prepared, { retire: () => { f.events.push("retiring"); return retired.promise; }, relaunch: () => { f.events.push("relaunch"); } });
@@ -69,7 +71,7 @@ test("Mac preparation settles real original archive owners before yielding an in
   } finally { await f.cleanup(); }
 });
 
-test("Mac checks clear stale candidates, exclude overlap and refuse cancellation before preparing", async () => {
+test("Mac checks retain a known candidate through an empty check, exclude overlap and refuse cancellation", async () => {
   const f = await fixture();
   try {
     const pending = deferred<typeof candidate | undefined>(), controller = new AbortController();
@@ -82,6 +84,11 @@ test("Mac checks clear stale candidates, exclude overlap and refuse cancellation
     assert.equal(await current.check(new AbortController().signal), undefined);
     await assert.rejects(current.prepareInstall(new AbortController().signal), failure("UNAVAILABLE"));
     assert.equal(f.events.includes("download"), false);
+    let reads = 0;
+    const retained = f.create({ read: async () => ++reads === 1 ? candidate : undefined });
+    assert.equal((await retained.check(new AbortController().signal))?.version, nextVersion);
+    assert.equal((await retained.check(new AbortController().signal))?.version, nextVersion);
+    assert.equal((await retained.prepareInstall(new AbortController().signal)).version, nextVersion);
   } finally { await f.cleanup(); }
 });
 

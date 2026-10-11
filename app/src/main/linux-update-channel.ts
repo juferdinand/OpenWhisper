@@ -3,6 +3,7 @@ import { fstatSync, readlinkSync } from "node:fs";
 import { Socket } from "node:net";
 import { z } from "zod";
 import { updateDetailsSchema } from "../contracts/ui/state.js";
+import { updateDownloadProgressSchema } from "../contracts/update/update-download-progress.js";
 import { isNewerUpdateVersion, parseUpdateVersion } from "../services/update/common/update-policy.js";
 import { LINUX_RESTART_NONCE, LINUX_RESTART_VERSION } from "./linux-restart.js";
 
@@ -11,15 +12,20 @@ export const LINUX_UPDATE_CHANNEL_FRAME_BYTES = 16 * 1024;
 const canonicalVersion = z.string().max(62).refine((value) => { try { parseUpdateVersion(value); return true; } catch { return false; } });
 const bindingSchema = z.strictObject({ currentVersion: canonicalVersion, nonce: z.string().regex(/^[a-f0-9]{64}$/u) });
 export type LinuxUpdateChannelBinding = z.infer<typeof bindingSchema>;
-const envelope = { version: z.literal(2), ...bindingSchema.shape };
-const linuxUpdateCommandSchema = z.strictObject({ ...envelope, type: z.enum(["check", "install", "cancel", "retired"]) });
+const envelope = { version: z.literal(3), ...bindingSchema.shape };
+const linuxUpdateCommandSchema = z.strictObject({ ...envelope, type: z.enum(["check", "check_auto", "download", "install", "cancel", "retired"]) });
 const linuxUpdatePublicStateSchema = z.discriminatedUnion("status", [
   z.strictObject({ status: z.enum(["idle", "checking", "preparing"]) }),
   z.strictObject({ status: z.literal("available"), updateVersion: canonicalVersion, details: updateDetailsSchema.optional() }),
+  z.strictObject({ status: z.literal("downloading"), updateVersion: canonicalVersion.optional(), download: updateDownloadProgressSchema }),
+  z.strictObject({ status: z.literal("verifying"), updateVersion: canonicalVersion }),
+  z.strictObject({ status: z.literal("ready"), updateVersion: canonicalVersion, details: updateDetailsSchema.optional() }),
   z.strictObject({ status: z.literal("prepared"), updateVersion: canonicalVersion }),
   z.strictObject({ status: z.literal("failed"), code: z.enum(["UNAVAILABLE", "CANCELLED", "FAILED"]) }),
 ]);
 export type LinuxUpdatePublicState = z.infer<typeof linuxUpdatePublicStateSchema>;
+export type LinuxUpdateAction = "check" | "check_auto" | "download" | "install";
+export type LinuxUpdateIntermediateState = Extract<LinuxUpdatePublicState, { status: "downloading" | "verifying" }>;
 const linuxUpdateResponseSchema = z.discriminatedUnion("type", [
   z.strictObject({ ...envelope, type: z.literal("state"), state: linuxUpdatePublicStateSchema }),
   z.strictObject({ ...envelope, type: z.literal("retire"), updateVersion: canonicalVersion }),
@@ -97,7 +103,7 @@ export interface LinuxUpdateParentChannel {
   close(): Promise<void>;
 }
 export function createLinuxUpdateParentChannel(pipe: Duplex, binding: LinuxUpdateChannelBinding,
-  action: (kind: "check" | "install", signal: AbortSignal) => Promise<LinuxUpdatePublicState>,
+  action: (kind: LinuxUpdateAction, signal: AbortSignal, reportState: (state: LinuxUpdateIntermediateState) => void) => Promise<LinuxUpdatePublicState>,
   onPreparedPublished?: () => void): LinuxUpdateParentChannel {
   let pending: Promise<void> | undefined, cancellation: AbortController | undefined, cancelled = false;
   const accepted = new Set<Promise<void>>();
@@ -112,24 +118,76 @@ export function createLinuxUpdateParentChannel(pipe: Duplex, binding: LinuxUpdat
       if (!pending || cancelled) return wire.poison(); cancelled = true; cancellation!.abort(); return;
     }
     if (pending) return wire.poison();
+    if (message.type === "download" && state.status !== "available" && state.status !== "failed") return wire.poison();
+    if (message.type === "install" && state.status !== "ready") return wire.poison();
     const controller = new AbortController(); cancellation = controller; cancelled = false;
-    state = { status: message.type === "check" ? "checking" : "preparing" };
+    const kind = message.type as LinuxUpdateAction;
+    state = kind === "check" || kind === "check_auto" ? { status: "checking" }
+      : kind === "download" ? { status: "downloading", download: { received: 0 } }
+        : { status: "preparing" };
+    let acceptingProgress = true, pendingDownload: Extract<LinuxUpdateIntermediateState, { status: "downloading" }> | undefined;
+    let pendingVerifying: Extract<LinuxUpdateIntermediateState, { status: "verifying" }> | undefined;
+    let intermediateFlush: Promise<void> | undefined, phase: "downloading" | "verifying" = "downloading";
+    const flushIntermediate = (): Promise<void> => {
+      if (intermediateFlush) return intermediateFlush;
+      const task = Promise.resolve().then(async () => {
+        while ((pendingDownload || pendingVerifying) && wire.valid() && !controller.signal.aborted) {
+          const next = pendingDownload ?? pendingVerifying!;
+          if (next.status === "downloading") pendingDownload = undefined;
+          else pendingVerifying = undefined;
+          await wire.send({ version: 3, ...wire.binding, type: "state", state: next });
+        }
+      }).catch(() => { wire.poison(); }).finally(() => {
+        if (intermediateFlush === task) intermediateFlush = undefined;
+      });
+      intermediateFlush = task;
+      return task;
+    };
+    const reportState = (next: LinuxUpdateIntermediateState): void => {
+      if (!acceptingProgress || !wire.valid() || controller.signal.aborted) return;
+      try { next = linuxUpdatePublicStateSchema.parse(next) as LinuxUpdateIntermediateState; }
+      catch { wire.poison(); return; }
+      if (next.status !== "downloading" && next.status !== "verifying") { wire.poison(); return; }
+      if (kind !== "download" || (next.updateVersion !== undefined && !isNewerUpdateVersion(next.updateVersion, wire.binding.currentVersion))) {
+        wire.poison(); return;
+      }
+      if (next.status === "downloading") {
+        if (phase !== "downloading") { wire.poison(); return; }
+      } else {
+        if (phase !== "downloading") { wire.poison(); return; }
+        phase = "verifying";
+      }
+      state = next;
+      if (next.status === "downloading") pendingDownload = next;
+      else pendingVerifying = next;
+      void flushIntermediate();
+    };
     const operation = Promise.resolve().then(async () => {
-      await wire.send({ version: 2, ...wire.binding, type: "state", state });
+      await wire.send({ version: 3, ...wire.binding, type: "state", state });
       if (!wire.valid()) return;
       let result: LinuxUpdatePublicState;
-      try { result = controller.signal.aborted ? { status: "failed", code: "CANCELLED" }
-        : linuxUpdatePublicStateSchema.parse(await action(message.type as "check" | "install", controller.signal)); }
+      try {
+        if (controller.signal.aborted) result = { status: "failed", code: "CANCELLED" };
+        else {
+          const value = await action(kind, controller.signal, reportState);
+          acceptingProgress = false;
+          result = linuxUpdatePublicStateSchema.parse(value);
+        }
+      }
       catch { result = { status: "failed", code: "FAILED" }; }
+      finally { acceptingProgress = false; }
+      await intermediateFlush;
       if (!wire.valid()) return;
       if (controller.signal.aborted) result = { status: "failed", code: "CANCELLED" };
       if ("updateVersion" in result && !isNewerUpdateVersion(result.updateVersion, wire.binding.currentVersion)) return wire.poison();
       if (result.status === "checking" || result.status === "preparing" ||
-          (message.type === "check" && result.status === "prepared") || (message.type === "install" && result.status === "available")) return wire.poison();
+          ((kind === "check" || kind === "check_auto") && ["prepared", "downloading", "verifying"].includes(result.status)) ||
+          (kind === "download" && result.status !== "ready" && result.status !== "failed") ||
+          (kind === "install" && result.status !== "prepared" && result.status !== "failed")) return wire.poison();
       state = result;
       // The original action has settled. A GUI callback may immediately send its next command.
       if (pending === operation) { pending = undefined; cancellation = undefined; }
-      await wire.send({ version: 2, ...wire.binding, type: "state", state });
+      await wire.send({ version: 3, ...wire.binding, type: "state", state });
       if (result.status === "prepared" && wire.valid()) onPreparedPublished?.();
     });
     pending = operation; accepted.add(operation);
@@ -151,14 +209,14 @@ export function createLinuxUpdateParentChannel(pipe: Duplex, binding: LinuxUpdat
       await pending;
       if (!wire.valid() || retireVersion || state.status !== "prepared") return failure("INVALID_STATE");
       retireVersion = state.updateVersion;
-      await wire.send({ version: 2, ...wire.binding, type: "retire", updateVersion: retireVersion });
+      await wire.send({ version: 3, ...wire.binding, type: "retire", updateVersion: retireVersion });
     },
     async close(): Promise<void> { await wire.close(); await settleAccepted(); },
   });
 }
 
 export interface LinuxUpdateGuiChannel {
-  request(kind: "check" | "install" | "cancel"): Promise<void>;
+  request(kind: LinuxUpdateAction | "cancel"): Promise<void>;
   /** Requires original readable EOF, writable completion and close; poisoning rejects. */
   readonly closed: Promise<void>;
   /** Caller must finish original native cleanup before this acknowledgment; original GUI close is still required. */
@@ -168,7 +226,8 @@ export interface LinuxUpdateGuiChannel {
 }
 export function createLinuxUpdateGuiChannel(pipe: Duplex, binding: LinuxUpdateChannelBinding,
   receive: (response: LinuxUpdateResponse) => void): LinuxUpdateGuiChannel {
-  let pending: "check" | "install" | undefined, cancelled = false, preparedVersion: string | undefined;
+  let pending: LinuxUpdateAction | undefined, cancelled = false, preparedVersion: string | undefined;
+  let latestState: LinuxUpdatePublicState = { status: "idle" };
   let retireVersion: string | undefined, acknowledged = false;
   const wire = transport(pipe, binding, (value) => {
     const response = linuxUpdateResponseSchema.parse(value);
@@ -178,9 +237,12 @@ export function createLinuxUpdateGuiChannel(pipe: Duplex, binding: LinuxUpdateCh
     } else {
       if (retireVersion || !pending) return wire.poison();
       if ("updateVersion" in response.state && !isNewerUpdateVersion(response.state.updateVersion, wire.binding.currentVersion)) return wire.poison();
-      if ((response.state.status === "checking" || response.state.status === "available") && pending !== "check" ||
+      if ((response.state.status === "checking" || response.state.status === "available" || response.state.status === "idle") && pending !== "check" && pending !== "check_auto" ||
+          (response.state.status === "downloading" || response.state.status === "verifying") && pending !== "download" ||
+          response.state.status === "ready" && pending !== "download" && pending !== "check" && pending !== "check_auto" ||
           (response.state.status === "preparing" || response.state.status === "prepared") && pending !== "install") return wire.poison();
-      if (response.state.status !== "checking" && response.state.status !== "preparing") {
+      latestState = response.state;
+      if (response.state.status !== "checking" && response.state.status !== "preparing" && response.state.status !== "downloading" && response.state.status !== "verifying") {
         preparedVersion = response.state.status === "prepared" ? response.state.updateVersion : undefined;
         pending = undefined; cancelled = false;
       }
@@ -191,19 +253,21 @@ export function createLinuxUpdateGuiChannel(pipe: Duplex, binding: LinuxUpdateCh
   void closed.catch(() => {});
   return Object.freeze({
     closed,
-    async request(kind: "check" | "install" | "cancel"): Promise<void> {
-      if (!["check", "install", "cancel"].includes(kind) || retireVersion || (kind === "cancel" ? !pending || cancelled : pending)) return failure("INVALID_STATE");
+    async request(kind: LinuxUpdateAction | "cancel"): Promise<void> {
+      if (!["check", "check_auto", "download", "install", "cancel"].includes(kind) || retireVersion || (kind === "cancel" ? !pending || cancelled : pending)) return failure("INVALID_STATE");
+      if (kind === "download" && latestState.status !== "available" && latestState.status !== "failed") return failure("INVALID_STATE");
+      if (kind === "install" && latestState.status !== "ready") return failure("INVALID_STATE");
       if (kind === "cancel") cancelled = true; else pending = kind;
-      await wire.send({ version: 2, ...wire.binding, type: kind });
+      await wire.send({ version: 3, ...wire.binding, type: kind });
     },
     async acknowledgeRetired(): Promise<void> {
       if (!retireVersion || pending || acknowledged) return failure("INVALID_STATE"); acknowledged = true;
-      await wire.send({ version: 2, ...wire.binding, type: "retired" }); wire.end();
+      await wire.send({ version: 3, ...wire.binding, type: "retired" }); wire.end();
     }, quit: wire.end, close: wire.close,
   });
 }
 
-/** Adopts only the fixed inherited V2 descriptor. Missing V2 leaves the V1 writer hints untouched. */
+/** Adopts only the fixed inherited V3 descriptor. Missing V3 leaves the V1 writer hints untouched. */
 export function openLinuxUpdateGuiChannel(currentVersion: string,
   receive: (response: LinuxUpdateResponse) => void): LinuxUpdateGuiChannel | undefined {
   const protocol = process.env[LINUX_UPDATE_PROTOCOL];
@@ -212,7 +276,7 @@ export function openLinuxUpdateGuiChannel(currentVersion: string,
   delete process.env[LINUX_UPDATE_PROTOCOL]; delete process.env[LINUX_RESTART_NONCE]; delete process.env[LINUX_RESTART_VERSION];
   try {
     const uid = process.getuid?.();
-    if (protocol !== "2" || process.platform !== "linux" || uid === undefined || uid === 0 || capturedVersion !== currentVersion) return failure("CHANNEL_FAILED");
+    if (protocol !== "3" || process.platform !== "linux" || uid === undefined || uid === 0 || capturedVersion !== currentVersion) return failure("CHANNEL_FAILED");
     const binding = bindingSchema.parse({ currentVersion, nonce });
     const descriptor = fstatSync(3, { bigint: true });
     const anonymous = readlinkSync("/proc/self/fd/3");

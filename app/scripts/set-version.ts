@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseUpdateVersion } from "../src/services/update/common/update-policy.js";
 
 type ManifestSpec =
   | { readonly kind: "root-version"; readonly path: string }
@@ -43,21 +44,6 @@ const activeManifests: readonly ManifestSpec[] = [
 export const VERSION_MANIFEST_SETS = {
   active: activeManifests.map(({ path }) => path),
 } as const;
-
-const VERSION_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
-const MAX_VERSION_PART = 18_446_744_073_709_551_615n;
-
-function validateVersion(version: string): void {
-  const match = VERSION_PATTERN.exec(version);
-  if (
-    !match ||
-    match.slice(1).some((part) => BigInt(part) > MAX_VERSION_PART)
-  ) {
-    throw new Error(
-      "Version must use X.Y.Z format with unsigned 64-bit numeric parts.",
-    );
-  }
-}
 
 function record(value: unknown): Record<string, unknown> | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -125,7 +111,20 @@ export async function synchronizeVersion(
   root: string,
   version: string,
 ): Promise<string[]> {
-  validateVersion(version);
+  const prepared = await prepareVersionUpdates(root, version);
+  for (const item of prepared) {
+    if (item.contents !== (await readFile(item.path, "utf8"))) {
+      await writeFile(item.path, item.contents, "utf8");
+    }
+  }
+  return prepared.map(({ path }) => path);
+}
+
+export async function prepareVersionUpdates(
+  root: string,
+  version: string,
+): Promise<readonly { readonly path: string; readonly contents: string }[]> {
+  parseUpdateVersion(version);
   const manifests = activeManifests;
   const paths = manifests.map(({ path }) => path);
   if (new Set(paths).size !== paths.length)
@@ -140,12 +139,7 @@ export async function synchronizeVersion(
     }),
   );
 
-  for (const item of prepared) {
-    if (item.contents !== (await readFile(item.path, "utf8"))) {
-      await writeFile(item.path, item.contents, "utf8");
-    }
-  }
-  return prepared.map(({ path }) => path);
+  return prepared;
 }
 
 async function main(): Promise<void> {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isNewerUpdateVersion, LINUX_UPDATE_FEED_URL, LINUX_UPDATE_REPOSITORY, MACOS_UPDATE_ASSET,
-  extractUpdateHighlights, macosUpdateEndpoint, parseUpdateVersion, projectLinuxUpdateFeed, projectMacosUpdateRelease, UPDATE_POLICY_LIMITS,
+  extractUpdateHighlights, macosUpdateEndpoint, nextPatchVersion, parseUpdateVersion, projectLinuxUpdateFeed, projectMacosUpdateRelease, UPDATE_POLICY_LIMITS,
   UpdatePolicyError } from "../../../src/services/update/common/update-policy.js";
 
 const repository = "juferdinand/OpenWhisper", version = "0.3.1", currentVersion = "0.3.0";
@@ -32,6 +32,13 @@ test("malformed versions and overflow cannot become newer candidates", () => {
     assert.equal(isNewerUpdateVersion(value, "0.0.0"), false); assert.equal(isNewerUpdateVersion("1.2.3", value), false);
   }
 });
+test("next patch derivation preserves uint64 semantics and rejects patch overflow", () => {
+  assert.equal(nextPatchVersion("0.4.1"), "0.4.2");
+  assert.equal(nextPatchVersion("1.9.8"), "1.9.9");
+  assert.equal(nextPatchVersion("1.2.18446744073709551614"), "1.2.18446744073709551615");
+  assert.throws(() => nextPatchVersion("1.2.18446744073709551615"), failure("INVALID_VERSION"));
+  assert.throws(() => nextPatchVersion("01.2.3"), failure("INVALID_VERSION"));
+});
 test("Mac repositories are build-supplied canonical owner/repo values", () => {
   assert.equal(macosUpdateEndpoint(repository), `https://api.github.com/repos/${repository}/releases/latest`);
   assert.equal(macosUpdateEndpoint("owner/repo.name-1"), "https://api.github.com/repos/owner/repo.name-1/releases/latest");
@@ -50,12 +57,20 @@ test("Mac release projection remains immutable and explicitly unauthenticated", 
   assert.equal(mac({ ...macRelease(), assets: [...macRelease().assets, { name: "OpenWhisper-macOS.dmg", browser_download_url: "https://github.com/unrelated/manual.dmg" }] }).assetName, MACOS_UPDATE_ASSET);
 });
 test("curated What's new bullets become bounded plain text and optional artifact size is projected", () => {
-  const notes = "# OpenWhisper\n\n## What's new in 0.3.1\n- **Fast** local recognition\n  with wrapped details and [help](https://example.test)\n- `Keyboard` improvements\n\n## Updating\n- excluded";
+  const notes = "# OpenWhisper\n\n## What's new in 0.3.1\n- **Fast** local recognition\n  with wrapped details and [help](https://example.test)\n- `Keyboard` improvements\n\n## Neu in OpenWhisper 0.3.1\n- Verbesserte Tastaturbedienung\n- Korrigierter Desktop-Start\n\n## Updating\n- excluded";
   assert.deepEqual(extractUpdateHighlights(notes), ["Fast local recognition with wrapped details and help", "Keyboard improvements"]);
+  assert.deepEqual(extractUpdateHighlights(notes, "de"), ["Verbesserte Tastaturbedienung", "Korrigierter Desktop-Start"]);
   const release = macRelease(); release.body = notes; release.assets[0]!.size = 12345;
-  assert.deepEqual(mac(release).details, { highlights: extractUpdateHighlights(notes), size: 12345 });
+  assert.deepEqual(mac(release).details, { highlights: extractUpdateHighlights(notes), localized_highlights: {
+    en: extractUpdateHighlights(notes), de: extractUpdateHighlights(notes, "de"),
+  }, size: 12345 });
   const feed = linuxFeed(); feed.notes = notes; feed.platforms["linux-x86_64-appimage"]!.size = 6789;
-  assert.deepEqual(linux(feed).details, { highlights: extractUpdateHighlights(notes), size: 6789 });
+  assert.deepEqual(linux(feed).details, { highlights: extractUpdateHighlights(notes), localized_highlights: {
+    en: extractUpdateHighlights(notes), de: extractUpdateHighlights(notes, "de"),
+  }, size: 6789 });
+  const legacyNotes = "## What's new in 0.3.1\n- English only";
+  assert.deepEqual(extractUpdateHighlights(legacyNotes, "de"), []);
+  assert.deepEqual(mac({ ...macRelease(), body: legacyNotes }).details, { highlights: ["English only"] });
   for (const size of [0, -1, 1.2, Number.MAX_SAFE_INTEGER + 1, "12"]) {
     assert.throws(() => mac({ ...macRelease(), assets: [{ name: MACOS_UPDATE_ASSET, browser_download_url: macURL, size }] }), failure("INVALID_METADATA"));
   }
