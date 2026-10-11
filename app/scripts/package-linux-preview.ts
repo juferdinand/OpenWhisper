@@ -231,7 +231,7 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
   await writeFile(join(desktopDirectory, `${appId}.desktop`), [
     "[Desktop Entry]", "Type=Application", `Name=${identity.productName}`, `Comment=${stable ? "Local speech recognition validation package" : "Isolated local development preview"}`,
     `Exec=/opt/${executableName}/${stable ? "openwhisper-launch" : `${executableName} --dev`}`, `Icon=${appId}`, "Terminal=false",
-    "Categories=AudioVideo;Audio;", `StartupWMClass=${stable ? appId : executableName}`, "",
+    "Categories=AudioVideo;Audio;", `StartupWMClass=${appId}`, "",
   ].join("\n"));
   await cp(join(root, "dist/ui/app-icon.png"), join(iconDirectory, `${appId}.png`));
   await cp(join(notices, "OpenWhisper-LICENSE"), join(docDirectory, "copyright"));

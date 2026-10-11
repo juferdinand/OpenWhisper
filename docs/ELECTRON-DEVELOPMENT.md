@@ -199,6 +199,13 @@ inputs, copies the locked production dependencies and retains notices. It uses
 the separate Dev package, launcher and `/opt/openwhisper-dev` destination. Archives
 are unsigned previews and do not replace the stable application.
 
+Linux desktop launchers set the desktop identity to the matching application ID. On
+Wayland, a directory-only Dev package needs its matching
+`io.github.whisperfree.dev.desktop` entry and icon registered with the desktop
+environment for taskbar and window grouping to resolve the Dev identity. The `.deb`
+layout includes that entry and icon for package installation. A directory-only
+preview does not register them and may display a generic compositor icon.
+
 Native inputs must be built on the intended distribution baseline. A fresh private
 Ubuntu22 build of the existing production recording scripts now produces a Dev
 package whose native ELF requirements are at most GLIBC2.34/GLIBCXX3.4.29. Its

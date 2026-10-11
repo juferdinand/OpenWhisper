@@ -508,6 +508,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     title: profile.productName,
     width: Math.min(1280, workspaceArea.width), height: Math.min(800, workspaceArea.height), minWidth: 740, minHeight: 560,
     backgroundColor: "#121017", show: false,
+    ...(process.platform === "linux" ? { icon: join(distribution, "ui/app-icon.png") } : {}),
     webPreferences: {
       preload: join(distribution, "preload/index.cjs"),
       sandbox: true, contextIsolation: true, nodeIntegration: false,
