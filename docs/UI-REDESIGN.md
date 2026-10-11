@@ -53,7 +53,9 @@ state. A live recording waveform indicates input level, not live transcription.
    isolated Dev profile for owner review; no installation is needed.
    Require a fully installed, selected speech model before advancing from model selection
    or completing setup. Pending, cancelled and failed downloads do not satisfy this check;
-   permission and shortcut fallbacks remain optional.
+   permission and shortcut fallbacks remain optional. Use the reference's large centered
+   shortcut keycap and compact output selector in the final trigger step without reducing
+   the accepted hardware/model flow to the prototype's four simulated steps.
 2. **Foundation and recording view.** Reproduce the reference's single transcript
    workspace, shown by default after setup. Group General, Recording & shortcuts, Text processing,
    History and About inside the settings dialog. Keep the
@@ -66,7 +68,7 @@ state. A live recording waveform indicates input level, not live transcription.
    cancel, retry and discard visible in the states where they are valid. Review screenshots
    at the actual 740 × 560 minimum window size and at larger sizes.
 3. **Models, history and settings.** Reuse existing model operations and history actions;
-   open the right-edge model chooser drawer from Dictation and General with Whisper/Parakeet
+   open the right-edge model chooser drawer from Recording and General with Whisper/Parakeet
    family selection. Do not duplicate it as a primary settings tab.
    Keep the native dialog stable through download progress, show command failures
    inside it, and support keyboard navigation, Escape and focus restoration.
@@ -78,12 +80,27 @@ state. A live recording waveform indicates input level, not live transcription.
    focus restoration, and retained unsaved edits. Keep
    setup exclusive until completion, then remove it from normal navigation. Put the shortcut,
    segmented output choice and floating indicator first in Recording & shortcuts; retain useful
-   microphone, language, mode and permission controls in secondary groups. Group vocabulary
+   push-to-talk mode beside the trigger, with microphone/language and output permissions in
+   separate groups. Shortcut capture and permission to insert text are separate capabilities.
+   Do not expose a second trigger-options group. Group vocabulary
    and snippet editors in Text processing, without adding simulated cleanup or correction counts.
 4. **Overlay and regression review.** Restyle floating controls separately from the main
    window, check both host layouts and capability fallbacks, and present one functional
    candidate for owner acceptance before merge. Display input levels as a rolling history:
    actual new telemetry enters on the right and moves left; do not animate invented samples.
+
+Use Recording/Aufnahme throughout visible navigation and actions, and Vocabulary/Vokabular
+for target terms. Keep technical command identifiers and existing data locations stable.
+The left Discard action clears the current workspace preview without deleting saved history
+or changing the clipboard. Show actual history entry count and UTF-8 text size; this summary
+excludes separately stored transcript files. Delete all applies to the history list only.
+History remains limited to the current 20 entries until the archive/retention work in #47.
+
+Keep system capability rows visually consistent and neutral. An unavailable login toggle stays
+disabled without an explanatory paragraph. Place the existing signed-update actions and available
+version/progress indicator in the titlebar, with automatic-check preferences in General; keep
+unsupported Dev update controls hidden. About contains identity, version, license and project
+information, with platform coverage documented through the README-linked guides.
 
 Use strict TypeScript and the existing renderer. Do not import the prototype's dynamic
 React/Babel runtime, remote fonts or demo scripts, relax the content security policy, or
@@ -117,8 +134,8 @@ Preserve these existing behaviors throughout:
 
 | Proposed behavior | Tracking |
 | --- | --- |
-| Raw/final text, processing changes and explicit correction/vocabulary feedback | [#46](https://github.com/juferdinand/OpenWhisper/issues/46) |
-| Dated history, recording duration and time-based retention | [#47](https://github.com/juferdinand/OpenWhisper/issues/47) |
+| Raw/final text, optional cleanup, explicit vocabulary spellings/heard-form mappings and correction feedback | [#46](https://github.com/juferdinand/OpenWhisper/issues/46) |
+| An optional unlimited archive, paged history, dates/duration and time-based retention | [#47](https://github.com/juferdinand/OpenWhisper/issues/47) |
 | Provider discovery, richer model selection, conversation or AI error review | Evaluate separately under [#11](https://github.com/juferdinand/OpenWhisper/issues/11); not existing stable capabilities |
 | Coding-agent connections and actions | [#12](https://github.com/juferdinand/OpenWhisper/issues/12); no raw shell-template interpolation |
 | Spoken replies and structured Obsidian output | [#13](https://github.com/juferdinand/OpenWhisper/issues/13), then [#10](https://github.com/juferdinand/OpenWhisper/issues/10) |

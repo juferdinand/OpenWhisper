@@ -356,7 +356,7 @@ async function main(): Promise<void> {
   };
   const autostartPath = join(config, "autostart/io.github.whisperfree.desktop");
   const autostartExec = appImageAdmission ? `"${imageLauncher}" "${permanentImage}"` : supervisedLaunch ? '"/opt/openwhisper/openwhisper-launch"' : '"/opt/openwhisper/openwhisper"';
-  const enabledAutostart = `[Desktop Entry]\nType=Application\nName=OpenWhisper\nComment=Free, local dictation\nExec=${autostartExec}\nIcon=io.github.whisperfree\nStartupWMClass=io.github.whisperfree\nTerminal=false\n`;
+  const enabledAutostart = `[Desktop Entry]\nType=Application\nName=OpenWhisper\nComment=Free, local speech recognition\nExec=${autostartExec}\nIcon=io.github.whisperfree\nStartupWMClass=io.github.whisperfree\nTerminal=false\n`;
   const legacyAutostart = enabledAutostart.replace(`Exec=${autostartExec}`, supervisedLaunch && installedDebian
     ? 'Exec="/opt/openwhisper/openwhisper"' : `Exec=env APPIMAGE_EXTRACT_AND_RUN=1 "${permanentImage}"`);
   let legacyAutostartIdentity: Awaited<ReturnType<typeof lstat>> | undefined;

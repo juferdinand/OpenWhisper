@@ -229,7 +229,7 @@ export async function packageLinuxPreview(options: LinuxPreviewOptions): Promise
   await mkdir(iconDirectory, { recursive: true });
   await mkdir(docDirectory, { recursive: true });
   await writeFile(join(desktopDirectory, `${appId}.desktop`), [
-    "[Desktop Entry]", "Type=Application", `Name=${identity.productName}`, `Comment=${stable ? "Local dictation validation package" : "Isolated local development preview"}`,
+    "[Desktop Entry]", "Type=Application", `Name=${identity.productName}`, `Comment=${stable ? "Local speech recognition validation package" : "Isolated local development preview"}`,
     `Exec=/opt/${executableName}/${stable ? "openwhisper-launch" : `${executableName} --dev`}`, `Icon=${appId}`, "Terminal=false",
     "Categories=AudioVideo;Audio;", `StartupWMClass=${stable ? appId : executableName}`, "",
   ].join("\n"));

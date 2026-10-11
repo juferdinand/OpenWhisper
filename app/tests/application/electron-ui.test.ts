@@ -242,7 +242,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     }
     await page.locator('[data-command="complete_setup"]').click();
     await expect.poll(async () => validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.setup_completed).toBe(true);
-    await expect(page.getByRole("heading", { name: "Dictation", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Recording", exact: true })).toBeVisible();
     await expect(page.locator(".dictation-workspace")).toBeVisible();
     await expect(page.locator("#dictation-timer")).toHaveText("0:00");
     await expect(page.locator("#copy-dictation")).toBeHidden();
@@ -250,7 +250,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await screenshot(page, "dev-dictation.png");
     await page.locator(".dictation-change-model").click();
     await expect(page.locator("#model-drawer")).toBeVisible();
-    await expect(page.locator("#model-drawer").getByRole("heading", { name: "Speech model for Dictation", exact: true })).toBeVisible();
+    await expect(page.locator("#model-drawer").getByRole("heading", { name: "Speech model for recording", exact: true })).toBeVisible();
     const drawerBounds = await page.locator("#model-drawer").evaluate((drawer) => {
       const bounds = drawer.getBoundingClientRect();
       const titlebar = document.querySelector(".window-titlebar")!.getBoundingClientRect();
@@ -279,6 +279,8 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     assert.equal(state.recording_available, false);
     assert.equal(state.history.length, 0);
     assert.equal(state.microphones.length, 0);
+    await expect(page.locator("#header-update")).toBeHidden();
+    await expect(page.locator("#discard-result")).toBeDisabled();
     const metadata = z.strictObject({
       commit: z.string().regex(/^([a-f0-9]{40}|source)$/), modified: z.boolean(),
     }).parse(JSON.parse(await readFile(join(packageRoot, "dist/resources/development-build.json"), "utf8")));
@@ -369,7 +371,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     page = await app.firstWindow();
     currentPage = page;
     await expect(page.locator(".window-wordmark")).toHaveText("openwhisper");
-    await expect(page.getByRole("heading", { name: "Dictation", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Recording", exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: /Vocabulary/ }).click();
     await expect(page.locator("#page-title")).toHaveText("Text processing");

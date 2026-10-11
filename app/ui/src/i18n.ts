@@ -1,8 +1,12 @@
+import english from "../locales/en.json";
 import german from "../locales/de.json";
 
 export type UILanguage = "en" | "de";
 let locale: UILanguage = "en";
-const translations: Record<string, string> = german;
+const translations: Record<UILanguage, Record<string, string>> = {
+  en: english,
+  de: german,
+};
 
 export function setLocale(value: UILanguage) {
   locale = value === "de" ? "de" : "en";
@@ -14,10 +18,11 @@ export function t(
   message: string,
   values: Record<string, string | number> = {},
 ): string {
-  let template = locale === "de" ? (translations[message] ?? message) : message;
+  const catalog = translations[locale];
+  let template = catalog[message] ?? message;
   // Native services emit English diagnostics; translate known templates while retaining error details.
-  if (locale === "de" && !translations[message]) {
-    for (const [source, translated] of Object.entries(translations)) {
+  if (locale === "de" && !catalog[message]) {
+    for (const [source, translated] of Object.entries(catalog)) {
       if (!source.includes("{error}") && !source.includes("{app}")) continue;
       const names = Array.from(
         source.matchAll(/\{([a-z_]+)\}/g),

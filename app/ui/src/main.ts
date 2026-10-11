@@ -32,6 +32,8 @@ let waveformGeneration: number | undefined;
 let selectedHistoryIndex: number | null = null;
 let observedHistorySnapshot: string | undefined;
 let observedTranscript: string | undefined;
+let dismissedTranscriptValue: string | undefined;
+let dismissedTranscriptGeneration: number | undefined;
 let modelDrawerFamily: "parakeet" | "whisper" = "parakeet";
 let modelDialogOpener: HTMLElement | null = null;
 let settingsDialogOpener: HTMLElement | null = null;
@@ -94,7 +96,7 @@ function windowTitlebar(): string {
   const tabChrome = setup
     ? `<span class="window-dictation-title">${esc(t("Setup"))}</span>`
     : `<div class="window-titlebar-tabs"><div class="window-active-tab" aria-current="page"><span class="window-tab-status ${dotState}" aria-hidden="true"></span><span class="window-tab-copy"><span class="window-tab-title">${esc(t("Dictation"))}</span><span class="window-tab-subtitle">${esc(model?.title ?? t("Choose a model"))}</span></span></div></div>`;
-  return `<header class="window-titlebar"><div class="window-titlebar-brand"><img src="./branding/icon-bordered.svg" width="24" height="24" alt="">${wordmark()}${dev}</div>${tabChrome}${setup ? "" : `<div class="window-titlebar-actions"><span class="local-recognition-badge">${esc(t("Local recognition"))}</span><button type="button" id="open-settings">${symbol("M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2")}${esc(t("Settings"))}</button></div>`}<div class="window-actions"><button data-window-action="minimize" aria-label="${esc(t("Minimize window"))}" title="${esc(t("Minimize window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 11.5h10"/></svg></button><button data-window-action="maximize" aria-label="${esc(t("Maximize or restore window"))}" title="${esc(t("Maximize or restore window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/></svg></button><button class="window-close" data-window-action="close" aria-label="${esc(t("Close window"))}" title="${esc(t("Close window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div></header>`;
+  return `<header class="window-titlebar"><div class="window-titlebar-brand"><img src="./branding/icon-bordered.svg" width="24" height="24" alt="">${wordmark()}${dev}</div>${tabChrome}${setup ? "" : `<div class="window-titlebar-actions"><button type="button" id="header-update" aria-live="polite" hidden></button><span class="local-recognition-badge">${esc(t("Local recognition"))}</span><button type="button" id="open-settings">${symbol("M12 8a4 4 0 1 0 0 8 4 4 0 0 0-4-8M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2")}${esc(t("Settings"))}</button></div>`}<div class="window-actions"><button data-window-action="minimize" aria-label="${esc(t("Minimize window"))}" title="${esc(t("Minimize window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 11.5h10"/></svg></button><button data-window-action="maximize" aria-label="${esc(t("Maximize or restore window"))}" title="${esc(t("Maximize or restore window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/></svg></button><button class="window-close" data-window-action="close" aria-label="${esc(t("Close window"))}" title="${esc(t("Close window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div></header>`;
 }
 function windowTabStatus(): string {
   return state.status === "recording"
@@ -108,12 +110,40 @@ function windowTabStatus(): string {
 function syncWindowTitlebar() {
   const dot = document.querySelector<HTMLElement>(".window-tab-status");
   const subtitle = document.querySelector<HTMLElement>(".window-tab-subtitle");
-  if (!dot || !subtitle) return;
-  dot.className = `window-tab-status ${windowTabStatus()}`;
-  const model = state.models.find(
-    (candidate) => candidate.id === state.preferences.model,
-  );
-  subtitle.textContent = model?.title ?? t("Choose a model");
+  if (dot && subtitle) {
+    dot.className = `window-tab-status ${windowTabStatus()}`;
+    const model = state.models.find(
+      (candidate) => candidate.id === state.preferences.model,
+    );
+    subtitle.textContent = model?.title ?? t("Choose a model");
+  }
+  const updateButton =
+    document.querySelector<HTMLButtonElement>("#header-update");
+  if (updateButton) {
+    updateButton.hidden = !state.updates.configured;
+    if (!state.updates.configured) return;
+    updateButton.dataset.status = state.updates.status;
+    updateButton.innerHTML = `${symbol("M12 3v12m0 0 5-5m-5 5-5-5M5 21h14")}<span>${esc(updateButtonLabel())}</span>`;
+    updateButton.title = updateStatus();
+    updateButton.setAttribute(
+      "aria-label",
+      t("Updates: {status}", { status: updateStatus() }),
+    );
+    updateButton.disabled = headerUpdateDisabled();
+    updateButton.onclick = () => {
+      const action =
+        state.updates.status === "available"
+          ? "install_update"
+          : "check_updates";
+      if (action === "install_update" && dirty) {
+        notice(
+          "Save or discard your changes before switching tabs or language.",
+        );
+        return;
+      }
+      void command(action);
+    };
+  }
 }
 const section = (title: string, body: string, note = "", id = "") =>
   `<section${id ? ` id="${id}"` : ""}>${title ? `<h2>${title}</h2>` : ""}<div class="group">${body}</div>${note ? `<p class="section-note">${note}</p>` : ""}</section>`;
@@ -298,25 +328,15 @@ function restoreModelDialogFocus(dialog: HTMLDialogElement) {
   const body = dialog.querySelector<HTMLElement>(".model-drawer-body");
   if (body) body.replaceChildren();
 }
-function historyRows(compact = false): string {
+function historyRows(): string {
   return state.history
     .map((text, i) => {
-      if (compact) {
-        const selected = selectedHistoryIndex === i;
-        return `<div class="history-row ${selected ? "selected" : ""}"><button type="button" class="history-entry" data-history-select="${i}" aria-pressed="${selected}" title="${esc(text)}"><span class="history-entry-text">${esc(text)}</span></button><button type="button" data-copy="${i}" aria-label="${esc(t("Copy dictation"))}">${esc(t("Copy"))}</button></div>`;
-      }
-      return `<div class="history-row"><p>${esc(text)}</p><button data-copy="${i}" aria-label="${esc(t("Copy dictation"))}">${esc(t("Copy"))}</button></div>`;
+      const selected = selectedHistoryIndex === i;
+      return `<div class="history-row ${selected ? "selected" : ""}"><button type="button" class="history-entry" data-history-select="${i}" aria-pressed="${selected}" title="${esc(text)}"><span class="history-entry-text">${esc(text)}</span></button></div>`;
     })
     .join("");
 }
 function bindHistoryActions(root: ParentNode) {
-  root
-    .querySelectorAll<HTMLButtonElement>("[data-copy]")
-    .forEach(
-      (button) =>
-        (button.onclick = () =>
-          void command("copy_history", { index: Number(button.dataset.copy) })),
-    );
   root
     .querySelector<HTMLButtonElement>("[data-clear-history]")
     ?.addEventListener("click", () => void command("clear_history"));
@@ -441,6 +461,8 @@ const settingOutputs = () => {
   ];
   return `<fieldset class="settings-output-segment" aria-label="${esc(t("Output"))}">${modes.map(([value, label, fullLabel]) => `<label><input type="radio" name="settings-output" data-pref="output" value="${value}" aria-label="${esc(t(fullLabel))}" ${state.preferences.output === value ? "checked" : ""}><span>${esc(t(label))}</span></label>`).join("")}</fieldset>`;
 };
+const setupTriggerOutput = () =>
+  `<div class="setup-trigger-output"><span class="setup-trigger-output-label">${esc(t("Output"))}<small>${esc(t(isMac() ? "Insert uses Accessibility access; Copy uses the clipboard." : "Insert uses keyboard access; Copy uses the clipboard."))}</small></span>${settingOutputs()}</div>`;
 
 function notice(text: string) {
   const el = document.querySelector<HTMLDialogElement>("#settings-dialog")?.open
@@ -924,7 +946,7 @@ function recordControl() {
     ).join("");
     controls.innerHTML = overlay
       ? `<div class="record-actions"><div class="record-status"><div class="audio-mark" aria-hidden="true">${overlayBars}</div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div><span id="record-label"></span><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-action-label" class="record-action-label"></span></button></div>`
-      : `<div class="record-leading"><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><div class="record-status"><div class="audio-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div></div><div class="record-center"><button id="record" class="capsule"><span id="record-symbol"></span></button><span id="record-label"></span></div>${outputControls}`;
+      : `<div class="record-leading"><button id="discard-result" type="button" title="${esc(t("Clear current text; saved history is kept."))}" aria-label="${esc(t("Clear current text; saved history is kept."))}">${esc(t("Discard"))}</button><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><div class="record-status"><div class="audio-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div></div><div class="record-center"><button id="record" class="capsule"><span id="record-symbol"></span></button><span id="record-label"></span></div>${outputControls}`;
     document
       .querySelector("#record")!
       .addEventListener(
@@ -947,6 +969,15 @@ function recordControl() {
               : "cancel_recording",
           ),
       );
+    document
+      .querySelector<HTMLButtonElement>("#discard-result")
+      ?.addEventListener("click", () => {
+        dismissedTranscriptValue = state.transcript;
+        dismissedTranscriptGeneration = state.recording_generation;
+        selectedHistoryIndex = null;
+        workspaceKey = "";
+        renderWorkspace();
+      });
     controls
       .querySelectorAll<HTMLButtonElement>("[data-output]")
       .forEach((output) =>
@@ -1079,6 +1110,7 @@ function updateWaveformHistory(append = false) {
 
 function syncDictationState() {
   updateWaveformHistory();
+  syncDiscardResult();
   const heading = document.querySelector<HTMLElement>(".dictation-status-pill");
   if (heading) heading.textContent = recordingStatusTitle();
   const timer = document.querySelector<HTMLElement>("#dictation-timer");
@@ -1109,10 +1141,33 @@ function syncDictationState() {
   }
 }
 
+function syncDiscardResult() {
+  const button = document.querySelector<HTMLButtonElement>("#discard-result");
+  if (!button) return;
+  const recording = state.status === "recording";
+  const busy = state.status === "transcribing";
+  const recovery = !!state.recovery_available && !recording && !busy;
+  button.hidden = recording || recovery;
+  button.disabled =
+    busy ||
+    (selectedHistoryIndex === null &&
+      (dismissedTranscriptValue !== undefined ||
+        (!state.transcript && !state.transcript_preview_omitted)));
+}
+
 function renderWorkspace() {
   const main = document.querySelector<HTMLElement>("#dictation-content");
   const rail = document.querySelector<HTMLElement>("#dictation-history");
   if (!main || !rail) return;
+  if (
+    dismissedTranscriptValue !== undefined &&
+    (state.transcript !== dismissedTranscriptValue ||
+      (state.status === "done" &&
+        state.recording_generation !== dismissedTranscriptGeneration))
+  ) {
+    dismissedTranscriptValue = undefined;
+    dismissedTranscriptGeneration = undefined;
+  }
   const historySnapshot = JSON.stringify(state.history);
   if (
     (observedHistorySnapshot !== undefined &&
@@ -1153,6 +1208,7 @@ function renderWorkspace() {
     tab === "history",
     historyRailOpen,
     selectedHistoryIndex,
+    dismissedTranscriptValue,
   ]);
   if (key === workspaceKey) {
     syncDictationState();
@@ -1166,10 +1222,11 @@ function renderWorkspace() {
     selectedHistoryIndex === null
       ? undefined
       : state.history[selectedHistoryIndex];
+  const currentTranscriptDismissed = dismissedTranscriptValue !== undefined;
   const transcriptAvailable =
     selectedHistoryText !== undefined ||
-    !!state.transcript ||
-    state.transcript_preview_omitted;
+    (!currentTranscriptDismissed &&
+      (!!state.transcript || state.transcript_preview_omitted));
   const transcriptMarkup =
     selectedHistoryText !== undefined
       ? `<p class="transcript">${esc(selectedHistoryText)}</p>`
@@ -1202,7 +1259,7 @@ function renderWorkspace() {
     ? t("Saved only on this device.")
     : t("History is not saved.");
   main.innerHTML = `<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true">${Array.from({ length: 64 }, (_, i) => `<i style="--wave-index:${i}"></i>`).join("")}</div></section><section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}</div></section><section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
-  rail.innerHTML = `<header class="dictation-history-heading"><div class="dictation-history-title"><h2>${esc(t("History"))}</h2><span class="dictation-history-count">${state.history.length}</span></div><button id="toggle-history" type="button" aria-expanded="${historyRailOpen}" aria-controls="dictation-history-list" aria-label="${esc(t(historyRailOpen ? "Hide history" : "Show history"))}">${esc(t(historyRailOpen ? "Hide history" : "Show history"))}</button></header><div id="dictation-history-list" class="dictation-history-list" ${historyRailOpen ? "" : "hidden"}>${state.history.length ? historyRows(true) : `<p class="secondary">${esc(t("No dictations in history yet."))}</p>`}</div><footer class="dictation-history-footer"><span>${esc(railStatus)}</span>${state.history.length || state.transcript ? `<button type="button" data-clear-history id="clear-history-rail" class="history-clear-action">${esc(t("Clear history"))}</button>` : ""}</footer>`;
+  rail.innerHTML = `<header class="dictation-history-heading"><div class="dictation-history-title"><h2>${esc(t("History"))}</h2><span class="dictation-history-count">${state.history.length}</span></div><button id="toggle-history" type="button" aria-expanded="${historyRailOpen}" aria-controls="dictation-history-list" aria-label="${esc(t(historyRailOpen ? "Hide history" : "Show history"))}">${esc(t(historyRailOpen ? "Hide history" : "Show history"))}</button></header><div id="dictation-history-list" class="dictation-history-list" ${historyRailOpen ? "" : "hidden"}>${state.history.length ? historyRows() : `<p class="secondary">${esc(t("No recordings in history yet."))}</p>`}</div><footer class="dictation-history-footer"><span>${esc(railStatus)}</span>${state.history.length ? `<button type="button" data-clear-history id="clear-history-rail" class="history-clear-action">${esc(t("Clear history"))}</button>` : ""}</footer>`;
   main
     .querySelector<HTMLButtonElement>("#copy-dictation")
     ?.addEventListener("click", () => {
@@ -1430,7 +1487,7 @@ function render() {
         content: `${permissionButton()}${!pasteAvailable() ? `<p class="secondary">${esc(t("Your desktop does not expose this portal. Clipboard output remains available."))}</p>` : ""}`,
       },
       {
-        title: t("Set a trigger and try it"),
+        title: t("How do you start the recording?"),
         detail:
           (isMac() && !macToggleOnly()) || state.native_mouse
             ? t(
@@ -1438,12 +1495,12 @@ function render() {
               )
             : state.native_x11 || macToggleOnly()
               ? t(
-                  "Choose a keyboard key or shortcut. Place the cursor in a text field, press the trigger, speak, then press it again.",
+                  "Choose a keyboard key or shortcut. Press it to start recording and press it again to stop.",
                 )
               : t(
-                  "Choose a shortcut in your desktop’s dialog. Place the cursor in a text field, press the trigger, speak, then press it again.",
+                  "Choose a shortcut in your desktop’s dialog. Press it to start recording and press it again to stop.",
                 ),
-        content: shortcutButton(),
+        content: `<div class="setup-trigger-panel">${shortcutButton()}${setupTriggerOutput()}</div>`,
       },
     ];
     const modelRequired =
@@ -1486,45 +1543,52 @@ function render() {
     const systemDetails = isMac()
       ? row(
           t("System"),
-          `<span class="secondary">${esc(state.desktop)} · macOS</span>`,
+          `<span class="settings-system-status">${esc(state.desktop)} · macOS</span>`,
         )
       : (state.native_x11
-          ? row(t("Native X11 triggers"), t("Available"))
+          ? row(
+              t("Native X11 triggers"),
+              `<span class="settings-system-status">${esc(t("Available"))}</span>`,
+            )
           : "") +
-        (state.native_paste ? row(t("Native X11 paste"), t("Available")) : "") +
+        (state.native_paste
+          ? row(
+              t("Native X11 paste"),
+              `<span class="settings-system-status">${esc(t("Available"))}</span>`,
+            )
+          : "") +
         row(
           t("Desktop"),
-          `<span class="secondary">${esc(state.desktop)} · ${esc(state.session)}</span>`,
+          `<span class="settings-system-status">${esc(state.desktop)} · ${esc(state.session)}</span>`,
         ) +
         row(
           t("Clipboard helper"),
           state.clipboard_available
-            ? `<span class="success">${esc(t("Available"))}</span>`
+            ? `<span class="settings-system-status">${esc(t("Available"))}</span>`
             : `<span class="warning">${esc(t("Install wl-clipboard (Wayland) or xclip (X11)"))}</span>`,
         ) +
         row(
           t("Global shortcuts portal"),
-          state.shortcut_portal ? t("Available") : t("Unavailable"),
+          `<span class="settings-system-status">${esc(t(state.shortcut_portal ? "Available" : "Unavailable"))}</span>`,
         ) +
         row(
           t("Keyboard portal"),
-          state.paste_portal ? t("Available") : t("Unavailable"),
+          `<span class="settings-system-status">${esc(t(state.paste_portal ? "Available" : "Unavailable"))}</span>`,
         );
     content.innerHTML =
       section(
         "",
         row(t("Interface language"), uiLanguage) +
-          toggle(
-            t("Launch at login"),
-            "launch_at_login",
-            !!p.launch_at_login,
-            state.launch_at_login_available === false,
-          ) +
-          (state.launch_at_login_available === false
-            ? `<p class="secondary launch-at-login-hint">${esc(t(state.profile === "development" ? "Launch at login is available in an installed version of OpenWhisper." : "Launch at login is unavailable in this installation."))}</p>`
-            : "") +
+          `<label class="row launch-at-login-row" title="${esc(state.launch_at_login_available === false ? t(state.profile === "development" ? "Launch at login is available in an installed version of OpenWhisper." : "Launch at login is unavailable in this installation.") : "")}"><span>${esc(t("Launch at login"))}</span><input class="switch" type="checkbox" data-pref="launch_at_login" ${p.launch_at_login ? "checked" : ""} ${state.launch_at_login_available === false ? "disabled" : ""}></label>` +
           (state.macos?.launch_at_login_pending
             ? `<div class="row approval"><span>${esc(t("Allow OpenWhisper in System Settings to finish enabling launch at login."))}</span><button data-command="open_login_settings">${esc(t("System Settings"))}</button></div>`
+            : "") +
+          (state.updates.configured
+            ? toggle(
+                t("Automatically check for updates (once a day)"),
+                "auto_check_updates",
+                !!p.auto_check_updates,
+              )
             : ""),
       ) +
       section(
@@ -1553,7 +1617,6 @@ function render() {
             )}</span>`,
           );
     const triggerCaption = `<small class="settings-row-description">${esc(t(state.native_mouse ? "Key, shortcut, or mouse button" : "Key or shortcut"))}</small>`;
-    const triggerOptions = shortcutOptions();
     const outputCaption = `<small class="settings-row-description">${esc(
       t(
         isMac()
@@ -1572,13 +1635,13 @@ function render() {
       (macToggleOnly()
         ? `<p class="secondary">${esc(t("Regular keyboard shortcuts use toggle mode in this build."))}</p>`
         : "");
+    const microphoneAccess = isMac()
+      ? row(
+          t("Microphone access"),
+          `<button data-command="allow_microphone">${esc(t("System Settings"))}</button>`,
+        )
+      : row(t("Microphone"), microphoneControl());
     const permissions =
-      (isMac()
-        ? row(
-            t("Microphone access"),
-            `<button data-command="allow_microphone">${esc(t("System Settings"))}</button>`,
-          )
-        : "") +
       row(
         isMac()
           ? t("Accessibility access")
@@ -1586,7 +1649,18 @@ function render() {
             ? t("Automatic X11 paste")
             : t("Keyboard access"),
         permissionButton(),
-      );
+      ) +
+      `<p class="secondary">${esc(
+        isMac()
+          ? t("Accessibility access is used for automatic insertion.")
+          : nativePaste()
+            ? t(
+                "Enable Ctrl+V pasting into the focused application for this X11 session. No screen capture is requested.",
+              )
+            : t(
+                "Keyboard access is needed for automatic pasting. Portal permission may need to be enabled again after restarting the app.",
+              ),
+      )}</p>`;
     const outputExtras =
       (isMac() &&
       state.macos?.clipboard_restore_available !== false &&
@@ -1605,56 +1679,48 @@ function render() {
         : "");
     content.innerHTML =
       section(
-        "",
+        t("Keyboard"),
         row(`${esc(t("Trigger"))}${triggerCaption}`, shortcutButton(true)) +
-          row(`${esc(t("Output"))}${outputCaption}`, settingOutputs()) +
-          overlayControl,
+          recordingMode +
+          modeNote,
         "",
         "settings-recording-primary",
       ) +
       section(
-        t("More recording settings"),
-        row(
-          t("Trigger options"),
-          `<div class="trigger-options-content">${triggerOptions ? `<div class="trigger-controls">${triggerOptions}</div>` : ""}<small class="settings-row-description">${esc(triggerHelp())}</small></div>`,
-        ) +
-          recordingMode +
-          modeNote +
-          row(t("Language"), languages()) +
-          (p.model.startsWith("parakeet")
-            ? `<p class="secondary">${esc(t("The active Parakeet model detects the language automatically. This selection only applies to Whisper models."))}</p>`
-            : "") +
-          row(
-            t("Microphone"),
-            isMac()
-              ? `<span class="secondary">${esc(t("System default"))}</span>`
-              : microphoneControl(),
-          ) +
+        t("Output"),
+        row(`${esc(t("Output"))}${outputCaption}`, settingOutputs()) +
+          outputExtras +
+          overlayControl +
           (isMac()
             ? toggle(
                 t("Play start and stop sounds"),
                 "play_sounds",
                 !!p.play_sounds,
               )
-            : "") +
-          outputExtras +
-          `<div id="settings-recording-permissions">${permissions}<p class="secondary">${esc(
-            isMac()
-              ? t(
-                  "Accessibility access enables automatic pasting and advanced triggers.",
-                )
-              : nativePaste()
-                ? t(
-                    "Enable Ctrl+V pasting into the focused application for this X11 session. No screen capture is requested.",
-                  )
-                : t(
-                    "Keyboard access is needed for automatic pasting. Portal permission may need to be enabled again after restarting the app.",
-                  ),
-          )}</p></div>`,
-        isMac()
-          ? ""
-          : t("Start and stop sounds are not yet available on Linux."),
-        "settings-recording-secondary",
+            : ""),
+        "",
+        "settings-recording-output",
+      ) +
+      section(
+        t("Language"),
+        row(t("Language"), languages()) +
+          (p.model.startsWith("parakeet")
+            ? `<p class="secondary">${esc(t("The active Parakeet model detects the language automatically. This selection only applies to Whisper models."))}</p>`
+            : ""),
+        "",
+        "settings-recording-language",
+      ) +
+      section(
+        t("Microphone"),
+        microphoneAccess,
+        "",
+        "settings-recording-microphone",
+      ) +
+      section(
+        t("Permissions"),
+        permissions,
+        "",
+        "settings-recording-permissions",
       );
   } else if (tab === "models") {
     content.innerHTML =
@@ -1797,60 +1863,43 @@ function render() {
       }
     };
   } else if (tab === "history") {
+    const historyBytes = state.history.reduce(
+      (bytes, text) => bytes + new TextEncoder().encode(text).byteLength,
+      0,
+    );
+    const historySize =
+      historyBytes < 1024
+        ? `${historyBytes} B`
+        : `${new Intl.NumberFormat(p.ui_language === "de" ? "de-DE" : "en-US", {
+            maximumFractionDigits: 1,
+          }).format(historyBytes / 1024)} KB`;
     content.innerHTML = section(
       "",
-      `<label class="row setting-description-row"><span><span>${esc(t("Save history"))}</span><small class="settings-row-description">${esc(t("Save the last 20 dictations locally"))}</small></span><input class="switch" type="checkbox" data-pref="keep_history" ${p.keep_history ? "checked" : ""}></label>` +
+      `<label class="row setting-description-row"><span><span>${esc(t("Save history"))}</span><small class="settings-row-description">${esc(t("Keep the last 20 recordings locally."))}</small></span><input class="switch" type="checkbox" data-pref="keep_history" ${p.keep_history ? "checked" : ""}></label>` +
+        `<div class="row history-storage-stats" title="${esc(t("Separate transcript files are not included."))}"><span>${esc(t("Stored history text"))}</span><div class="control"><span>${esc(t("{count} recordings · {size}", { count: String(state.history.length), size: historySize }))}</span></div></div>` +
         row(
           t("Transcripts folder"),
           `<button type="button" data-command="show_transcripts_folder">${esc(t("Show in file manager"))}</button>`,
         ) +
         row(
-          t("Clear history"),
-          `<button type="button" data-clear-history id="clear-history" ${state.history.length || state.transcript ? "" : "disabled"}>${esc(t("Clear"))}</button>`,
+          t("History"),
+          `<button type="button" data-clear-history id="clear-history" class="history-delete-all" ${state.history.length ? "" : "disabled"}>${esc(t("Delete all"))}</button>`,
         ),
       "",
       "settings-history-controls",
     );
     bindHistoryActions(content);
   } else {
-    content.innerHTML =
-      section(
-        "",
-        `<div class="about-brand"><img src="./branding/icon-bordered.svg" width="88" height="88" alt="${esc(t("OpenWhisper app icon"))}"><div><span class="page-eyebrow">${esc(t("LESS TYPING. MORE YOU."))}</span><h1>OpenWhisper</h1><p class="version-badge">Version ` +
-          esc(state.version) +
-          (state.profile === "development" && state.development_build
-            ? ` · Dev ${esc(state.development_build)}`
-            : "") +
-          (isMac() ? "" : " · " + t("Linux")) +
-          `</p></div></div><p class="about-intro">${esc(t("A little more freedom for your voice."))}</p><p class="secondary">${esc(t("Turn your thoughts into text, right on your computer."))}</p><div class="about-values"><span>${esc(t("On-device recognition"))}</span><span>${esc(t("No subscription"))}</span><span>${esc(t("Open source · MIT"))}</span></div><p class="engine-credit">${esc(t("Powered by whisper.cpp, OpenAI Whisper, and NVIDIA Parakeet."))}</p>`,
-      ) +
-      section(
-        t("Updates"),
-        state.updates.configured
-          ? toggle(
-              t("Automatically check for updates (once a day)"),
-              "auto_check_updates",
-              !!p.auto_check_updates,
-            ) +
-              row(
-                updateStatus(),
-                `<button data-command="${state.updates.status === "available" ? "install_update" : "check_updates"}" ${["checking", "downloading", "installing"].includes(state.updates.status) || (state.updates.status === "available" && (["recording", "transcribing"].includes(state.status) || !!state.download || !!state.recovery_available)) ? "disabled" : ""}>${state.updates.status === "available" ? t("Download & install") : t("Check now")}</button>`,
-              )
-          : `<p class="secondary">${esc(t("Updates are not configured in this build."))}</p>`,
-        state.updates.package === "deb"
-          ? t(
-              "Updates are verified before installation. Your system asks for administrator permission. OpenWhisper restarts afterward.",
-            )
-          : t(
-              "Updates are verified before installation. OpenWhisper restarts afterward; your settings and models are kept.",
-            ),
-      ) +
-      (isMac()
-        ? ""
-        : section(
-            t("Linux support"),
-            `<p>${esc(state.desktop)} · ${esc(state.session)}</p><p class="secondary">${esc(t("CachyOS with KDE Plasma on Wayland is the first test target. Other distributions and desktops require separate validation. See the README support matrix."))}</p>`,
-          ));
+    content.innerHTML = section(
+      "",
+      `<div class="about-brand"><img src="./branding/icon-bordered.svg" width="88" height="88" alt="${esc(t("OpenWhisper app icon"))}"><div><span class="page-eyebrow">${esc(t("LESS TYPING. MORE YOU."))}</span><h1>OpenWhisper</h1><p class="version-badge">Version ` +
+        esc(state.version) +
+        (state.profile === "development" && state.development_build
+          ? ` · Dev ${esc(state.development_build)}`
+          : "") +
+        (isMac() ? "" : " · " + t("Linux")) +
+        `</p></div></div><p class="about-intro">${esc(t("A little more freedom for your voice."))}</p><p class="secondary">${esc(t("Turn your thoughts into text, right on your computer."))}</p><div class="about-values"><span>${esc(t("On-device recognition"))}</span><span>${esc(t("No subscription"))}</span><span>${esc(t("Open source · MIT"))}</span></div><p class="engine-credit">${esc(t("Powered by whisper.cpp, OpenAI Whisper, and NVIDIA Parakeet."))}</p>`,
+    );
   }
   main.scrollTop = scrollTop;
   if (modelFocusRestorePending) {
@@ -1965,12 +2014,43 @@ function updateStatus() {
     case "installing":
       return t("Verifying and installing update …");
     case "error":
-      return esc(
-        t("Update failed: {error}", { error: t(u.error ?? "Unknown error") }),
-      );
+      return t("Update failed: {error}", {
+        error: t(u.error ?? "Unknown error"),
+      });
     default:
       return t("Not checked yet.");
   }
+}
+
+function updateButtonLabel() {
+  const update = state.updates;
+  switch (update.status) {
+    case "available":
+      return update.version ?? t("Updates");
+    case "checking":
+      return t("Checking");
+    case "downloading":
+      return `${Math.round(update.progress * 100)}%`;
+    case "installing":
+      return t("Updates");
+    case "current":
+      return t("Up to date");
+    case "error":
+      return t("Update error");
+    default:
+      return t("Updates");
+  }
+}
+
+function headerUpdateDisabled() {
+  const update = state.updates;
+  return (
+    ["checking", "downloading", "installing"].includes(update.status) ||
+    (update.status === "available" &&
+      (["recording", "transcribing"].includes(state.status) ||
+        !!state.download ||
+        !!state.recovery_available))
+  );
 }
 
 function modifierOnlyTrigger() {
@@ -1999,28 +2079,6 @@ function triggerLabel() {
   }
   return state.shortcut ?? t("Set trigger …");
 }
-function triggerHelp() {
-  if (macToggleOnly())
-    return t(
-      "Use a regular key or shortcut. Fn and mouse triggers are not available in this build.",
-    );
-  if (state.native_x11)
-    return t(
-      "Choose a regular keyboard key or shortcut. X11 reserves the selected key while OpenWhisper is running. Existing shortcuts are not replaced.",
-    );
-  if (state.native_mouse)
-    return t(
-      "Choose a single key, shortcut, or mouse button. The selected trigger is reserved for dictation while OpenWhisper is running.",
-    );
-  if (state.native_shortcuts)
-    return t(
-      "Choose a single key or shortcut. Direct mouse triggers require KDE Plasma 6 on Wayland.",
-    );
-  return t(
-    "Your desktop controls which shortcuts are allowed. Direct mouse triggers currently require KDE Plasma 6 on Wayland.",
-  );
-}
-
 function shortcutBusy() {
   return (
     portalBusy ||
@@ -2029,40 +2087,32 @@ function shortcutBusy() {
   );
 }
 function shortcutButton(compact = false) {
-  if (state.shortcut_configuring)
-    return `<span class="secondary" role="status">${esc(t("Choose a shortcut in your desktop’s dialog."))}</span> <button data-command="cancel_shortcut">${esc(t("Cancel"))}</button>`;
-  if (isMac() && state.macos!.recording_shortcut)
-    return `<span class="secondary" role="status">${esc(t(state.macos!.shortcut_hint))}</span> <button data-command="cancel_shortcut">${esc(t("Cancel"))}</button>`;
-  if (!isMac() && state.recording_shortcut)
-    return `<span class="secondary" role="status">${esc(t(state.native_x11 || !state.native_mouse ? "Press and release a keyboard key. Escape cancels." : "Press and release a key or mouse button. Escape cancels."))}</span> <button data-command="cancel_shortcut">${esc(t("Cancel"))}</button>`;
+  const captureHint = state.shortcut_configuring
+    ? t("Choose a shortcut in your desktop’s dialog.")
+    : isMac() && state.macos!.recording_shortcut
+      ? t(state.macos!.shortcut_hint)
+      : !isMac() && state.recording_shortcut
+        ? t(
+            state.native_x11 || !state.native_mouse
+              ? "Press and release a keyboard key. Escape cancels."
+              : "Press and release a key or mouse button. Escape cancels.",
+          )
+        : "";
+  if (captureHint)
+    return compact
+      ? `<span class="secondary" role="status">${esc(captureHint)}</span> <button data-command="cancel_shortcut">${esc(t("Cancel"))}</button>`
+      : `<div class="setup-trigger-capture" role="status"><span>${esc(captureHint)}</span><button type="button" data-command="cancel_shortcut">${esc(t("Cancel"))}</button></div>`;
   const busy = shortcutBusy();
-  const select = `<button data-portal="enable_shortcut" ${(!state.shortcut_portal && !state.native_shortcuts) || busy ? "disabled" : ""}>${state.shortcut ? esc(triggerLabel()) : t("Set trigger …")}</button>`;
-  if (compact || (isMac() && !macToggleOnly())) return select;
-  return `<div class="trigger-controls">${select}${shortcutOptions()}</div>`;
-}
-function shortcutOptions() {
-  if (
-    state.shortcut_configuring ||
-    state.recording_shortcut ||
-    state.macos?.recording_shortcut ||
-    (isMac() && !macToggleOnly())
-  )
-    return "";
-  const busy = shortcutBusy();
-  const canRemove = !!(
-    state.shortcut ||
-    state.preferences.native_trigger ||
-    state.preferences.x11_trigger ||
-    state.preferences.macos_shortcut
-  );
-  const remove = canRemove
-    ? `<button data-portal="clear_shortcut" ${busy ? "disabled" : ""}>${esc(t("Remove trigger"))}</button>`
-    : "";
-  const desktopDialog =
-    state.native_shortcuts && state.shortcut_portal
-      ? `<button class="quiet" data-portal="desktop_shortcut" ${busy ? "disabled" : ""}>${esc(t("Desktop shortcut dialog"))}</button>`
+  const disabled =
+    (!state.shortcut_portal && !state.native_shortcuts) || busy
+      ? "disabled"
       : "";
-  return `${remove}${desktopDialog}`;
+  const value = state.shortcut ? triggerLabel() : t("Set trigger …");
+  return compact
+    ? `<button type="button" class="settings-trigger-button" data-portal="enable_shortcut" ${disabled}>${esc(value)}</button>`
+    : state.shortcut
+      ? `<button type="button" class="setup-trigger-button" data-portal="enable_shortcut" aria-label="${esc(value)}" ${disabled}><span class="setup-trigger-key">${esc(value)}</span><span class="setup-trigger-hint">${esc(t("Click to change"))}</span></button>`
+      : `<button type="button" class="setup-trigger-button" data-portal="enable_shortcut" aria-label="${esc(value)}" ${disabled}><span class="setup-trigger-key">${symbol("M3 5h18v14H3zM7 9h2m3 0h2m3 0h2M7 13h2m3 0h2m3 0h2M7 17h2m3 0h2m3 0h2")}</span><span class="setup-trigger-hint">${esc(value)}</span></button>`;
 }
 
 // Explicit native setup must not activate focused buttons or edit settings.

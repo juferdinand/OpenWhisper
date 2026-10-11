@@ -12,6 +12,10 @@ import type {
 const catalog = JSON.parse(
   readFileSync(resolve("../data/models.json"), "utf8"),
 ).models;
+const recordingPolishScreenshots = resolve(
+  "../../.local/validation/ui-redesign-setup/recording-polish",
+);
+mkdirSync(recordingPolishScreenshots, { recursive: true });
 declare global {
   interface Window {
     openwhisper?: DesktopBridge;
@@ -55,6 +59,46 @@ test("pending keyboard permission exposes translated Cancel and sends only revoc
     "Erlauben",
   );
 });
+
+for (const platform of ["linux", "macos"] as const) {
+  test(`${platform}: visible product copy uses Recording wording in English and German`, async ({
+    page,
+  }) => {
+    const assertVisibleCopy = async () => {
+      const visibleText = await page.locator("body").innerText();
+      expect(visibleText).not.toMatch(
+        /\b(dictation|dictate|diktat|diktieren|wörterbuch)\b/iu,
+      );
+    };
+
+    await start(page, platform, false, false, false, null);
+    await assertVisibleCopy();
+    await openSettings(page);
+    await selectSettingsTab(page, "general");
+    await page.locator('[data-ui-language="de"]').click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "de");
+    await closeSettings(page);
+    await assertVisibleCopy();
+  });
+}
+
+for (const platform of ["linux", "macos"] as const) {
+  test(`${platform}: setup uses Recording wording in English and German`, async ({
+    page,
+  }) => {
+    await start(page, platform, false, true);
+    const assertVisibleCopy = async () => {
+      const visibleText = await page.locator("body").innerText();
+      expect(visibleText).not.toMatch(
+        /\b(dictation|dictate|diktat|diktieren|wörterbuch)\b/iu,
+      );
+    };
+    await assertVisibleCopy();
+    await page.getByRole("button", { name: "Deutsch", exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "de");
+    await assertVisibleCopy();
+  });
+}
 
 test("Linux overlay availability distinguishes unsupported protocol from missing runtime and translates both", async ({
   page,
@@ -434,12 +478,15 @@ test("saved Linux recordings can be retried or discarded without starting captur
   await page.evaluate(() => {
     const host = window as any;
     host.testState.updates.status = "available";
+    host.testState.updates.version = "0.2.2";
     host.publishState();
   });
   await selectSettingsTab(page, "about");
-  await expect(
-    page.getByRole("button", { name: "Laden & installieren", exact: true }),
-  ).toBeDisabled();
+  await closeSettings(page);
+  await expect(page.locator("#header-update")).toBeDisabled();
+  await expect(page.locator("#header-update")).toHaveAccessibleName(
+    /Version 0\.2\.2 ist verfügbar/u,
+  );
 });
 
 async function start(
@@ -449,6 +496,8 @@ async function start(
   fresh = false,
   initialStateRace = false,
   initialTab: AppState["initial_tab"] | null = "general",
+  updatesConfigured = true,
+  development = false,
 ) {
   let savedPreferences: unknown = null;
   await page.exposeBinding("loadTestPreferences", () => savedPreferences);
@@ -456,14 +505,24 @@ async function start(
     savedPreferences = preferences;
   });
   await page.addInitScript(
-    ({ platform, models, overlay, fresh, initialStateRace, initialTab }) => {
+    ({
+      platform,
+      models,
+      overlay,
+      fresh,
+      initialStateRace,
+      initialTab,
+      updatesConfigured,
+      development,
+    }) => {
       const host = window as any;
       host.__OPENWHISPER_OVERLAY__ = platform === "macos" && overlay;
       host.calls = [];
       const state: any = {
         platform,
+        profile: development ? "development" : undefined,
         updates: {
-          configured: true,
+          configured: updatesConfigured,
           status: "idle",
           version: null,
           progress: 0,
@@ -518,7 +577,7 @@ async function start(
           shortcut_hint: "Press a key",
           editor: "TextEdit",
           recommended: ["base"],
-          updates_configured: true,
+          updates_configured: updatesConfigured,
         },
       };
       const callbacks = new Map<string, Set<(value: unknown) => void>>();
@@ -583,6 +642,11 @@ async function start(
           command === "complete_setup"
         )
           await host.saveTestPreferences(state.preferences);
+        if (
+          command === "check_updates" &&
+          (state.profile === "development" || !state.updates.configured)
+        )
+          throw new Error("Updates are not configured in this fixture.");
         if (command === "check_updates")
           Object.assign(state.updates, {
             status: "available",
@@ -604,13 +668,6 @@ async function start(
         if (command === "cancel_shortcut") {
           state.macos.recording_shortcut = false;
           state.recording_shortcut = false;
-        }
-        if (command === "clear_shortcut") {
-          if (platform === "macos" && state.macos.shortcut_toggle_only)
-            state.preferences.macos_shortcut = null;
-          else if (state.native_x11) state.preferences.x11_trigger = null;
-          else state.preferences.native_trigger = null;
-          state.shortcut = null;
         }
         if (command === "enable_paste") state.paste_ready = true;
         if (command === "disable_paste") {
@@ -650,7 +707,16 @@ async function start(
         },
       };
     },
-    { platform, models: catalog, overlay, fresh, initialStateRace, initialTab },
+    {
+      platform,
+      models: catalog,
+      overlay,
+      fresh,
+      initialStateRace,
+      initialTab,
+      updatesConfigured,
+      development,
+    },
   );
   await page.goto(
     pathToFileURL(resolve("dist/index.html")).href +
@@ -781,7 +847,7 @@ test("recording telemetry follows the newest full state and ignores stale genera
     host.publishState();
     host.publishTelemetry({ generation: 8, elapsed: 6, level: 1 });
   });
-  await expect(page.locator("#record-label")).toHaveText("Start dictation");
+  await expect(page.locator("#record-label")).toHaveText("Start recording");
 });
 
 test("recording waveform keeps a rolling history of accepted telemetry samples", async ({
@@ -838,7 +904,7 @@ test("recording waveform keeps a rolling history of accepted telemetry samples",
 });
 
 for (const platform of ["linux", "macos"] as const) {
-  test(`${platform}: completed setup opens Dictation and keeps transcript actions on the existing bridge`, async ({
+  test(`${platform}: completed setup opens Recording and keeps transcript actions on the existing bridge`, async ({
     page,
   }) => {
     await start(page, platform, false, false, false, null);
@@ -875,6 +941,12 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(page.locator(".record-output [data-output]")).toHaveCount(
       platform === "macos" ? 3 : 2,
     );
+    const insertOutput = page.locator('.record-output [data-output="paste"]');
+    await insertOutput.click();
+    await expect(insertOutput).toHaveAttribute("aria-pressed", "true");
+    await expect
+      .poll(() => page.evaluate(() => window.testState.preferences.output))
+      .toBe("paste");
     await expect(page.locator(".dictation-history-title")).toContainText(
       "History",
     );
@@ -924,15 +996,43 @@ for (const platform of ["linux", "macos"] as const) {
       await expect(
         page.locator("#content").getByRole("heading", { name: section }),
       ).toBeVisible();
+    const systemStatusTypography = await page
+      .locator("#content .settings-system-status")
+      .evaluateAll((statuses) => {
+        const bodyFont = getComputedStyle(document.body).fontFamily;
+        return statuses
+          .map((status) => ({
+            fontFamily: getComputedStyle(status).fontFamily,
+            classes: Array.from(status.classList),
+          }))
+          .map(({ fontFamily, classes }) => ({
+            sameFont: fontFamily === bodyFont,
+            neutral:
+              !classes.includes("success") && !classes.includes("warning"),
+          }));
+      });
+    expect(systemStatusTypography.length).toBeGreaterThan(0);
+    expect(systemStatusTypography.every((status) => status.sameFont)).toBe(
+      true,
+    );
+    expect(systemStatusTypography.every((status) => status.neutral)).toBe(true);
     await expect(
       page.getByText("Launch at login", { exact: true }),
     ).toBeVisible();
     await selectSettingsTab(page, "recording");
     await expect(page.locator("#settings-recording-primary")).toBeVisible();
-    await expect(page.locator("#settings-recording-secondary")).toBeVisible();
+    await expect(page.locator("#settings-recording-output")).toBeVisible();
+    await expect(page.locator("#settings-recording-language")).toBeVisible();
+    await expect(page.locator("#settings-recording-microphone")).toBeVisible();
     await expect(page.locator("#settings-recording-permissions")).toBeVisible();
+    await expect(page.locator("#settings-recording-primary")).toContainText(
+      "Push to talk",
+    );
+    await expect(page.locator("#settings-recording-microphone")).toContainText(
+      platform === "macos" ? "Microphone access" : "Microphone",
+    );
     await expect(
-      page.locator("#settings-recording-primary .settings-output-segment"),
+      page.locator("#settings-recording-output .settings-output-segment"),
     ).toBeVisible();
     await selectSettingsTab(page, "text");
     await expect(page.locator("#settings-vocabulary")).toBeVisible();
@@ -974,13 +1074,18 @@ for (const platform of ["linux", "macos"] as const) {
     await expect
       .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
       .toBe("toggle_recording");
+    await page.evaluate(() => {
+      window.testState.status = "recording";
+      window.publishState();
+    });
+    await expect(insertOutput).toBeDisabled();
 
     await page.locator(".dictation-change-model").click();
     const modelDialog = page.locator("dialog#model-drawer");
     await expect(modelDialog).toBeVisible();
     await expect(
       modelDialog.getByRole("heading", {
-        name: "Speech model for Dictation",
+        name: "Speech model for recording",
         exact: true,
       }),
     ).toBeVisible();
@@ -1097,6 +1202,86 @@ for (const platform of ["linux", "macos"] as const) {
       .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
       .toBe("discard_recovery");
 
+    const retainedTranscript = "Synthetic retained preview across generations.";
+    await page.evaluate((transcript) => {
+      Object.assign(window.testState, {
+        status: "done",
+        recovery_available: false,
+        transcript,
+        transcript_preview_omitted: false,
+        recording_generation: 10,
+        history: [transcript],
+      });
+      window.publishState();
+    }, retainedTranscript);
+    await expect(page.locator(".dictation-transcript .transcript")).toHaveText(
+      retainedTranscript,
+    );
+    await page.screenshot({
+      path: resolve(
+        recordingPolishScreenshots,
+        `${platform}-workspace-restored-result.png`,
+      ),
+    });
+    const callsBeforeDiscard = await page.evaluate(() => window.calls.length);
+    await page.locator("#discard-result").click();
+    await expect(page.locator(".dictation-transcript .transcript")).toHaveCount(
+      0,
+    );
+    await page.screenshot({
+      path: resolve(
+        recordingPolishScreenshots,
+        `${platform}-discarded-preview.png`,
+      ),
+    });
+    expect(await page.evaluate(() => window.calls.length)).toBe(
+      callsBeforeDiscard,
+    );
+    await expect(
+      page.locator(
+        '#dictation-history .history-entry[data-history-select="0"]',
+      ),
+    ).toHaveText(retainedTranscript);
+
+    for (const status of ["recording", "transcribing"] as const) {
+      await page.evaluate(
+        ({ transcript, status }) => {
+          Object.assign(window.testState, {
+            status,
+            transcript,
+            recording_generation: 11,
+          });
+          window.publishState();
+        },
+        { transcript: retainedTranscript, status },
+      );
+      await expect(
+        page.locator(".dictation-transcript .transcript"),
+      ).toHaveCount(0);
+      await expect(page.locator("#copy-dictation")).toBeHidden();
+    }
+    await page.evaluate((transcript) => {
+      Object.assign(window.testState, {
+        status: "done",
+        transcript,
+        recording_generation: 11,
+      });
+      window.publishState();
+    }, retainedTranscript);
+    await expect(page.locator(".dictation-transcript .transcript")).toHaveText(
+      retainedTranscript,
+    );
+    await page
+      .locator('#dictation-history .history-entry[data-history-select="0"]')
+      .click();
+    await page.locator("#copy-dictation").click();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)))
+      .toEqual({ command: "copy_history", args: { index: 0 } });
+    expect(await page.evaluate(() => window.testState.history)).toEqual([
+      retainedTranscript,
+    ]);
+
     await page.evaluate(() => {
       Object.assign(window.testState, {
         status: "idle",
@@ -1146,15 +1331,17 @@ for (const platform of ["linux", "macos"] as const) {
     await page.keyboard.press("Escape");
   });
 
-  test(`${platform}: Dictation stays usable at minimum and large window sizes in English and German`, async ({
+  test(`${platform}: Recording stays usable at minimum and large window sizes in English and German`, async ({
     page,
   }) => {
-    await start(page, platform, false, false, false, null);
+    await start(page, platform, false, false, false, null, false, true);
     await page.evaluate(() => {
       window.testState.profile = "development";
       window.testState.development_build = "reference-test";
+      window.testState.preferences.auto_check_updates = false;
       window.publishState();
     });
+    await expect(page.locator("#header-update")).toBeHidden();
     const longTranscript = "Synthetic long transcript. ".repeat(900);
     await page.evaluate((transcript) => {
       Object.assign(window.testState, {
@@ -1679,7 +1866,7 @@ for (const platform of ["linux", "macos"] as const) {
     await page.locator(".dictation-change-model").click();
     await expect(
       dialog.getByRole("heading", {
-        name: "Sprachmodell für Diktat",
+        name: "Sprachmodell für die Aufnahme",
         exact: true,
       }),
     ).toBeVisible();
@@ -1834,7 +2021,7 @@ for (const platform of ["linux", "macos"] as const) {
     }
   });
 
-  test(`${platform}: Dictation history rail copies full text and clears through host commands`, async ({
+  test(`${platform}: History rail copies full text and clears only history through host commands`, async ({
     page,
   }) => {
     await start(page, platform, false, false, false, null);
@@ -1851,6 +2038,7 @@ for (const platform of ["linux", "macos"] as const) {
       );
       window.testState.history[1] = longEntry;
       window.testState.transcript = longEntry;
+      window.testState.transcript_preview_omitted = false;
       window.publishState();
     }, longEntry);
     const toggle = page.locator("#toggle-history");
@@ -1885,6 +2073,31 @@ for (const platform of ["linux", "macos"] as const) {
         );
         await expect(historyEntries).toHaveCount(entries.length);
         await expect(historyEntries.nth(1)).toHaveText(longEntry);
+        const historyBytes = entries.reduce(
+          (total, entry) => total + new TextEncoder().encode(entry).byteLength,
+          0,
+        );
+        const byteDisplay =
+          historyBytes < 1024
+            ? `${historyBytes} B`
+            : `${new Intl.NumberFormat(language === "en" ? "en-US" : "de-DE", {
+                maximumFractionDigits: 1,
+              }).format(historyBytes / 1024)} KB`;
+        await openSettings(page);
+        await selectSettingsTab(page, "history");
+        await expect(page.locator(".history-storage-stats")).toContainText(
+          byteDisplay,
+        );
+        await expect(page.locator(".history-storage-stats")).toContainText(
+          language === "en" ? "14 recordings" : "14 Aufnahmen",
+        );
+        await expect(page.locator(".history-storage-stats")).toHaveAttribute(
+          "title",
+          language === "en"
+            ? "Separate transcript files are not included."
+            : "Separate Transkriptdateien sind nicht enthalten.",
+        );
+        await closeSettings(page);
         const longTextGeometry = await historyEntries
           .nth(1)
           .locator(".history-entry-text")
@@ -1908,9 +2121,7 @@ for (const platform of ["linux", "macos"] as const) {
           await page.evaluate(() => (window as any).historyCompromised),
         ).toBe(undefined);
         await expect(history.locator("time")).toHaveCount(0);
-        await expect(history.locator("[data-copy]")).toHaveCount(
-          entries.length,
-        );
+        await expect(history.locator("[data-copy]")).toHaveCount(0);
         const clearRailHistory = rail.locator("[data-clear-history]");
         await expect(page.locator("#copy-dictation")).toBeVisible();
         await expect(page.locator("#record")).toBeInViewport();
@@ -1942,6 +2153,11 @@ for (const platform of ["linux", "macos"] as const) {
         expect(transcriptGeometry.headerBeforeBody).toBe(true);
         expect(transcriptGeometry.railAfterCanvas).toBe(true);
         expect(transcriptGeometry.railInsideViewport).toBe(true);
+        const selectedHistoryEntry = history.locator(
+          '.history-entry[aria-pressed="true"]',
+        );
+        if (await selectedHistoryEntry.count())
+          await selectedHistoryEntry.click();
         await page.locator("#copy-dictation").click();
         await expect
           .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
@@ -1950,17 +2166,22 @@ for (const platform of ["linux", "macos"] as const) {
           await page.screenshot({
             path: `test-results/${platform}-history-${language}.png`,
           });
-          await historyEntries.nth(1).hover();
-          await history.locator('[data-copy="1"]').click();
+          await historyEntries.nth(1).click();
+          await expect(
+            page.locator(".dictation-transcript-body .transcript"),
+          ).toHaveText(longEntry);
+          await page.locator("#copy-dictation").click();
           await expect
             .poll(() => page.evaluate(() => window.calls.at(-1)))
             .toEqual({ command: "copy_history", args: { index: 1 } });
         }
-        const lastCopy = history.locator('[data-copy="13"]');
-        await lastCopy.scrollIntoViewIfNeeded();
-        await expect(lastCopy).toBeInViewport();
-        await historyEntries.nth(13).hover();
-        await lastCopy.click();
+        await historyEntries.nth(13).scrollIntoViewIfNeeded();
+        await expect(historyEntries.nth(13)).toBeInViewport();
+        await historyEntries.nth(13).click();
+        await expect(
+          page.locator(".dictation-transcript-body .transcript"),
+        ).toHaveText("History entry 13");
+        await page.locator("#copy-dictation").click();
         await expect
           .poll(() => page.evaluate(() => window.calls.at(-1)))
           .toEqual({ command: "copy_history", args: { index: 13 } });
@@ -1980,7 +2201,18 @@ for (const platform of ["linux", "macos"] as const) {
       .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
       .toBe("clear_history");
     await expect(history.locator(".history-row")).toHaveCount(0);
-    await expect(history).toContainText("Noch keine Diktate im Verlauf.");
+    await expect(history).toContainText("Noch keine Aufnahmen im Verlauf.");
+    await expect(page.locator(".dictation-transcript .transcript")).toHaveText(
+      longEntry,
+    );
+    await expect(page.locator("#copy-dictation")).toBeVisible();
+    await openSettings(page);
+    await selectSettingsTab(page, "history");
+    await expect(page.locator(".history-storage-stats")).toContainText("0");
+    await expect(page.locator("#clear-history")).toBeDisabled();
+    await expect(page.locator(".history-storage-stats")).toContainText(
+      /0 (recordings|Aufnahmen)/u,
+    );
   });
 
   test(`${platform}: Text processing remains keyboard reachable and saves vocabulary after navigation`, async ({
@@ -2237,6 +2469,7 @@ for (const platform of ["linux", "macos"] as const) {
 test("workspace and General match the reference proportions in English and German", async ({
   page,
 }) => {
+  const platform = "linux";
   await start(page, "linux", false, false, false, null);
   await page.setViewportSize({ width: 1280, height: 800 });
   const longTranscript =
@@ -2303,7 +2536,7 @@ test("workspace and General match the reference proportions in English and Germa
     ).toHaveCount(1);
     await expect(
       page.locator(".window-active-tab .window-tab-title"),
-    ).toHaveText(language === "en" ? "Dictation" : "Diktat");
+    ).toHaveText(language === "en" ? "Recording" : "Aufnahme");
     await expect(page.locator(".window-tab-subtitle")).toHaveText(
       "Whisper Base",
     );
@@ -2445,6 +2678,30 @@ test("workspace and General match the reference proportions in English and Germa
       ["history", "history"],
     ] as const) {
       await selectSettingsTab(page, tab);
+      if (tab === "recording") {
+        await expect(page.locator("#settings-recording-primary")).toBeVisible();
+        await expect(page.locator("#settings-recording-output")).toBeVisible();
+        await expect(
+          page.locator("#settings-recording-language"),
+        ).toBeVisible();
+        await expect(
+          page.locator("#settings-recording-microphone"),
+        ).toBeVisible();
+        await expect(
+          page.locator("#settings-recording-permissions"),
+        ).toBeVisible();
+        await expect(page.locator(".trigger-options-content")).toHaveCount(0);
+        await expect(
+          page.locator(
+            '#settings-recording-primary [data-portal="clear_shortcut"]',
+          ),
+        ).toHaveCount(0);
+        await expect(
+          page.locator(
+            '#settings-recording-primary [data-portal="desktop_shortcut"]',
+          ),
+        ).toHaveCount(0);
+      }
       if (tab === "text")
         await expect(
           page.locator("#snippet-form .text-processing-description"),
@@ -2456,6 +2713,25 @@ test("workspace and General match the reference proportions in English and Germa
       if (tab === "history") {
         await expect(page.locator("#settings-history-controls")).toBeVisible();
         await expect(page.locator("#content .history-row")).toHaveCount(0);
+        const historyBytes = [longTranscript, secondTranscript].reduce(
+          (total, text) => total + new TextEncoder().encode(text).byteLength,
+          0,
+        );
+        const historySize =
+          historyBytes < 1024
+            ? `${historyBytes} B`
+            : `${new Intl.NumberFormat(language === "en" ? "en-US" : "de-DE", {
+                maximumFractionDigits: 1,
+              }).format(historyBytes / 1024)} KB`;
+        await expect(page.locator(".history-storage-stats")).toContainText(
+          historySize,
+        );
+        await expect(page.locator("#clear-history")).toHaveText(
+          language === "en" ? "Delete all" : "Alles löschen",
+        );
+        await expect(
+          page.locator('[data-command="show_transcripts_folder"]'),
+        ).toBeVisible();
       }
       await page.screenshot({
         path: resolve(screenshotFolder, `${name}-${language}.png`),
@@ -2532,9 +2808,8 @@ test("macOS retains native trigger capture, model import, and update actions", a
     .click();
   await expect(page.locator("dialog#model-drawer")).toBeVisible();
   await page.keyboard.press("Escape");
-  await openSettings(page);
-  await selectSettingsTab(page, "about");
-  await page.getByRole("button", { name: "Check now", exact: true }).click();
+  await expect(page.locator("#header-update")).toBeVisible();
+  await page.locator("#header-update").click();
   const commands = await page.evaluate(() =>
     (window as any).calls.map((c: any) => c.command),
   );
@@ -2555,7 +2830,10 @@ for (const platform of ["linux", "macos"] as const) {
     await start(page, platform);
     await page.evaluate(() => {
       const w = window as any;
-      w.testState.history = ["Recording", "<script>private text</script>"];
+      w.testState.history = [
+        "Diktat / Dictation",
+        "<script>private text</script>",
+      ];
       w.publishState();
     });
     await page.getByRole("button", { name: "Deutsch", exact: true }).click();
@@ -2564,12 +2842,12 @@ for (const platform of ["linux", "macos"] as const) {
       page.getByRole("heading", { name: "Allgemein", exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Diktat starten", exact: true }),
+      page.getByRole("button", { name: "Aufnahme starten", exact: true }),
     ).toBeVisible();
     await selectSettingsTab(page, "history");
     await expect(
       page.locator("#dictation-history .history-entry[data-history-select]"),
-    ).toHaveText(["Recording", "<script>private text</script>"]);
+    ).toHaveText(["Diktat / Dictation", "<script>private text</script>"]);
     await expect(page.locator("#settings-history-controls")).toBeVisible();
     await expect(page.locator("#content .history-row")).toHaveCount(0);
     expect(
@@ -2584,11 +2862,12 @@ for (const platform of ["linux", "macos"] as const) {
     await selectSettingsTab(page, "general");
     await page.locator('[data-ui-language="en"]').click();
     await expect(
-      page.getByRole("heading", { name: "Dictation", exact: true }),
+      page.getByRole("heading", { name: "Recording", exact: true }),
     ).toBeVisible();
   });
   test(`${platform}: setup is shown for a fresh installation and stays hidden after completion and restart`, async ({
     page,
+    context,
   }) => {
     const microphoneHeading =
       platform === "macos" ? "Allow microphone access" : "Choose a microphone";
@@ -2865,7 +3144,7 @@ for (const platform of ["linux", "macos"] as const) {
       await page.setViewportSize(viewport);
       await expect(page.locator("#record")).toHaveAttribute(
         "aria-label",
-        "Start dictation",
+        "Start recording",
       );
       const card = page.locator(".setup-card");
       const top = await card.evaluate(
@@ -3198,14 +3477,53 @@ for (const platform of ["linux", "macos"] as const) {
     }
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(
-      page.getByRole("heading", { name: "Set a trigger and try it" }),
+      page.getByRole("heading", { name: "How do you start the recording?" }),
     ).toBeVisible();
+    const setupKeycap = page.locator(".setup-trigger-button");
+    await expect(setupKeycap).toBeVisible();
+    await expect(setupKeycap.locator(".setup-trigger-key")).toBeVisible();
+    const setupOutput = page.locator(".setup-trigger-output");
+    await expect(setupOutput).toBeVisible();
+    await expect(
+      setupOutput.locator('input[name="settings-output"]'),
+    ).toHaveCount(platform === "macos" ? 3 : 2);
+    const pasteOutput = setupOutput.locator('input[value="paste"]');
+    await pasteOutput.focus();
+    await page.keyboard.press("Space");
+    await expect
+      .poll(() => page.evaluate(() => window.testState.preferences.output))
+      .toBe("paste");
     await page.evaluate(() => {
-      const state = window.testState;
-      if (state.platform === "macos") state.macos.recording_shortcut = true;
-      else state.recording_shortcut = true;
+      window.testState.native_shortcuts = true;
+      window.testState.native_mouse = window.testState.platform === "linux";
       window.publishState();
     });
+    await setupKeycap.click();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+      .toBe("enable_shortcut");
+    if (platform === "linux") {
+      const input = await context.newCDPSession(page);
+      await input.send("Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        x: 500,
+        y: 300,
+        button: "back",
+        buttons: 8,
+        clickCount: 1,
+      });
+      await input.send("Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        x: 500,
+        y: 300,
+        button: "back",
+        buttons: 0,
+        clickCount: 1,
+      });
+      await expect
+        .poll(() => page.evaluate(() => window.calls.at(-1)))
+        .toEqual({ command: "capture_mouse_trigger", args: { button: 8 } });
+    }
     await expect(
       page.getByRole("button", { name: "Back", exact: true }),
     ).toBeDisabled();
@@ -3230,7 +3548,7 @@ for (const platform of ["linux", "macos"] as const) {
     ).toBeEnabled();
     expect(
       await page.evaluate(() => window.calls.map((call) => call.command)),
-    ).not.toContain("enable_shortcut");
+    ).toContain("enable_shortcut");
 
     await page.evaluate(() => {
       window.testState.installed = [];
@@ -3264,7 +3582,7 @@ for (const platform of ["linux", "macos"] as const) {
       window.publishNavigate("models");
     });
     await expect(
-      page.getByRole("heading", { name: "Set a trigger and try it" }),
+      page.getByRole("heading", { name: "How do you start the recording?" }),
     ).toBeVisible();
     await expect(page.locator(".settings-dialog-nav [data-tab]")).toHaveCount(
       0,
@@ -3291,7 +3609,7 @@ for (const platform of ["linux", "macos"] as const) {
       page.getByRole("button", { name: "Einrichtung", exact: true }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("heading", { name: "Diktat", exact: true }),
+      page.getByRole("heading", { name: "Aufnahme", exact: true }),
     ).toBeVisible();
     await expect
       .poll(() =>
@@ -3303,7 +3621,7 @@ for (const platform of ["linux", "macos"] as const) {
       page.getByRole("button", { name: "Einrichtung", exact: true }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("heading", { name: "Diktat", exact: true }),
+      page.getByRole("heading", { name: "Aufnahme", exact: true }),
     ).toBeVisible();
     await selectSettingsTab(page, "recording");
     await expect(
@@ -3347,31 +3665,128 @@ for (const platform of ["linux", "macos"] as const) {
       ).toHaveText(longFriendlyName);
     }
   });
-  test(`${platform}: update controls show availability and prevent recording during installation`, async ({
+  test(`${platform}: header updates expose status and prevent recording during installation`, async ({
     page,
   }) => {
     await start(page, platform);
-    await selectSettingsTab(page, "about");
-    await page.getByRole("button", { name: "Check now", exact: true }).click();
-    await expect(page.getByText("Version 0.2.2 is available.")).toBeVisible();
+    await closeSettings(page);
+    const update = page.locator("#header-update");
+    await expect(update).toBeVisible();
+    await expect(update).toBeEnabled();
+    await update.click();
+    await expect(update).toHaveAccessibleName(/Version 0\.2\.2 is available/u);
+    await expect(update).toBeEnabled();
     await page.evaluate(() => {
       const w = window as any;
+      w.testState.updates.status = "current";
+      w.publishState();
+    });
+    await expect(update).toHaveAccessibleName(/latest version/u);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.testState.updates.status = "checking";
+      w.publishState();
+    });
+    await expect(update).toBeDisabled();
+    await expect(update).toHaveAccessibleName(/Checking for updates/u);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.testState.updates.status = "available";
+      w.testState.updates.version = "0.2.2";
+      w.testState.updates.progress = 0;
+      w.publishState();
+    });
+    await expect(update).toBeEnabled();
+    await page.screenshot({
+      path: resolve(
+        recordingPolishScreenshots,
+        `${platform}-header-update-available.png`,
+      ),
+    });
+    await page.evaluate(() => {
+      const w = window as any;
+      w.testState.status = "recording";
+      w.publishState();
+    });
+    await expect(update).toBeDisabled();
+    await page.evaluate(() => {
+      const w = window as any;
+      w.testState.status = "idle";
+      w.testState.download = "base";
+      w.publishState();
+    });
+    await expect(update).toBeDisabled();
+    await page.evaluate(() => {
+      const w = window as any;
+      w.testState.download = null;
+      w.testState.recovery_available = true;
+      w.publishState();
+    });
+    await expect(update).toBeDisabled();
+    await page.evaluate(() => {
+      const w = window as any;
+      w.testState.recovery_available = false;
+      w.publishState();
+    });
+    await expect(update).toBeEnabled();
+    await page.evaluate(() => {
+      const w = window as any;
+      w.testState.updates.status = "downloading";
+      w.testState.updates.progress = 0.42;
+      w.publishState();
+    });
+    await expect(update).toBeDisabled();
+    await expect(update).toHaveAccessibleName(/Downloading update: 42%/u);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.testState.updates.status = "installing";
+      w.publishState();
+    });
+    await expect(update).toBeDisabled();
+    await page.evaluate(() => {
+      const w = window as any;
+      w.testState.updates.status = "available";
       w.testState.status = "transcribing";
       w.publishState();
     });
-    await expect(
-      page.getByRole("button", { name: "Download & install", exact: true }),
-    ).toBeDisabled();
+    await expect(update).toBeDisabled();
     await page.evaluate(() => {
       const w = window as any;
       w.testState.status = "idle";
       w.publishState();
     });
-    await page
-      .getByRole("button", { name: "Download & install", exact: true })
-      .click();
+    await update.click();
     await expect(page.locator("#record")).toBeDisabled();
-    await expect(page.getByText("Downloading update: 0%")).toBeVisible();
+    await expect(update).toHaveAccessibleName(/Downloading update: 42%/u);
+    await expect(update).toBeDisabled();
+    await page.evaluate(() => {
+      const w = window as any;
+      w.testState.updates.status = "error";
+      w.testState.updates.error = "Network unavailable";
+      w.testState.updates.progress = 0;
+      w.publishState();
+    });
+    await expect(update).toBeEnabled();
+    await expect(update).toHaveAccessibleName(
+      /Update failed: Network unavailable/u,
+    );
+    await update.click();
+    await expect
+      .poll(() => page.evaluate(() => window.testState.updates.status))
+      .toBe("available");
+    const updateCommands = await page.evaluate(() =>
+      window.calls
+        .map((call) => call.command)
+        .filter(
+          (command) =>
+            command === "check_updates" || command === "install_update",
+        ),
+    );
+    expect(updateCommands).toEqual([
+      "check_updates",
+      "install_update",
+      "check_updates",
+    ]);
   });
   test(`${platform}: German views fit the minimum window and translate the floating timer`, async ({
     page,
@@ -3413,7 +3828,7 @@ for (const platform of ["linux", "macos"] as const) {
       "Sprache wählen",
       "Wo soll der Text erscheinen?",
       null,
-      "Auslöser festlegen und ausprobieren",
+      "Wie startest du die Aufnahme?",
     ];
     for (const [index, title] of titles.entries()) {
       await expect(
@@ -3441,6 +3856,22 @@ for (const platform of ["linux", "macos"] as const) {
         });
         await page.setViewportSize({ width: 740, height: 560 });
       }
+      if (index === 6) {
+        await page.screenshot({
+          path: resolve(
+            recordingPolishScreenshots,
+            `${platform}-setup-keycap-de-740x560.png`,
+          ),
+        });
+        await page.setViewportSize({ width: 980, height: 740 });
+        await page.screenshot({
+          path: resolve(
+            recordingPolishScreenshots,
+            `${platform}-setup-keycap-de-980x740.png`,
+          ),
+        });
+        await page.setViewportSize({ width: 740, height: 560 });
+      }
       await page
         .getByRole("button", {
           name: index === 6 ? "Einrichtung abschließen" : "Weiter",
@@ -3453,7 +3884,7 @@ for (const platform of ["linux", "macos"] as const) {
       5,
     );
     await expect(
-      page.getByRole("heading", { name: "Diktat", exact: true }),
+      page.getByRole("heading", { name: "Aufnahme", exact: true }),
     ).toBeVisible();
     for (const title of [
       "Allgemein",
@@ -3524,6 +3955,15 @@ for (const platform of ["linux", "macos"] as const) {
     });
     await expect(login).toBeChecked();
     await expect(login).toBeDisabled();
+    await expect(
+      page.getByText("Launch at login is unavailable in this installation.", {
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await expect(login.locator("xpath=..")).toHaveAttribute(
+      "title",
+      "Launch at login is unavailable in this installation.",
+    );
     await page.evaluate(() => {
       const host = window as Window & {
         testState: { launch_at_login_available?: boolean };
@@ -3665,11 +4105,10 @@ test("Linux recognition mode selection remains independent of launch-at-login", 
   await expect(
     page.getByRole("checkbox", { name: "Launch at login", exact: true }),
   ).toBeDisabled();
-  await expect(
-    page.getByText("Launch at login is unavailable in this installation.", {
-      exact: true,
-    }),
-  ).toBeVisible();
+  await expect(page.locator(".launch-at-login-row")).toHaveAttribute(
+    "title",
+    "Launch at login is unavailable in this installation.",
+  );
   await page.reload();
   await expect(gpu).toBeChecked();
   await expect(
@@ -3717,13 +4156,14 @@ test("Mac Dev controls expose native Accessibility setup and preserve separate t
   await expect(
     page.getByRole("button", { name: "Command+Shift+Space", exact: true }),
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Remove trigger", exact: true })
-    .click();
   await expect(
-    page.getByRole("button", { name: "Set trigger …", exact: true }),
-  ).toBeVisible();
-  await selectSettingsTab(page, "recording");
+    page.locator('#settings-recording-primary [data-portal="clear_shortcut"]'),
+  ).toHaveCount(0);
+  await expect(
+    page.locator(
+      '#settings-recording-primary [data-portal="desktop_shortcut"]',
+    ),
+  ).toHaveCount(0);
   await expect(page.locator('[data-portal="enable_paste"]')).toBeEnabled();
   expect(
     await page.evaluate(() => {
@@ -3735,7 +4175,10 @@ test("Mac Dev controls expose native Accessibility setup and preserve separate t
         linux: host.testState.preferences.native_trigger,
       };
     }),
-  ).toEqual({ mac: null, linux: { kind: "mouse", button: 8 } });
+  ).toEqual({
+    mac: "Command+Shift+Space",
+    linux: { kind: "mouse", button: 8 },
+  });
 });
 
 test("macOS shows pending login approval without changing the idle overlay", async ({
@@ -3770,7 +4213,7 @@ test("macOS shows pending login approval without changing the idle overlay", asy
   ).not.toBeChecked();
 });
 
-test("Linux: native trigger capture blocks recording, cancels, and shows saved mouse bindings", async ({
+test("Linux: native trigger capture blocks recording and shows saved mouse bindings without inline removal controls", async ({
   page,
 }) => {
   await start(page, "linux");
@@ -3784,13 +4227,8 @@ test("Linux: native trigger capture blocks recording, cancels, and shows saved m
     w.publishState();
   });
   await selectSettingsTab(page, "recording");
-  await expect(
-    page.getByText("Choose a single key, shortcut, or mouse button.", {
-      exact: false,
-    }),
-  ).toBeVisible();
   await page
-    .getByRole("button", { name: "Set trigger …", exact: true })
+    .locator("#settings-recording-primary .settings-trigger-button")
     .click();
   await expect(
     page.getByRole("status").filter({ hasText: "Press and release" }),
@@ -3827,17 +4265,19 @@ test("Linux: native trigger capture blocks recording, cancels, and shows saved m
   await page.screenshot({
     path: "test-results/linux-native-triggers-german.png",
   });
-  await page.evaluate(() => {
-    const w = window as any;
-    w.testState.preferences.ui_language = "en";
-    w.publishState();
-  });
-  await page
-    .getByRole("button", { name: "Remove trigger", exact: true })
-    .click();
   await expect(
-    page.getByRole("button", { name: "Set trigger …", exact: true }),
-  ).toBeVisible();
+    page.locator('#settings-recording-primary [data-portal="clear_shortcut"]'),
+  ).toHaveCount(0);
+  await expect(
+    page.locator(
+      '#settings-recording-primary [data-portal="desktop_shortcut"]',
+    ),
+  ).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => (window as any).testState.preferences.native_trigger,
+    ),
+  ).toEqual({ kind: "mouse", button: 8 });
 });
 
 test("Linux mouse setup commits matching middle, back and forward releases only during setup", async ({
@@ -3938,11 +4378,6 @@ test("Linux X11 fallback exposes explicit keyboard setup and session paste witho
   });
   await selectSettingsTab(page, "recording");
   await expect(
-    page.getByText("Choose a regular keyboard key or shortcut.", {
-      exact: false,
-    }),
-  ).toBeVisible();
-  await expect(
     page.getByRole("combobox", { name: "Recording mode" }),
   ).toBeEnabled();
   await page
@@ -3977,7 +4412,7 @@ test("Linux X11 fallback exposes explicit keyboard setup and session paste witho
   await expect(page.getByText("Unavailable", { exact: true })).toHaveCount(2);
 });
 
-test("Linux X11 trigger removal and German help preserve the inactive KDE profile", async ({
+test("Linux X11 trigger settings preserve the inactive KDE profile without inline removal controls", async ({
   page,
 }) => {
   await start(page, "linux");
@@ -4004,17 +4439,16 @@ test("Linux X11 trigger removal and German help preserve the inactive KDE profil
     page.getByText("Automatisches Einfügen unter X11", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText("Wähle eine normale Taste", { exact: false }),
-  ).toBeVisible();
+    page.locator('#settings-recording-primary [data-portal="clear_shortcut"]'),
+  ).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "F8", exact: true }),
-  ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Auslöser entfernen", exact: true })
-    .click();
+    page.locator(
+      '#settings-recording-primary [data-portal="desktop_shortcut"]',
+    ),
+  ).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Auslöser festlegen …", exact: true }),
-  ).toBeVisible();
+    page.locator("#settings-recording-primary .settings-trigger-button"),
+  ).toHaveText("F8");
   expect(
     await page.evaluate(
       () => (window as any).testState.preferences.native_trigger,
@@ -4024,7 +4458,7 @@ test("Linux X11 trigger removal and German help preserve the inactive KDE profil
     await page.evaluate(
       () => (window as any).testState.preferences.x11_trigger,
     ),
-  ).toBeNull();
+  ).toEqual({ keycode: 74, keysym: 65477, modifiers: 0, group: 0 });
 });
 
 test("Linux: modifier-only triggers explain toggle mode and disable push to talk", async ({
