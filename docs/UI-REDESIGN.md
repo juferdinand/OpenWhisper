@@ -138,23 +138,28 @@ the preview-channel selector deferred until a reviewed release-channel implement
 
 ## Recording-level presentation
 
-The current native capture reports callback peaks, not a PCM waveform or RMS. The
-renderer shifts these samples and transitions every bar's height, which is a likely
-source of the reported pulsing. Preserve the capture path and improve presentation first:
-smooth each real incoming level with a time-based envelope, then move fixed historical
-bars from right to left at a steady speed. Do not reshape the entire history on each
-sample or generate fake activity during silence or transcription.
+Native capture reports callback peaks, not a PCM waveform or RMS. Adapt the Canvas
+scrolling renderer from [ElevenLabs Live Waveform](https://github.com/elevenlabs/ui/blob/23c31bd3088814215a8b5d0bfb56b327cad1a578/apps/www/registry/elevenlabs-ui/ui/live-waveform.tsx)
+to strict TypeScript in `app/ui/src/live-waveform.ts`, with the upstream
+[MIT notice](../app/ui/public/notices/elevenlabs-ui-LICENSE.txt) included in the renderer's
+packaged assets. Reuse its rounded bars, HiDPI sizing and softened edges; feed the existing
+validated recording telemetry instead of its React microphone acquisition. Keep the native
+recorder as the sole audio owner and avoid adding React for this component.
 
-Use [ElevenLabs Live Waveform](https://ui.elevenlabs.io/docs/components/live-waveform)
-as a visual reference for scrolling history and softened edges. Its React microphone
-component is not a drop-in replacement for our existing native recorder. For frame-paced
+Smooth only the incoming level with a time-based envelope, then move fixed historical
+bars from right to left at a steady speed. Preserve each historical bar's height instead of
+transitioning all heights on every sample. Bound the display history independently of the
+recording duration, fade stale input to silence and clear it on stop or a new recording
+generation. Do not generate activity during silence or transcription. For frame-paced
 motion, use timestamps with
 [requestAnimationFrame](https://developer.mozilla.org/en-US/docs/Web/API/Window/requestAnimationFrame)
 and preserve reduced-motion behavior. Web Audio's
 [smoothingTimeConstant](https://developer.mozilla.org/en-US/docs/Web/API/AnalyserNode/smoothingTimeConstant)
 applies to frequency data; it does not smooth the existing peak telemetry automatically.
-Validate any replacement with synthetic speech-like pulses, silence, irregular telemetry,
-stop/cancel, both window sizes and both main/overlay views before owner review.
+Validate the presentation with synthetic speech-like pulses, silence, irregular telemetry,
+stop/cancel, both window sizes and both main/overlay views before owner review. Dispose
+animation and resize listeners when a canvas is replaced, and stop scheduling frames when
+inactive or hidden.
 
 Use strict TypeScript and the existing renderer. Do not import the prototype's dynamic
 React/Babel runtime, remote fonts or demo scripts, relax the content security policy, or

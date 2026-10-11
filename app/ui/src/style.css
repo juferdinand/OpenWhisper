@@ -466,26 +466,16 @@ svg {
   min-width: 0;
   height: 100%;
   flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 3px;
   overflow: hidden;
 }
-.dictation-waveform i,
-.dictation-waveform span {
-  min-width: 2px;
-  flex: 1 1 0;
-  height: var(--wave-height, 4px);
-  max-height: 92px;
-  border-radius: 2px;
-  background: var(--border);
-  opacity: 1;
-  transition: height 90ms linear;
+.dictation-waveform canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: var(--border);
 }
-.dictation-waveform[data-active="true"] i,
-.dictation-waveform[data-active="true"] span {
-  background: var(--accent);
-  opacity: 0.82;
+.dictation-waveform[data-active="true"] canvas {
+  color: var(--accent);
 }
 .dictation-transcript {
   min-height: 0;
@@ -2831,9 +2821,11 @@ html.overlay,
   width: 3px;
   min-width: 3px;
   flex: 0 0 3px;
-  height: var(--wave-height, 6px);
+  height: 6px;
   max-height: 26px;
-  transition: height 90ms linear;
+}
+.audio-mark canvas {
+  display: none;
 }
 .overlay
   #record-control:not([data-status="recording"])
@@ -2907,17 +2899,14 @@ html.overlay,
   flex: 1 1 142px;
 }
 .overlay #record-control[data-status="recording"] .audio-mark i {
-  display: block;
-  width: auto;
-  min-width: 1px;
-  flex: 1 1 0;
-  height: var(--wave-height, 4px);
-}
-.overlay
-  #record-control:not([data-status="recording"])
-  .audio-mark
-  i:nth-child(n + 6) {
   display: none;
+}
+.overlay #record-control[data-status="recording"] .audio-mark canvas {
+  display: block;
+  width: 100%;
+  height: 26px;
+  min-width: 0;
+  color: var(--accent);
 }
 .overlay #record-control[data-status="recording"] #record-symbol {
   width: 11px;
@@ -2930,9 +2919,6 @@ html.overlay,
 }
 .overlay #record-control[data-status="recording"] #record-symbol svg {
   display: none;
-}
-.overlay #record-control[data-status="recording"] .audio-mark i {
-  animation: none;
 }
 @media (max-width: 400px) {
   .overlay .record-actions {

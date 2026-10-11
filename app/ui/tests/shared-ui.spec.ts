@@ -941,6 +941,83 @@ async function start(
   }
 }
 
+async function waveformPixels(page: Page, selector: string) {
+  return page.locator(selector).evaluate((element) => {
+    const canvas = element as HTMLCanvasElement;
+    const context = canvas.getContext("2d");
+    if (!context || canvas.width === 0 || canvas.height === 0)
+      throw new Error("Waveform canvas is not drawable.");
+    const { data, width, height } = context.getImageData(
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    );
+    const columns = Array<number>(width).fill(0);
+    const center = height / 2;
+    let paintedPixels = 0;
+    let peakDistance = 0;
+    let signature = 2166136261;
+    for (let index = 0; index < data.length; index += 4) {
+      const alpha = data[index + 3]!;
+      signature = Math.imul(signature ^ alpha, 16777619) >>> 0;
+      if (alpha < 16) continue;
+      paintedPixels++;
+      const pixel = index / 4;
+      const x = pixel % width;
+      const y = Math.floor(pixel / width);
+      const distance = Math.abs(y + 0.5 - center);
+      if (distance > 2) {
+        columns[x]! += alpha * distance;
+        peakDistance = Math.max(peakDistance, distance);
+      }
+    }
+    let peakX = -1;
+    let peakStrength = 0;
+    for (let x = 0; x < columns.length; x++) {
+      if (columns[x]! > peakStrength) {
+        peakX = x;
+        peakStrength = columns[x]!;
+      }
+    }
+    const rect = canvas.getBoundingClientRect();
+    return {
+      width,
+      height,
+      cssWidth: rect.width,
+      cssHeight: rect.height,
+      pixelRatio: rect.width ? width / rect.width : 0,
+      paintedPixels,
+      peakX,
+      peakRight: peakX >= 0 ? width - peakX : -1,
+      peakStrength,
+      peakDistance,
+      signature,
+    };
+  });
+}
+
+async function blockMicrophoneInput(page: Page) {
+  await page.addInitScript(() => {
+    (window as any).__syntheticMicrophoneRequests = 0;
+    const mediaDevices = navigator.mediaDevices ?? {};
+    Object.defineProperty(mediaDevices, "getUserMedia", {
+      configurable: true,
+      value: () => {
+        (window as any).__syntheticMicrophoneRequests++;
+        return Promise.reject(
+          new Error("Microphone access is disabled in tests."),
+        );
+      },
+    });
+    if (!navigator.mediaDevices)
+      Object.defineProperty(navigator, "mediaDevices", {
+        configurable: true,
+        value: mediaDevices,
+      });
+  });
+}
+
 async function openSettings(page: Page) {
   const dialog = page.locator("dialog#settings-dialog");
   if (
@@ -1046,57 +1123,183 @@ test("recording telemetry follows the newest full state and ignores stale genera
   await expect(page.locator("#record-label")).toHaveText("Start recording");
 });
 
-test("recording waveform keeps a rolling history of accepted telemetry samples", async ({
+test("waveform canvas ignores stale telemetry and stays static with reduced motion", async ({
   page,
 }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.clock.install();
+  await blockMicrophoneInput(page);
   await start(page, "linux", false, false, false, null);
+  const canvas = page.locator(
+    '.dictation-waveform canvas.live-waveform[data-waveform="main"]',
+  );
+  await expect(canvas).toBeVisible();
+  const idle = await waveformPixels(
+    page,
+    '.dictation-waveform canvas.live-waveform[data-waveform="main"]',
+  );
+
   await page.evaluate(() => {
     Object.assign(window.testState, {
       status: "recording",
       recording_generation: 7,
-      elapsed: 0,
+      elapsed: 1,
       level: 0,
     });
     window.publishState();
-    document
-      .querySelectorAll<HTMLElement>(".dictation-waveform i")
-      .forEach((bar) => (bar.style.transition = "none"));
-    for (const [elapsed, level] of [
-      [1, 0.2],
-      [2, 0.8],
-      [3, 0.4],
-    ])
-      window.publishTelemetry({ generation: 7, elapsed, level });
+    window.publishTelemetry({ generation: 7, elapsed: 1, level: 0.85 });
   });
-
-  await expect(page.locator(".dictation-waveform i")).toHaveCount(64);
-  const lastBars = page
-    .locator(".dictation-waveform i")
-    .evaluateAll((bars) =>
-      bars
-        .slice(-3)
-        .map((bar) => Number.parseFloat(getComputedStyle(bar).height)),
-    );
-  const heights = await lastBars;
-  expect(heights[0]).toBeCloseTo(19.2, 1);
-  expect(heights[1]).toBeCloseTo(64.8, 1);
-  expect(heights[2]).toBeCloseTo(34.4, 1);
-  await expect(page.locator("#dictation-timer")).toHaveText("0:03");
+  await page.clock.runFor(100);
+  const firstPeak = await waveformPixels(
+    page,
+    '.dictation-waveform canvas.live-waveform[data-waveform="main"]',
+  );
+  expect(firstPeak.paintedPixels).toBeGreaterThan(0);
+  expect(firstPeak.signature).not.toBe(idle.signature);
+  expect(firstPeak.peakDistance).toBeGreaterThan(idle.peakDistance);
 
   await page.evaluate(() => {
-    window.publishTelemetry({ generation: 7, elapsed: 4, level: 0 });
+    window.publishTelemetry({ generation: 6, elapsed: 99, level: 1 });
   });
-  const shifted = await page
-    .locator(".dictation-waveform i")
-    .evaluateAll((bars) =>
-      bars
-        .slice(-3)
-        .map((bar) => Number.parseFloat(getComputedStyle(bar).height)),
+  await page.clock.runFor(200);
+  const afterStale = await waveformPixels(
+    page,
+    '.dictation-waveform canvas.live-waveform[data-waveform="main"]',
+  );
+  expect(afterStale.signature).toBe(firstPeak.signature);
+
+  await page.evaluate(() => {
+    window.publishTelemetry({ generation: 7, elapsed: 2, level: 0.2 });
+  });
+  await page.clock.runFor(80);
+  const withHistory = await waveformPixels(
+    page,
+    '.dictation-waveform canvas.live-waveform[data-waveform="main"]',
+  );
+  await page.screenshot({
+    path: resolve(
+      recordingPolishScreenshots,
+      "waveform-reduced-motion-history.png",
+    ),
+  });
+  await page.evaluate(() => {
+    (window as any).__recordingWaveformCanvas = document.querySelector(
+      '.dictation-waveform canvas.live-waveform[data-waveform="main"]',
     );
-  expect(shifted[0]).toBeCloseTo(64.8, 1);
-  expect(shifted[1]).toBeCloseTo(34.4, 1);
-  expect(shifted[2]).toBeCloseTo(4, 1);
-  await expect(page.locator("#dictation-timer")).toHaveText("0:04");
+  });
+  await page.locator("#toggle-history").click();
+  await expect(page.locator("#toggle-history")).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
+  await page.clock.runFor(300);
+  const afterHistoryToggle = await waveformPixels(
+    page,
+    '.dictation-waveform canvas.live-waveform[data-waveform="main"]',
+  );
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__recordingWaveformCanvas ===
+        document.querySelector(
+          '.dictation-waveform canvas.live-waveform[data-waveform="main"]',
+        ),
+    ),
+  ).toBe(true);
+  expect(afterHistoryToggle.peakDistance).toBe(withHistory.peakDistance);
+  expect(afterHistoryToggle.paintedPixels).toBeGreaterThan(0);
+  await page.clock.runFor(600);
+  const expiredEnvelope = await waveformPixels(
+    page,
+    '.dictation-waveform canvas.live-waveform[data-waveform="main"]',
+  );
+  expect(expiredEnvelope.peakRight).toBe(afterHistoryToggle.peakRight);
+  expect(expiredEnvelope.peakDistance).toBe(afterHistoryToggle.peakDistance);
+  expect(
+    Math.abs(expiredEnvelope.peakStrength - afterHistoryToggle.peakStrength) /
+      afterHistoryToggle.peakStrength,
+  ).toBeLessThanOrEqual(0.05);
+  expect(expiredEnvelope.peakDistance).toBeGreaterThan(idle.peakDistance);
+
+  await page.evaluate(() => {
+    window.testState.status = "transcribing";
+    window.publishState();
+  });
+  await page.clock.runFor(200);
+  const stopped = await waveformPixels(
+    page,
+    '.dictation-waveform canvas.live-waveform[data-waveform="main"]',
+  );
+  await page.clock.runFor(200);
+  const stoppedAgain = await waveformPixels(
+    page,
+    '.dictation-waveform canvas.live-waveform[data-waveform="main"]',
+  );
+  expect(stoppedAgain.signature).toBe(stopped.signature);
+  expect(
+    await page.evaluate(() => (window as any).__syntheticMicrophoneRequests),
+  ).toBe(0);
+});
+
+test("recording canvas moves accepted historical peaks left without changing their height", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.clock.install();
+  await blockMicrophoneInput(page);
+  await start(page, "linux", false, false, false, null);
+  const selector =
+    '.dictation-waveform canvas.live-waveform[data-waveform="main"]';
+  await page.evaluate(() => {
+    Object.assign(window.testState, {
+      status: "recording",
+      recording_generation: 7,
+      elapsed: 1,
+      level: 0,
+    });
+    window.publishState();
+    window.publishTelemetry({ generation: 7, elapsed: 1, level: 0.9 });
+  });
+  await page.clock.runFor(100);
+  await page.evaluate(() => {
+    window.publishTelemetry({ generation: 7, elapsed: 2, level: 0 });
+  });
+  await page.clock.runFor(100);
+  const before = await waveformPixels(page, selector);
+  expect(before.paintedPixels).toBeGreaterThan(0);
+  await page.screenshot({
+    path: resolve(recordingPolishScreenshots, "waveform-scroll-before.png"),
+  });
+
+  await page.clock.runFor(200);
+  const after = await waveformPixels(page, selector);
+  await page.screenshot({
+    path: resolve(recordingPolishScreenshots, "waveform-scroll-after.png"),
+  });
+  expect(after.peakX).toBeLessThan(before.peakX);
+  expect(
+    Math.abs(after.peakDistance - before.peakDistance),
+  ).toBeLessThanOrEqual(2);
+  expect(after.cssWidth).toBeGreaterThan(0);
+  expect(after.pixelRatio).toBeGreaterThanOrEqual(1);
+
+  await page.setViewportSize({ width: 980, height: 740 });
+  await page.evaluate(() => {
+    Object.defineProperty(window, "devicePixelRatio", {
+      configurable: true,
+      value: 2,
+    });
+    window.dispatchEvent(new Event("resize"));
+  });
+  await page.clock.runFor(100);
+  const highDensity = await waveformPixels(page, selector);
+  expect(highDensity.cssWidth).toBeGreaterThan(0);
+  expect(highDensity.pixelRatio).toBeGreaterThanOrEqual(1.9);
+  expect(highDensity.pixelRatio).toBeLessThanOrEqual(2.1);
+  expect(highDensity.paintedPixels).toBeGreaterThan(0);
+  expect(
+    await page.evaluate(() => (window as any).__syntheticMicrophoneRequests),
+  ).toBe(0);
 });
 
 for (const platform of ["linux", "macos"] as const) {
@@ -1336,16 +1539,15 @@ for (const platform of ["linux", "macos"] as const) {
       window.publishTelemetry({ generation: 8, elapsed: 99, level: 1 });
     });
     await expect(page.locator("#dictation-timer")).toHaveText("1:14");
-    expect(
-      await page
-        .locator(".dictation-waveform i")
-        .last()
-        .evaluate((bar) =>
-          Number.parseFloat(
-            (bar as HTMLElement).style.getPropertyValue("--wave-height"),
-          ),
-        ),
-    ).toBeCloseTo(53.4, 1);
+    const waveformSelector =
+      '.dictation-waveform canvas.live-waveform[data-waveform="main"]';
+    await expect(page.locator(waveformSelector)).toBeVisible();
+    await expect
+      .poll(
+        async () =>
+          (await waveformPixels(page, waveformSelector)).paintedPixels,
+      )
+      .toBeGreaterThan(0);
     expect(await copy.evaluate((button) => button.isConnected)).toBe(true);
     await expect(copy).toBeFocused();
     await copy.click();
@@ -1730,6 +1932,7 @@ for (const platform of ["linux", "macos"] as const) {
     page,
   }) => {
     await page.setViewportSize({ width: 340, height: 64 });
+    await blockMicrophoneInput(page);
     await start(page, platform, true, true);
     await expect(page.locator("aside")).toHaveCount(0);
     await expect
@@ -1737,19 +1940,29 @@ for (const platform of ["linux", "macos"] as const) {
         page.evaluate(() => window.testState.preferences.setup_completed),
       )
       .toBe(false);
+    let generation = 10;
+    const overlayCanvasSelector =
+      '.audio-mark canvas.live-waveform[data-waveform="overlay"]';
     for (const language of ["en", "de"] as const) {
       for (const elapsed of [14, 126, 36_617]) {
+        const currentGeneration = generation++;
         await page.evaluate(
-          ({ language, elapsed }) => {
+          ({ language, elapsed, currentGeneration }) => {
             Object.assign(window.testState, {
               status: "recording",
               elapsed,
               level: 0.5,
+              recording_generation: currentGeneration,
             });
             window.testState.preferences.ui_language = language;
             window.publishState();
+            window.publishTelemetry({
+              generation: currentGeneration,
+              elapsed,
+              level: 0.55,
+            });
           },
-          { language, elapsed },
+          { language, elapsed, currentGeneration },
         );
         expect(
           await page.evaluate(() => ({
@@ -1766,60 +1979,41 @@ for (const platform of ["linux", "macos"] as const) {
         await expect(page.locator("#record-unavailable-action")).toBeHidden();
         await expect(page.locator("#record")).toBeInViewport();
         await expect(page.locator("#cancel")).toBeInViewport();
+        const waveform = page.locator(overlayCanvasSelector);
+        await expect(waveform).toBeVisible();
+        await page.locator("#record").focus();
+        await expect
+          .poll(
+            async () =>
+              (await waveformPixels(page, overlayCanvasSelector)).paintedPixels,
+          )
+          .toBeGreaterThan(0);
         const geometry = await page
           .locator("#record-control")
           .evaluate((control) => {
             const actions = control.querySelector(".record-actions")!;
             const actionsRect = actions.getBoundingClientRect();
-            const bars = Array.from(
-              control.querySelectorAll<HTMLElement>(".audio-mark i"),
-            ).map((bar) => {
-              const previousPointerEvents = bar.style.pointerEvents;
-              bar.style.pointerEvents = "auto";
-              try {
-                const rect = bar.getBoundingClientRect();
-                const hit = document.elementFromPoint(
-                  rect.left + rect.width / 2,
-                  rect.top + rect.height / 2,
-                );
-                const style = getComputedStyle(bar);
-                const hitStyle = hit ? getComputedStyle(hit) : null;
-                return {
-                  left: rect.left,
-                  right: rect.right,
-                  top: rect.top,
-                  bottom: rect.bottom,
-                  width: rect.width,
-                  height: rect.height,
-                  visible:
-                    style.visibility === "visible" && style.opacity !== "0",
-                  painted: style.backgroundColor !== "rgba(0, 0, 0, 0)",
-                  unobscured: hit === bar,
-                  hitTarget: hit
-                    ? {
-                        tag: hit.tagName,
-                        id: hit.id,
-                        className:
-                          typeof hit.className === "string"
-                            ? hit.className
-                            : "",
-                        pointerEvents: hitStyle?.pointerEvents,
-                        rect: (() => {
-                          const hitRect = hit.getBoundingClientRect();
-                          return {
-                            left: hitRect.left,
-                            right: hitRect.right,
-                            top: hitRect.top,
-                            bottom: hitRect.bottom,
-                          };
-                        })(),
-                      }
-                    : null,
-                };
-              } finally {
-                bar.style.pointerEvents = previousPointerEvents;
-              }
-            });
+            const canvas = control.querySelector<HTMLCanvasElement>(
+              'canvas.live-waveform[data-waveform="overlay"]',
+            )!;
+            const originalPointerEvents = canvas.style.pointerEvents;
+            canvas.style.pointerEvents = "auto";
+            const waveformRect = canvas.getBoundingClientRect();
+            const waveformHit = document.elementFromPoint(
+              waveformRect.left + waveformRect.width / 2,
+              waveformRect.top + waveformRect.height / 2,
+            );
+            const context = canvas.getContext("2d")!;
+            const pixels = context.getImageData(
+              0,
+              0,
+              canvas.width,
+              canvas.height,
+            ).data;
+            let paintedPixels = 0;
+            for (let index = 3; index < pixels.length; index += 4)
+              if (pixels[index]! > 16) paintedPixels++;
+            canvas.style.pointerEvents = originalPointerEvents;
             const label = control.querySelector("#record-label")!;
             const text = label.getBoundingClientRect();
             const record = control
@@ -1835,7 +2029,24 @@ for (const platform of ["linux", "macos"] as const) {
                 top: actionsRect.top,
                 bottom: actionsRect.bottom,
               },
-              bars,
+              waveform: {
+                left: waveformRect.left,
+                right: waveformRect.right,
+                top: waveformRect.top,
+                bottom: waveformRect.bottom,
+                width: waveformRect.width,
+                height: waveformRect.height,
+                visible:
+                  getComputedStyle(canvas).visibility === "visible" &&
+                  getComputedStyle(canvas).display !== "none",
+                paintedPixels,
+                unobscured: waveformHit === canvas,
+                inside:
+                  waveformRect.left >= actionsRect.left &&
+                  waveformRect.right <= actionsRect.right &&
+                  waveformRect.top >= actionsRect.top &&
+                  waveformRect.bottom <= actionsRect.bottom,
+              },
               textStart: text.left,
               textEnd: text.right,
               cancelLeft: cancel.left,
@@ -1850,88 +2061,85 @@ for (const platform of ["linux", "macos"] as const) {
           path: `test-results/${platform}-${language}-recording-overlay.png`,
           omitBackground: true,
         });
-        expect(geometry.bars).toHaveLength(36);
-        for (const bar of geometry.bars) {
-          expect(bar.width).toBeGreaterThan(0);
-          expect(bar.height).toBeGreaterThan(0);
-          expect(bar.left).toBeGreaterThanOrEqual(geometry.capsule.left);
-          expect(bar.right).toBeLessThanOrEqual(geometry.capsule.right);
-          expect(bar.top).toBeGreaterThanOrEqual(geometry.capsule.top);
-          expect(bar.bottom).toBeLessThanOrEqual(geometry.capsule.bottom);
-          expect(bar.visible).toBe(true);
-          expect(bar.painted).toBe(true);
-          expect(
-            bar.unobscured,
-            JSON.stringify({
-              platform,
-              language,
-              elapsed,
-              bar,
-              capsule: geometry.capsule,
-            }),
-          ).toBe(true);
-        }
-        expect(geometry.bars.at(-1)!.right).toBeLessThanOrEqual(
-          geometry.textStart,
-        );
+        await page.screenshot({
+          path: resolve(
+            recordingPolishScreenshots,
+            `${platform}-${language}-overlay-canvas-340.png`,
+          ),
+          omitBackground: true,
+        });
+        expect(geometry.waveform.width).toBeGreaterThan(0);
+        expect(geometry.waveform.height).toBeGreaterThan(0);
+        expect(geometry.waveform.inside).toBe(true);
+        expect(geometry.waveform.visible).toBe(true);
+        expect(geometry.waveform.paintedPixels).toBeGreaterThan(0);
+        expect(geometry.waveform.unobscured).toBe(true);
+        expect(geometry.waveform.right).toBeLessThanOrEqual(geometry.textStart);
         expect(geometry.textEnd).toBeLessThanOrEqual(geometry.cancelLeft);
         expect(geometry.cancelRight).toBeLessThanOrEqual(geometry.recordLeft);
         expect(geometry.stopRightInset).toBeGreaterThanOrEqual(8);
         expect(geometry.stopRightInset).toBeLessThanOrEqual(10);
         expect(geometry.textFits).toBe(true);
+        await expect(page.locator("#record")).toBeFocused();
       }
     }
     await page.setViewportSize({ width: 476, height: 68 });
+    await page.evaluate(() => {
+      window.publishTelemetry({
+        generation: window.testState.recording_generation,
+        elapsed: window.testState.elapsed + 1,
+        level: 0.75,
+      });
+    });
     const referenceCapsule = await page.evaluate(() => {
       const capsule = document
         .querySelector(".record-actions")!
         .getBoundingClientRect();
-      const bars = Array.from(
-        document.querySelectorAll<HTMLElement>(".audio-mark i"),
-      ).map((bar) => {
-        const original = bar.style.pointerEvents;
-        bar.style.pointerEvents = "auto";
-        try {
-          const rect = bar.getBoundingClientRect();
-          return {
-            width: rect.width,
-            height: rect.height,
-            inside:
-              rect.left >= capsule.left &&
-              rect.right <= capsule.right &&
-              rect.top >= capsule.top &&
-              rect.bottom <= capsule.bottom,
-            hit:
-              document.elementFromPoint(
-                rect.left + rect.width / 2,
-                rect.top + rect.height / 2,
-              ) === bar,
-          };
-        } finally {
-          bar.style.pointerEvents = original;
-        }
-      });
+      const canvas = document.querySelector<HTMLCanvasElement>(
+        'canvas.live-waveform[data-waveform="overlay"]',
+      )!;
+      const originalPointerEvents = canvas.style.pointerEvents;
+      canvas.style.pointerEvents = "auto";
+      const waveform = canvas.getBoundingClientRect();
+      const hit = document.elementFromPoint(
+        waveform.left + waveform.width / 2,
+        waveform.top + waveform.height / 2,
+      );
+      canvas.style.pointerEvents = originalPointerEvents;
       const stop = document.querySelector("#record")!.getBoundingClientRect();
       return {
         capsuleWidth: capsule.width,
         capsuleHeight: capsule.height,
         stopRightInset: capsule.right - stop.right,
-        bars,
+        waveform: {
+          width: waveform.width,
+          height: waveform.height,
+          inside:
+            waveform.left >= capsule.left &&
+            waveform.right <= capsule.right &&
+            waveform.top >= capsule.top &&
+            waveform.bottom <= capsule.bottom,
+          hit: hit === canvas,
+        },
       };
     });
     expect(referenceCapsule.capsuleWidth).toBeCloseTo(460, 0);
     expect(referenceCapsule.capsuleHeight).toBeCloseTo(52, 0);
     expect(referenceCapsule.stopRightInset).toBeGreaterThanOrEqual(8);
     expect(referenceCapsule.stopRightInset).toBeLessThanOrEqual(10);
-    expect(referenceCapsule.bars).toHaveLength(36);
-    for (const bar of referenceCapsule.bars) {
-      expect(bar.width).toBeGreaterThan(0);
-      expect(bar.height).toBeGreaterThan(0);
-      expect(bar.inside).toBe(true);
-      expect(bar.hit).toBe(true);
-    }
+    expect(referenceCapsule.waveform.width).toBeGreaterThan(0);
+    expect(referenceCapsule.waveform.height).toBeGreaterThan(0);
+    expect(referenceCapsule.waveform.inside).toBe(true);
+    expect(referenceCapsule.waveform.hit).toBe(true);
     await page.screenshot({
       path: `test-results/${platform}-recording-overlay-reference-width.png`,
+      omitBackground: true,
+    });
+    await page.screenshot({
+      path: resolve(
+        recordingPolishScreenshots,
+        `${platform}-overlay-canvas-reference-width.png`,
+      ),
       omitBackground: true,
     });
     await page.locator("#record").click();

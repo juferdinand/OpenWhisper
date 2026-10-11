@@ -1,6 +1,7 @@
 import { invoke, listen } from "./bridge";
 import { setLocale, t } from "./i18n";
 import { escapeHtml as esc } from "./escape-html";
+import { LiveWaveform } from "./live-waveform";
 import "./style.css";
 import {
   preferencePatchSchema,
@@ -29,9 +30,8 @@ let workspaceKey = "";
 let shellKey = "";
 let renderedTab: View | undefined;
 let historyRailOpen = true;
-const waveformSamples: number[] = Array<number>(64).fill(0);
-let waveformRecording = false;
-let waveformGeneration: number | undefined;
+let mainWaveform: LiveWaveform | undefined;
+let overlayWaveform: LiveWaveform | undefined;
 let selectedHistoryIndex: number | null = null;
 let observedHistorySnapshot: string | undefined;
 let observedTranscript: string | undefined;
@@ -1097,6 +1097,10 @@ function renderShell() {
   const previousSettings =
     document.querySelector<HTMLDialogElement>("#settings-dialog");
   if (previousSettings?.open) previousSettings.close();
+  mainWaveform?.destroy();
+  mainWaveform = undefined;
+  overlayWaveform?.destroy();
+  overlayWaveform = undefined;
   shellKey = key;
   contentKey = "";
   workspaceKey = "";
@@ -1281,12 +1285,9 @@ function recordControl() {
         : []),
     ];
     const outputControls = `<div class="record-output" role="group" aria-label="${esc(t("Output"))}"><span class="record-output-label">${esc(t("Output"))}</span>${outputModes.map(([value, label, fullLabel]) => `<button type="button" data-output="${value}" data-pref="output" aria-label="${esc(fullLabel)}" title="${esc(fullLabel)}" aria-pressed="${state.preferences.output === value}" ${recording || recovery || (value === "paste" && (portalBusy || state.paste_configuring)) ? "disabled" : ""}>${esc(label)}</button>`).join("")}</div>`;
-    const overlayBars = Array.from(
-      { length: 36 },
-      (_, index) => `<i style="--wave-index:${index}"></i>`,
-    ).join("");
+    const overlayBars = Array.from({ length: 5 }, () => "<i></i>").join("");
     controls.innerHTML = overlay
-      ? `<div class="record-actions"><div class="record-status"><div class="audio-mark" aria-hidden="true">${overlayBars}</div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div><span id="record-label"></span><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-action-label" class="record-action-label"></span></button></div>`
+      ? `<div class="record-actions"><div class="record-status"><div class="audio-mark" aria-hidden="true">${overlayBars}<canvas class="live-waveform" data-waveform="overlay" aria-hidden="true"></canvas></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div><span id="record-label"></span><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-action-label" class="record-action-label"></span></button></div>`
       : `<div class="record-leading"><button id="discard-result" type="button" title="${esc(t("Clear current text; saved history is kept."))}" aria-label="${esc(t("Clear current text; saved history is kept."))}">${esc(t("Discard"))}</button><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><div class="record-status"><div class="audio-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div></div><div class="record-center"><button id="record" class="capsule"><span id="record-symbol"></span></button><span id="record-label"></span></div>${outputControls}`;
     document
       .querySelector("#record")!
@@ -1434,55 +1435,59 @@ function recordControl() {
   syncDictationState();
 }
 
-function updateWaveformHistory(append = false) {
-  if (state.status !== "recording") {
-    waveformSamples.fill(0);
-    waveformRecording = false;
-    waveformGeneration = undefined;
-    return;
+function syncWaveforms(seedCurrentLevel = true) {
+  const recording = state.status === "recording";
+  const generation = state.recording_generation;
+  const mainWaveformElement = document.querySelector<HTMLElement>(
+    ".dictation-waveform",
+  );
+  if (mainWaveformElement)
+    mainWaveformElement.dataset.active = String(recording);
+  const mainCanvas = document.querySelector<HTMLCanvasElement>(
+    '#dictation-content canvas[data-waveform="main"]',
+  );
+  if (mainWaveform?.canvas !== mainCanvas) {
+    mainWaveform?.destroy();
+    mainWaveform = mainCanvas
+      ? new LiveWaveform(mainCanvas, { mode: "scrolling" })
+      : undefined;
   }
-  if (!waveformRecording || waveformGeneration !== state.recording_generation) {
-    waveformSamples.fill(0);
-    waveformRecording = true;
-    waveformGeneration = state.recording_generation;
-    append = true;
+  const overlayCanvas = overlay
+    ? document.querySelector<HTMLCanvasElement>(
+        '#record-control canvas[data-waveform="overlay"]',
+      )
+    : null;
+  if (overlayWaveform?.canvas !== overlayCanvas) {
+    overlayWaveform?.destroy();
+    overlayWaveform = overlayCanvas
+      ? new LiveWaveform(overlayCanvas, {
+          mode: "scrolling",
+          fadeWidth: 10,
+        })
+      : undefined;
   }
-  if (append) {
-    waveformSamples.shift();
-    waveformSamples.push(state.level ?? 0);
+  for (const waveform of [mainWaveform, overlayWaveform]) {
+    if (!waveform) continue;
+    const freshGeneration = waveform.setRecording(recording, generation);
+    if (
+      freshGeneration &&
+      seedCurrentLevel &&
+      recording &&
+      generation !== undefined
+    )
+      waveform.push(generation, state.level ?? 0, performance.now());
   }
 }
 
 function syncDictationState() {
-  updateWaveformHistory();
   syncDiscardResult();
+  syncWaveforms();
   const heading = document.querySelector<HTMLElement>(".dictation-status-pill");
   if (heading) heading.textContent = recordingStatusTitle();
   const timer = document.querySelector<HTMLElement>("#dictation-timer");
   if (timer) {
     const elapsed = state.elapsed;
     timer.textContent = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
-  }
-  const level = document.querySelector<HTMLElement>(".dictation-waveform");
-  if (level) {
-    level.dataset.active = String(state.status === "recording");
-    level.querySelectorAll<HTMLElement>("i").forEach((bar, index) => {
-      bar.style.setProperty(
-        "--wave-height",
-        `${4 + (waveformSamples[index] ?? 0) * 76}px`,
-      );
-    });
-  }
-  if (overlay) {
-    const samples = waveformSamples.slice(-36);
-    document
-      .querySelectorAll<HTMLElement>(".audio-mark i")
-      .forEach((bar, index) => {
-        bar.style.setProperty(
-          "--wave-height",
-          `${4 + (samples[index] ?? 0) * 22}px`,
-        );
-      });
   }
 }
 
@@ -1603,7 +1608,13 @@ function renderWorkspace() {
   const railStatus = state.preferences.keep_history
     ? t("Saved only on this device.")
     : t("History is not saved.");
-  main.innerHTML = `<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true">${Array.from({ length: 64 }, (_, i) => `<i style="--wave-index:${i}"></i>`).join("")}</div></section><section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}</div></section><section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
+  const retainedWaveformCanvas = mainWaveform?.canvas;
+  retainedWaveformCanvas?.remove();
+  main.innerHTML = `<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true"><canvas class="live-waveform" data-waveform="main" aria-hidden="true"></canvas></div></section><section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}</div></section><section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
+  if (retainedWaveformCanvas)
+    main
+      .querySelector<HTMLElement>(".dictation-waveform")
+      ?.replaceChildren(retainedWaveformCanvas);
   rail.innerHTML = `<header class="dictation-history-heading"><div class="dictation-history-title"><h2>${esc(t("History"))}</h2><span class="dictation-history-count">${state.history.length}</span></div><button id="toggle-history" type="button" aria-expanded="${historyRailOpen}" aria-controls="dictation-history-list" aria-label="${esc(t(historyRailOpen ? "Hide history" : "Show history"))}">${esc(t(historyRailOpen ? "Hide history" : "Show history"))}</button></header><div id="dictation-history-list" class="dictation-history-list" ${historyRailOpen ? "" : "hidden"}>${state.history.length ? historyRows() : `<p class="secondary">${esc(t("No recordings in history yet."))}</p>`}</div><footer class="dictation-history-footer"><span>${esc(railStatus)}</span>${state.history.length ? `<button type="button" data-clear-history id="clear-history-rail" class="history-clear-action">${esc(t("Clear history"))}</button>` : ""}</footer>`;
   main
     .querySelector<HTMLButtonElement>("#copy-dictation")
@@ -2570,7 +2581,11 @@ async function start() {
         elapsed: event.payload.elapsed,
         level: event.payload.level,
       };
-      updateWaveformHistory(true);
+      syncWaveforms(false);
+      const generation = event.payload.generation;
+      const sampleAt = performance.now();
+      mainWaveform?.push(generation, event.payload.level, sampleAt);
+      overlayWaveform?.push(generation, event.payload.level, sampleAt);
       recordControl();
     });
     const initialState = await invoke("get_state");
