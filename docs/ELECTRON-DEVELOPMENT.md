@@ -56,15 +56,15 @@ npm run dev -- --dev-profile /absolute/private/path/openwhisper-dev
 Existing Dev directories must be owned by the current user with mode `0700`; stored
 preferences use `0600`. Stable storage, overlapping bases, symlink paths and unsafe
 existing directories are refused. No stable preferences, models or recovery files are
-imported automatically. Closing the main window quits this Dev host so it stays
-reachable without assuming a working tray host.
+imported automatically.
 
 ## Desktop controls
 
-The tray uses the existing app icon and shared English/German labels. Its Settings,
-Start/Stop, Cancel and Quit actions use the same recording handlers as the shared UI.
-Unavailable recording actions stay disabled; closing the main window still quits.
-Native tray presentation on each desktop remains an acceptance item.
+Closing the main window hides it while the app stays running in the Linux tray or macOS
+menu bar. Tray click or Settings, and normal app activation, reopen the main window.
+Explicit Quit runs normal cleanup and exits. Tray Settings, Start/Stop, Cancel and Quit
+use the shared UI handlers; unavailable recording actions stay disabled. The owned Xvfb
+lifecycle check does not establish native tray presentation on every desktop.
 
 The floating control loads the same trusted shared UI through a sandboxed, restricted
 overlay bridge. It shows only while the main window is in the background, during

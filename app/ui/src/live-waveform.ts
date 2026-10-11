@@ -329,6 +329,7 @@ export class LiveWaveform {
         return;
       this.displayedLevel = 0;
       this.targetLevel = 0;
+      this.columns = [];
       this.draw(performance.now());
     }, remaining + 1);
   }

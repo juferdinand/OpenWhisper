@@ -521,12 +521,18 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     assert.equal((await lstat(persisted)).mode & 0o777, 0o600);
     await reopened.locator("#close-settings").click();
     await expect(reopened.locator("#settings-dialog")).toBeHidden();
-    await Promise.all([
-      restarted.waitForEvent("close"),
-      reopened.locator('[data-window-action="close"]').click(),
-    ]);
+    await reopened.locator('[data-window-action="close"]').click();
+    const mainWindowState = () => restarted.evaluate(({ BrowserWindow }) => {
+      const main = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL() === "app://openwhisper/index.html");
+      return main ? { visible: main.isVisible(), destroyed: main.isDestroyed() } : undefined;
+    });
+    await expect.poll(mainWindowState).toEqual({ visible: false, destroyed: false });
+    assert.equal(restarted.process().exitCode, null);
+    await restarted.evaluate(({ app }) => app.emit("activate"));
+    await expect.poll(mainWindowState).toEqual({ visible: true, destroyed: false });
+    await Promise.all([restarted.waitForEvent("close"), restarted.evaluate(({ app }) => app.quit())]);
     application = undefined;
-    checks.push("custom close button reaches normal application shutdown through the validated bridge");
+    checks.push("custom close hides the main window, activate reopens it, and explicit application quit shuts down cleanly");
     checks.push("EN/DE patches, focused editor and stable toggle node, restart persistence, stable sentinels unchanged");
     await writeFile(join(evidence, "result.json"), JSON.stringify({
       result: "PASS", scope: "Owned development UI and real preference IPC; no microphone, physical input or model quality test", checks,

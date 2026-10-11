@@ -177,7 +177,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   app.on("activate", () => {
     if (window && !window.isDestroyed()) { window.show(); window.focus(); }
   });
-  app.on("window-all-closed", () => { app.quit(); });
+  // Keep the tray resident when the main window is closed on macOS and Linux.
+  app.on("window-all-closed", () => undefined);
   await app.whenReady();
   const devAutostart = process.platform === "linux" && identity.kind === "development" && app.isPackaged
     ? admitLinuxDevelopmentAutostart({ build: identity, platform: process.platform, packaged: app.isPackaged,
@@ -1086,7 +1087,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     target.on("will-navigate", (event) => { event.preventDefault(); });
     target.on("will-attach-webview", (event) => { event.preventDefault(); });
   }
-  window.on("close", (event) => { if (!shutdownComplete) { event.preventDefault(); app.quit(); } });
+  window.on("close", (event) => { if (!shutdownComplete) { event.preventDefault(); window?.hide(); } });
   window.on("closed", () => { processing.close(); ipcMain.removeHandler("openwhisper:invoke"); window = undefined; syncOverlayAfterWindowEvent(); });
   window.once("ready-to-show", () => { window?.show(); });
   window.on("focus", syncOverlayAfterWindowEvent);

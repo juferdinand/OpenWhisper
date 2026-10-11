@@ -742,6 +742,22 @@ try {
     await expect.poll(async () => (await state()).preferences.vocabulary, { timeout: 10_000 }).toBe(vocabulary);
     await preserved();
   }
+  stage = "close-to-background";
+  const settingsDialog = page.locator("#settings-dialog");
+  if (await settingsDialog.evaluate((element) => (element as HTMLDialogElement).open)) {
+    await page.locator("#close-settings").click();
+    await expect(settingsDialog).toBeHidden();
+  }
+  await page.locator('[data-window-action="close"]').click();
+  const mainWindow = () => application!.evaluate(({ BrowserWindow }) => {
+    const item = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL() === "app://openwhisper/index.html");
+    return item ? { visible: item.isVisible(), destroyed: item.isDestroyed() } : undefined;
+  });
+  await expect.poll(mainWindow, { timeout: 10_000 }).toEqual({ visible: false, destroyed: false });
+  assert.equal(application.process().exitCode, null);
+  await application.evaluate(({ app }) => app.emit("activate"));
+  await expect.poll(mainWindow, { timeout: 10_000 }).toEqual({ visible: true, destroyed: false });
+  checks.push("Production window close hides the main window while the packaged app stays alive; native app activation reopens it");
   stage = "original-quit";
   await application.close();
   const exit = await closed; application = undefined;

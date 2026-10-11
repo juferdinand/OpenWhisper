@@ -167,6 +167,7 @@ Use strict TypeScript and the existing renderer. Do not import the prototype's d
 React/Babel runtime, remote fonts or demo scripts, relax the content security policy, or
 switch frameworks solely for this appearance. Use the prototype's custom titlebar with
 working minimize, maximize/restore and close buttons, as requested during owner review.
+Close hides the window while the tray remains active; explicit Quit and update retirement still exit.
 Keep dragging available and route these actions through the validated main-window bridge;
 recording overlays must not gain access to main-window controls.
 

@@ -19,7 +19,6 @@ declare global {
       command: CommandName,
       args: unknown,
     ) => Promise<unknown>;
-    rendererFixturePublish?: (state: unknown) => void;
   }
 }
 
@@ -115,10 +114,6 @@ class RendererFixture {
           listeners.set(name, current);
           return () => current.delete(callback);
         },
-      };
-      window.rendererFixturePublish = (state) => {
-        for (const callback of listeners.get("state") ?? [])
-          callback(structuredClone(state));
       };
     });
     await this.page.goto(pathToFileURL(resolve("dist/index.html")).href);

@@ -1217,13 +1217,20 @@ test("waveform canvas ignores stale telemetry and stays static with reduced moti
     page,
     '.dictation-waveform canvas.live-waveform[data-waveform="main"]',
   );
-  expect(expiredEnvelope.peakRight).toBe(afterHistoryToggle.peakRight);
-  expect(expiredEnvelope.peakDistance).toBe(afterHistoryToggle.peakDistance);
-  expect(
-    Math.abs(expiredEnvelope.peakStrength - afterHistoryToggle.peakStrength) /
-      afterHistoryToggle.peakStrength,
-  ).toBeLessThanOrEqual(0.05);
-  expect(expiredEnvelope.peakDistance).toBeGreaterThan(idle.peakDistance);
+  expect(expiredEnvelope.paintedPixels).toBe(0);
+  expect(expiredEnvelope.peakDistance).toBe(0);
+  await expect(page.locator("#record-label")).toHaveText("Recording · 0:02");
+
+  await page.evaluate(() => {
+    window.publishTelemetry({ generation: 7, elapsed: 3, level: 0.7 });
+  });
+  await page.clock.runFor(100);
+  const recovered = await waveformPixels(
+    page,
+    '.dictation-waveform canvas.live-waveform[data-waveform="main"]',
+  );
+  expect(recovered.paintedPixels).toBeGreaterThan(0);
+  expect(recovered.peakDistance).toBeGreaterThan(idle.peakDistance);
 
   await page.evaluate(() => {
     window.testState.status = "transcribing";

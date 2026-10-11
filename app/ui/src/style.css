@@ -3052,7 +3052,7 @@ html.setup-mode .setup-progress {
   color: var(--accent);
   font-size: 10px;
   font-weight: 650;
-  letter-spacing: 1.5px;
+  letter-spacing: 1.1px;
   text-transform: uppercase;
 }
 html.setup-mode .setup-card h1 {
@@ -3091,10 +3091,6 @@ html.setup-mode .setup-language button[aria-pressed="true"] {
   border-color: #8e6ab7;
   background: #342744;
   color: #ead9ff;
-}
-html.setup-mode .setup-progress {
-  margin-bottom: 12px;
-  letter-spacing: 1.1px;
 }
 html.setup-mode .setup-segments {
   display: flex;
