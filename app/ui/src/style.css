@@ -1147,7 +1147,8 @@ dialog#settings-dialog {
 .settings-content .group > .launch-at-login-hint {
   padding-top: 0;
 }
-.settings-content .group:has(.compute-mode) {
+.settings-content .group:has(.compute-mode),
+.settings-content .group:has(> .recognition-mode-footer) {
   padding: 14px 16px;
 }
 .settings-content .group:has(.compute-mode) > .row {
@@ -1224,6 +1225,9 @@ dialog#settings-dialog {
   justify-content: space-between;
   gap: 12px;
   margin-top: 12px;
+}
+.settings-content .recognition-mode-footer:only-child {
+  margin-top: 0;
 }
 .settings-content #manage-models {
   min-height: 0;
@@ -2546,6 +2550,35 @@ dialog#update-dialog {
   #dictation-workspace:has(.history-collapsed) #record-control {
     right: 48px;
   }
+  #dictation-workspace #record-control[data-unavailable="true"] .record-status {
+    flex: 1 1 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  #dictation-workspace
+    #record-control[data-unavailable="true"]
+    #discard-result {
+    width: auto;
+  }
+  #dictation-workspace #record-control[data-unavailable="true"] .record-copy {
+    width: 100%;
+  }
+  #dictation-workspace #record-control[data-unavailable="true"] #status-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #dictation-workspace
+    #record-control[data-unavailable="true"]
+    #record-unavailable-action {
+    align-self: flex-start;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
   .dictation-topline > div,
   .dictation-title-group {
     gap: 9px;
@@ -2604,8 +2637,7 @@ dialog#update-dialog {
     padding: 8px;
   }
   .record-output-label {
-    padding: 0 4px;
-    font-size: 10.5px;
+    display: none;
   }
   .record-output button {
     padding: 0 4px;

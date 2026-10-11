@@ -87,7 +87,9 @@ try {
   const originalProcess = application.process(), originalPid = originalProcess.pid;
   assert.ok(typeof originalPid === "number" && originalPid > 0);
   const originalClosed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((accept) => originalProcess.once("close", (code, signal) => accept({ code, signal })));
-  page = await application.firstWindow(); await expect(page.locator(".sidebar-brand strong")).toHaveText("OpenWhisper", { timeout: 20_000 });
+  page = await application.firstWindow(); await expect(page.locator(".window-wordmark")).toHaveText("openwhisper", { timeout: 20_000 });
+  await expect(page.locator(".window-dev-badge")).toHaveCount(0);
+  assert.equal(await application.evaluate(({ app }) => app.getName()), currentBuild.productName);
   assert.equal(page.url(), "app://openwhisper/index.html");
   const state = async () => appStateSchema.parse(await page!.evaluate(() => window.openwhisper!.invoke("get_state", {})));
   const before = await state(); assert.equal(before.version, "0.3.1"); assert.equal(before.updates.configured, true);

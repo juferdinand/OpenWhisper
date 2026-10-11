@@ -3286,6 +3286,21 @@ test("macOS retains native trigger capture, model import, and update actions", a
   page,
 }) => {
   await start(page, "macos");
+  await expect(page.locator(".recognition-mode-footer")).toBeVisible();
+  const recognitionInsets = await page
+    .locator(".recognition-mode-footer")
+    .evaluate((footer) => {
+      const card = footer.parentElement!.getBoundingClientRect();
+      const content = footer.getBoundingClientRect();
+      return [
+        content.left - card.left,
+        card.right - content.right,
+        content.top - card.top,
+        card.bottom - content.bottom,
+      ];
+    });
+  for (const inset of recognitionInsets)
+    expect(inset).toBeGreaterThanOrEqual(10);
   await selectSettingsTab(page, "recording");
   await page
     .getByRole("button", { name: "Set trigger …", exact: true })
@@ -3323,6 +3338,106 @@ test("macOS retains native trigger capture, model import, and update actions", a
 });
 
 for (const platform of ["linux", "macos"] as const) {
+  test(`${platform}: unavailable recording status remains readable at minimum window size in English and German`, async ({
+    page,
+  }) => {
+    await start(page, platform, false, false, false, null);
+    await page.setViewportSize({ width: 740, height: 560 });
+    for (const language of ["en", "de"] as const) {
+      await page.evaluate((uiLanguage) => {
+        Object.assign(window.testState, {
+          status: "idle",
+          message:
+            uiLanguage === "de"
+              ? "Mikrofonzugriff ist erforderlich. Prüfe die Einstellungen unter „Aufnahme“."
+              : "Recording is unavailable. Restart the recording service and try again.",
+          recording_available: false,
+          recording_unavailable_reason: "audio",
+          recovery_available: false,
+          preferences: {
+            ...window.testState.preferences,
+            ui_language: uiLanguage,
+          },
+        });
+        window.publishState();
+      }, language);
+      const status = page.locator(".record-status");
+      const action = page.locator("#record-unavailable-action");
+      await expect(status).toBeVisible();
+      await expect(page.locator("#status-title")).toHaveText(
+        language === "de"
+          ? "Aufnahme nicht verfügbar"
+          : "Recording is unavailable",
+      );
+      await expect(page.locator("#status")).toContainText(
+        language === "de"
+          ? "Audioeingang verfügbar"
+          : "audio input is available",
+      );
+      await expect(action).toBeVisible();
+      await expect(action).toBeInViewport();
+      const geometry = await page.evaluate(() => {
+        const rect = (selector: string) => {
+          const { left, right, top, bottom } = document
+            .querySelector(selector)!
+            .getBoundingClientRect();
+          return { left, right, top, bottom };
+        };
+        return {
+          status: rect(".record-status"),
+          discard: rect("#discard-result"),
+          center: rect(".record-center"),
+          output: rect(".record-output"),
+          title: rect("#status-title"),
+          message: rect("#status"),
+          action: rect("#record-unavailable-action"),
+          footer: rect("#record-control"),
+          viewportWidth: document.documentElement.clientWidth,
+        };
+      });
+      expect(geometry.status.left).toBeGreaterThanOrEqual(
+        geometry.discard.right,
+      );
+      expect(geometry.status.right).toBeLessThanOrEqual(geometry.center.left);
+      expect(geometry.status.right).toBeLessThanOrEqual(geometry.viewportWidth);
+      expect(
+        geometry.output.left,
+        JSON.stringify({ platform, language, geometry }),
+      ).toBeGreaterThanOrEqual(geometry.center.right);
+      const actionBox = await action.boundingBox();
+      expect(actionBox).not.toBeNull();
+      expect(actionBox!.x).toBeGreaterThanOrEqual(geometry.status.left);
+      expect(
+        actionBox!.x + actionBox!.width,
+        JSON.stringify({ geometry, actionBox }),
+      ).toBeLessThanOrEqual(geometry.status.right);
+      expect(geometry.title.bottom).toBeLessThanOrEqual(
+        geometry.message.top + 1,
+      );
+      expect(geometry.message.bottom).toBeLessThanOrEqual(
+        geometry.action.top + 1,
+      );
+      expect(
+        geometry.action.bottom,
+        JSON.stringify({ platform, language, geometry }),
+      ).toBeLessThanOrEqual(geometry.footer.bottom);
+      const titleLineHeight = await page
+        .locator("#status-title")
+        .evaluate(
+          (element) =>
+            Number.parseFloat(getComputedStyle(element).fontSize) * 1.5,
+        );
+      expect(geometry.title.bottom - geometry.title.top).toBeLessThanOrEqual(
+        titleLineHeight * 1.5,
+      );
+      await action.click();
+      await expect(
+        page.locator('.settings-dialog-nav [data-tab="recording"]'),
+      ).toHaveClass(/selected/);
+      await closeSettings(page);
+    }
+  });
+
   test(`${platform}: interface language persists without changing recognition language or user text`, async ({
     page,
   }) => {

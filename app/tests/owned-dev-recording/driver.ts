@@ -23,6 +23,12 @@ import type { ControlCommand, ControlAction } from "../../src/cli/arguments.js";
 import { diagnosticIdentity, resourceSnapshot, type DiagnosticRoot } from "./resource-diagnostic.js";
 
 declare global { interface Window { openwhisper?: DesktopBridge } }
+async function openSettingsTab(page: Page, tab: string): Promise<void> {
+  const dialog = page.locator("#settings-dialog");
+  if (!(await dialog.evaluate((element) => (element as HTMLDialogElement).open))) await page.locator("#open-settings").click();
+  await expect(dialog).toBeVisible();
+  await page.locator(`.settings-dialog-nav [data-tab="${tab}"]`).click();
+}
 const execute = promisify(execFile);
 const payload = resolve(fileURLToPath(new URL("./", import.meta.url)));
 const packaged = process.env.OPENWHISPER_PACKAGE_DIRECTORY === "/payload/package";
@@ -643,7 +649,9 @@ async function main(): Promise<void> {
   });
   startupPhase = "initial-ui";
   page = await application.firstWindow();
-  await expect(page.locator(".sidebar-brand strong")).toHaveText(stablePackage ? "OpenWhisper" : "OpenWhisper Dev");
+  await expect(page.locator(".window-wordmark")).toHaveText("openwhisper");
+  await expect(page.locator(".window-dev-badge")).toHaveCount(stablePackage ? 0 : 1);
+  assert.equal(await application.evaluate(({ app }) => app.getName()), stablePackage ? "OpenWhisper" : "OpenWhisper Dev");
   assert.equal(page.url(), "app://openwhisper/index.html");
   if (stablePackage) {
     const actual = await application.evaluate(({ app }) => ({ name: app.getName(), path: app.getAppPath(), executable: process.execPath,
@@ -682,7 +690,9 @@ async function main(): Promise<void> {
     const window = BrowserWindow.getAllWindows()[0];
     return { visible: window?.isVisible(), loading: window?.webContents.isLoading(), gpu: app.getGPUFeatureStatus() };
   })), { mode: 0o600 });
-  await expect(page.locator(".sidebar-brand strong")).toHaveText(stablePackage ? "OpenWhisper" : "OpenWhisper Dev");
+  await expect(page.locator(".window-wordmark")).toHaveText("openwhisper");
+  await expect(page.locator(".window-dev-badge")).toHaveCount(stablePackage ? 0 : 1);
+  assert.equal(await application.evaluate(({ app }) => app.getName()), stablePackage ? "OpenWhisper" : "OpenWhisper Dev");
   assert.equal(page.url(), "app://openwhisper/index.html");
   const firstSources = await state();
   await writeFile(join(evidence, "initial-source-enumeration.json"), JSON.stringify({ count: firstSources.microphones.length,
@@ -694,9 +704,10 @@ async function main(): Promise<void> {
   const initial = await state(); assert.equal(initial.profile, stablePackage ? undefined : "development"); assert.equal(initial.recording_available, true);
   if (!stablePackage) {
     assert.equal(initial.preferences.setup_completed, false);
-    await expect(page.locator('nav button[data-tab="setup"]')).toBeVisible();
-    await expect(page.locator("nav button[data-tab]")).toHaveCount(1);
-    await expect(page.locator('nav button[data-tab="general"]')).toHaveCount(0);
+    await expect(page.locator("main.setup-main #setup-title")).toBeVisible();
+    await expect(page.locator("#dictation-workspace, #settings-dialog")).toHaveCount(0);
+    await page.locator("[data-setup-next]").click();
+    for (let step = 0; step < 6; step += 1) await page.locator("[data-setup-next]").click();
     await page.locator('[data-command="complete_setup"]').click();
     await expect.poll(async () => (await state()).preferences.setup_completed).toBe(true);
     checks.push("fresh Dev profile exposes Setup only until Finish setup persists completion");
@@ -728,9 +739,9 @@ async function main(): Promise<void> {
     assert.equal(initial.updates.configured, true); assert.equal(initial.updates.status, "idle"); assert.equal(initial.updates.progress, 0);
     assert.equal(initial.preferences.auto_check_updates, false); await assertRendererIsolation(application, page);
     assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
-    await page.locator('[data-tab="about"]').click();
+    await openSettingsTab(page, "about");
     await expect(page.locator('[data-pref="auto_check_updates"]')).not.toBeChecked();
-    await expect(page.locator('[data-command="check_updates"]')).toBeEnabled();
+    await expect(page.locator("#about-update-action")).toBeEnabled();
     const observation = page.evaluate(() => new Promise<string[]>((accept, reject) => {
       const bridge = window.openwhisper; if (!bridge) { reject(new Error("OWNED_BRIDGE_UNAVAILABLE")); return; }
       const statuses: string[] = [];
@@ -745,11 +756,11 @@ async function main(): Promise<void> {
         if (updates.status === "error") finish(statuses.includes("checking"));
       });
     })); void observation.catch(() => {});
-    await page.locator('[data-command="check_updates"]').click();
+    await page.locator("#about-update-action").click();
     const statuses = await observation; assert.ok(statuses.includes("checking")); assert.equal(statuses.at(-1), "error");
     const after = await state(); assert.equal(after.updates.configured, true); assert.equal(after.updates.status, "error"); assert.equal(after.updates.progress, 0);
     assert.equal(after.preferences.auto_check_updates, false); assert.equal(after.recording_available, true); assert.equal(after.recovery_available, true);
-    await expect(page.locator('[data-command="check_updates"]')).toBeEnabled();
+    await expect(page.locator("#about-update-action")).toBeEnabled();
     assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
     assert.equal(await readFile(autostartPath, "utf8"), legacyAutostart); await assertStableOriginals(); await assertNoDevControl(); await assertInstalledPackage();
     const desktopAfter = await lstat(autostartPath);
@@ -967,7 +978,7 @@ async function main(): Promise<void> {
   assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "", "Initialization and enumeration must open no recording stream.");
   await checkpoint("actual-ui-complete-setup");
   if (stockKde) await page.screenshot({ path: join(evidence, "initial-ui.png"), timeout: 5000 });
-  await page.locator('[data-tab="general"]').click();
+  await openSettingsTab(page, "general");
   if (installedDebian || appImageAdmission) {
     await checkpoint("installed-autostart-ui-enable");
     const checkbox = page.locator('[data-pref="launch_at_login"]'); await expect(checkbox).toBeEnabled();
@@ -982,7 +993,7 @@ async function main(): Promise<void> {
       : "ordinary shared UI enables the verified private fixed-name desktop entry at the permanent Debian executable; focus/status leave its identity and bytes unchanged");
   }
   await checkpoint("actual-ui-language");
-  await page.locator('[data-tab="recording"]').click();
+  await openSettingsTab(page, "recording");
   await page.locator('[data-pref="language"]').selectOption("en");
   await until(async () => (await state()).preferences.language === "en");
   await checkpoint("renderer-security");
@@ -1561,7 +1572,7 @@ async function main(): Promise<void> {
       const bindAfterRestart = async () => {
         assert.ok(application && page);
         await checkpoint(`lifecycle-${appOwners.length}-focus-window`);
-        await page.locator('[data-tab="recording"]').click();
+        await openSettingsTab(page, "recording");
         await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.focus());
         await until(async () => application!.evaluate(({ BrowserWindow }) => !!BrowserWindow.getAllWindows()[0]?.isFocused()));
         await checkpoint(`lifecycle-${appOwners.length}-capture-key`);
@@ -1869,7 +1880,7 @@ async function main(): Promise<void> {
     assert.equal(restartedMaps.includes("openwhisper_capture.node"), false); assert.equal(restartedMaps.includes("openwhisper_speech.node"), false);
     if (installedDebian || appImageAdmission) {
       assert.equal(restarted.launch_at_login_available, true); assert.equal(restarted.preferences.launch_at_login, true); await assertAutostart(true);
-      await page.locator('[data-tab="general"]').click(); await checkpoint("installed-autostart-ui-disable");
+      await openSettingsTab(page, "general"); await checkpoint("installed-autostart-ui-disable");
       const checkbox = page.locator('[data-pref="launch_at_login"]'); await expect(checkbox).toBeEnabled(); await expect(checkbox).toBeChecked();
       await checkbox.uncheck(); await until(async () => !(await state()).preferences.launch_at_login && !(await persistedLogin()));
       await assertAutostart(false); const disabledIdentity = await lstat(autostartPath);
@@ -1887,7 +1898,7 @@ async function main(): Promise<void> {
         await assertAutostart(false); const unchangedDisabled = await lstat(autostartPath);
         assert.equal(unchangedDisabled.dev, disabledIdentity.dev); assert.equal(unchangedDisabled.ino, disabledIdentity.ino);
         assert.equal(unchangedDisabled.mtimeMs, disabledIdentity.mtimeMs); assert.equal(unchangedDisabled.ctimeMs, disabledIdentity.ctimeMs);
-        await page.locator('[data-tab="general"]').click(); const reenable = page.locator('[data-pref="launch_at_login"]');
+        await openSettingsTab(page, "general"); const reenable = page.locator('[data-pref="launch_at_login"]');
         await expect(reenable).not.toBeChecked(); await reenable.check();
         await until(async () => (await state()).preferences.launch_at_login === true && await persistedLogin());
         await assertAutostart(true); enabledAutostartIdentity = await lstat(autostartPath);
