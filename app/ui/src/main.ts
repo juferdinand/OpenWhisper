@@ -1435,6 +1435,15 @@ function recordControl() {
   syncDictationState();
 }
 
+function syncWaveform(
+  current: LiveWaveform | undefined,
+  canvas: HTMLCanvasElement | null,
+): LiveWaveform | undefined {
+  if (current?.canvas === canvas) return current;
+  current?.destroy();
+  return canvas ? new LiveWaveform(canvas) : undefined;
+}
+
 function syncWaveforms(seedCurrentLevel = true) {
   const recording = state.status === "recording";
   const generation = state.recording_generation;
@@ -1446,23 +1455,13 @@ function syncWaveforms(seedCurrentLevel = true) {
   const mainCanvas = document.querySelector<HTMLCanvasElement>(
     '#dictation-content canvas[data-waveform="main"]',
   );
-  if (mainWaveform?.canvas !== mainCanvas) {
-    mainWaveform?.destroy();
-    mainWaveform = mainCanvas
-      ? new LiveWaveform(mainCanvas, { mode: "scrolling" })
-      : undefined;
-  }
+  mainWaveform = syncWaveform(mainWaveform, mainCanvas);
   const overlayCanvas = overlay
     ? document.querySelector<HTMLCanvasElement>(
         '#record-control canvas[data-waveform="overlay"]',
       )
     : null;
-  if (overlayWaveform?.canvas !== overlayCanvas) {
-    overlayWaveform?.destroy();
-    overlayWaveform = overlayCanvas
-      ? new LiveWaveform(overlayCanvas, { mode: "scrolling" })
-      : undefined;
-  }
+  overlayWaveform = syncWaveform(overlayWaveform, overlayCanvas);
   for (const waveform of [mainWaveform, overlayWaveform]) {
     if (!waveform) continue;
     const freshGeneration = waveform.setRecording(recording, generation);

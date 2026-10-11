@@ -10,10 +10,6 @@ const SCROLL_PIXELS_PER_SECOND = 64;
 const COLUMN_INTERVAL_MS = (BAR_STEP / SCROLL_PIXELS_PER_SECOND) * 1000;
 const STALE_AFTER_MS = 500;
 
-export interface LiveWaveformOptions {
-  readonly mode: "scrolling" | "static";
-}
-
 interface Column {
   readonly level: number;
   readonly at: number;
@@ -23,7 +19,6 @@ interface Column {
 export class LiveWaveform {
   readonly canvas: HTMLCanvasElement;
 
-  private readonly options: LiveWaveformOptions;
   private readonly context: CanvasRenderingContext2D | null;
   private readonly resizeObserver: ResizeObserver | undefined;
   private readonly reducedMotion: MediaQueryList | undefined;
@@ -58,9 +53,8 @@ export class LiveWaveform {
   private fadeGradient: CanvasGradient | undefined;
   private destroyed = false;
 
-  constructor(canvas: HTMLCanvasElement, options: LiveWaveformOptions) {
+  constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    this.options = options;
     this.context = canvas.getContext("2d");
     this.reducedMotion = window.matchMedia?.(
       "(prefers-reduced-motion: reduce)",
@@ -223,17 +217,14 @@ export class LiveWaveform {
     const color = getComputedStyle(this.canvas).color || "#ffffff";
     const center = this.height / 2;
     if (!this.active) {
-      if (this.options.mode === "scrolling") {
-        for (let x = 0; x + BAR_WIDTH <= this.width; x += BAR_STEP)
-          this.drawColumn(context, x, center, BAR_BASE, color, 0.42);
-        this.applyEdgeFade(context);
-      }
+      for (let x = 0; x + BAR_WIDTH <= this.width; x += BAR_STEP)
+        this.drawColumn(context, x, center, BAR_BASE, color, 0.42);
+      this.applyEdgeFade(context);
       return;
     }
 
     if (advance) this.advanceEnvelope(at);
-    const staticLayout =
-      this.options.mode === "static" || this.reducedMotion?.matches === true;
+    const staticLayout = this.reducedMotion?.matches === true;
     for (let index = 0; index < this.columns.length; index++) {
       const column = this.columns[index]!;
       const x = staticLayout

@@ -29,6 +29,11 @@ async function openSettingsTab(page: Page, tab: string): Promise<void> {
   await expect(dialog).toBeVisible();
   await page.locator(`.settings-dialog-nav [data-tab="${tab}"]`).click();
 }
+async function closeSettings(page: Page): Promise<void> {
+  const dialog = page.locator("#settings-dialog");
+  if (await dialog.evaluate((element) => (element as HTMLDialogElement).open)) await page.locator("#close-settings").click();
+  await expect(dialog).not.toBeVisible();
+}
 const execute = promisify(execFile);
 const payload = resolve(fileURLToPath(new URL("./", import.meta.url)));
 const packaged = process.env.OPENWHISPER_PACKAGE_DIRECTORY === "/payload/package";
@@ -996,6 +1001,7 @@ async function main(): Promise<void> {
   await openSettingsTab(page, "recording");
   await page.locator('[data-pref="language"]').selectOption("en");
   await until(async () => (await state()).preferences.language === "en");
+  await closeSettings(page);
   await checkpoint("renderer-security");
   const security = await assertRendererIsolation(application, page);
   checks.push("normal main/shared UI/preload; private Tiny inventory; enumeration with zero streams; sandboxed renderer");
@@ -1046,6 +1052,7 @@ async function main(): Promise<void> {
     await writeFile(join(evidence, "owned-app-focus.json"), JSON.stringify(await application.evaluate(({ BrowserWindow }) =>
       ({ focused: BrowserWindow.getAllWindows()[0]?.isFocused() }))), { mode: 0o600 });
     await checkpoint("actual-kde-key-capture");
+    await openSettingsTab(page, "recording");
     await page.locator('[data-portal="enable_shortcut"]').click();
     await until(async () => !!(await state()).recording_shortcut);
     await stockPress();
@@ -1065,6 +1072,7 @@ async function main(): Promise<void> {
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await until(async () => !(await state()).recording_shortcut);
     assert.equal((await state()).shortcut, "F8");
+    await closeSettings(page);
     if (kdeOverlay || kdeWaylandOverlay) {
       const mainUrl = "app://openwhisper/index.html", overlayUrl = `${mainUrl}?overlay=1`;
       await checkpoint("actual-overlay-default-hidden");
@@ -1223,9 +1231,11 @@ async function main(): Promise<void> {
       checks.push("trusted actual overlay is hidden by default; sandbox/context isolation and Linux kernel renderer isolation; no renderer Node API");
 
       await checkpoint("actual-overlay-idle-preference");
+      await openSettingsTab(page, "recording");
       await page.locator('[data-pref="show_idle_overlay"]').check();
       await until(async () => (await state()).preferences.show_idle_overlay === true &&
         (kdeWaylandOverlay || (await windowState()).overlayVisible));
+      await closeSettings(page);
       await assertFocusRetained();
       await expect(overlay.locator("#record-control")).toHaveAttribute("data-status", "idle");
       assert.equal(await overlay.evaluate(async () => {
@@ -1360,8 +1370,10 @@ async function main(): Promise<void> {
       }
 
       await checkpoint("actual-overlay-idle-hidden-again");
+      await openSettingsTab(page, "recording");
       await page.locator('[data-pref="show_idle_overlay"]').uncheck();
       await until(async () => (await state()).preferences.show_idle_overlay === false && !(await windowState()).overlayVisible);
+      await closeSettings(page);
       if (!kdeWaylandOverlay) await assertFocusRetained();
       else {
         // This explicit main-settings action follows all four keyboard gates;
@@ -1409,10 +1421,12 @@ async function main(): Promise<void> {
       await checkpoint("actual-keyboard-session-allow");
       await until(async () => (await state()).paste_portal);
       assert.equal((await state()).paste_ready, false);
+      await openSettingsTab(page, "recording");
       await page.locator('[data-portal="enable_paste"]').click();
       await until(async () => (await state()).paste_ready && !(await state()).paste_configuring, 20_000);
       await page.evaluate(() => window.openwhisper?.invoke("save_preferences", { changes: { output: "paste" } }));
       await until(async () => (await state()).preferences.output === "paste");
+      await closeSettings(page);
       checks.push("explicit shared-UI Allow grants the actual stock KDE keyboard-only session; legacy immediate grant, dialog denial not established");
 
       const ownedRuntime = env.XDG_RUNTIME_DIR!;
@@ -1581,6 +1595,7 @@ async function main(): Promise<void> {
         await stockPress();
         await checkpoint(`lifecycle-${appOwners.length}-await-confirmation`);
         await until(async () => (await state()).shortcut === "F8" && !(await state()).shortcut_configuring);
+        await closeSettings(page);
       };
       const firstLease = await journal(); assert.equal(firstLease.length, 1);
       assert.equal(await available(), false); assert.equal(await hasOwner(firstLease[0]!.connection), true);
@@ -1659,6 +1674,7 @@ async function main(): Promise<void> {
     assert.equal(serverFocus, nativeWindow);
     await writeFile(join(evidence, "native-x11-focus.json"), JSON.stringify({ ownedWindow: nativeWindow, serverFocus,
       electronFocused: await application.evaluate(({ BrowserWindow }) => !!BrowserWindow.getAllWindows()[0]?.isFocused()) }), { mode: 0o600 });
+    await openSettingsTab(page, "recording");
     await page.locator('[data-portal="enable_shortcut"]').click();
     await checkpoint("actual-x11-native-capture-started");
     await until(async () => !!(await state()).recording_shortcut);
@@ -1687,6 +1703,7 @@ async function main(): Promise<void> {
     await until(async () => !(await state()).recording_shortcut && !(await state()).shortcut_configuring);
     assert.equal((await state()).shortcut, "F8"); assert.deepEqual((await state()).preferences.x11_trigger, trigger);
     checks.push("native X11 setup captures actual F8 keycode/keysym/group into legacy x11_trigger; real Escape preserves its original binding without recording");
+    await closeSettings(page);
     await checkpoint("actual-x11-repeat-hold-stale-release");
     await page.evaluate(() => window.openwhisper?.invoke("save_preferences", { changes: { hold_to_record: true } }));
     await nativeKey(true); await until(async () => (await state()).status === "recording");
@@ -1702,6 +1719,7 @@ async function main(): Promise<void> {
     checks.push("actual native X11 held/repeated F8 owns one capture; GUI Cancel then later GUI Start; stale key release cannot stop the later owner");
     await captureResources("after-x11-second-cancel");
   } else {
+  await openSettingsTab(page, "recording");
   await portal("PortalMode", "pending"); await page.locator('[data-portal="enable_shortcut"]').click();
   await until(async () => !!(await state()).shortcut_configuring);
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -1720,6 +1738,7 @@ async function main(): Promise<void> {
   await page.evaluate(() => window.openwhisper?.invoke("save_preferences", { changes: { hold_to_record: false } }));
   checks.push("actual native D-Bus portal protocol: cancelled pending consent, explicit retry, granted binding, session loss and hold binding revoke close only the original private capture");
   }
+  await closeSettings(page);
   await checkpoint("actual-ui-cancel");
   await page.locator("#record").click(); await until(async () => (await state()).status === "recording");
   await page.locator("#cancel").click(); await until(async () => (await state()).status === "idle");
@@ -1747,7 +1766,9 @@ async function main(): Promise<void> {
   if (stockKde) await stockPress();
   else if (nativeX11) await nativePress();
   else {
+    await openSettingsTab(page, "recording");
     await page.locator('[data-portal="enable_shortcut"]').click(); await until(async () => (await state()).shortcut === "Ctrl+Alt+Space");
+    await closeSettings(page);
     await portal("Press"); await portal("Release");
   }
   await until(async () => (await state()).status === "recording");
@@ -1782,8 +1803,7 @@ async function main(): Promise<void> {
   const maps = await readFile(`/proc/${security.pid}/maps`, "utf8");
   assert.equal(maps.includes("openwhisper_capture.node"), false); assert.equal(maps.includes("openwhisper_speech.node"), false);
   checks.push(`${stockKde ? "actual stock KGlobalAccel F8" : nativeX11 ? "actual native X11 F8" : "actual owned portal"} Start${packaged ? "; no-display package CLI Stop" : "/Stop"}; real CPU Tiny recognition; private clipboard exact readback; history confirmation; recovery removal; native capture/speech absent from main`);
-  if (stockKde || nativeX11) await page.evaluate(() => window.openwhisper?.invoke("clear_shortcut", {}));
-  else await page.locator('[data-portal="clear_shortcut"]').click();
+  await page.evaluate(() => window.openwhisper?.invoke("clear_shortcut", {}));
   await until(async () => (await state()).shortcut === null && !(await state()).shortcut_configuring);
   if (stockKde) {
     assert.deepEqual(JSON.parse(await readFile(join(profile.paths.settings, "kde-keyboard-lease.json"), "utf8")), []);
@@ -1797,7 +1817,7 @@ async function main(): Promise<void> {
   }
   if (!stockKde && !nativeX11) assert.match(await portal("PortalStatus"), /uint32 0/u);
   await checkpoint("actual-source-loss-retry");
-  await expect(page.locator("#record-label")).toHaveText("Start dictation");
+  await expect(page.locator("#record-label")).toHaveText("Start recording");
   await page.locator("#record").click(); await until(async () => (await state()).status === "recording");
   await until(async () => (await pactl(["list", "short", "source-outputs"])).trim().split("\n").filter(Boolean).length === 1);
   await checkpoint("retry-case-second-capture-running");
@@ -1826,7 +1846,7 @@ async function main(): Promise<void> {
   const secondModule = (await pactl(["load-module", "module-null-sink", `sink_name=${sink}`, "rate=48000", "channels=1"])).trim(); assert.match(secondModule, /^\d+$/u);
   await pactl(["set-default-sink", sink]); await pactl(["set-default-source", source]);
   await until(async () => JSON.stringify(await sourceNames()) === JSON.stringify([source]));
-  await expect(page.locator("#record-label")).toHaveText("Start dictation");
+  await expect(page.locator("#record-label")).toHaveText("Start recording");
   await page.locator("#record").click(); await until(async () => (await state()).status === "recording");
   await until(async () => (await pactl(["list", "short", "source-outputs"])).trim().split("\n").filter(Boolean).length === 1);
   const fragment = join(root, "public-fragment.f32"); await writeFile(fragment, audio.subarray(0, 48000 * 4), { mode: 0o600 });

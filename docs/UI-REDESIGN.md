@@ -141,10 +141,12 @@ the preview-channel selector deferred until a reviewed release-channel implement
 Native capture reports callback peaks, not a PCM waveform or RMS. Adapt the Canvas
 scrolling renderer from [ElevenLabs Live Waveform](https://github.com/elevenlabs/ui/blob/23c31bd3088814215a8b5d0bfb56b327cad1a578/apps/www/registry/elevenlabs-ui/ui/live-waveform.tsx)
 to strict TypeScript in `app/ui/src/live-waveform.ts`, with the upstream
-[MIT notice](../app/ui/public/notices/elevenlabs-ui-LICENSE.txt) included in the renderer's
+[MIT notice](../app/ui/public/licenses/elevenlabs-ui-LICENSE.txt) included in the renderer's
 packaged assets. Reuse its rounded bars, HiDPI sizing and softened edges; feed the existing
 validated recording telemetry instead of its React microphone acquisition. Keep the native
 recorder as the sole audio owner and avoid adding React for this component.
+This is adapted component source, not an installed ElevenLabs runtime dependency;
+upstream changes require review and an explicit update to the local implementation.
 
 Smooth only the incoming level with a time-based envelope, then move fixed historical
 bars from right to left at a steady speed. Preserve each historical bar's height instead of

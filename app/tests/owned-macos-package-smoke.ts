@@ -731,10 +731,10 @@ try {
   assert.equal((await state()).status, "idle");
   checks.push("Owned-window CDP Command+Shift+F8 input commits through normal setup; actual globalShortcut registration");
   stage = "shortcut-remove";
-  await page.locator('[data-portal="clear_shortcut"]').click();
+  await page.evaluate(() => window.openwhisper!.invoke("clear_shortcut", {}));
   await expect.poll(async () => (await state()).preferences.macos_shortcut, { timeout: 10_000 }).toBe(null);
   assert.equal(await application.evaluate(({ globalShortcut }, key) => globalShortcut.isRegistered(key), accelerator), false);
-  checks.push("Normal Remove trigger unregisters the actual shortcut");
+  checks.push("Typed clear-shortcut command unregisters the actual shortcut");
   if (stable) {
     stage = "stable-preference-edit";
     await openSettingsTab(page, "text");

@@ -10,6 +10,12 @@ import { captureSignedMacDescriptor, insideOutMacCodePaths, inspectMacBinary, in
   macPreviewCodesignArguments, macPreviewPlistValues, macPreviewSigningPolicy, macPreviewUpdatePolicy, stageMacPreview } from "../../scripts/package-macos-preview.js";
 import { buildIdentitySchema } from "../../src/contracts/application/build-identity.js";
 const nobleSource = new URL("../../node_modules/@noble/hashes/", import.meta.url);
+const rendererNotices = {
+  "licenses/elevenlabs-ui-LICENSE.txt": "Fixture ElevenLabs UI notice; inert test text",
+  "licenses/inter-LICENSE.txt": "fixture font license",
+  "licenses/instrument-sans-OFL.txt": "Fixture Instrument Sans notice; inert test text",
+  "licenses/newsreader-OFL.txt": "Fixture Newsreader notice; inert test text",
+} as const;
 
 async function fixture(kind: "development" | "stable" = "development", architecture: "arm64" | "x64" = "arm64") {
   const base = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-mac-package-"))), root = join(base, "source/app");
@@ -54,7 +60,7 @@ async function fixture(kind: "development" | "stable" = "development", architect
   await write("dist/main/application-build.js", `export const APPLICATION_BUILD = ${JSON.stringify(identity)};`);
   const source = '{"commit":"0123456789abcdef0123456789abcdef01234567","modified":true}';
   await write("dist/resources/development-build.json", source); await write("dist/resources/VERSION", "0.3.0\n");
-  await write("dist/ui/fonts/LICENSE.txt", "fixture font license");
+  for (const [path, value] of Object.entries(rendererNotices)) await write(`dist/ui/${path}`, value);
   await write("dist/native/macos-retirement-probe-notices/LICENSE", "excluded probe");
   await write("dist/native/openwhisper_macos_retirement_probe.node", "excluded probe");
   await write("node_modules/electron/path.txt", "Electron.app/Contents/MacOS/Electron");
@@ -68,7 +74,7 @@ async function fixture(kind: "development" | "stable" = "development", architect
   await symlink("Versions/Current/Electron Framework", join(root, runtime, "Contents/Frameworks/Electron Framework.framework/Electron Framework"));
   for (const path of ["node_modules/electron/dist/LICENSE", "node_modules/electron/dist/LICENSES.chromium.html", "../LICENSE",
     "vendor/whisper.cpp/LICENSE", "native/build-cpu/build-manifest.json", "resources/AppIcon.icns"]) await write(path, "fixture original notice/icon");
-  return { base, root, runtime, source, metadata, recording, identity, koffi, output: join(base, "preview") };
+  return { base, root, runtime, source, metadata, recording, identity, koffi, output: join(base, "preview"), rendererNotices };
 }
 
 test("Mac preview copies exact captured inputs, architecture dependency, icon/notices and relative framework links without probes", async () => {
@@ -76,6 +82,8 @@ test("Mac preview copies exact captured inputs, architecture dependency, icon/no
   try {
     const result = await stageMacPreview({ root: input.root, output: input.output, architecture: "arm64" });
     assert.equal(await readFile(join(result.application, "package.json"), "utf8"), input.metadata);
+    for (const [path, text] of Object.entries(input.rendererNotices))
+      assert.deepEqual(await readFile(join(result.application, "dist/ui", path)), Buffer.from(text));
     assert.equal(await readFile(join(result.directory, "Contents/MacOS/OpenWhisper Dev"), "utf8"), "inert runtime fixture");
     await assert.rejects(lstat(join(result.directory, "Contents/MacOS/Electron")), { code: "ENOENT" });
     assert.equal(await readFile(join(input.root, input.runtime, "Contents/MacOS/Electron"), "utf8"), "inert runtime fixture");
