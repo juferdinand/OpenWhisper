@@ -16,3 +16,8 @@ legacy source snapshot at commit `47560a29b85b41630b116ceaa5002d39de2b9d2b`, res
 `linux/scripts/test-owned-portals.py` (SHA-256
 `af17a2dedbaece0ccf6ee2b06fdb0ba3701b8f9ddc03a37c5a96843ae69efdb6`). These hashes are checked
 by the owned Dev recording runner before either helper is copied into its private payload.
+
+`app-icon.png` is the former stable icon from immutable commit
+`d69b43bf6e7017c61089e117e79af34f57f297c4`, path `shared/ui/public/app-icon.png`, SHA-256
+`394c7a4e172149d2f3099650c23e3ef2f64f2c177feb9cea9310c8e0171d747b`. The installed-launch
+regression uses its exact bytes to distinguish a legacy-managed icon from a user customization.

@@ -110,13 +110,16 @@ linuxTest("premature EOF and invalid read counts cannot authenticate a file", as
 });
 linuxTest("changes during reading refuse same-size rewrite, truncation, growth, modes and pathname swaps", async () => {
   for (const change of ["rewrite", "truncate", "grow", "mode", "path", "directory"] as const) {
-    const f = await fixture(), read = f.file.read.bind(f.file); let changed = false;
+    const f = await fixture(), original = await f.file.stat(), read = f.file.read.bind(f.file); let changed = false;
     // Host-only perturbation: actual reads still use the same real original descriptor.
     f.file.read = (async (buffer: Buffer, offset: number, length: number, position: number) => {
       const result = await read(buffer, offset, length, position);
       if (!changed) {
         changed = true;
-        if (change === "rewrite") await f.file.write(Buffer.from("Test"), 0, 4, 0);
+        if (change === "rewrite") {
+          await f.file.write(Buffer.from("Test"), 0, 4, 0);
+          await f.file.utimes(original.atime, new Date(original.mtimeMs + 1_000));
+        }
         else if (change === "truncate") await f.file.truncate(2);
         else if (change === "grow") await f.file.write(Buffer.from("!"), 0, 1, 4);
         else if (change === "mode") await f.file.chmod(0o644);

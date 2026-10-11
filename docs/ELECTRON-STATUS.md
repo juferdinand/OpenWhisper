@@ -1,7 +1,7 @@
 # Release and platform status
 
-OpenWhisper **0.4.0** is the current Electron release for macOS and Linux. Download packages from
-the [v0.4.0 release](https://github.com/juferdinand/OpenWhisper/releases/tag/v0.4.0). Its assets include
+OpenWhisper **0.4.1** is the current Electron release for macOS and Linux. Download packages from
+the [v0.4.1 release](https://github.com/juferdinand/OpenWhisper/releases/tag/v0.4.1). Its assets include
 the macOS DMG/ZIP, Linux AppImage/DEB and signatures, `latest.json`, and `SHA256SUMS`. This page records
 automated coverage and its limits; it does not claim support for every device, desktop,
 distribution, or installation history.
@@ -30,6 +30,10 @@ at version 0.3.1, including macOS close-to-background/reopen on both architectur
 signed candidates. That run's isolated signed macOS successor handoff tested 0.3.1 to a private
 0.3.2 build; the 0.4.0 release preparation advances the current/successor pair to 0.4.0/0.4.1.
 
+The 0.4.1 patch refreshes the exact old per-user AppImage icon left by an updater replacement,
+preserving customized launchers and icons. KDE receives a bounded best-effort icon-loader signal.
+The focused private filesystem regression does not claim a signed 0.4.0-to-0.4.1 updater handoff.
+
 Linux owned desktop coverage includes a native keyboard binding and recording on KDE Plasma 5.27
 Wayland, plus keyboard/basic dictation on an X11 profile. Other automated checks use private
 virtual audio and owned package/runtime environments; results do not establish
@@ -53,7 +57,7 @@ support on every distribution.
 
 ## Upgrading from 0.2.5
 
-Install 0.4.0 manually from the Releases page using its DMG/ZIP or Linux package. Do not infer that
+Install 0.4.1 manually from the Releases page using its DMG/ZIP or Linux package. Do not infer that
 preferences, models, recordings, or history have moved between app generations. Back up data you
 need before changing installations. The immutable [0.2.5 source and platform record](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4)
 describes the former native hosts and their historical evidence.

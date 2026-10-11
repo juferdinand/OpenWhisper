@@ -1,5 +1,6 @@
-import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync, fchmodSync, fsyncSync, linkSync, mkdtempSync, rmdirSync, unlinkSync, writeSync, type BigIntStats } from "node:fs";
-import { createHash } from "node:crypto";
+import { constants, closeSync, fstatSync, futimesSync, lstatSync, openSync, readSync, realpathSync, renameSync, statSync, fchmodSync, fsyncSync, linkSync, mkdtempSync, rmdirSync, unlinkSync, writeSync, type BigIntStats } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { buildIdentitySchema } from "../contracts/application/build-identity.js";
 import { appImageLauncher } from "../services/update/linux/linux-appimage-launcher.js";
@@ -9,7 +10,8 @@ export type LinuxInstalledLaunch = Readonly<{ kind: "debian"; executable: string
   Readonly<{ kind: "appimage"; executable: string; arguments: readonly [string]; assertUnchanged(): void }>;
 interface Input {
   readonly build: unknown; readonly packaged: boolean; readonly home: string; readonly executable: string;
-  readonly appPath: string; readonly resourcesPath: string; readonly environment: Readonly<{ APPIMAGE?: string; APPDIR?: string }>;
+  readonly appPath: string; readonly resourcesPath: string; readonly environment: Readonly<{ APPIMAGE?: string; APPDIR?: string;
+    XDG_DATA_HOME?: string; XDG_CURRENT_DESKTOP?: string; KDE_FULL_SESSION?: string }>;
   readonly pid: number;
 }
 interface ProcessIdentity { readonly pid: number; readonly parent: number; readonly start: string }
@@ -18,6 +20,7 @@ export class LinuxInstalledLaunchError extends Error {
 }
 const refuse = (): never => { throw new LinuxInstalledLaunchError(); };
 const path = (value: string): boolean => isAbsolute(value) && resolve(value) === value && value.length <= 4096 && !/[\p{Cc}]/u.test(value);
+const legacyIconHash = "394c7a4e172149d2f3099650c23e3ef2f64f2c177feb9cea9310c8e0171d747b";
 function same(a: BigIntStats, b: BigIntStats): boolean {
   return a.dev === b.dev && a.ino === b.ino && a.uid === b.uid && a.mode === b.mode && a.size === b.size &&
     a.nlink === b.nlink && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
@@ -50,6 +53,40 @@ function boundedText(name: string, limit: number): string {
     if (size > limit) refuse();
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, size));
   } finally { closeSync(fd); }
+}
+function fileSnapshot(name: string, limit: number, uid?: bigint): Readonly<{ identity: BigIntStats; bytes: Buffer }> {
+  const identity = lstatSync(name, { bigint: true });
+  if (!identity.isFile() || identity.isSymbolicLink() || (uid !== undefined && identity.uid !== uid) || identity.nlink !== 1n ||
+      (identity.mode & 0o022n) !== 0n || identity.size > BigInt(limit)) return refuse();
+  const fd = openSync(name, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    if (!same(identity, fstatSync(fd, { bigint: true }))) return refuse();
+    const bytes = Buffer.alloc(limit + 1); let size = 0;
+    while (size < bytes.length) { const count = readSync(fd, bytes, size, bytes.length - size, null); if (!count) break; size += count; }
+    if (size > limit || size !== Number(identity.size) || !same(identity, fstatSync(fd, { bigint: true })) ||
+        !same(identity, lstatSync(name, { bigint: true }))) return refuse();
+    return { identity, bytes: bytes.subarray(0, size) };
+  } finally { closeSync(fd); }
+}
+function assertDirectories(before: ReadonlyMap<string, BigIntStats>): void {
+  for (const [name, identity] of before) {
+    const current = lstatSync(name, { bigint: true });
+    if (current.dev !== identity.dev || current.ino !== identity.ino || current.uid !== identity.uid || current.mode !== identity.mode) refuse();
+  }
+}
+function legacyDesktopEntry(image: string): string {
+  const argument = `"${[...image].map((char) => `${["\\", '"', "`", "$"].includes(char) ? "\\" : ""}${char === "%" ? "%%" : char}`).join("").replaceAll("\\", "\\\\")}"`;
+  return `[Desktop Entry]\nType=Application\nName=OpenWhisper\nComment=Free, local dictation\nExec=env APPIMAGE_EXTRACT_AND_RUN=1 ${argument}\nIcon=io.github.whisperfree\nStartupWMClass=io.github.whisperfree\nStartupNotify=true\nTerminal=false\nCategories=AudioVideo;Audio;\n`;
+}
+function validAppIcon(bytes: Buffer): boolean {
+  return bytes.length >= 24 && bytes.length <= 2 * 1024 * 1024 &&
+    bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) &&
+    bytes.readUInt32BE(8) === 13 && bytes.toString("ascii", 12, 16) === "IHDR" &&
+    bytes.readUInt32BE(16) > 0 && bytes.readUInt32BE(16) <= 1024 && bytes.readUInt32BE(20) > 0 && bytes.readUInt32BE(20) <= 1024;
+}
+function notifyKdeIconChanged(): void {
+  spawnSync("/usr/bin/dbus-send", ["--session", "--type=signal", "/KIconLoader", "org.kde.KIconLoader.iconChanged", "int32:0"],
+    { stdio: "ignore", timeout: 500, windowsHide: true });
 }
 function processIdentity(pid: number, uid: bigint): ProcessIdentity {
   const root = `/proc/${pid}`, owner = lstatSync(root, { bigint: true });
@@ -166,6 +203,70 @@ export async function ensureLinuxAppImageLauncher(input: Input): Promise<void> {
       rmdirSync(stage);
     }
   } catch { refuse(); }
+}
+
+/** Refresh only the exact icon owned by the former stable AppImage installer. */
+export function refreshLinuxAppImageIcon(input: Input, notifyKde: () => void = notifyKdeIconChanged): void {
+  let refreshed = false;
+  try {
+    const structural = appImageStructure(input), uid = structural.uid;
+    const dataHome = input.environment.XDG_DATA_HOME ?? join(input.home, ".local/share");
+    if (!path(dataHome)) return;
+    const applications = join(dataHome, "applications"), iconDirectory = join(dataHome, "icons/hicolor/256x256/apps");
+    const desktopPath = join(applications, "io.github.whisperfree.desktop");
+    const iconPath = join(iconDirectory, "io.github.whisperfree.png");
+    const checkedDirectories = new Map([...directories(applications, input.home, uid), ...directories(iconDirectory, input.home, uid)]);
+    const desktop = fileSnapshot(desktopPath, 32 * 1024, uid);
+    if (new TextDecoder("utf-8", { fatal: true }).decode(desktop.bytes) !== legacyDesktopEntry(structural.image)) return;
+    const icon = fileSnapshot(iconPath, 2 * 1024 * 1024, uid);
+    if (createHash("sha256").update(icon.bytes).digest("hex") !== legacyIconHash) return;
+    const sourcePath = join(input.appPath, "dist/ui/app-icon.png"), source = fileSnapshot(sourcePath, 2 * 1024 * 1024);
+    if (!validAppIcon(source.bytes)) return;
+
+    const stage = join(iconDirectory, `.io.github.whisperfree.png.${randomUUID()}.tmp`);
+    let staged: BigIntStats | undefined;
+    try {
+      const fd = openSync(stage, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      try {
+        let offset = 0;
+        while (offset < source.bytes.length) {
+          const count = writeSync(fd, source.bytes, offset, source.bytes.length - offset, offset);
+          if (!Number.isInteger(count) || count < 1 || count > source.bytes.length - offset) return refuse();
+          offset += count;
+        }
+        fchmodSync(fd, 0o644); fsyncSync(fd); staged = fstatSync(fd, { bigint: true });
+      } finally { closeSync(fd); }
+      assertDirectories(checkedDirectories);
+      const currentDesktop = fileSnapshot(desktopPath, 32 * 1024, uid), currentIcon = fileSnapshot(iconPath, 2 * 1024 * 1024, uid);
+      if (!same(desktop.identity, currentDesktop.identity) || !desktop.bytes.equals(currentDesktop.bytes) ||
+          !same(icon.identity, currentIcon.identity) || createHash("sha256").update(currentIcon.bytes).digest("hex") !== legacyIconHash ||
+          !same(source.identity, lstatSync(sourcePath, { bigint: true }))) return;
+      const currentStage = lstatSync(stage, { bigint: true });
+      if (!staged || !same(staged, currentStage) || currentStage.uid !== uid || currentStage.nlink !== 1n ||
+          currentStage.size !== BigInt(source.bytes.length)) return;
+      renameSync(stage, iconPath);
+      refreshed = true;
+      const themeRoot = join(dataHome, "icons/hicolor"), expectedRoot = checkedDirectories.get(themeRoot);
+      const directory = openSync(themeRoot, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+      try {
+        const currentRoot = fstatSync(directory, { bigint: true });
+        if (expectedRoot && currentRoot.dev === expectedRoot.dev && currentRoot.ino === expectedRoot.ino && currentRoot.uid === uid) {
+          const nextMtime = new Date(Math.max(Date.now(), Number(currentRoot.mtimeNs / 1_000_000n) + 1000));
+          futimesSync(directory, new Date(Number(currentRoot.atimeNs / 1_000_000n)), nextMtime); fsyncSync(directory);
+        }
+      } finally { closeSync(directory); }
+      const iconDirectoryFd = openSync(iconDirectory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+      try { fsyncSync(iconDirectoryFd); } finally { closeSync(iconDirectoryFd); }
+    } finally {
+      try {
+        const current = lstatSync(stage, { bigint: true });
+        if (staged && same(staged, current) && current.nlink === 1n) unlinkSync(stage);
+      } catch { /* The staged path is already published or no longer ours. */ }
+    }
+  } catch { /* A stale, custom or unsafe desktop icon must never block ordinary app launch. */ }
+  if (refreshed && (input.environment.KDE_FULL_SESSION === "true" || input.environment.XDG_CURRENT_DESKTOP?.split(":").includes("KDE"))) {
+    try { notifyKde(); } catch { /* KDE cache notification is optional and never blocks startup. */ }
+  }
 }
 
 /** Environment values are hints only. The permanent image must be a live same-user kernel ancestor executable. */

@@ -4,7 +4,8 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mock, test } from "node:test";
-import { admitLinuxInstalledLaunch, ensureLinuxAppImageLauncher, LinuxInstalledLaunchError } from "../../../src/main/linux-installed-launch.js";
+import { fileURLToPath } from "node:url";
+import { admitLinuxInstalledLaunch, ensureLinuxAppImageLauncher, LinuxInstalledLaunchError, refreshLinuxAppImageIcon } from "../../../src/main/linux-installed-launch.js";
 import { appImageLauncher } from "../../../src/services/update/linux/linux-appimage-launcher.js";
 
 const supported = process.platform === "linux" && process.getuid?.() !== 0;
@@ -140,4 +141,63 @@ test("Exclusive launcher publication preserves a racing destination and closes o
     assert.equal(await filesystem.promises.readFile(files.launcher, "utf8"), "racing launcher"); assert.equal(closed, true);
     assert.deepEqual(filesystem.readdirSync(files.launcher.slice(0, files.launcher.lastIndexOf("/"))).sort(), ["OpenWhisper.AppImage", "openwhisper-launch"]);
   } finally { publication.mock.restore(); close.mock.restore(); writes.mock.restore(); syncBuiltinESMExports(); }
+}));
+
+test("The successor refreshes only the exact legacy-managed AppImage icon", { skip: !supported }, async () => fixture(async (input, files) => {
+  const dataHome = join(input.home, ".local/share"), applications = join(dataHome, "applications"), iconDirectory = join(dataHome, "icons/hicolor/256x256/apps");
+  const themeRoot = join(dataHome, "icons/hicolor");
+  const desktop = join(applications, "io.github.whisperfree.desktop"), icon = join(iconDirectory, "io.github.whisperfree.png");
+  filesystem.mkdirSync(applications, { recursive: true, mode: 0o700 }); filesystem.mkdirSync(iconDirectory, { recursive: true, mode: 0o700 });
+  filesystem.utimesSync(themeRoot, new Date(1000), new Date(1000));
+  filesystem.writeFileSync(desktop, `[Desktop Entry]\nType=Application\nName=OpenWhisper\nComment=Free, local dictation\nExec=env APPIMAGE_EXTRACT_AND_RUN=1 "${files.image}"\nIcon=io.github.whisperfree\nStartupWMClass=io.github.whisperfree\nStartupNotify=true\nTerminal=false\nCategories=AudioVideo;Audio;\n`, { mode: 0o600 });
+  const oldIcon = fileURLToPath(new URL("../../fixtures/legacy-linux/app-icon.png", import.meta.url));
+  const currentIcon = fileURLToPath(new URL("../../../ui/public/app-icon.png", import.meta.url));
+  const sourcePath = join(input.appPath, "dist/ui/app-icon.png");
+  filesystem.mkdirSync(join(input.appPath, "dist/ui"), { recursive: true, mode: 0o700 });
+  filesystem.copyFileSync(oldIcon, icon); filesystem.copyFileSync(currentIcon, sourcePath);
+
+  let notifications = 0;
+  refreshLinuxAppImageIcon({ ...input, environment: { ...input.environment, KDE_FULL_SESSION: "true" } }, () => { notifications++; throw new Error("private bus unavailable"); });
+  assert.deepEqual(filesystem.readFileSync(icon), filesystem.readFileSync(currentIcon));
+  assert.equal(notifications, 1);
+  assert(filesystem.statSync(themeRoot, { bigint: true }).mtimeNs > 1_000_000_000n);
+  const refreshed = filesystem.statSync(icon, { bigint: true });
+  refreshLinuxAppImageIcon(input);
+  const repeated = filesystem.statSync(icon, { bigint: true });
+  for (const field of ["dev", "ino", "uid", "mode", "nlink", "size", "mtimeNs", "ctimeNs"] as const) {
+    assert.equal(repeated[field], refreshed[field], `unchanged icon ${field}`);
+  }
+}));
+
+test("Icon refresh preserves customized desktop entries, customized icons, and symlink targets", { skip: !supported }, async () => fixture(async (input, files) => {
+  const dataHome = join(input.home, ".local/share"), applications = join(dataHome, "applications"), iconDirectory = join(dataHome, "icons/hicolor/256x256/apps");
+  const desktop = join(applications, "io.github.whisperfree.desktop"), icon = join(iconDirectory, "io.github.whisperfree.png");
+  filesystem.mkdirSync(applications, { recursive: true, mode: 0o700 }); filesystem.mkdirSync(iconDirectory, { recursive: true, mode: 0o700 });
+  const canonical = `[Desktop Entry]\nType=Application\nName=OpenWhisper\nComment=Free, local dictation\nExec=env APPIMAGE_EXTRACT_AND_RUN=1 "${files.image}"\nIcon=io.github.whisperfree\nStartupWMClass=io.github.whisperfree\nStartupNotify=true\nTerminal=false\nCategories=AudioVideo;Audio;\n`;
+  const oldIcon = fileURLToPath(new URL("../../fixtures/legacy-linux/app-icon.png", import.meta.url));
+  const currentIcon = fileURLToPath(new URL("../../../ui/public/app-icon.png", import.meta.url));
+  const sourcePath = join(input.appPath, "dist/ui/app-icon.png");
+  filesystem.mkdirSync(join(input.appPath, "dist/ui"), { recursive: true, mode: 0o700 }); filesystem.copyFileSync(currentIcon, sourcePath);
+  let notifications = 0;
+  const kdeInput = { ...input, environment: { ...input.environment, XDG_CURRENT_DESKTOP: "KDE" } };
+  const notify = (): void => { notifications++; };
+
+  filesystem.writeFileSync(desktop, `${canonical}X-User-Custom=true\n`, { mode: 0o600 });
+  filesystem.copyFileSync(oldIcon, icon); const oldBytes = filesystem.readFileSync(icon);
+  refreshLinuxAppImageIcon(kdeInput, notify); assert.deepEqual(filesystem.readFileSync(icon), oldBytes); assert.equal(notifications, 0);
+
+  filesystem.writeFileSync(desktop, canonical.replace(files.image, `${files.image}.custom`), { mode: 0o600 });
+  refreshLinuxAppImageIcon(kdeInput, notify); assert.deepEqual(filesystem.readFileSync(icon), oldBytes); assert.equal(notifications, 0);
+
+  filesystem.writeFileSync(desktop, canonical, { mode: 0o600 });
+  filesystem.writeFileSync(icon, "user-customized icon", { mode: 0o600 });
+  refreshLinuxAppImageIcon(kdeInput, notify); assert.equal(filesystem.readFileSync(icon, "utf8"), "user-customized icon"); assert.equal(notifications, 0);
+
+  const retained = join(iconDirectory, "user-icon.png"); filesystem.copyFileSync(oldIcon, retained);
+  filesystem.unlinkSync(icon); filesystem.symlinkSync(retained, icon);
+  refreshLinuxAppImageIcon(kdeInput, notify); assert(filesystem.lstatSync(icon).isSymbolicLink());
+  assert.deepEqual(filesystem.readFileSync(retained), oldBytes); assert.equal(notifications, 0);
+
+  filesystem.unlinkSync(icon); filesystem.copyFileSync(oldIcon, icon); filesystem.writeFileSync(sourcePath, "invalid image", { mode: 0o600 });
+  refreshLinuxAppImageIcon(kdeInput, notify); assert.deepEqual(filesystem.readFileSync(icon), oldBytes); assert.equal(notifications, 0);
 }));
