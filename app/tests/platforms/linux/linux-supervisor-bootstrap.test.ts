@@ -88,7 +88,7 @@ async function appImageFixture() {
   // Darwin's temporary base can contain /var aliases; production admission requires physical ancestry.
   const home = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-appimage-parent-"))), events: string[] = [];
   const file = await open(join(home, "inert-download"), "wx", 0o600);
-  const selected: LinuxUpdateCandidate = { package: "appimage", authentication: "unauthenticated", version: "0.3.1", notes: "",
+  const selected: LinuxUpdateCandidate = { package: "appimage", authentication: "unauthenticated", version: "0.3.1", notes: "", details: { highlights: [] },
     assetName: "OpenWhisper-Linux-x86_64.AppImage", assetURL: `${LINUX_UPDATE_REPOSITORY}/releases/download/v0.3.1/OpenWhisper-Linux-x86_64.AppImage`,
     pageURL: `${LINUX_UPDATE_REPOSITORY}/releases/tag/v0.3.1`, feedURL: LINUX_UPDATE_FEED_URL, target: "linux-x86_64-appimage", signature: "inert successor signature" };
   let changed = false, local = false, closed = false;
@@ -134,7 +134,7 @@ test("explicit AppImage repair authenticates current before discovery and closes
   try {
     const updates = appImageUpdates("0.3.0", input.launch, input.dependencies);
     input.dependencies.signature = async () => { assert.fail("Later effects must not replace captured parent authority."); };
-    assert.deepEqual(await updates.action("check", signal), { status: "available", updateVersion: "0.3.1" });
+    assert.deepEqual(await updates.action("check", signal), { status: "available", updateVersion: "0.3.1", details: { highlights: [] } });
     assert.ok(input.events.indexOf("repair-current") < input.events.indexOf("feed"));
     assert.deepEqual(await updates.action("install", signal), { status: "prepared", updateVersion: "0.3.1" });
     const installed = await updates.installPrepared("0.3.1"); installed.assertForExec();

@@ -67,6 +67,7 @@ import { createControlAdapter } from "../platforms/linux/shared/control-adapter.
 import { LinuxBus } from "../platforms/linux/shared/bus.js";
 import { verifyDevelopmentLinuxBusArtifact } from "../services/development/development-artifact.js";
 import { parseModelCatalog, recommendationsFor, recommendationTier } from "../core/models/catalog.js";
+import { isNewerUpdateVersion } from "../services/update/common/update-policy.js";
 
 const distribution = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let window: BrowserWindow | undefined;
@@ -782,11 +783,14 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       void finishShutdown(true).catch(() => {}); return;
     }
     const value = response.state;
+    const checking = updateReserved === "check", idle = value.status === "idle";
     if (updateReserved === "check" && (value.status === "idle" || value.status === "available")) automaticUpdateCheckAllowed = true;
     updates = { ...updates, error: null, progress: 0,
       status: value.status === "idle" ? "current" : value.status === "checking" ? "checking"
         : value.status === "available" ? "available" : value.status === "failed" ? "error" : "installing",
-      version: "updateVersion" in value ? value.updateVersion : null,
+      version: "updateVersion" in value ? value.updateVersion : checking || idle ? null : updates.version,
+      details: value.status === "available" ? value.details : checking || idle ? undefined
+        : "updateVersion" in value && value.updateVersion !== updates.version ? undefined : updates.details,
       ...(value.status === "failed" ? { error: value.code === "CANCELLED" ? "The update was cancelled." : "The update could not be completed." } : {}) };
     if (!["checking", "preparing", "prepared"].includes(value.status)) updateReserved = undefined;
     notify();
@@ -798,7 +802,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       throw new Error("Finish the current recording, download or setup before installing an update.");
     }
     // A request resolves after its write, not its terminal response. Keep the reservation until that response or retirement.
-    updateReserved = kind; updates = { ...updates, status: kind === "check" ? "checking" : "installing", error: null, progress: 0 }; notify();
+    updateReserved = kind; updates = { ...updates, status: kind === "check" ? "checking" : "installing", error: null, progress: 0,
+      ...(kind === "check" ? { version: null, details: undefined } : {}) }; notify();
     if (macUpdates) {
       const controller = new AbortController(); macUpdateAbort = controller;
       try {
@@ -807,7 +812,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           const candidate = await task;
           if (macUpdateOperation === task) macUpdateOperation = undefined;
           if (shutdownInProgress) return;
-          updates = { ...updates, status: candidate ? "available" : "current", version: candidate?.version ?? null, error: null };
+          updates = { ...updates, status: candidate ? "available" : "current", version: candidate?.version ?? null,
+            details: candidate?.details, error: null };
           updateReserved = undefined; notify();
         } else {
           const task = macUpdates.prepareInstall(controller.signal).then((prepared) => { macPrepared = prepared; return prepared; });
@@ -865,6 +871,16 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     handlers: {
       get_state: () => state(),
       window_action: ({ action: windowAction }) => performWindowAction(window, windowAction),
+      open_project_link: async ({ target }) => {
+        let url: string;
+        if (target === "repository") url = "https://github.com/juferdinand/OpenWhisper";
+        else if (target === "issues") url = "https://github.com/juferdinand/OpenWhisper/issues";
+        else if (target === "license") url = "https://github.com/juferdinand/OpenWhisper/blob/main/LICENSE";
+        else if (["available", "downloading", "installing", "error"].includes(updates.status) && updates.version &&
+          isNewerUpdateVersion(updates.version, version)) url = `https://github.com/juferdinand/OpenWhisper/releases/tag/v${updates.version}`;
+        else throw new Error("No update release is available.");
+        await shell.openExternal(url);
+      },
       check_updates: () => requestUpdate("check"),
       install_update: () => requestUpdate("install"),
       save_preferences: ({ changes }) => withRecordingControl(async () => {

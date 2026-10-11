@@ -253,34 +253,34 @@ svg {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 8px;
   width: auto;
   min-width: 30px;
-  max-width: 104px;
+  max-width: 130px;
   height: 30px;
   min-height: 30px;
   overflow: hidden;
-  padding: 0 8px;
+  padding: 0 12px 0 10px;
   border-radius: 9px;
-  background: var(--group);
-  color: var(--secondary);
-  font-size: 11px;
+  border-color: rgb(134 217 180 / 35%);
+  background: rgb(134 217 180 / 12%);
+  color: var(--ok);
+  font-size: 12.5px;
+  font-weight: 600;
   white-space: nowrap;
 }
 #header-update svg {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 14px;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
 }
 #header-update span {
   min-width: 0;
   overflow: hidden;
   text-overflow: clip;
 }
-#header-update[data-status="available"] {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
+#header-update:hover:not(:disabled) {
+  border-color: var(--ok);
 }
 .window-actions {
   height: 100%;
@@ -816,7 +816,8 @@ main.dictation-main .dictation-feature-cards {
   margin-top: 12px;
 }
 dialog#model-drawer,
-dialog#settings-dialog {
+dialog#settings-dialog,
+dialog#update-dialog {
   position: fixed;
   z-index: 50;
   margin: 0;
@@ -829,7 +830,8 @@ dialog#settings-dialog {
   background: var(--raised);
 }
 dialog#model-drawer::backdrop,
-dialog#settings-dialog::backdrop {
+dialog#settings-dialog::backdrop,
+dialog#update-dialog::backdrop {
   background: rgb(6 5 9 / 60%);
 }
 dialog#model-drawer {
@@ -1923,52 +1925,314 @@ progress::-webkit-progress-value {
 .about-brand {
   display: flex;
   align-items: center;
-  gap: 20px;
-  margin: 28px 0 22px;
+  gap: 18px;
+  margin: 0;
+  padding: 6px 0 4px;
 }
 .about-brand img {
+  width: 72px;
+  height: 72px;
+  flex: 0 0 72px;
   object-fit: contain;
+  filter: drop-shadow(0 12px 28px rgb(0 0 0 / 40%));
 }
-.about-brand .page-eyebrow {
-  display: block;
-  margin-bottom: 9px;
+.about-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
-.about-brand h1 {
-  font-size: 32px;
+.about-brand .window-wordmark {
+  margin: 0;
+  font-size: 24px;
+  letter-spacing: -0.72px;
+}
+.about-copy > p {
+  margin: 0;
+  color: var(--secondary);
+  font-size: 13px;
 }
 .version-badge {
-  display: inline-block;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.about-copy > .version-badge {
+  color: var(--muted);
+  font-size: 12px;
+}
+.about-description {
+  max-width: 540px;
+  margin: 0;
   color: var(--secondary);
-  font-size: 10px;
-  margin: 8px 0 0;
+  font-size: 13.5px;
+  line-height: 1.55;
 }
-.about-intro {
-  font-size: 18px;
-  font-weight: 500;
-  letter-spacing: -0.4px;
+.about-links {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
 }
-.about-values {
+.about-link {
+  min-width: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px 18px;
-  margin: 24px 0;
-  color: var(--accent);
-  font-size: 10px;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--sunken);
+  text-align: left;
+  white-space: normal;
+  line-height: 1.5;
 }
-.about-values span::before {
+.about-link > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.about-link > span::after {
   content: "";
-  display: inline-block;
-  width: 4px;
-  height: 4px;
-  background: var(--accent);
-  border-radius: 50%;
-  margin-right: 7px;
-  vertical-align: middle;
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-top: 1.5px solid var(--muted);
+  border-right: 1.5px solid var(--muted);
+  transform: rotate(45deg);
 }
-.engine-credit {
+.about-link small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.about-updates .row > span {
+  min-width: 0;
+}
+.about-updates .row button {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 12.5px;
+}
+#about-update-action[data-status="available"] {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--button-text);
+  font-weight: 600;
+}
+.about-update-row .settings-row-description {
+  padding-left: 16px;
+}
+.about-update-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.about-update-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.about-update-dot[data-status="available"],
+.about-update-dot[data-status="downloading"],
+.about-update-dot[data-status="installing"] {
+  background: var(--accent);
+}
+.about-update-dot[data-status="current"] {
+  background: var(--ok);
+}
+.about-update-dot[data-status="error"] {
+  background: var(--warning);
+}
+dialog#update-dialog {
+  inset: 50% auto auto 50%;
+  width: min(460px, calc(100vw - 40px));
+  max-height: calc(100dvh - 40px);
+  transform: translate(-50%, -50%);
+  overflow: auto;
+  border-radius: 20px;
+  box-shadow: 0 40px 120px rgb(0 0 0 / 60%);
+}
+.update-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 26px 28px 18px;
+  background: radial-gradient(
+    ellipse at 20% 0%,
+    rgb(143 108 255 / 18%),
+    transparent 70%
+  );
+}
+.update-dialog-header img {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+}
+.update-dialog-identity {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.update-dialog-kicker {
+  color: var(--ok);
+  font-size: 12px;
+  font-weight: 600;
+}
+.update-dialog-version {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.42px;
+}
+.update-dialog-installed {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.update-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 28px 0;
+}
+.update-dialog-body > h2 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.update-dialog-message {
+  margin: 0;
+  color: var(--warning);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.update-highlights {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.update-highlights li {
+  position: relative;
+  padding-left: 16px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.update-highlights li::before {
+  content: "";
+  position: absolute;
+  top: 7px;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.update-release-link {
+  align-self: flex-start;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+.update-dialog-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 18px 28px 0;
   color: var(--secondary);
-  font-size: 10px;
-  padding-bottom: 15px;
+  font-size: 11.5px;
+}
+.update-dialog-progress progress {
+  width: 100%;
+  height: 4px;
+}
+.update-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 16px 28px;
+  border-top: 1px solid var(--border);
+}
+.update-dialog-hint {
+  max-width: 200px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.update-dialog-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+.update-dialog-actions button {
+  height: 36px;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--secondary);
+  font-size: 13px;
+  font-weight: 400;
+}
+.update-dialog-actions button.primary {
+  padding: 0 16px;
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--button-text);
+  font-weight: 600;
+}
+@media (max-width: 800px), (max-height: 650px) {
+  #settings-dialog[data-view="about"] .settings-dialog-shell {
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+  #settings-dialog[data-view="about"] .settings-dialog-heading {
+    padding: 18px 20px 4px;
+  }
+  #settings-dialog[data-view="about"] .settings-dialog-scroll {
+    padding: 10px 20px 20px;
+  }
+  #settings-dialog[data-view="about"] #content {
+    gap: 14px;
+  }
+  #settings-dialog[data-view="about"] .about-link {
+    padding: 10px;
+  }
+  #settings-dialog[data-view="about"] .about-updates .row {
+    padding: 12px 14px;
+  }
 }
 
 #record-control {

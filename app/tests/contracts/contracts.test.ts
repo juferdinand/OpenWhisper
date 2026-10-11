@@ -81,8 +81,22 @@ test("schema-derived command maps cover all current renderer actions", async () 
     "enable_paste", "disable_paste", "enable_shortcut", "desktop_shortcut", "clear_shortcut",
     "retry_transcription", "discard_recovery", "toggle_recording", "cancel_recording", "check_updates", "install_update",
   ]) assert.doesNotThrow(() => validateCommandName(name));
-  assert.equal(Object.keys(commandInputSchemas).length, 33);
+  assert.equal(Object.keys(commandInputSchemas).length, 34);
   assert.deepEqual(Object.keys(commandOutputSchemas).sort(), Object.keys(commandInputSchemas).sort());
+});
+
+test("update metadata and project links are bounded fixed capabilities", () => {
+  assert.deepEqual(validateCommandInput("open_project_link", { target: "repository" }), { target: "repository" });
+  for (const target of ["https://attacker.invalid", "file:///etc/passwd", "release/0.3.1", "unknown", null]) {
+    assert.throws(() => validateCommandInput("open_project_link", { target }));
+  }
+  const valid = { ...state(), updates: { ...state().updates, status: "available", version: "0.3.1",
+    details: { highlights: ["Local speech recognition", "Keyboard improvements"], size: 1024 } } };
+  assert.deepEqual(appStateSchema.parse(valid), valid);
+  for (const details of [{ highlights: ["x".repeat(513)] }, { highlights: Array.from({ length: 6 }, () => "item") },
+    { highlights: [], size: 0 }, { highlights: [], size: Number.MAX_SAFE_INTEGER + 1 }]) {
+    assert.equal(appStateSchema.safeParse({ ...valid, updates: { ...valid.updates, details } }).success, false);
+  }
 });
 
 test("unknown commands, shell/path authority and extra arguments are rejected", () => {

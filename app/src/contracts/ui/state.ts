@@ -26,6 +26,9 @@ const modelId = utf8(1024).min(1).refine(
 );
 const fraction = z.number().finite().min(0).max(1);
 const userText = utf8(MAX_USER_TEXT_BYTES);
+export const updateDetailsSchema = z.strictObject({ highlights: z.array(utf8(512)).max(5),
+  size: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional() });
+export type UpdateDetails = z.infer<typeof updateDetailsSchema>;
 
 const tabSchema = z.enum(["setup", "general", "models", "snippets", "history", "about"]);
 export type Tab = z.infer<typeof tabSchema>;
@@ -130,6 +133,7 @@ const updateStateSchema = z.strictObject({
   progress: fraction,
   error: utf8(65536).nullable(),
   package: z.enum(["macos", "deb", "appimage", "development"]),
+  details: updateDetailsSchema.optional(),
 });
 export type UpdateState = z.infer<typeof updateStateSchema>;
 
@@ -278,6 +282,7 @@ export const commandInputSchemas = {
   open_login_settings: noArgs,
   check_updates: noArgs,
   install_update: noArgs,
+  open_project_link: z.strictObject({ target: z.enum(["repository", "issues", "license", "release"]) }),
   window_action: z.strictObject({ action: z.enum(["minimize", "maximize", "close"]) }),
 };
 const commandNameSchema = z.strictObject(commandInputSchemas).keyof();
@@ -315,6 +320,7 @@ export const commandOutputSchemas = {
   open_login_settings: actionResult,
   check_updates: actionResult,
   install_update: actionResult,
+  open_project_link: actionResult,
   window_action: actionResult,
 } satisfies Record<CommandName, z.ZodType>;
 export type CommandInput<N extends CommandName> = z.infer<(typeof commandInputSchemas)[N]>;

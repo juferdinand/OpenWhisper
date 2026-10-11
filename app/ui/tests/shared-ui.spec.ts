@@ -661,10 +661,18 @@ test("saved Linux recordings can be retried or discarded without starting captur
   });
   await selectSettingsTab(page, "about");
   await closeSettings(page);
-  await expect(page.locator("#header-update")).toBeDisabled();
-  await expect(page.locator("#header-update")).toHaveAccessibleName(
-    /Version 0\.2\.2 ist verfügbar/u,
+  const update = page.locator("#header-update");
+  await expect(update).toBeVisible();
+  await expect(update).toBeEnabled();
+  await update.click();
+  await expect(page.locator("#update-dialog")).toBeVisible();
+  await expect(page.locator("#update-main-action")).toBeDisabled();
+  await expect(page.locator("#update-dialog-hint")).toContainText(
+    "gespeicherte Aufnahme",
   );
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#update-dialog")).toBeHidden();
+  await expect(update).toBeFocused();
 });
 
 async function start(
@@ -834,6 +842,10 @@ async function start(
           Object.assign(state.updates, {
             status: "available",
             version: "0.2.2",
+            details: {
+              highlights: ["Improved keyboard access"],
+              size: 1234,
+            },
           });
         if (command === "install_update") state.updates.status = "downloading";
         if (command === "download_model") {
@@ -2470,9 +2482,10 @@ for (const platform of ["linux", "macos"] as const) {
       "About",
     ]);
     await selectSettingsTab(page, "about");
-    await expect(
-      page.getByRole("heading", { name: "OpenWhisper", exact: true }),
-    ).toBeVisible();
+    await expect(page.locator("#page-title")).toHaveText("About");
+    await expect(page.locator("#content .about-copy > p")).toContainText(
+      "Local speech recognition",
+    );
     const aboutIcon = page.locator(".about-brand img");
     await expect(aboutIcon).toHaveAttribute(
       "src",
@@ -2992,8 +3005,14 @@ test("macOS retains native trigger capture, model import, and update actions", a
     .click();
   await expect(page.locator("dialog#model-drawer")).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.locator("#header-update")).toBeVisible();
-  await page.locator("#header-update").click();
+  await selectSettingsTab(page, "about");
+  await expect(page.locator("#about-update-action")).toHaveText(
+    "Check for updates",
+  );
+  await page.locator("#about-update-action").click();
+  await expect
+    .poll(() => page.evaluate(() => window.testState.updates.status))
+    .toBe("available");
   const commands = await page.evaluate(() =>
     (window as any).calls.map((c: any) => c.command),
   );
@@ -3886,30 +3905,113 @@ for (const platform of ["linux", "macos"] as const) {
       ).toHaveText(longFriendlyName);
     }
   });
-  test(`${platform}: header updates expose status and prevent recording during installation`, async ({
+  test(`${platform}: header opens update details and Download alone starts installation`, async ({
     page,
   }) => {
     await start(page, platform);
     await closeSettings(page);
     const update = page.locator("#header-update");
+    const dialog = page.locator("#update-dialog");
+    const action = page.locator("#update-main-action");
+    const later = page.locator("#update-later");
+    await page.evaluate(() => {
+      Object.assign(window.testState.updates, {
+        status: "available",
+        version: "0.2.2",
+        progress: 0,
+        error: null,
+        details: {
+          highlights: [
+            "Improved keyboard access",
+            "Fixed desktop startup handling",
+            "<img src=x onerror=window.__ownedUpdateXss=1>",
+            "Updated translations",
+            "Reduced memory use",
+          ],
+          size: 1234,
+        },
+      });
+      window.publishState();
+    });
     await expect(update).toBeVisible();
     await expect(update).toBeEnabled();
+    const installRequests = () =>
+      page.evaluate(
+        () =>
+          window.calls.filter((call) => call.command === "install_update")
+            .length,
+      );
+    await page.screenshot({
+      path: resolve(
+        recordingPolishScreenshots,
+        `${platform}-header-update-available.png`,
+      ),
+    });
     await update.click();
-    await expect(update).toHaveAccessibleName(/Version 0\.2\.2 is available/u);
-    await expect(update).toBeEnabled();
+    await expect(dialog).toBeVisible();
+    await page.screenshot({
+      path: resolve(
+        recordingPolishScreenshots,
+        `${platform}-update-details-en.png`,
+      ),
+    });
+    await expect(action).toHaveText("Download");
+    await expect(action).toBeFocused();
+    await expect(page.locator("#update-dialog-version")).toHaveText(
+      "Version 0.2.2",
+    );
+    await expect(page.locator("#update-dialog-installed")).toContainText(
+      "1.2 KB",
+    );
+    await expect(page.locator("#update-dialog-highlights li")).toHaveCount(5);
+    await expect(
+      page.locator("#update-dialog-highlights li").nth(2),
+    ).toHaveText("<img src=x onerror=window.__ownedUpdateXss=1>");
+    await expect(
+      page.locator("#update-dialog-highlights").locator("img,script,svg"),
+    ).toHaveCount(0);
+    expect(await installRequests()).toBe(0);
+
+    await later.click();
+    await expect(dialog).toBeHidden();
+    await expect(update).toBeFocused();
+    await update.click();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(update).toBeFocused();
+
+    await update.click();
+    await later.focus();
     await page.evaluate(() => {
       const w = window as any;
       w.testState.updates.status = "current";
       w.publishState();
     });
-    await expect(update).toHaveAccessibleName(/latest version/u);
+    await expect(page.locator("#update-dialog-status")).toHaveText(
+      "Up to date",
+    );
+    await expect(action).toBeHidden();
+    await expect(later).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(page.locator("#open-settings")).toBeFocused();
+    await page.evaluate(() => {
+      window.testState.updates.status = "available";
+      window.publishState();
+    });
+    await update.click();
+    await expect(dialog).toBeVisible();
+    await later.focus();
     await page.evaluate(() => {
       const w = window as any;
       w.testState.updates.status = "checking";
       w.publishState();
     });
-    await expect(update).toBeDisabled();
-    await expect(update).toHaveAccessibleName(/Checking for updates/u);
+    await expect(page.locator("#update-dialog-status")).toContainText(
+      "Checking",
+    );
+    await expect(action).toBeHidden();
+    await expect(later).toBeFocused();
     await page.evaluate(() => {
       const w = window as any;
       w.testState.updates.status = "available";
@@ -3917,97 +4019,424 @@ for (const platform of ["linux", "macos"] as const) {
       w.testState.updates.progress = 0;
       w.publishState();
     });
-    await expect(update).toBeEnabled();
-    await page.screenshot({
-      path: resolve(
-        recordingPolishScreenshots,
-        `${platform}-header-update-available.png`,
-      ),
-    });
+    await expect(action).toBeEnabled();
+    await expect(later).toBeFocused();
+
     await page.evaluate(() => {
       const w = window as any;
       w.testState.status = "recording";
       w.publishState();
     });
-    await expect(update).toBeDisabled();
+    await expect(action).toBeDisabled();
     await page.evaluate(() => {
       const w = window as any;
       w.testState.status = "idle";
-      w.testState.download = "base";
       w.publishState();
     });
-    await expect(update).toBeDisabled();
+    await expect(action).toBeEnabled();
     await page.evaluate(() => {
       const w = window as any;
-      w.testState.download = null;
+      w.testState.status = "transcribing";
+      w.publishState();
+    });
+    await expect(action).toBeDisabled();
+    await page.evaluate(() => {
+      const w = window as any;
+      w.testState.status = "idle";
       w.testState.recovery_available = true;
       w.publishState();
     });
-    await expect(update).toBeDisabled();
+    await expect(action).toBeDisabled();
     await page.evaluate(() => {
       const w = window as any;
       w.testState.recovery_available = false;
+      w.testState.download = "base";
       w.publishState();
     });
-    await expect(update).toBeEnabled();
+    await expect(action).toBeDisabled();
+    await page.evaluate(() => {
+      const w = window as any;
+      w.testState.download = null;
+      w.testState.shortcut_configuring = true;
+      w.publishState();
+    });
+    await expect(action).toBeDisabled();
+    await page.evaluate(() => {
+      const w = window as any;
+      w.testState.shortcut_configuring = false;
+      w.testState.paste_configuring = true;
+      w.publishState();
+    });
+    await expect(action).toBeDisabled();
+    await expect(later).toBeFocused();
+    expect(await installRequests()).toBe(0);
+
     await page.evaluate(() => {
       const w = window as any;
       w.testState.updates.status = "downloading";
       w.testState.updates.progress = 0.42;
+      w.testState.paste_configuring = false;
       w.publishState();
     });
-    await expect(update).toBeDisabled();
-    await expect(update).toHaveAccessibleName(/Downloading update: 42%/u);
+    await expect(action).toBeHidden();
+    await expect(page.locator("#update-dialog-progress")).toBeVisible();
+    await expect(page.locator("#update-progress-label")).toHaveText(
+      "Downloading update: 42%",
+    );
+    await expect(later).toBeFocused();
     await page.evaluate(() => {
       const w = window as any;
       w.testState.updates.status = "installing";
       w.publishState();
     });
-    await expect(update).toBeDisabled();
-    await page.evaluate(() => {
-      const w = window as any;
-      w.testState.updates.status = "available";
-      w.testState.status = "transcribing";
-      w.publishState();
-    });
-    await expect(update).toBeDisabled();
-    await page.evaluate(() => {
-      const w = window as any;
-      w.testState.status = "idle";
-      w.publishState();
-    });
-    await update.click();
-    await expect(page.locator("#record")).toBeDisabled();
-    await expect(update).toHaveAccessibleName(/Downloading update: 42%/u);
-    await expect(update).toBeDisabled();
+    await expect(action).toBeHidden();
+    await expect(page.locator("#update-dialog-status")).toContainText(
+      "Installing",
+    );
+    await expect(page.locator("#update-dialog-version")).toHaveText(
+      "Version 0.2.2",
+    );
+    await expect(page.locator("#update-dialog-highlights li")).toHaveCount(5);
+    await expect(page.locator("#update-dialog-installed")).toContainText(
+      "1.2 KB",
+    );
+    await expect(later).toBeFocused();
     await page.evaluate(() => {
       const w = window as any;
       w.testState.updates.status = "error";
+      w.testState.updates.version = "0.2.2";
       w.testState.updates.error = "Network unavailable";
       w.testState.updates.progress = 0;
       w.publishState();
     });
-    await expect(update).toBeEnabled();
-    await expect(update).toHaveAccessibleName(
-      /Update failed: Network unavailable/u,
+    await expect(action).toBeHidden();
+    await expect(page.locator("#update-dialog-message")).toContainText(
+      "Network unavailable",
     );
-    await update.click();
+    await expect(page.locator("#update-dialog-version")).toHaveText(
+      "Version 0.2.2",
+    );
+    await expect(page.locator("#update-dialog-highlights li")).toHaveCount(5);
+    await expect(page.locator("#update-dialog-installed")).toContainText(
+      "1.2 KB",
+    );
+    await expect(page.locator("#update-release-link")).toBeVisible();
+    await expect(later).toBeFocused();
+    expect(await installRequests()).toBe(0);
+    await page.locator("#update-release-link").click();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)))
+      .toEqual({
+        command: "open_project_link",
+        args: { target: "release" },
+      });
+
+    await page.evaluate(() => {
+      const w = window as any;
+      w.testState.updates.status = "available";
+      w.testState.updates.error = null;
+      w.testState.status = "idle";
+      w.publishState();
+    });
+    await expect(action).toBeEnabled();
+    await later.focus();
+    await action.click();
+    await expect
+      .poll(() => page.evaluate(() => window.testState.updates.status))
+      .toBe("downloading");
+    await expect(later).toBeFocused();
+    expect(await installRequests()).toBe(1);
+    await expect(page.locator("#record")).toBeDisabled();
+    await expect(action).toBeHidden();
+  });
+
+  test(`${platform}: About update details, fixed project links, and localized overflow`, async ({
+    page,
+  }) => {
+    await start(page, platform, false, false, false, null);
+    const trustedUrl = page.url();
+    await openSettings(page);
+    await expect(
+      page.locator('#content [data-pref="auto_check_updates"]'),
+    ).toHaveCount(0);
+    await selectSettingsTab(page, "about");
+    const aboutScroll = page.locator(
+      "#settings-dialog .settings-dialog-scroll",
+    );
+    const autoUpdates = page.locator(
+      '#about-updates [data-pref="auto_check_updates"]',
+    );
+    const updateAction = page.locator("#about-update-action");
+    await expect(updateAction).toHaveText("Check for updates");
+    await expect(autoUpdates).toBeChecked();
+    await autoUpdates.uncheck();
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.testState.preferences.auto_check_updates),
+      )
+      .toBe(false);
+    await autoUpdates.check();
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.testState.preferences.auto_check_updates),
+      )
+      .toBe(true);
+
+    const aboutBounds = async () =>
+      aboutScroll.evaluate((element) => ({
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+        overflowY: getComputedStyle(element).overflowY,
+        dialog: (() => {
+          const rect = document
+            .querySelector("#settings-dialog")!
+            .getBoundingClientRect();
+          return {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            right: rect.right,
+            bottom: rect.bottom,
+          };
+        })(),
+      }));
+
+    for (const viewport of [
+      { width: 1280, height: 900 },
+      { width: 900, height: 650 },
+    ]) {
+      await page.setViewportSize(viewport);
+      const metrics = await aboutBounds();
+      console.info(
+        `[about-layout] ${platform} ${viewport.width}x${viewport.height} ${JSON.stringify(metrics)}`,
+      );
+      expect(metrics.dialog.right).toBeLessThanOrEqual(viewport.width + 1);
+      expect(metrics.dialog.bottom).toBeLessThanOrEqual(viewport.height + 1);
+      expect(metrics.scrollHeight).toBeLessThanOrEqual(
+        metrics.clientHeight + 1,
+      );
+      await page.screenshot({
+        path: resolve(
+          recordingPolishScreenshots,
+          `${platform}-about-${viewport.width}x${viewport.height}.png`,
+        ),
+      });
+    }
+    await page.setViewportSize({ width: 740, height: 560 });
+    const minimumMetrics = await aboutBounds();
+    console.info(
+      `[about-layout] ${platform} 740x560 ${JSON.stringify(minimumMetrics)}`,
+    );
+    expect(minimumMetrics.overflowY).toMatch(/auto|scroll/u);
+    await page.screenshot({
+      path: resolve(
+        recordingPolishScreenshots,
+        `${platform}-about-740x560.png`,
+      ),
+    });
+    await page
+      .locator('#about-updates [data-pref="auto_check_updates"]')
+      .scrollIntoViewIfNeeded();
+    await expect(updateAction).toHaveText("Check for updates");
+
+    await page.locator('[data-project-link="repository"]').click();
+    await page.locator('[data-project-link="issues"]').click();
+    await page.locator('[data-project-link="license"]').click();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          window.calls
+            .filter((call) => call.command === "open_project_link")
+            .map((call) => (call.args as { target?: string }).target),
+        ),
+      )
+      .toEqual(["repository", "issues", "license"]);
+    expect(page.url()).toBe(trustedUrl);
+
+    await updateAction.click();
     await expect
       .poll(() => page.evaluate(() => window.testState.updates.status))
       .toBe("available");
-    const updateCommands = await page.evaluate(() =>
-      window.calls
-        .map((call) => call.command)
-        .filter(
-          (command) =>
-            command === "check_updates" || command === "install_update",
-        ),
+    await expect(updateAction).toHaveText("Details");
+    await updateAction.click();
+    const dialog = page.locator("#update-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(page.locator("#update-main-action")).toHaveText("Download");
+    await page.locator("#update-release-link").click();
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)))
+      .toEqual({
+        command: "open_project_link",
+        args: { target: "release" },
+      });
+    await page.locator("#update-later").click();
+    await expect(dialog).toBeHidden();
+    await expect(updateAction).toBeFocused();
+
+    await page.evaluate(() => {
+      window.testState.updates.details = { highlights: [] };
+      window.publishState();
+    });
+    await updateAction.click();
+    await expect(page.locator("#update-dialog-highlights li")).toHaveText(
+      "No release notes are available for this version.",
     );
-    expect(updateCommands).toEqual([
-      "check_updates",
-      "install_update",
-      "check_updates",
-    ]);
+    await expect(page.locator("#update-dialog-installed")).not.toContainText(
+      "Download size:",
+    );
+    await page.locator("#update-later").click();
+
+    await page.evaluate(() => {
+      window.testState.updates.details = {
+        highlights: [
+          "Improved keyboard access",
+          "Fixed desktop startup handling",
+          "Updated translations",
+          "Reduced memory use",
+          "Refined settings",
+        ],
+        size: 1234,
+      };
+      window.publishState();
+    });
+    await selectSettingsTab(page, "general");
+    await page.locator('[data-ui-language="de"]').click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "de");
+    await selectSettingsTab(page, "about");
+    await page.setViewportSize({ width: 900, height: 650 });
+    const germanMetrics = await aboutBounds();
+    console.info(
+      `[about-layout] ${platform} de 900x650 ${JSON.stringify(germanMetrics)}`,
+    );
+    expect(germanMetrics.scrollHeight).toBeLessThanOrEqual(
+      germanMetrics.clientHeight + 1,
+    );
+    await page.screenshot({
+      path: resolve(
+        recordingPolishScreenshots,
+        `${platform}-about-de-900x650.png`,
+      ),
+    });
+    await expect(autoUpdates).toBeChecked();
+    await expect(updateAction).toHaveText("Details");
+    await updateAction.click();
+    await expect(dialog).toBeVisible();
+    await expect(page.locator("#update-main-action")).toHaveText(
+      "Herunterladen",
+    );
+    await page.screenshot({
+      path: resolve(
+        recordingPolishScreenshots,
+        `${platform}-update-details-de.png`,
+      ),
+    });
+    await expect(page.locator("#update-dialog-highlights li")).toHaveCount(5);
+    await expect(page.locator("#update-dialog-installed")).toContainText(
+      "1,2 KB",
+    );
+    await page.locator("#update-later").click();
+    await expect(dialog).toBeHidden();
+    await expect(updateAction).toBeFocused();
+
+    await page.evaluate(() => {
+      window.testState.updates.details = { highlights: [] };
+      window.publishState();
+    });
+    await updateAction.click();
+    await expect(page.locator("#update-dialog-highlights li")).toHaveText(
+      "Für diese Version gibt es keine Versionshinweise.",
+    );
+    await expect(page.locator("#update-dialog-installed")).not.toContainText(
+      "Downloadgröße:",
+    );
+    await page.locator("#update-later").click();
+    await page.evaluate(() => {
+      window.testState.profile = "development";
+      window.testState.development_build = "fixture-build";
+      window.testState.updates.configured = false;
+      window.testState.updates.status = "idle";
+      window.testState.updates.version = null;
+      window.testState.updates.details = undefined;
+      window.publishState();
+    });
+    await expect(page.locator("#about-update-status")).toContainText(
+      "nicht eingerichtet",
+    );
+    await expect(updateAction).toBeHidden();
+    await page.screenshot({
+      path: resolve(
+        recordingPolishScreenshots,
+        `${platform}-about-dev-updates-unconfigured.png`,
+      ),
+    });
+  });
+
+  test(`${platform}: update download guard preserves dirty text and native capture`, async ({
+    page,
+  }) => {
+    await start(page, platform);
+    await page.evaluate(() => {
+      Object.assign(window.testState.updates, {
+        status: "available",
+        version: "0.2.2",
+        details: { highlights: ["Fixture release note"] },
+      });
+      window.publishState();
+    });
+    await closeSettings(page);
+    const dialog = page.locator("#update-dialog");
+    const action = page.locator("#update-main-action");
+    await page.locator("#header-update").click();
+    await expect(dialog).toBeVisible();
+
+    await page.evaluate(() => {
+      window.testState.shortcut_configuring = true;
+      window.publishState();
+    });
+    await expect(action).toBeDisabled();
+    await expect(page.locator("#update-dialog-hint")).toContainText(
+      "permission or shortcut setup",
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.calls.filter((call) => call.command === "install_update")
+              .length,
+        ),
+      )
+      .toBe(0);
+    await page.locator("#update-later").click();
+    await page.evaluate(() => {
+      window.testState.shortcut_configuring = false;
+      window.publishState();
+    });
+
+    await selectSettingsTab(page, "text");
+    const vocabulary = page.locator("#vocabulary");
+    await vocabulary.fill("Unsaved update-guard fixture");
+    await page.evaluate(() => {
+      document.querySelector<HTMLButtonElement>("#header-update")?.click();
+    });
+    await expect(dialog).toBeVisible();
+    await expect(action).toBeDisabled();
+    await expect(page.locator("#update-dialog-hint")).toContainText(
+      "Save or discard your changes",
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.calls.filter((call) => call.command === "install_update")
+              .length,
+        ),
+      )
+      .toBe(0);
+    await page.locator("#update-later").click();
+    await expect(vocabulary).toHaveValue("Unsaved update-guard fixture");
+    await page.locator("[data-discard-vocabulary]").click();
+    await expect(vocabulary).toHaveValue("");
   });
   test(`${platform}: German views fit the minimum window and translate the floating timer`, async ({
     page,

@@ -40,6 +40,7 @@ let dismissedTranscriptGeneration: number | undefined;
 let modelDrawerFamily: "parakeet" | "whisper" = "parakeet";
 let modelDialogOpener: HTMLElement | null = null;
 let settingsDialogOpener: HTMLElement | null = null;
+let updateDialogOpener: HTMLElement | null = null;
 let pendingSettingsSection = "";
 let modelDialogKey = "";
 let modelFocusRestorePending = false;
@@ -99,7 +100,7 @@ function windowTitlebar(): string {
   const tabChrome = setup
     ? `<span class="window-dictation-title">${esc(t("Setup"))}</span>`
     : `<div class="window-titlebar-tabs"><div class="window-active-tab" aria-current="page"><span class="window-tab-status ${dotState}" aria-hidden="true"></span><span class="window-tab-copy"><span class="window-tab-title">${esc(t("Dictation"))}</span><span class="window-tab-subtitle">${esc(model?.title ?? t("Choose a model"))}</span></span></div></div>`;
-  return `<header class="window-titlebar"><div class="window-titlebar-brand"><img src="./branding/icon-bordered.svg" width="24" height="24" alt="">${wordmark()}${dev}</div>${tabChrome}${setup ? "" : `<div class="window-titlebar-actions"><button type="button" id="header-update" aria-live="polite" hidden></button><span class="local-recognition-badge">${esc(t("Local recognition"))}</span><button type="button" id="open-settings">${symbol("M12 8a4 4 0 1 0 0 8 4 4 0 0 0-4-8M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2")}${esc(t("Settings"))}</button></div>`}<div class="window-actions"><button data-window-action="minimize" aria-label="${esc(t("Minimize window"))}" title="${esc(t("Minimize window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 11.5h10"/></svg></button><button data-window-action="maximize" aria-label="${esc(t("Maximize or restore window"))}" title="${esc(t("Maximize or restore window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/></svg></button><button class="window-close" data-window-action="close" aria-label="${esc(t("Close window"))}" title="${esc(t("Close window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div></header>`;
+  return `<header class="window-titlebar"><div class="window-titlebar-brand"><img src="./branding/icon-bordered.svg" width="24" height="24" alt="">${wordmark()}${dev}</div>${tabChrome}${setup ? "" : `<div class="window-titlebar-actions"><span class="local-recognition-badge">${esc(t("Local recognition"))}</span><button type="button" id="header-update" aria-live="polite" hidden></button><button type="button" id="open-settings">${symbol("M12 8a4 4 0 1 0 0 8 4 4 0 0 0-4-8M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2")}${esc(t("Settings"))}</button></div>`}<div class="window-actions"><button data-window-action="minimize" aria-label="${esc(t("Minimize window"))}" title="${esc(t("Minimize window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 11.5h10"/></svg></button><button data-window-action="maximize" aria-label="${esc(t("Maximize or restore window"))}" title="${esc(t("Maximize or restore window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/></svg></button><button class="window-close" data-window-action="close" aria-label="${esc(t("Close window"))}" title="${esc(t("Close window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div></header>`;
 }
 function windowTabStatus(): string {
   return state.status === "recording"
@@ -123,7 +124,12 @@ function syncWindowTitlebar() {
   const updateButton =
     document.querySelector<HTMLButtonElement>("#header-update");
   if (updateButton) {
-    updateButton.hidden = !state.updates.configured;
+    updateButton.hidden =
+      !state.updates.configured ||
+      (!["available", "downloading", "installing"].includes(
+        state.updates.status,
+      ) &&
+        !(state.updates.status === "error" && !!state.updates.version));
     if (!state.updates.configured) return;
     updateButton.dataset.status = state.updates.status;
     updateButton.innerHTML = `${symbol("M12 3v12m0 0 5-5m-5 5-5-5M5 21h14")}<span>${esc(updateButtonLabel())}</span>`;
@@ -132,21 +138,220 @@ function syncWindowTitlebar() {
       "aria-label",
       t("Updates: {status}", { status: updateStatus() }),
     );
-    updateButton.disabled = headerUpdateDisabled();
-    updateButton.onclick = () => {
-      const action =
-        state.updates.status === "available"
-          ? "install_update"
-          : "check_updates";
-      if (action === "install_update" && dirty) {
-        notice(
-          "Save or discard your changes before switching tabs or language.",
-        );
-        return;
-      }
-      void command(action);
-    };
+    updateButton.disabled = false;
+    updateButton.onclick = () => openUpdateDialog(updateButton);
   }
+}
+function updateKicker() {
+  switch (state.updates.status) {
+    case "available":
+      return t("Update available");
+    case "checking":
+      return t("Checking for updates …");
+    case "current":
+      return t("Up to date");
+    case "downloading":
+      return t("Downloading update");
+    case "installing":
+      return t("Installing update");
+    case "error":
+      return t("Update error");
+    default:
+      return t("Updates");
+  }
+}
+function updateInstallBlockReason(): string {
+  if (dirty)
+    return t("Save or discard your changes before installing an update.");
+  if (!state.preferences.setup_completed)
+    return t("Finish setup before installing an update.");
+  if (state.recovery_available)
+    return t(
+      "Resolve or discard the saved recording before installing an update.",
+    );
+  if (["recording", "transcribing"].includes(state.status))
+    return t("Finish the current recording before installing an update.");
+  if (state.download)
+    return t(
+      "Wait for the model download to finish before installing an update.",
+    );
+  if (
+    state.shortcut_configuring ||
+    state.recording_shortcut ||
+    state.macos?.recording_shortcut === true ||
+    state.paste_configuring ||
+    portalBusy
+  )
+    return t(
+      "Finish the permission or shortcut setup before installing an update.",
+    );
+  return "";
+}
+function canInstallUpdate() {
+  return (
+    state.updates.configured &&
+    state.updates.status === "available" &&
+    !!state.updates.version &&
+    !updateInstallBlockReason()
+  );
+}
+function openUpdateDialog(opener: HTMLElement) {
+  const dialog = document.querySelector<HTMLDialogElement>("#update-dialog");
+  if (!dialog || !state.updates.configured) return;
+  updateDialogOpener = opener;
+  syncUpdateDialog();
+  if (!dialog.open) dialog.showModal();
+  const action = dialog.querySelector<HTMLButtonElement>("#update-main-action");
+  if (action && !action.hidden && !action.disabled) action.focus();
+  else dialog.querySelector<HTMLButtonElement>("#update-later")?.focus();
+}
+function formatUpdateSize(bytes: number) {
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  const locale = state.preferences.ui_language === "de" ? "de-DE" : "en-US";
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value)} ${units[unit]}`;
+}
+function syncUpdateDialog() {
+  const dialog = document.querySelector<HTMLDialogElement>("#update-dialog");
+  if (!dialog) return;
+  const update = state.updates;
+  dialog.dataset.status = update.status;
+  dialog.setAttribute(
+    "aria-busy",
+    String(["checking", "downloading", "installing"].includes(update.status)),
+  );
+  const status = dialog.querySelector<HTMLElement>("#update-dialog-status");
+  const version = dialog.querySelector<HTMLElement>("#update-dialog-version");
+  const installed = dialog.querySelector<HTMLElement>(
+    "#update-dialog-installed",
+  );
+  const message = dialog.querySelector<HTMLElement>("#update-dialog-message");
+  const notes = dialog.querySelector<HTMLElement>("#update-dialog-highlights");
+  const releaseLink = dialog.querySelector<HTMLButtonElement>(
+    "#update-release-link",
+  );
+  const progress = dialog.querySelector<HTMLElement>("#update-dialog-progress");
+  const progressBar = dialog.querySelector<HTMLProgressElement>(
+    "#update-progress-bar",
+  );
+  const progressLabel = dialog.querySelector<HTMLElement>(
+    "#update-progress-label",
+  );
+  const hint = dialog.querySelector<HTMLElement>("#update-dialog-hint");
+  const action = dialog.querySelector<HTMLButtonElement>("#update-main-action");
+  if (status) status.textContent = updateKicker();
+  if (version)
+    version.textContent = update.version
+      ? t("Version {version}", { version: update.version })
+      : t("Updates");
+  if (installed) {
+    installed.textContent = `${t("Installed: {version}", { version: state.version })}${update.details?.size ? ` · ${t("Download size: {size}", { size: formatUpdateSize(update.details.size) })}` : ""}`;
+  }
+  if (message) {
+    message.textContent = updateStatus();
+    message.className =
+      update.status === "error" ? "update-dialog-message" : "visually-hidden";
+  }
+  if (notes) {
+    const highlights = update.details?.highlights ?? [];
+    notes.replaceChildren(
+      ...(highlights.length
+        ? highlights.map((text) => {
+            const item = document.createElement("li");
+            item.textContent = text;
+            return item;
+          })
+        : [
+            (() => {
+              const item = document.createElement("li");
+              item.textContent = t(
+                "No release notes are available for this version.",
+              );
+              return item;
+            })(),
+          ]),
+    );
+  }
+  if (releaseLink)
+    releaseLink.hidden =
+      !update.version ||
+      !["available", "downloading", "installing", "error"].includes(
+        update.status,
+      );
+  const downloading = update.status === "downloading";
+  if (progress) progress.hidden = !downloading;
+  if (progressBar) progressBar.value = update.progress;
+  if (progressLabel)
+    progressLabel.textContent = downloading
+      ? t("Downloading update: {progress}%", {
+          progress: String(Math.round(update.progress * 100)),
+        })
+      : "";
+  if (hint) {
+    hint.textContent =
+      update.status === "available"
+        ? updateInstallBlockReason() || t("Ready to download this update.")
+        : ["downloading", "installing"].includes(update.status)
+          ? t("The update continues when you close this window.")
+          : "";
+  }
+  if (action) {
+    const actionWasFocused = document.activeElement === action;
+    const available = update.status === "available";
+    action.hidden = !available;
+    action.disabled = available && !canInstallUpdate();
+    action.textContent = t("Download");
+    action.setAttribute("aria-label", t("Download"));
+    if (actionWasFocused && (action.hidden || action.disabled))
+      dialog.querySelector<HTMLButtonElement>("#update-later")?.focus();
+  }
+}
+function syncAboutUpdates() {
+  const status = document.querySelector<HTMLElement>("#about-update-status");
+  if (!status) return;
+  status.dataset.status = state.updates.status;
+  status.textContent = state.updates.configured
+    ? updateStatus()
+    : t("Updates are not configured in this installation.");
+  const dot = document.querySelector<HTMLElement>("#about-update-dot");
+  if (dot) dot.dataset.status = state.updates.status;
+  const summary = document.querySelector<HTMLElement>("#about-update-summary");
+  if (summary) {
+    const text =
+      state.updates.status === "available" && state.updates.details?.size
+        ? t("Download size: {size}", {
+            size: formatUpdateSize(state.updates.details.size),
+          })
+        : "";
+    summary.textContent = text;
+    summary.hidden = !text;
+  }
+  const action = document.querySelector<HTMLButtonElement>(
+    "#about-update-action",
+  );
+  const automatic = document.querySelector<HTMLElement>("#about-auto-updates");
+  if (action) {
+    action.hidden = !state.updates.configured;
+    action.dataset.status = state.updates.status;
+    const detailState =
+      ["available", "downloading", "installing"].includes(
+        state.updates.status,
+      ) ||
+      (state.updates.status === "error" && !!state.updates.version);
+    action.textContent =
+      state.updates.status === "checking"
+        ? t("Checking")
+        : detailState
+          ? t("Details")
+          : t("Check for updates");
+    action.disabled = state.updates.status === "checking";
+  }
+  if (automatic) automatic.hidden = !state.updates.configured;
 }
 const section = (title: string, body: string, note = "", id = "") =>
   `<section${id ? ` id="${id}"` : ""}>${title ? `<h2>${title}</h2>` : ""}<div class="group">${body}</div>${note ? `<p class="section-note">${note}</p>` : ""}</section>`;
@@ -746,6 +951,9 @@ const microphoneIcon =
 function emptyModelDialog() {
   return '<dialog id="model-drawer" aria-labelledby="model-drawer-title"></dialog>';
 }
+function emptyUpdateDialog() {
+  return `<dialog id="update-dialog" aria-labelledby="update-dialog-version" aria-describedby="update-dialog-message"><div class="update-dialog-shell"><header class="update-dialog-header"><img src="./branding/icon-bordered.svg" width="52" height="52" alt=""><div class="update-dialog-identity"><span class="update-dialog-kicker" id="update-dialog-status"></span><h2 class="update-dialog-version" id="update-dialog-version"></h2><p class="update-dialog-installed" id="update-dialog-installed"></p></div></header><div class="update-dialog-body"><p class="visually-hidden" id="update-dialog-message"></p><h2>${esc(t("What’s new"))}</h2><ul class="update-highlights" id="update-dialog-highlights"></ul><button type="button" id="update-release-link" class="update-release-link" data-project-link="release">${esc(t("All changes on GitHub"))}</button></div><div class="update-dialog-progress" id="update-dialog-progress" hidden><progress id="update-progress-bar" max="1" value="0"></progress><span id="update-progress-label"></span></div><footer class="update-dialog-footer"><span class="update-dialog-hint" id="update-dialog-hint"></span><div class="update-dialog-actions"><button type="button" id="update-later">${esc(t("Later"))}</button><button type="button" id="update-main-action" class="primary"></button></div></footer></div></dialog>`;
+}
 function bindDialogFocusTrap(dialog: HTMLDialogElement) {
   dialog.addEventListener("keydown", (event) => {
     if (event.key !== "Tab" || !dialog.open) return;
@@ -777,6 +985,54 @@ function bindModelDialogShell() {
   if (!dialog) return;
   dialog.onclose = (event) =>
     restoreModelDialogFocus(event.currentTarget as HTMLDialogElement);
+  bindDialogFocusTrap(dialog);
+}
+function bindUpdateDialogShell() {
+  const dialog = document.querySelector<HTMLDialogElement>("#update-dialog");
+  if (!dialog) return;
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+  dialog.onclose = () => {
+    if (dialog.open || !dialog.isConnected) return;
+    const opener = updateDialogOpener;
+    updateDialogOpener = null;
+    if (opener?.isConnected && !opener.hidden && !opener.matches(":disabled")) {
+      opener.focus();
+      return;
+    }
+    const fallback = [
+      document.querySelector<HTMLElement>("#about-update-action"),
+      document.querySelector<HTMLElement>("#header-update"),
+      document.querySelector<HTMLElement>("#open-settings"),
+    ].find(
+      (element) =>
+        element?.isConnected &&
+        !element.hidden &&
+        !element.matches(":disabled"),
+    );
+    fallback?.focus();
+  };
+  dialog
+    .querySelector<HTMLButtonElement>("#update-later")
+    ?.addEventListener("click", () => dialog.close());
+  dialog
+    .querySelector<HTMLButtonElement>("#update-main-action")
+    ?.addEventListener("click", () => {
+      if (!canInstallUpdate()) return;
+      void command("install_update");
+    });
+  dialog
+    .querySelector<HTMLButtonElement>("#update-release-link")
+    ?.addEventListener("click", () => {
+      if (
+        state.updates.version &&
+        ["available", "downloading", "installing", "error"].includes(
+          state.updates.status,
+        )
+      )
+        void command("open_project_link", { target: "release" });
+    });
   bindDialogFocusTrap(dialog);
 }
 function bindSettingsDialogShell() {
@@ -861,8 +1117,9 @@ function renderShell() {
     ["history", "History"],
     ["about", "About"],
   ];
-  app.innerHTML = `${windowTitlebar()}<div id="notice" role="alert" hidden></div><div id="dictation-workspace" class="dictation-workspace"><div class="workspace-frame${historyRailOpen ? "" : " history-collapsed"}"><main id="dictation-content" class="dictation-main"></main><aside id="dictation-history" class="dictation-history history-rail" aria-label="${esc(t("History"))}"></aside></div><div id="record-control"></div></div><dialog id="settings-dialog" aria-labelledby="page-title"><div class="settings-dialog-shell"><nav class="settings-dialog-nav" aria-label="${esc(t("Settings"))}">${settingsTabs.map(([id, title]) => `<button type="button" data-tab="${id}">${esc(t(title))}</button>`).join("")}<small class="settings-dialog-version">OpenWhisper ${esc(state.version)}</small></nav><div class="settings-dialog-panel"><header class="settings-dialog-heading"><h1 id="page-title"></h1><button type="button" id="close-settings">${esc(t("Done"))}</button></header><div id="settings-notice" role="alert" hidden></div><div class="settings-dialog-scroll"><div class="settings-content"><div id="content"></div></div></div></div></div></dialog>${emptyModelDialog()}`;
+  app.innerHTML = `${windowTitlebar()}<div id="notice" role="alert" hidden></div><div id="dictation-workspace" class="dictation-workspace"><div class="workspace-frame${historyRailOpen ? "" : " history-collapsed"}"><main id="dictation-content" class="dictation-main"></main><aside id="dictation-history" class="dictation-history history-rail" aria-label="${esc(t("History"))}"></aside></div><div id="record-control"></div></div><dialog id="settings-dialog" aria-labelledby="page-title"><div class="settings-dialog-shell"><nav class="settings-dialog-nav" aria-label="${esc(t("Settings"))}">${settingsTabs.map(([id, title]) => `<button type="button" data-tab="${id}">${esc(t(title))}</button>`).join("")}<small class="settings-dialog-version">OpenWhisper ${esc(state.version)}</small></nav><div class="settings-dialog-panel"><header class="settings-dialog-heading"><h1 id="page-title"></h1><button type="button" id="close-settings">${esc(t("Done"))}</button></header><div id="settings-notice" role="alert" hidden></div><div class="settings-dialog-scroll"><div class="settings-content"><div id="content"></div></div></div></div></div></dialog>${emptyModelDialog()}${emptyUpdateDialog()}`;
   bindModelDialogShell();
+  bindUpdateDialogShell();
   bindSettingsDialogShell();
   if (overlay)
     app.innerHTML =
@@ -1388,11 +1645,13 @@ function render() {
   else if (tab === "setup") tab = "dictation";
   renderShell();
   syncWindowTitlebar();
+  syncUpdateDialog();
   recordControl();
   if (overlay) return;
   syncModelDialog();
   const settingsDialog =
     document.querySelector<HTMLDialogElement>("#settings-dialog");
+  if (settingsDialog) settingsDialog.dataset.view = tab;
   if (tab !== "dictation" && settingsDialog && !settingsDialog.open) {
     settingsDialogOpener ??=
       document.querySelector<HTMLElement>("#open-settings");
@@ -1406,6 +1665,7 @@ function render() {
     b.setAttribute("aria-current", selected ? "page" : "false");
   });
   syncPreferenceControls();
+  syncAboutUpdates();
   renderWorkspace();
   if (tab === "dictation") return;
   const triggerBusy =
@@ -1449,7 +1709,12 @@ function render() {
               model: state.preferences.model,
               output: state.preferences.output,
             }
-          : state.preferences,
+          : tab === "about"
+            ? {
+                ui_language: state.preferences.ui_language,
+                setup_completed: state.preferences.setup_completed,
+              }
+            : state.preferences,
       state.installed,
       state.microphones,
       state.microphone_labels,
@@ -1474,7 +1739,7 @@ function render() {
       state.transcript,
       state.transcript_preview_omitted,
       state.macos,
-      state.updates,
+      tab === "about" ? state.updates.configured : state.updates,
       state.overlay_available,
       state.overlay_unavailable_reason,
       state.gpu_supported,
@@ -1670,13 +1935,6 @@ function render() {
           `<label class="row launch-at-login-row" title="${esc(state.launch_at_login_available === false ? t(state.profile === "development" ? "Launch at login is available in an installed version of OpenWhisper." : "Launch at login is unavailable in this installation.") : "")}"><span>${esc(t("Launch at login"))}</span><input class="switch" type="checkbox" data-pref="launch_at_login" ${p.launch_at_login ? "checked" : ""} ${state.launch_at_login_available === false ? "disabled" : ""}></label>` +
           (state.macos?.launch_at_login_pending
             ? `<div class="row approval"><span>${esc(t("Allow OpenWhisper in System Settings to finish enabling launch at login."))}</span><button data-command="open_login_settings">${esc(t("System Settings"))}</button></div>`
-            : "") +
-          (state.updates.configured
-            ? toggle(
-                t("Automatically check for updates (once a day)"),
-                "auto_check_updates",
-                !!p.auto_check_updates,
-              )
             : ""),
       ) +
       section(
@@ -1978,16 +2236,12 @@ function render() {
     );
     bindHistoryActions(content);
   } else {
-    content.innerHTML = section(
-      "",
-      `<div class="about-brand"><img src="./branding/icon-bordered.svg" width="88" height="88" alt="${esc(t("OpenWhisper app icon"))}"><div><span class="page-eyebrow">${esc(t("LESS TYPING. MORE YOU."))}</span><h1>OpenWhisper</h1><p class="version-badge">Version ` +
-        esc(state.version) +
-        (state.profile === "development" && state.development_build
-          ? ` · Dev ${esc(state.development_build)}`
-          : "") +
-        (isMac() ? "" : " · " + t("Linux")) +
-        `</p></div></div><p class="about-intro">${esc(t("A little more freedom for your voice."))}</p><p class="secondary">${esc(t("Turn your thoughts into text, right on your computer."))}</p><div class="about-values"><span>${esc(t("On-device recognition"))}</span><span>${esc(t("No subscription"))}</span><span>${esc(t("Open source · MIT"))}</span></div><p class="engine-credit">${esc(t("Powered by whisper.cpp, OpenAI Whisper, and NVIDIA Parakeet."))}</p>`,
+    content.innerHTML = `<div class="about-brand"><img src="./branding/icon-bordered.svg" width="72" height="72" alt="${esc(t("OpenWhisper app icon"))}"><div class="about-copy">${wordmark()}<p>${esc(t("Local speech recognition for macOS and Linux"))}</p><span class="version-badge">${esc(t("Version {version}", { version: state.version }))} · Electron${state.profile === "development" && state.development_build ? ` · ${esc(t("Dev build {build}", { build: state.development_build }))}` : ""}</span></div></div><p class="about-description">${esc(t("Open source and free to use, with no account, subscription, or API key. Speech is recognized on your computer with Whisper or Parakeet; after the model is downloaded, dictation works offline."))}</p><div class="about-links"><button type="button" class="about-link" data-project-link="repository" aria-label="${esc(t("GitHub"))}"><span>${esc(t("GitHub"))}</span><small>${esc(t("Browse the source and project updates."))}</small></button><button type="button" class="about-link" data-project-link="issues" aria-label="${esc(t("Report an issue"))}"><span>${esc(t("Report an issue"))}</span><small>${esc(t("Report a bug or request a change."))}</small></button><button type="button" class="about-link" data-project-link="license" aria-label="${esc(t("MIT License"))}"><span>${esc(t("MIT License"))}</span><small>${esc(t("View the project license."))}</small></button></div>`;
+    content.insertAdjacentHTML(
+      "beforeend",
+      `<section id="about-updates" class="about-updates"><h2>${esc(t("Updates"))}</h2><div class="group"><div class="row about-update-row"><span><span class="about-update-title"><i class="about-update-dot" id="about-update-dot" aria-hidden="true"></i><span id="about-update-status" aria-live="polite"></span></span><small class="settings-row-description" id="about-update-summary" hidden></small></span><div class="control"><button type="button" id="about-update-action"></button></div></div><label class="row setting-description-row" id="about-auto-updates"><span><span>${esc(t("Automatically check for updates"))}</span><small class="settings-row-description">${esc(t("At startup, no more than once per day."))}</small></span><input class="switch" type="checkbox" data-pref="auto_check_updates" ${p.auto_check_updates ? "checked" : ""}></label></div></section>`,
     );
+    syncAboutUpdates();
   }
   main.scrollTop = scrollTop;
   if (modelFocusRestorePending) {
@@ -1997,6 +2251,32 @@ function render() {
   content
     .querySelectorAll<HTMLButtonElement>("[data-command]")
     .forEach((b) => (b.onclick = () => void command(b.dataset.command!)));
+  content
+    .querySelectorAll<HTMLButtonElement>("[data-project-link]")
+    .forEach((button) => {
+      button.onclick = () => {
+        const target = button.dataset.projectLink;
+        if (
+          target === "repository" ||
+          target === "issues" ||
+          target === "license"
+        )
+          void command("open_project_link", { target });
+      };
+    });
+  content
+    .querySelector<HTMLButtonElement>("#about-update-action")
+    ?.addEventListener("click", (event) => {
+      if (
+        ["available", "downloading", "installing"].includes(
+          state.updates.status,
+        ) ||
+        (state.updates.status === "error" && !!state.updates.version)
+      )
+        openUpdateDialog(event.currentTarget as HTMLElement);
+      else if (state.updates.configured && state.updates.status !== "checking")
+        void command("check_updates");
+    });
   content
     .querySelectorAll<HTMLDetailsElement>("[data-model-family]")
     .forEach((details) =>
@@ -2115,31 +2395,20 @@ function updateButtonLabel() {
   const update = state.updates;
   switch (update.status) {
     case "available":
-      return update.version ?? t("Updates");
+      return t("Update");
     case "checking":
       return t("Checking");
     case "downloading":
       return `${Math.round(update.progress * 100)}%`;
     case "installing":
-      return t("Updates");
+      return t("Update");
     case "current":
       return t("Up to date");
     case "error":
-      return t("Update error");
+      return update.version ? t("Update") : t("Update error");
     default:
       return t("Updates");
   }
-}
-
-function headerUpdateDisabled() {
-  const update = state.updates;
-  return (
-    ["checking", "downloading", "installing"].includes(update.status) ||
-    (update.status === "available" &&
-      (["recording", "transcribing"].includes(state.status) ||
-        !!state.download ||
-        !!state.recovery_available))
-  );
 }
 
 function modifierOnlyTrigger() {

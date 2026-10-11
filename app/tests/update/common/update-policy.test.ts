@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isNewerUpdateVersion, LINUX_UPDATE_FEED_URL, LINUX_UPDATE_REPOSITORY, MACOS_UPDATE_ASSET,
-  macosUpdateEndpoint, parseUpdateVersion, projectLinuxUpdateFeed, projectMacosUpdateRelease, UPDATE_POLICY_LIMITS,
+  extractUpdateHighlights, macosUpdateEndpoint, parseUpdateVersion, projectLinuxUpdateFeed, projectMacosUpdateRelease, UPDATE_POLICY_LIMITS,
   UpdatePolicyError } from "../../../src/services/update/common/update-policy.js";
 
 const repository = "juferdinand/OpenWhisper", version = "0.3.1", currentVersion = "0.3.0";
 const macURL = `https://github.com/${repository}/releases/download/v${version}/${MACOS_UPDATE_ASSET}`;
 const macPage = `https://github.com/${repository}/releases/tag/v${version}`;
-const macRelease = () => ({ tag_name: `v${version}`, html_url: macPage, draft: false, prerelease: false, body: "Release notes",
+const macRelease = (): { tag_name: string; html_url: string; draft: false; prerelease: false; body: string; assets: { name: string; browser_download_url: string; size?: number }[] } => ({ tag_name: `v${version}`, html_url: macPage, draft: false, prerelease: false, body: "Release notes",
   assets: [{ name: MACOS_UPDATE_ASSET, browser_download_url: macURL }] });
 const mac = (release: unknown = macRelease(), overrides: Record<string, unknown> = {}) => projectMacosUpdateRelease({ repository, currentVersion, release, ...overrides });
-const linuxFeed = () => ({ version, notes: "Release notes", pub_date: "2026-10-09T00:00:00Z", platforms: {
+const linuxFeed = (): { version: string; notes: string; pub_date: string; platforms: Record<string, { url: string; signature: string; size?: number }> } => ({ version, notes: "Release notes", pub_date: "2026-10-09T00:00:00Z", platforms: {
   "linux-x86_64-appimage": { url: `${LINUX_UPDATE_REPOSITORY}/releases/download/v${version}/OpenWhisper-Linux-x86_64.AppImage`, signature: "opaque announced AppImage signature" },
   "linux-x86_64-deb": { url: `${LINUX_UPDATE_REPOSITORY}/releases/download/v${version}/OpenWhisper-Linux-amd64.deb`, signature: "opaque announced Debian signature" },
 } });
@@ -42,11 +42,23 @@ test("Mac repositories are build-supplied canonical owner/repo values", () => {
 });
 test("Mac release projection remains immutable and explicitly unauthenticated", () => {
   const release = { ...macRelease(), author: { private: "not projected" } }, candidate = mac(release);
-  assert.deepEqual(candidate, { authentication: "unauthenticated", package: "macos", repository, version, notes: "Release notes", assetName: MACOS_UPDATE_ASSET, assetURL: macURL, pageURL: macPage });
+  assert.deepEqual(candidate, { authentication: "unauthenticated", package: "macos", repository, version, notes: "Release notes",
+    details: { highlights: [] }, assetName: MACOS_UPDATE_ASSET, assetURL: macURL, pageURL: macPage });
   assert.ok(Object.isFrozen(candidate)); release.body = "changed"; assert.equal(candidate.notes, "Release notes");
   assert.equal(mac({ ...macRelease(), body: null }).notes, "");
   const missing = macRelease(); Reflect.deleteProperty(missing, "body"); assert.equal(mac(missing).notes, "");
   assert.equal(mac({ ...macRelease(), assets: [...macRelease().assets, { name: "OpenWhisper-macOS.dmg", browser_download_url: "https://github.com/unrelated/manual.dmg" }] }).assetName, MACOS_UPDATE_ASSET);
+});
+test("curated What's new bullets become bounded plain text and optional artifact size is projected", () => {
+  const notes = "# OpenWhisper\n\n## What's new in 0.3.1\n- **Fast** local recognition\n  with wrapped details and [help](https://example.test)\n- `Keyboard` improvements\n\n## Updating\n- excluded";
+  assert.deepEqual(extractUpdateHighlights(notes), ["Fast local recognition with wrapped details and help", "Keyboard improvements"]);
+  const release = macRelease(); release.body = notes; release.assets[0]!.size = 12345;
+  assert.deepEqual(mac(release).details, { highlights: extractUpdateHighlights(notes), size: 12345 });
+  const feed = linuxFeed(); feed.notes = notes; feed.platforms["linux-x86_64-appimage"]!.size = 6789;
+  assert.deepEqual(linux(feed).details, { highlights: extractUpdateHighlights(notes), size: 6789 });
+  for (const size of [0, -1, 1.2, Number.MAX_SAFE_INTEGER + 1, "12"]) {
+    assert.throws(() => mac({ ...macRelease(), assets: [{ name: MACOS_UPDATE_ASSET, browser_download_url: macURL, size }] }), failure("INVALID_METADATA"));
+  }
 });
 test("Mac source policy rejects foreign or normalized asset and page URLs", () => {
   for (const bad of [macURL.replace("https:", "http:"), macURL.replace("github.com", "github.com.evil.invalid"), macURL.replace("juferdinand", "other"),
@@ -74,8 +86,8 @@ test("Linux projects only the selected fixed target and opaque unverified signat
     assert.equal(candidate.package, packageKind); assert.equal(candidate.feedURL, LINUX_UPDATE_FEED_URL);
     assert.equal(candidate.target, packageKind === "deb" ? "linux-x86_64-deb" : "linux-x86_64-appimage");
     assert.equal(candidate.authentication, "unauthenticated"); assert.ok(Object.isFrozen(candidate));
-    assert.equal(candidate.assetURL, linuxFeed().platforms[candidate.target].url);
-    assert.equal(candidate.signature, linuxFeed().platforms[candidate.target].signature);
+    assert.equal(candidate.assetURL, linuxFeed().platforms[candidate.target]!.url);
+    assert.equal(candidate.signature, linuxFeed().platforms[candidate.target]!.signature);
     assert.equal(Object.hasOwn(candidate, "pub_date"), false);
   }
   const missing = linuxFeed(); Reflect.deleteProperty(missing, "notes"); assert.equal(linux(missing).notes, "");
@@ -85,16 +97,16 @@ test("Linux rejects any alternate feed, unadmitted package and wrong package sou
     assert.throws(() => linux(linuxFeed(), { sourceURL }), failure("INVALID_SOURCE"));
   }
   for (const packageKind of ["development", "macos", "rpm", "linux-x86_64-appimage", undefined]) assert.throws(() => linux(linuxFeed(), { package: packageKind }), failure("INVALID_PACKAGE"));
-  const original = linuxFeed().platforms["linux-x86_64-appimage"].url;
+  const original = linuxFeed().platforms["linux-x86_64-appimage"]!.url;
   for (const url of [original.replace("https:", "http:"), original.replace("github.com", "github.com.evil.invalid"), original.replace("juferdinand", "other"),
-    original.replace("v0.3.1", "v0.3.0"), `${original}?x=1`, `${original}#fragment`, linuxFeed().platforms["linux-x86_64-deb"].url]) {
-    const feed = linuxFeed(); feed.platforms["linux-x86_64-appimage"].url = url; assert.throws(() => linux(feed), failure("INVALID_SOURCE"));
+    original.replace("v0.3.1", "v0.3.0"), `${original}?x=1`, `${original}#fragment`, linuxFeed().platforms["linux-x86_64-deb"]!.url]) {
+    const feed = linuxFeed(); feed.platforms["linux-x86_64-appimage"]!.url = url; assert.throws(() => linux(feed), failure("INVALID_SOURCE"));
   }
 });
 test("Linux requires selected target and nonblank signature without claiming cryptographic acceptance", () => {
   const missingTarget = linuxFeed(); Reflect.deleteProperty(missingTarget.platforms, "linux-x86_64-appimage"); assert.throws(() => linux(missingTarget), failure("INVALID_METADATA"));
   for (const signature of [undefined, "", " \n\t", 1]) {
-    const feed = linuxFeed(); Reflect.set(feed.platforms["linux-x86_64-appimage"], "signature", signature); assert.throws(() => linux(feed), failure("INVALID_METADATA"));
+    const feed = linuxFeed(); Reflect.set(feed.platforms["linux-x86_64-appimage"]!, "signature", signature); assert.throws(() => linux(feed), failure("INVALID_METADATA"));
   }
   for (const announced of [currentVersion, "0.2.5"]) assert.throws(() => linux({ ...linuxFeed(), version: announced }), failure("NOT_NEWER"));
   assert.throws(() => linux({ ...linuxFeed(), version: "0.3.1-beta" }), failure("INVALID_VERSION"));
@@ -110,7 +122,7 @@ test("projection bounds UTF-8 notes, signature fields and assets before visiting
   Object.defineProperty(excessive, 0, { get() { visited = true; throw new Error("Must not visit excessive assets"); } });
   assert.throws(() => mac({ ...macRelease(), assets: excessive }), failure("INVALID_METADATA"));
   assert.equal(visited, false);
-  const feed = linuxFeed(); feed.platforms["linux-x86_64-appimage"].signature = "s".repeat(UPDATE_POLICY_LIMITS.signatureBytes + 1);
+  const feed = linuxFeed(); feed.platforms["linux-x86_64-appimage"]!.signature = "s".repeat(UPDATE_POLICY_LIMITS.signatureBytes + 1);
   assert.throws(() => linux(feed), failure("INVALID_METADATA"));
   assert.throws(() => mac({ ...macRelease(), assets: [{ name: MACOS_UPDATE_ASSET, browser_download_url: "x".repeat(2049) }] }), failure("INVALID_METADATA"));
 });
@@ -119,7 +131,7 @@ test("inherited required fields and arbitrary getter failures never project or l
   assert.throws(() => linux(Object.create(linuxFeed()) as unknown), failure("INVALID_METADATA"));
   const asset = Object.create(macRelease().assets[0]!) as unknown;
   assert.throws(() => mac({ ...macRelease(), assets: [asset] }), failure("INVALID_METADATA"));
-  const target = Object.create(linuxFeed().platforms["linux-x86_64-appimage"]) as unknown;
+  const target = Object.create(linuxFeed().platforms["linux-x86_64-appimage"]!) as unknown;
   assert.throws(() => linux({ ...linuxFeed(), platforms: { "linux-x86_64-appimage": target } }), failure("INVALID_METADATA"));
   const privateSource = macRelease(); Object.defineProperty(privateSource, "html_url", { get() { throw new Error("Private path and token"); } });
   assert.throws(() => mac(privateSource), failure("INVALID_METADATA"));

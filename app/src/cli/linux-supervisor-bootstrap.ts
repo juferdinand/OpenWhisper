@@ -58,7 +58,7 @@ export function debianUpdates(currentVersion: string, dependencies: DebianUpdate
         const result = await dependencies.feed({ package: "deb", currentVersion, signal }); active();
         if (!result) return { status: "idle" } as const;
         if (result.package !== "deb") throw new LinuxRestartError("INVALID_REQUEST");
-        candidate = result; return { status: "available", updateVersion: result.version } as const;
+        candidate = result; return { status: "available", updateVersion: result.version, details: result.details } as const;
       }
       const selected = candidate;
       if (!selected || download || prepared || failedCleanup) throw new LinuxRestartError("INVALID_REQUEST");
@@ -135,7 +135,7 @@ export function appImageUpdates(currentVersion: string, launch: Extract<LinuxIns
         const result = await dependencies.feed({ package: "appimage", currentVersion, signal }); active(); current.assertUnchanged();
         if (!result) return { status: "idle" } as const;
         if (result.package !== "appimage") throw new LinuxRestartError("INVALID_REQUEST");
-        candidate = result; return { status: "available", updateVersion: result.version } as const;
+        candidate = result; return { status: "available", updateVersion: result.version, details: result.details } as const;
       }
       const selected = candidate;
       if (!selected || !current || download || prepared || failedCleanup) throw new LinuxRestartError("INVALID_REQUEST");

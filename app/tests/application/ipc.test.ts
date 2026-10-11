@@ -312,6 +312,16 @@ test("unavailable handlers fail safely and void actions have explicit null repli
   }
 });
 
+test("project links accept only fixed targets through the trusted main bridge", async () => {
+  const calls: unknown[] = [], bridge = dispatcher({ open_project_link: (args) => { calls.push(args); } });
+  const result = await bridge.dispatch({ sender: main, serializedRequest: request("open_project_link", { target: "license" }) });
+  assert.deepEqual(result, { ok: true, value: null });
+  assert.deepEqual(calls, [{ target: "license" }]);
+  failure(await bridge.dispatch({ sender: main, serializedRequest: request("open_project_link", { target: "https://attacker.invalid" }) }), "INVALID_REQUEST");
+  failure(await bridge.dispatch({ sender: overlay, serializedRequest: request("open_project_link", { target: "repository" }) }), "FORBIDDEN_COMMAND");
+  assert.equal(calls.length, 1);
+});
+
 test("invalid duplicate or unsafe trusted window IDs fail at configuration", () => {
   for (const webContentsId of [0, -1, 1.5, NaN, Number.MAX_SAFE_INTEGER + 1]) {
     assert.throws(() => createUiDispatcher({ windows: [{ webContentsId, role: "main" }], handlers: {} }));

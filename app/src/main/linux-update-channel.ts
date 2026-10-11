@@ -2,11 +2,12 @@ import { Duplex } from "node:stream";
 import { fstatSync, readlinkSync } from "node:fs";
 import { Socket } from "node:net";
 import { z } from "zod";
+import { updateDetailsSchema } from "../contracts/ui/state.js";
 import { isNewerUpdateVersion, parseUpdateVersion } from "../services/update/common/update-policy.js";
 import { LINUX_RESTART_NONCE, LINUX_RESTART_VERSION } from "./linux-restart.js";
 
 export const LINUX_UPDATE_PROTOCOL = "OPENWHISPER_UPDATE_PROTOCOL";
-export const LINUX_UPDATE_CHANNEL_FRAME_BYTES = 1024;
+export const LINUX_UPDATE_CHANNEL_FRAME_BYTES = 16 * 1024;
 const canonicalVersion = z.string().max(62).refine((value) => { try { parseUpdateVersion(value); return true; } catch { return false; } });
 const bindingSchema = z.strictObject({ currentVersion: canonicalVersion, nonce: z.string().regex(/^[a-f0-9]{64}$/u) });
 export type LinuxUpdateChannelBinding = z.infer<typeof bindingSchema>;
@@ -14,7 +15,8 @@ const envelope = { version: z.literal(2), ...bindingSchema.shape };
 const linuxUpdateCommandSchema = z.strictObject({ ...envelope, type: z.enum(["check", "install", "cancel", "retired"]) });
 const linuxUpdatePublicStateSchema = z.discriminatedUnion("status", [
   z.strictObject({ status: z.enum(["idle", "checking", "preparing"]) }),
-  z.strictObject({ status: z.enum(["available", "prepared"]), updateVersion: canonicalVersion }),
+  z.strictObject({ status: z.literal("available"), updateVersion: canonicalVersion, details: updateDetailsSchema.optional() }),
+  z.strictObject({ status: z.literal("prepared"), updateVersion: canonicalVersion }),
   z.strictObject({ status: z.literal("failed"), code: z.enum(["UNAVAILABLE", "CANCELLED", "FAILED"]) }),
 ]);
 export type LinuxUpdatePublicState = z.infer<typeof linuxUpdatePublicStateSchema>;

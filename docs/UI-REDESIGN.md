@@ -98,10 +98,13 @@ excludes separately stored transcript files. Delete all applies to the history l
 History remains limited to the current 20 entries until the archive/retention work in #47.
 
 Keep system capability rows visually consistent and neutral. An unavailable login toggle stays
-disabled without an explanatory paragraph. Place the existing signed-update actions and available
-version/progress indicator in the titlebar, with automatic-check preferences in General; keep
-unsupported Dev update controls hidden. About contains identity, version, license and project
-information, with platform coverage documented through the README-linked guides.
+disabled without an explanatory paragraph. Match the refreshed titlebar's green Update action:
+show it for an available or active update and open the details dialog before installation.
+Put automatic-check preferences beside update status in About; keep unsupported Dev update
+controls hidden. About uses the reference's compact logo/wordmark, identity, brief local-recognition
+description and three project links. It should fit without vertical scrolling at the normal review
+sizes; retain accessible scrolling at smaller sizes or when enlarged text genuinely needs it.
+Document platform coverage through the README-linked guides.
 
 Selecting Insert must request missing keyboard access immediately instead of silently
 saving an unusable destination. Keep the previous output when access is cancelled or
@@ -120,12 +123,18 @@ channel are not evidence that those capabilities exist in the app.
 
 Use `.github/release-notes.md` as the editorial source for a short highlights section.
 The release workflow already uses it for the GitHub release body. The Linux feed and
-macOS release reader accept notes, but the current renderer state does not expose them.
-A later implementation should publish the same curated highlights into Linux metadata
+macOS release reader accept notes. Publish the same curated highlights into Linux metadata
 and carry a bounded plain-text list through the typed host/UI boundary. Render text safely
 and link to the complete release for installation and platform details. Missing highlights
 must not block an otherwise valid update. Avoid a second independently maintained `.txt`
 asset or displaying the entire generated pull-request list in the dialog.
+
+Display package size only when supplied by validated metadata. Keep installation behind the
+explicit Download action and the existing recording, recovery, setup and download guards.
+The current updater prepares and installs in one controlled operation; show its real status
+instead of promising continued recording or inventing a separate restart-ready stage. Keep
+the preview-channel selector deferred until a reviewed release-channel implementation exists
+([#49](https://github.com/juferdinand/OpenWhisper/issues/49)).
 
 ## Recording-level presentation
 
