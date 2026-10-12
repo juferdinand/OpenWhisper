@@ -124,7 +124,6 @@
   "Recording": "Recording",
   "Recording mode": "Recording mode",
   "Remove snippet": "Remove snippet",
-  "Required for automatic insertion and advanced triggers. Clipboard-only output remains available.": "Required for automatic insertion and advanced triggers. Clipboard-only output remains available.",
   "Restore the previous clipboard afterward": "Restore the previous clipboard afterward",
   "Revoke": "Revoke",
   "Russian": "Russian",
@@ -555,5 +554,7 @@
   "Use a regular key, a shortcut, or the middle, back or forward mouse button.": "Use a regular key, a shortcut, or the middle, back or forward mouse button.",
   "Accessibility access allowed": "Accessibility access allowed",
   "Allowed": "Allowed",
-  "Not allowed": "Not allowed"
+  "Not allowed": "Not allowed",
+  "Required: OpenWhisper needs Accessibility access to insert text and to react to mouse triggers while another app is in front.": "Required: OpenWhisper needs Accessibility access to insert text and to react to mouse triggers while another app is in front.",
+  "Allow Accessibility access to continue.": "Allow Accessibility access to continue."
 }

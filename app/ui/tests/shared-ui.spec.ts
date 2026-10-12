@@ -4193,6 +4193,26 @@ for (const platform of ["linux", "macos"] as const) {
       expect(
         await page.evaluate(() => window.calls.map((call) => call.command)),
       ).not.toContain("allow_microphone");
+      // Accessibility is mandatory on macOS: setup cannot continue until it is allowed.
+      await page.evaluate(() => {
+        window.testState.paste_ready = false;
+        window.publishState();
+      });
+      await expect(
+        page.getByRole("button", { name: "Continue", exact: true }),
+      ).toBeDisabled();
+      await expect(
+        page.getByText("Allow Accessibility access to continue.", {
+          exact: true,
+        }),
+      ).toBeVisible();
+      await page.evaluate(() => {
+        window.testState.paste_ready = true;
+        window.publishState();
+      });
+      await expect(
+        page.getByText("Accessibility access allowed", { exact: true }),
+      ).toBeVisible();
     }
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(
@@ -5118,6 +5138,12 @@ for (const platform of ["linux", "macos"] as const) {
           ),
         });
         await page.setViewportSize({ width: 740, height: 560 });
+      }
+      if (platform === "macos" && index === titles.length - 2) {
+        await page.evaluate(() => {
+          window.testState.paste_ready = true;
+          window.publishState();
+        });
       }
       await page
         .getByRole("button", {

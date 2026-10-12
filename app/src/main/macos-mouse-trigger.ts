@@ -28,6 +28,8 @@ export type MacosMouseTapFactory = () => MacosMouseTapNative;
  */
 export class MacosMouseTrigger {
   private native: MacosMouseTapNative | undefined;
+  private permissions: string | undefined;
+  private openedWith: string | undefined;
   private readonly callbacks = new Map<MacosMouseButton, () => void>();
   private constructor(private readonly factory: MacosMouseTapFactory) {}
 
@@ -37,15 +39,27 @@ export class MacosMouseTrigger {
   register(accelerator: string, callback: () => void): boolean {
     const button = macosMouseButton(accelerator);
     if (button === undefined || this.callbacks.has(button)) return false;
-    if (!this.native) {
-      const native = this.factory();
-      if (!native.start((value) => { const mapped = macosButtons[value]; if (mapped !== undefined) this.callbacks.get(mapped)?.(); })) {
-        throw new Error("The Mac mouse trigger listener is unavailable.");
-      }
-      this.native = native;
-    }
+    if (!this.native) this.open();
     this.callbacks.set(button, callback);
     return true;
+  }
+  /**
+   * macOS applies a later Accessibility grant only to newly created event taps; a tap created
+   * before the grant keeps receiving clicks only while OpenWhisper is frontmost. Reopen the
+   * listener whenever the reported permission state changes.
+   */
+  refresh(permissions: string): void {
+    this.permissions = permissions;
+    if (!this.native || this.openedWith === permissions) return;
+    const previous = this.native; this.native = undefined; previous.stop();
+    this.open();
+  }
+  private open(): void {
+    const native = this.factory();
+    if (!native.start((value) => { const mapped = macosButtons[value]; if (mapped !== undefined) this.callbacks.get(mapped)?.(); })) {
+      throw new Error("The Mac mouse trigger listener is unavailable.");
+    }
+    this.native = native; this.openedWith = this.permissions;
   }
   unregister(accelerator: string): void {
     const button = macosMouseButton(accelerator);

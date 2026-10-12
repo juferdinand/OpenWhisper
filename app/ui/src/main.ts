@@ -1937,7 +1937,7 @@ function render() {
             : t("Allow keyboard access"),
         detail: isMac()
           ? t(
-              "Required for automatic insertion and advanced triggers. Clipboard-only output remains available.",
+              "Required: OpenWhisper needs Accessibility access to insert text and to react to mouse triggers while another app is in front.",
             )
           : nativePaste()
             ? t(
@@ -1946,6 +1946,8 @@ function render() {
             : t(
                 "Optional permission for automatic pasting. Only keyboard access is requested; no screen capture.",
               ),
+        // macOS setup cannot continue without Accessibility access; see accessibilityRequired.
+        accessibility: true,
         content: `${isMac() && state.paste_ready ? `<p class="success">${esc(t("Accessibility access allowed"))}</p>` : ""}${permissionButton()}${!pasteAvailable() ? `<p class="secondary">${esc(t("Your desktop does not expose this portal. Clipboard output remains available."))}</p>` : ""}`,
       },
       {
@@ -1968,6 +1970,12 @@ function render() {
     const modelRequired =
       !hasInstalledSelectedModel() &&
       (setupStep === setupModelStep() || setupStep === panels.length - 1);
+    const accessibilityRequired =
+      isMac() &&
+      state.paste_ready !== true &&
+      setupStep >= 0 &&
+      (panels[setupStep] as { accessibility?: boolean } | undefined)
+        ?.accessibility === true;
     const navigation = (welcome: boolean) => {
       const permissionFlowActive =
         portalBusy ||
@@ -1980,7 +1988,7 @@ function render() {
       const primaryDisabled =
         permissionFlowActive ||
         pendingPreferences > 0 ||
-        (!welcome && modelRequired)
+        (!welcome && (modelRequired || accessibilityRequired))
           ? "disabled"
           : "";
       return `<footer class="setup-navigation">${welcome ? "" : `<button class="setup-back" data-setup-back ${disabled}>${esc(t("Back"))}</button>`}<span></span>${welcome || setupStep < panels.length - 1 ? `<button class="setup-primary" data-setup-next ${primaryDisabled}>${esc(t("Continue"))}</button>` : `<button class="setup-primary" data-command="complete_setup" ${primaryDisabled}>${esc(t("Finish setup"))}</button>`}</footer>`;
@@ -2000,7 +2008,7 @@ function render() {
         (_, index) =>
           `<span${index === setupStep ? ' class="current"' : ""}></span>`,
       ).join("");
-      content.innerHTML = `<section class="setup-card" aria-labelledby="setup-title"><div class="setup-card-body"><div class="setup-segments" aria-hidden="true">${progress}</div><div class="setup-progress" role="status">${esc(t("Step {step} of {total}", { step: setupStep + 1, total: panels.length }))}</div><h1 id="setup-title" tabindex="-1">${esc(panel.title)}</h1><p class="setup-intro">${esc(panel.detail)}</p><div class="setup-panel-content">${panel.content}</div>${modelRequired ? `<p class="setup-footnote setup-model-required" role="status">${esc(t("Download and select a model to continue."))}</p>` : ""}${setupStep === panels.length - 1 ? `<p class="setup-footnote">${esc(t("You can change permissions, shortcuts, and recording preferences in General at any time."))}</p>` : ""}</div>${navigation(false)}</section>`;
+      content.innerHTML = `<section class="setup-card" aria-labelledby="setup-title"><div class="setup-card-body"><div class="setup-segments" aria-hidden="true">${progress}</div><div class="setup-progress" role="status">${esc(t("Step {step} of {total}", { step: setupStep + 1, total: panels.length }))}</div><h1 id="setup-title" tabindex="-1">${esc(panel.title)}</h1><p class="setup-intro">${esc(panel.detail)}</p><div class="setup-panel-content">${panel.content}</div>${modelRequired ? `<p class="setup-footnote setup-model-required" role="status">${esc(t("Download and select a model to continue."))}</p>` : ""}${accessibilityRequired ? `<p class="setup-footnote setup-model-required" role="status">${esc(t("Allow Accessibility access to continue."))}</p>` : ""}${setupStep === panels.length - 1 ? `<p class="setup-footnote">${esc(t("You can change permissions, shortcuts, and recording preferences in General at any time."))}</p>` : ""}</div>${navigation(false)}</section>`;
       const setupBody = content.querySelector<HTMLElement>(".setup-card-body");
       if (setupBody) setupBody.scrollTop = setupScrollTop;
     }

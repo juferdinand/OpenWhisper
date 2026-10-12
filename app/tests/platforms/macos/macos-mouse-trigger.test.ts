@@ -45,3 +45,14 @@ test("the native Mac mouse listener can be stopped and started again", { skip: p
     try { assert.equal(tap.start(() => {}), true); } finally { tap.stop(); }
   }
 });
+
+test("the Mac mouse listener is reopened once when the Accessibility state changes", () => {
+  const tap = fakeTap(), trigger = MacosMouseTrigger.create(tap.factory, "darwin")!;
+  trigger.refresh("false");
+  trigger.register("Mouse2", () => {});
+  assert.equal(tap.events.starts, 1);
+  trigger.refresh("false"); assert.equal(tap.events.starts, 1);
+  trigger.refresh("true");
+  assert.equal(tap.events.starts, 2); assert.equal(tap.events.stops, 1);
+  trigger.refresh("true"); assert.equal(tap.events.starts, 2);
+});

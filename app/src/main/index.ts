@@ -1106,7 +1106,9 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       : nativeImage.createFromPath(join(distribution, "ui/app-icon.png")).resize({ width: 18, height: 18 });
     if (icon.isEmpty()) throw new Error("Tray icon unavailable.");
     if (process.platform === "darwin") icon.setTemplateImage(true);
-    tray = new Tray(icon); tray.setToolTip(profile.productName); tray.on("click", showSettings);
+    tray = new Tray(icon); tray.setToolTip(profile.productName);
+    // macOS shows the menu (with Settings and Stop recording) on click; opening the window there hid its actions.
+    if (process.platform !== "darwin") tray.on("click", showSettings);
     updateTray = (snapshot) => {
       if (!tray || tray.isDestroyed()) return;
       const key = JSON.stringify([snapshot.status, snapshot.recording_available, snapshot.recovery_available, snapshot.preferences.ui_language]);
@@ -1150,7 +1152,9 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   if (macRecording) window.on("focus", () => {
     microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted";
     sources = macosAudioInputSources();
-    accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(false); notify();
+    accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(false);
+    try { macMouse?.refresh(String(accessibilityAllowed)); } catch { message = "Shortcut setup or recording failed. Window recording remains usable."; }
+    notify();
   });
   if (autostart) window.on("focus", () => { void refreshLogin().then(notify); });
   // Configure the saved request to discover private stopped audio before showing
