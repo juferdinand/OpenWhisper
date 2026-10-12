@@ -726,18 +726,19 @@ function setupModelGroups(): string {
     .join("")}</div>`;
 }
 const outputs = () =>
-  `<div class="radio-group">${[["paste", t("Paste at the cursor")], ["clipboard", t("Copy to clipboard only")], ...(isMac() ? [["editor", t("Open in a text editor")]] : [])].map(([v, l]) => `<label><input type="radio" name="output" data-pref="output" value="${v}" ${state.preferences.output === v ? "checked" : ""}>${l}</label>`).join("")}</div>`;
+  `<div class="radio-group">${[
+    ["paste", t("Paste at the cursor")],
+    ["clipboard", t("Copy to clipboard only")],
+  ]
+    .map(
+      ([v, l]) =>
+        `<label><input type="radio" name="output" data-pref="output" value="${v}" ${state.preferences.output === v ? "checked" : ""}>${l}</label>`,
+    )
+    .join("")}</div>`;
 const settingOutputs = () => {
   const modes: [string, string, string][] = [
     ["paste", "Insert", "Paste at the cursor"],
     ["clipboard", "Copy", "Copy to clipboard only"],
-    ...(isMac()
-      ? ([["editor", "Editor", "Open in a text editor"]] as [
-          string,
-          string,
-          string,
-        ][])
-      : []),
   ];
   return `<fieldset class="settings-output-segment" aria-label="${esc(t("Output"))}">${modes.map(([value, label, fullLabel]) => `<label><input type="radio" name="settings-output" data-pref="output" value="${value}" aria-label="${esc(t(fullLabel))}" ${state.preferences.output === value ? "checked" : ""}><span>${esc(t(label))}</span></label>`).join("")}</fieldset>`;
 };
@@ -748,7 +749,18 @@ function notice(text: string) {
   const el = document.querySelector<HTMLDialogElement>("#settings-dialog")?.open
     ? document.querySelector<HTMLElement>("#settings-notice")!
     : document.querySelector<HTMLElement>("#notice")!;
-  el.textContent = t(text);
+  const message = document.createElement("span");
+  message.textContent = t(text);
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "notice-close";
+  close.setAttribute("aria-label", t("Close"));
+  close.title = t("Close");
+  close.addEventListener("click", () => {
+    el.hidden = true;
+    el.replaceChildren();
+  });
+  el.replaceChildren(message, close);
   el.hidden = false;
 }
 async function command(
@@ -1358,17 +1370,8 @@ function recordControl() {
     const outputModes: [string, string, string][] = [
       ["paste", t("Insert"), t("Paste at the cursor")],
       ["clipboard", t("Copy"), t("Copy to clipboard only")],
-      ...(isMac()
-        ? [
-            ["editor", t("Editor"), t("Open in a text editor")] as [
-              string,
-              string,
-              string,
-            ],
-          ]
-        : []),
     ];
-    const outputControls = `<div class="record-output" role="group" aria-label="${esc(t("Output"))}"><span class="record-output-label">${esc(t("Output"))}</span>${outputModes.map(([value, label, fullLabel]) => `<button type="button" data-output="${value}" data-pref="output" aria-label="${esc(fullLabel)}" title="${esc(fullLabel)}" aria-pressed="${state.preferences.output === value}" ${recording || recovery || (value === "paste" && (portalBusy || state.paste_configuring)) ? "disabled" : ""}>${esc(label)}</button>`).join("")}</div>`;
+    const outputControls = `<div class="record-output" role="group" aria-label="${esc(t("Output"))}"><span class="record-output-label">${esc(t("Output"))}</span>${outputModes.map(([value, label, fullLabel]) => `<button type="button" data-output="${value}" data-pref="output" aria-label="${esc(fullLabel)}" title="${esc(fullLabel)}" aria-pressed="${state.preferences.output === value}" ${recording || recovery || busy || (value === "paste" && (portalBusy || state.paste_configuring)) ? "disabled" : ""}>${esc(label)}</button>`).join("")}</div>`;
     const overlayBars = Array.from({ length: 5 }, () => "<i></i>").join("");
     controls.innerHTML = overlay
       ? `<div class="record-actions"><div class="record-status"><div class="audio-mark" aria-hidden="true">${overlayBars}<canvas class="live-waveform" data-waveform="overlay" aria-hidden="true"></canvas></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div><span id="record-label"></span><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-action-label" class="record-action-label"></span></button></div>`
@@ -1495,6 +1498,7 @@ function recordControl() {
       output.disabled =
         recording ||
         recovery ||
+        busy ||
         (output.dataset.output === "paste" &&
           (portalBusy || state.paste_configuring === true));
     });
@@ -1987,7 +1991,7 @@ function render() {
     const systemDetails = isMac()
       ? row(
           t("System"),
-          `<span class="settings-system-status">${esc(state.desktop)} · macOS</span>`,
+          `<span class="settings-system-status">${esc(state.desktop)} · ${esc(state.session)}</span>`,
         )
       : (state.native_x11
           ? row(
@@ -2099,7 +2103,7 @@ function render() {
               ),
       )}</p>`;
     const outputExtras =
-      (isMac() &&
+      isMac() &&
       state.macos?.clipboard_restore_available !== false &&
       p.output === "paste"
         ? toggle(
@@ -2107,13 +2111,7 @@ function render() {
             "restore_clipboard",
             !!p.restore_clipboard,
           )
-        : "") +
-      (isMac() && p.output === "editor"
-        ? row(
-            esc(state.macos!.editor),
-            `<button data-command="choose_editor">${esc(t("Choose another editor …"))}</button>`,
-          )
-        : "");
+        : "";
     content.innerHTML =
       section(
         t("Keyboard"),

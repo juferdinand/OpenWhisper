@@ -43,10 +43,27 @@ export function normalizeMacosShortcutAccelerator(value: string): string | undef
   if (!key || !regularKey(key) || new Set(parts).size !== parts.length || parts.some((part) => !modifiers.has(part))) return undefined;
   return [...modifierOrder.filter((modifier) => parts.includes(modifier)), key].join("+");
 }
+const codeNames: Readonly<Record<string, string>> = { Space: "Space", Tab: "Tab", Enter: "Return",
+  Backspace: "Backspace", Delete: "Delete", Insert: "Insert", Home: "Home", End: "End", PageUp: "PageUp",
+  PageDown: "PageDown", ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right",
+  Comma: ",", Period: ".", Slash: "/", Semicolon: ";", Quote: "'", BracketLeft: "[", BracketRight: "]",
+  Backslash: "\\", Minus: "-", Equal: "=", Backquote: "`" };
+/**
+ * Physical key names follow the US positions that globalShortcut registers. Deriving them from
+ * `code` keeps German or other layouts and Option-modified characters (such as "ß" or "å") usable.
+ */
+function keyFromCode(code: string): string | undefined {
+  const letter = /^Key([A-Z])$/u.exec(code)?.[1], digit = /^Digit([0-9])$/u.exec(code)?.[1];
+  return letter ?? digit ?? (/^F(?:[1-9]|1[0-9]|2[0-4])$/u.test(code) ? code : codeNames[code]);
+}
 function acceleratorFor(input: MacosShortcutInput): string | undefined {
+  const physical = keyFromCode(input.code);
+  // macOS flags function-row and navigation keys with Fn even without the Fn key held.
+  const fnAllowed = physical !== undefined && (/^F[0-9]+$/u.test(physical) || namedKeys.has(physical));
   if (input.isComposing || input.code.startsWith("Numpad") || input.modifiers?.some((modifier) =>
-    /^(?:fn|function|iskeypad|leftbuttondown|middlebuttondown|rightbuttondown)$/iu.test(modifier))) return undefined;
-  const key = inputNames[input.key] ?? (/^[a-z]$/u.test(input.key) ? input.key.toUpperCase() : input.key);
+    /^(?:iskeypad|leftbuttondown|middlebuttondown|rightbuttondown)$/iu.test(modifier) ||
+    (/^(?:fn|function)$/iu.test(modifier) && !fnAllowed))) return undefined;
+  const key = physical ?? inputNames[input.key] ?? (/^[a-z]$/u.test(input.key) ? input.key.toUpperCase() : input.key);
   const parts = [input.meta ? "Command" : "", input.control ? "Control" : "", input.alt ? "Alt" : "",
     input.shift ? "Shift" : "", key].filter(Boolean);
   return normalizeMacosShortcutAccelerator(parts.join("+"));

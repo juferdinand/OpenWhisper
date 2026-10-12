@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { test } from "node:test";
 import { prepareStableProfile, prepareStableProfileStorage, resolveStableProfile, stableProfileSchema, validateStableProfile, type StableProfile } from "../../src/services/settings/stable-profile.js";
-import { formatBootstrapFailure, observeBootstrapLoginStatus, type ApplicationBootstrapStage, type ApplicationBootstrapLoginStatus } from "../../src/main/stable-profile-startup.js";
+import { formatBootstrapFailure, formatStartFailure, observeBootstrapLoginStatus, type ApplicationBootstrapStage, type ApplicationBootstrapLoginStatus } from "../../src/main/stable-profile-startup.js";
 import { StableMigrationError } from "../../src/contracts/migration/stable-migration.js";
 import { MacBundleAdmissionError } from "../../src/main/macos-stable-admission.js";
 
@@ -186,4 +186,13 @@ test("storage-only preparation reserves config publication for migration while v
     assert.equal(existsSync(join(profile.roots.config, "electron")), false);
     assert.strictEqual(validateStableProfile(profile), profile);
   });
+});
+
+test("service startup failures report only the error class and categorical code", () => {
+  class SpeechWorkerError extends Error { constructor(readonly code: string) { super(`/Users/private/path ${code}`); } }
+  assert.equal(formatStartFailure(new SpeechWorkerError("INTEGRITY_FAILED")),
+    "OpenWhisper could not initialize its application services or UI. error=SpeechWorkerError code=INTEGRITY_FAILED");
+  assert.equal(formatStartFailure(new SpeechWorkerError("/Users/private/path")),
+    "OpenWhisper could not initialize its application services or UI. error=SpeechWorkerError code=unknown");
+  assert.equal(formatStartFailure("text"), "OpenWhisper could not initialize its application services or UI. error=unknown code=unknown");
 });

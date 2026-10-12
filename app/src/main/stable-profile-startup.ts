@@ -28,6 +28,17 @@ export function formatBootstrapFailure(stage: ApplicationBootstrapStage, error: 
     (bundle ? ` bundle=${bundle.code} status=${bundle.status ?? "unavailable"} signal=${bundle.signal ?? "none"} elapsed_ms=${bundle.elapsedMs}` : "");
 }
 
+/** Service startup diagnostics name only the error class and its categorical code, never messages or paths. */
+export function formatStartFailure(error: unknown): string {
+  let name: unknown, code: unknown;
+  try {
+    if (error instanceof Error) { name = error.constructor.name; code = Reflect.get(error, "code"); }
+  } catch { /* Unreadable exception fields stay generic. */ }
+  const category = (value: unknown, pattern: RegExp) => typeof value === "string" && pattern.test(value) ? value : "unknown";
+  return "OpenWhisper could not initialize its application services or UI." +
+    ` error=${category(name, /^[A-Za-z]{1,64}Error$/u)} code=${category(code, /^[A-Z][A-Z0-9_]{0,63}$/u)}`;
+}
+
 /** Select only after the host's packaged stable identity is verified. Never runs in Dev bootstrap. */
 export async function initializeStableLinuxProfile(options: unknown): Promise<StableProfile> {
   const input = stableProfileInputSchema.parse(options);

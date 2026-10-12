@@ -607,6 +607,24 @@ test("workspace command failure keeps the global notice visible above the worksp
   await page.screenshot({
     path: "test-results/linux-global-command-error.png",
   });
+  await notice.getByRole("button", { name: "Close" }).click();
+  await expect(notice).toBeHidden();
+});
+
+test("Mac output controls offer only Insert and Copy and lock while transcribing", async ({
+  page,
+}) => {
+  await start(page, "macos");
+  const outputs = page.locator("#record-control [data-output]");
+  await expect(outputs).toHaveCount(2);
+  await expect(page.locator('[data-output="editor"]')).toHaveCount(0);
+  await page.evaluate(() => {
+    window.testState.status = "transcribing";
+    window.publishState();
+  });
+  await expect(
+    page.locator('#record-control [data-output="clipboard"]'),
+  ).toBeDisabled();
 });
 
 test("saved Linux recordings can be retried or discarded without starting capture", async ({
@@ -1434,9 +1452,7 @@ for (const platform of ["linux", "macos"] as const) {
       "Snippets",
     ]);
     await expect(page.locator(".record-output-label")).toHaveText("Output");
-    await expect(page.locator(".record-output [data-output]")).toHaveCount(
-      platform === "macos" ? 3 : 2,
-    );
+    await expect(page.locator(".record-output [data-output]")).toHaveCount(2);
     const insertOutput = page.locator('.record-output [data-output="paste"]');
     await insertOutput.click();
     await expect(insertOutput).toHaveAttribute("aria-pressed", "true");
@@ -1885,7 +1901,7 @@ for (const platform of ["linux", "macos"] as const) {
         await expect(page.locator("#cancel")).toBeInViewport();
         await expect(page.locator(".record-output")).toBeVisible();
         await expect(page.locator(".record-output [data-output]")).toHaveCount(
-          platform === "macos" ? 3 : 2,
+          2,
         );
         for (const output of await page
           .locator(".record-output [data-output]")
@@ -4120,7 +4136,7 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(setupOutput).toBeVisible();
     await expect(
       setupOutput.locator('input[name="settings-output"]'),
-    ).toHaveCount(platform === "macos" ? 3 : 2);
+    ).toHaveCount(2);
     const pasteOutput = setupOutput.locator('input[value="paste"]');
     const pasteRequestsBeforeChoice = await page.evaluate(
       () =>

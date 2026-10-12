@@ -18,7 +18,7 @@ import type { HostProfile } from "../services/settings/host-profile.js";
 import type { BuildIdentity } from "../contracts/application/build-identity.js";
 import { APPLICATION_BUILD } from "./application-build.js";
 import { selectApplicationBuild } from "./build-selection.js";
-import { formatBootstrapFailure, initializeStableLinuxProfile, initializeStableMacosProfile, observeBootstrapLoginStatus,
+import { formatBootstrapFailure, formatStartFailure, initializeStableLinuxProfile, initializeStableMacosProfile, observeBootstrapLoginStatus,
   type ApplicationBootstrapStage, type ApplicationBootstrapLoginStatus } from "./stable-profile-startup.js";
 import { verifyMacApplicationBundle, macosMigrationContext } from "./macos-stable-admission.js";
 import { StableMigrationError } from "../contracts/migration/stable-migration.js";
@@ -426,8 +426,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         gpuFallback: gpuSelection.fallback,
         memoryBytes: totalmem(),
       }), preferenceSnapshot.language === "auto" ? preferenceSnapshot.ui_language : preferenceSnapshot.language).map((model) => model.id),
-      session: process.env["XDG_SESSION_TYPE"] ?? "unknown",
-      desktop: process.env["XDG_CURRENT_DESKTOP"] ?? "unknown", clipboard_available: descriptor !== null,
+      // XDG variables exist only on Linux desktops; macOS reports its version and architecture instead.
+      session: process.platform === "darwin" ? process.arch : process.env["XDG_SESSION_TYPE"] ?? "unknown",
+      desktop: process.platform === "darwin" ? `macOS ${process.getSystemVersion()}` : process.env["XDG_CURRENT_DESKTOP"] ?? "unknown",
+      clipboard_available: descriptor !== null,
       shortcut_portal: shortcut.available, paste_portal: pasteState.available, shortcut: macShortcutState?.label ?? shortcut.label,
       native_shortcuts: macShortcutState?.available ?? shortcut.nativeAvailable,
       shortcut_configuring: shortcut.configuring && !shortcut.nativeX11,
@@ -1081,7 +1083,11 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     },
   });
   try {
-    const icon = nativeImage.createFromPath(join(distribution, "ui/app-icon.png")).resize({ width: 18, height: 18 });
+    // macOS renders menu bar template images from alpha only, so it needs a monochrome mark;
+    // the opaque application icon would show as a solid square there.
+    const icon = process.platform === "darwin"
+      ? nativeImage.createFromPath(join(distribution, "ui/branding/trayTemplate.png"))
+      : nativeImage.createFromPath(join(distribution, "ui/app-icon.png")).resize({ width: 18, height: 18 });
     if (icon.isEmpty()) throw new Error("Tray icon unavailable.");
     if (process.platform === "darwin") icon.setTemplateImage(true);
     tray = new Tray(icon); tray.setToolTip(profile.productName); tray.on("click", showSettings);
@@ -1199,8 +1205,8 @@ if (control) {
     app.exit(1);
     return undefined;
   });
-  if (bootstrap) void start(bootstrap).catch(() => {
-    console.error("OpenWhisper could not initialize its application services or UI.");
+  if (bootstrap) void start(bootstrap).catch((error: unknown) => {
+    console.error(formatStartFailure(error));
     app.exit(1);
   });
 }

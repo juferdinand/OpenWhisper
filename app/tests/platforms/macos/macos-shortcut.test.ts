@@ -122,7 +122,7 @@ test("modifier-only, Fn, mouse, composition and keypad setup preserve the old pr
     f.adapter.bind("F8");
     const unsupported: MacosShortcutInput[][] = [
       [key("keyDown", "Control"), key("keyUp", "Control")],
-      [key("keyDown", "Fn")], [key("keyDown", "F9", { modifiers: ["fn"] })],
+      [key("keyDown", "Fn")], [key("keyDown", "a", { code: "KeyA", modifiers: ["fn"] })],
       [{ ...key("keyDown"), type: "mouseDown" }],
       [key("keyDown", "a", { code: "KeyA", isComposing: true })],
       [key("keyDown", "1", { code: "Numpad1" })],
@@ -131,6 +131,28 @@ test("modifier-only, Fn, mouse, composition and keypad setup preserve the old pr
       f.adapter.prepareCapture(); for (const input of sequence) f.adapter.consume(input);
       assert.equal(f.adapter.state().result, "UNSUPPORTED");
       assert.equal(f.adapter.state().accelerator, "F8"); assert.equal(f.shortcuts.callbacks.has("F8"), true);
+    }
+  } finally { await f.adapter.close(); }
+});
+
+test("capture uses physical key positions for non-US layouts, Option characters and the function row", async () => {
+  const f = fixture();
+  try {
+    const cases: [MacosShortcutInput, string][] = [
+      // German layout: the key right of 0 produces "ß"; Option+A produces "å".
+      [key("keyDown", "ß", { code: "Minus", meta: true }), "Command+-"],
+      [key("keyDown", "å", { code: "KeyA", alt: true, control: true }), "Control+Alt+A"],
+      [key("keyDown", "!", { code: "Digit1", shift: true, control: true }), "Control+Shift+1"],
+      // macOS marks function-row and navigation keys with Fn even when Fn is not held.
+      [key("keyDown", "F9", { modifiers: ["fn"] }), "F9"],
+      [key("keyDown", "ArrowUp", { code: "ArrowUp", control: true, modifiers: ["fn"] }), "Control+Up"],
+    ];
+    for (const [down, accelerator] of cases) {
+      f.adapter.prepareCapture();
+      f.adapter.consume(down);
+      f.adapter.consume({ ...down, type: "keyUp" });
+      assert.equal(f.adapter.state().result, "ENABLED", accelerator);
+      assert.equal(f.adapter.state().accelerator, accelerator);
     }
   } finally { await f.adapter.close(); }
 });
