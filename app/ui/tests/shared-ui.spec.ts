@@ -182,6 +182,27 @@ test("Insert requests permission only on intent and persists once after an inter
   expect(await enableRequests()).toBe(2);
 });
 
+test("Mac settings show whether Accessibility and microphone access are allowed", async ({
+  page,
+}) => {
+  await start(page, "macos");
+  await page.evaluate(() => {
+    window.testState.paste_ready = false;
+    window.testState.macos!.microphone_allowed = false;
+    window.publishState();
+  });
+  await selectSettingsTab(page, "recording");
+  const permissions = page.locator("#settings-recording-permissions");
+  await expect(
+    permissions.getByText("Not allowed", { exact: true }),
+  ).toHaveCount(1);
+  await page.evaluate(() => {
+    window.testState.paste_ready = true;
+    window.publishState();
+  });
+  await expect(permissions.getByText("Allowed", { exact: true })).toBeVisible();
+});
+
 test("Mac Insert opens Accessibility settings, then saves only after the user retries", async ({
   page,
 }) => {

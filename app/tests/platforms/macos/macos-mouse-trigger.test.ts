@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MacosMouseTrigger, macosMouseAccelerator, macosMouseButton, type MacosMouseTapNative } from "../../../src/main/macos-mouse-trigger.js";
+import { createNativeMacosMouseTap, MacosMouseTrigger, macosMouseAccelerator, macosMouseButton, type MacosMouseTapNative } from "../../../src/main/macos-mouse-trigger.js";
 
 function fakeTap(startResult = true) {
   const events = { starts: 0, stops: 0 };
@@ -36,4 +36,12 @@ test("a refused Mac mouse listener fails registration and only exists on macOS",
   const tap = fakeTap(false), trigger = MacosMouseTrigger.create(tap.factory, "darwin")!;
   assert.throws(() => trigger.register("Mouse8", () => {}));
   assert.equal(MacosMouseTrigger.create(tap.factory, "linux"), undefined);
+});
+
+test("the native Mac mouse listener can be stopped and started again", { skip: process.platform !== "darwin" }, () => {
+  // Choosing a second mouse trigger closes and reopens the listener; this once failed on a duplicate FFI type.
+  for (let round = 0; round < 3; round++) {
+    const tap = createNativeMacosMouseTap();
+    try { assert.equal(tap.start(() => {}), true); } finally { tap.stop(); }
+  }
 });

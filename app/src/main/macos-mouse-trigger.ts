@@ -65,7 +65,10 @@ const kCGEventOtherMouseDown = 25, kCGMouseEventButtonNumber = 3;
 // macOS disables a tap that is too slow or interrupted by user input; it must be re-enabled.
 const kCGEventTapDisabledByTimeout = 0xfffffffe, kCGEventTapDisabledByUserInput = 0xffffffff;
 
-function createNativeMacosMouseTap(): MacosMouseTapNative {
+// koffi type names are process-global; the callback prototype must be declared only once.
+let tapCallbackPrototype: ReturnType<typeof import("koffi").proto> | undefined;
+
+export function createNativeMacosMouseTap(): MacosMouseTapNative {
   const koffi = createRequire(import.meta.url)("koffi") as typeof import("koffi");
   const libraries: LibraryHandle[] = [];
   let tap: unknown, source: unknown, callback: unknown;
@@ -75,7 +78,8 @@ function createNativeMacosMouseTap(): MacosMouseTapNative {
     start(onButton) {
       const cg = koffi.load("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"); libraries.push(cg);
       const cf = koffi.load("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"); libraries.push(cf);
-      const prototype = koffi.proto("void *OpenWhisperMouseTapCallback(void *proxy, uint32_t type, void *event, void *info)");
+      tapCallbackPrototype ??= koffi.proto("void *OpenWhisperMouseTapCallback(void *proxy, uint32_t type, void *event, void *info)");
+      const prototype = tapCallbackPrototype;
       const create = cg.func("void *CGEventTapCreate(uint32_t tap, uint32_t place, uint32_t options, uint64_t mask, OpenWhisperMouseTapCallback *callback, void *info)");
       const field = cg.func("int64_t CGEventGetIntegerValueField(void *event, uint32_t field)");
       const enable = cg.func("void CGEventTapEnable(void *tap, bool enable)");

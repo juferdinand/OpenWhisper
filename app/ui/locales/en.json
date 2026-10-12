@@ -553,5 +553,8 @@
   "Release notes are shown in English.": "Release notes are shown in English.",
   "Microphone access allowed": "Microphone access allowed",
   "OpenWhisper records from the system default microphone. Change it in System Settings → Sound → Input.": "OpenWhisper records from the system default microphone. Change it in System Settings → Sound → Input.",
-  "Use a regular key, a shortcut, or the middle, back or forward mouse button.": "Use a regular key, a shortcut, or the middle, back or forward mouse button."
+  "Use a regular key, a shortcut, or the middle, back or forward mouse button.": "Use a regular key, a shortcut, or the middle, back or forward mouse button.",
+  "Accessibility access allowed": "Accessibility access allowed",
+  "Allowed": "Allowed",
+  "Not allowed": "Not allowed"
 }

@@ -3332,3 +3332,7 @@ html.setup-mode #record-control {
     padding: 12px 16px;
   }
 }
+.permission-status {
+  margin-right: 10px;
+  font-size: 12px;
+}

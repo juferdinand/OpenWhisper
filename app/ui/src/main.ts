@@ -1946,7 +1946,7 @@ function render() {
             : t(
                 "Optional permission for automatic pasting. Only keyboard access is requested; no screen capture.",
               ),
-        content: `${permissionButton()}${!pasteAvailable() ? `<p class="secondary">${esc(t("Your desktop does not expose this portal. Clipboard output remains available."))}</p>` : ""}`,
+        content: `${isMac() && state.paste_ready ? `<p class="success">${esc(t("Accessibility access allowed"))}</p>` : ""}${permissionButton()}${!pasteAvailable() ? `<p class="secondary">${esc(t("Your desktop does not expose this portal. Clipboard output remains available."))}</p>` : ""}`,
       },
       {
         title: t("How do you start the recording?"),
@@ -2101,7 +2101,7 @@ function render() {
     const microphoneAccess = isMac()
       ? row(
           t("Microphone access"),
-          `<button data-command="allow_microphone">${esc(t("System Settings"))}</button>`,
+          `${macPermissionStatus(state.macos?.microphone_allowed === true)}<button data-command="allow_microphone">${esc(t("System Settings"))}</button>`,
         )
       : row(t("Microphone"), microphoneControl());
     const permissions =
@@ -2111,7 +2111,7 @@ function render() {
           : nativePaste()
             ? t("Automatic X11 paste")
             : t("Keyboard access"),
-        permissionButton(),
+        `${isMac() ? macPermissionStatus(state.paste_ready === true) : ""}${permissionButton()}`,
       ) +
       `<p class="secondary">${esc(
         isMac()
@@ -2478,6 +2478,10 @@ function nativePaste() {
 }
 function pasteAvailable() {
   return state.paste_portal || !!state.native_paste;
+}
+/** macOS permissions are granted in System Settings; show whether macOS currently reports access. */
+function macPermissionStatus(allowed: boolean) {
+  return `<span class="permission-status ${allowed ? "success" : "secondary"}">${esc(t(allowed ? "Allowed" : "Not allowed"))}</span>`;
 }
 function permissionButton() {
   const pending = !isMac() && state.paste_configuring;
