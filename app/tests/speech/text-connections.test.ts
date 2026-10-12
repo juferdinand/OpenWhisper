@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -156,7 +156,11 @@ test("CLI detection resolves executable files from PATH without running them", a
   const executable = join(directory, "claude");
   await writeFile(executable, "#!/bin/sh\nprintf '2.1.260 (Claude Code)\\n'\n", { mode: 0o700 });
   await chmod(executable, 0o700);
-  assert.equal(await resolveTextCliExecutable("claude", directory), executable);
+  const canonicalExecutable = await realpath(executable);
+  assert.equal(await resolveTextCliExecutable("claude", directory), canonicalExecutable);
+  const directoryAlias = join(directory, "alias");
+  await symlink(directory, directoryAlias, "dir");
+  assert.equal(await resolveTextCliExecutable("claude", directoryAlias), canonicalExecutable);
   assert.equal(await resolveTextCliExecutable("claude", ".", "/nonexistent"), undefined);
   const emptyPort = await serve((path, response) => response.end(JSON.stringify(path === "/api/tags" ? { models: [] } : { models: [
     { key: "nomic-embed", type: "embedding" }, { key: "decision-model", type: "decision" },
