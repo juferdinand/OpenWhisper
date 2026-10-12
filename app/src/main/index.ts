@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, protocol, screen, session, shell, systemPreferences, Tray } from "electron";
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences, Tray } from "electron";
 import { deliverClipboard } from "../services/recording/clipboard-output.js";
 import { WaylandClipboard } from "../services/platforms/linux/wayland-clipboard.js";
 import { portalPasteStateSchema } from "../platforms/linux/shared/portal-paste.js";
@@ -44,6 +44,7 @@ import { createRecordingControlPort, recordingUnavailableReason } from "./record
 import { portalShortcutStateSchema } from "../platforms/linux/shared/portal-shortcuts.js";
 import { KdeKeyCapture } from "../platforms/linux/kde/key-capture.js";
 import { modifierOnly } from "../platforms/linux/kde/keyboard.js";
+import { recordingUnavailableTitle } from "../contracts/ui/recording-guidance.js";
 import { buildTrayMenu } from "./tray-menu.js";
 import { overlayWindowBounds, overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "./recording-overlay.js";
 import { WaylandRecordingOverlay } from "./wayland-recording-overlay.js";
@@ -310,7 +311,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   const waylandClipboard = descriptor?.platform === "linux" && process.env["XDG_SESSION_TYPE"] === "wayland"
     ? new WaylandClipboard() : undefined;
   const clipboardOutput = waylandClipboard ?? clipboard;
-  let microphoneAllowed = macRecording && systemPreferences.getMediaAccessStatus("microphone") === "granted";
+  let microphonePermission = macRecording ? systemPreferences.getMediaAccessStatus("microphone") : "unknown" as const;
+  let microphoneAllowed = microphonePermission === "granted";
   let accessibilityAllowed = macRecording && systemPreferences.isTrustedAccessibilityClient(false);
   const macPaste = macRecording ? MacosPaste.create({
     accessibilityGranted: () => systemPreferences.isTrustedAccessibilityClient(false),
@@ -402,13 +404,14 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     const gpuName = hardwareDeviceNameSchema.safeParse(gpuSelection.device);
     const unavailable = recordingUnavailableReason({ host: !recordingRetired && !!host,
       model: installed.some((item) => item.model.id === preferenceSnapshot.model), busy: recording.busy,
-      recovery: recording.recoveryAvailable, mac: macRecording, microphoneAllowed, audioServer: !!audioServer });
+      recovery: recording.recoveryAvailable, mac: macRecording, microphoneAllowed, audioServer: !!audioServer,
+      audioInput: sources.length > 0 && (!preferenceSnapshot.microphone || sources.some((source) => source.id === preferenceSnapshot.microphone)) });
     return appStateSchema.parse({
       updates,
       launch_at_login_available: !!autostart && loginFact !== undefined,
       platform,
       ...(platform === "macos" ? { macos: {
-        microphone_allowed: microphoneAllowed, recording_shortcut: macShortcutState?.configuring ?? false,
+        microphone_allowed: microphoneAllowed, microphone_permission: microphonePermission, recording_shortcut: macShortcutState?.configuring ?? false,
         shortcut_toggle_only: macRecording, clipboard_restore_available: false,
         shortcut_hint: "Press and release a keyboard key. Escape cancels.",
         editor: "", recommended: [], updates_configured: updates.configured, launch_at_login_pending: loginFact?.pending ?? false,
@@ -624,13 +627,25 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     if (recordingRetired) throw new Error("Recording is unavailable until the app restarts.");
     cancelRequested = true; if (host?.isConfigured()) await host.command("cancel");
   });
+  let lastUnavailableNotice = 0;
+  const unavailableTrigger = (): void => {
+    if (shutdownInProgress || state().recording_available !== false || Date.now() - lastUnavailableNotice < 3000) return;
+    lastUnavailableNotice = Date.now();
+    const snapshot = state(), key = recordingUnavailableTitle(snapshot);
+    message = key; notify();
+    if (Notification.isSupported()) {
+      const notification = new Notification({ title: profile.productName,
+        body: trayLocales[snapshot.preferences.ui_language][key] ?? key });
+      notification.on("click", showSettings); notification.show();
+    } else showSettings();
+  };
   if (host && macRecording && process.platform === "darwin") {
     macMouse = MacosMouseTrigger.create();
     macShortcut = new MacosShortcut({ shortcuts: globalShortcut, ...(macMouse ? { mouse: macMouse } : {}),
       allowed: () => !shutdownInProgress && updateReserved !== "install" && !recordingControl && !recording.recoveryAvailable &&
         !["stopping", "transcribing", "restoring", "discarding"].includes(recording.phase),
       setupAllowed: () => !shutdownInProgress && updateReserved !== "install" && !recording.busy && !recording.recoveryAvailable,
-      capture: createRecordingControlPort({ owner: host, snapshot: () => recording, configure: configureRecording,
+      capture: createRecordingControlPort({ owner: host, snapshot: () => recording, configure: configureRecording, unavailable: unavailableTrigger,
         available: () => !shutdownInProgress && state().recording_available === true,
         serialize: withRecordingControl, cleanupSerialize: (operation) => withRecordingControl(operation, true) }),
       changed: (value) => {
@@ -698,10 +713,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           }
           notify();
         },
-        capture: createRecordingControlPort({ owner: host, snapshot: () => recording, configure: configureRecording,
+        capture: createRecordingControlPort({ owner: host, snapshot: () => recording, configure: configureRecording, unavailable: unavailableTrigger,
           serialize: withRecordingControl,
           cleanupSerialize: <T>(operation: () => Promise<T>) => withRecordingControl(operation, true),
-          available: () => !shutdownInProgress && updateReserved !== "install" && !keyCapture && !!audioServer && installed.some((item) => item.model.id === preferences.snapshot().model) }),
+          available: () => !shutdownInProgress && !keyCapture && state().recording_available === true }),
       }, new AbortController().signal);
       const savedTrigger = preferences.snapshot().native_trigger;
       if (preferences.snapshot().setup_completed && !shortcut.nativeX11 && savedTrigger) {
@@ -1058,12 +1073,16 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       retry_transcription: () => recordingAction(async () => { await configureRecording(); if (cancelRequested) return; inferenceProgress = 0; await host?.command("retry"); }),
       discard_recovery: () => recordingAction(async () => { await configureRecording(); if (!cancelRequested) await host?.command("discard"); }),
       refresh_microphones: () => recordingAction(async () => { if (!host) throw new Error("Recording unavailable.");
-        if (macRecording) { microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted"; sources = macosAudioInputSources(); return; }
+if (macRecording) { microphonePermission = systemPreferences.getMediaAccessStatus("microphone"); microphoneAllowed = microphonePermission === "granted"; sources = macosAudioInputSources(); return; }
         audioServer = await checkedAudioServer(); sources = await host.enumerate(audioServer); }),
       allow_microphone: () => action(async () => {
         if (!macRecording) throw new Error("Microphone permission is unavailable.");
         const permission = systemPreferences.getMediaAccessStatus("microphone");
-        if (permission === "not-determined") microphoneAllowed = await systemPreferences.askForMediaAccess("microphone");
+        microphonePermission = permission;
+        if (permission === "not-determined") {
+          microphoneAllowed = await systemPreferences.askForMediaAccess("microphone");
+          microphonePermission = systemPreferences.getMediaAccessStatus("microphone");
+        }
         else {
           microphoneAllowed = permission === "granted";
           if (!microphoneAllowed) await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone");
@@ -1118,7 +1137,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     if (process.platform !== "darwin") tray.on("click", showSettings);
     updateTray = (snapshot) => {
       if (!tray || tray.isDestroyed()) return;
-      const key = JSON.stringify([snapshot.status, snapshot.recording_available, snapshot.recovery_available, snapshot.preferences.ui_language]);
+      const key = JSON.stringify([snapshot.status, snapshot.recording_available, snapshot.recording_unavailable_reason, snapshot.recovery_available, snapshot.preferences.ui_language]);
       if (key === trayKey) return;
       trayKey = key;
       const labels = trayLocales[snapshot.preferences.ui_language];
@@ -1157,7 +1176,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   window.on("minimize", syncOverlayAfterWindowEvent);
   window.on("restore", syncOverlayAfterWindowEvent);
   if (macRecording) window.on("focus", () => {
-    microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted";
+microphonePermission = systemPreferences.getMediaAccessStatus("microphone");
+    microphoneAllowed = microphonePermission === "granted";
     sources = macosAudioInputSources();
     accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(false);
     try { macMouse?.refresh(String(accessibilityAllowed)); } catch { message = "Shortcut setup or recording failed. Window recording remains usable."; }

@@ -109,3 +109,17 @@ test("tray labels use the supplied English or German translator and existing sha
     }
   }
 });
+
+test("unavailable tray entries expose each bounded reason in both languages", async () => {
+  for (const language of ["en", "de"] as const) {
+    const translations = z.record(z.string(), z.string()).parse(JSON.parse(await readFile(new URL(`../../../ui/locales/${language}.json`, import.meta.url), "utf8")));
+    const expected = language === "en" ? ["Microphone access", "No speech model", "No microphone", "HOST_UNAVAILABLE"]
+      : ["Mikrofonzugriff", "Sprachmodell", "Kein Mikrofon", "HOST_UNAVAILABLE"];
+    for (const [index, reason] of (["permission", "model", "audio", "host"] as const).entries()) {
+      const menu = buildTrayMenu(state({ recording_available: false, recording_unavailable_reason: reason }), routed().actions,
+        (key) => { assert.ok(translations[key]); return translations[key]; });
+      const detail = item(menu, "recording-unavailable");
+      assert.equal(detail.enabled, false); assert.ok(detail.label?.includes(expected[index]!));
+    }
+  }
+});

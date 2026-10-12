@@ -1,3 +1,4 @@
+import { recordingUnavailableTitle } from "../../src/contracts/ui/recording-guidance.js";
 import { invoke, listen } from "./bridge";
 import { setLocale, t } from "./i18n";
 import { escapeHtml as esc } from "./escape-html";
@@ -731,7 +732,7 @@ function setupModelGroups(): string {
     .join("")}</div>`;
 }
 const outputs = () =>
-  `<div class="radio-group">${[["paste", t("Paste at the cursor")], ["clipboard", t("Copy to clipboard only")], ...(isMac() ? [["editor", t("Open in a text editor")]] : [])].map(([v, l]) => `<label><input type="radio" name="output" data-pref="output" value="${v}" ${effectiveOutput() === v ? "checked" : ""} ${v === "paste" && !accessibilityPermissionGranted() ? "disabled" : ""}>${l}</label>`).join("")}</div>`;
+  `<div class="radio-group">${[["paste", t("Paste at the cursor")], ["clipboard", t("Copy to clipboard only")], ...(isMac() ? [["editor", t("Open in a text editor")]] : [])].map(([v, l]) => `<label><input type="radio" name="output" data-pref="output" value="${v}" ${effectiveOutput() === v ? "checked" : ""} >${l}</label>`).join("")}</div>`;
 const settingOutputs = () => {
   const modes: [string, string, string][] = [
     ["paste", "Insert", "Paste at the cursor"],
@@ -744,11 +745,12 @@ const settingOutputs = () => {
         ][])
       : []),
   ];
-  return `<fieldset class="settings-output-segment" aria-label="${esc(t("Output"))}">${modes.map(([value, label, fullLabel]) => `<label><input type="radio" name="settings-output" data-pref="output" value="${value}" aria-label="${esc(t(fullLabel))}" ${effectiveOutput() === value ? "checked" : ""} ${value === "paste" && !accessibilityPermissionGranted() ? `disabled title="${esc(t("Insertion requires Accessibility access."))}"` : ""}><span>${esc(t(label))}</span></label>`).join("")}</fieldset>`;
+  return `<fieldset class="settings-output-segment" aria-label="${esc(t("Output"))}">${modes.map(([value, label, fullLabel]) => `<label><input type="radio" name="settings-output" data-pref="output" value="${value}" aria-label="${esc(t(fullLabel))}" ${effectiveOutput() === value ? "checked" : ""} ><span>${esc(t(label))}</span></label>`).join("")}</fieldset>`;
 };
 
 function effectiveOutput(): string {
-  return state.preferences.output === "paste" && !accessibilityPermissionGranted()
+  return state.preferences.output === "paste" &&
+    !accessibilityPermissionGranted()
     ? "clipboard"
     : state.preferences.output;
 }
@@ -757,8 +759,7 @@ const setupTriggerOutput = () =>
 
 function microphonePermissionGranted(): boolean {
   if (isMac()) return state.macos?.microphone_allowed === true;
-  return state.recording_unavailable_reason !== "audio" &&
-    state.recording_unavailable_reason !== "permission";
+  return true;
 }
 
 function accessibilityPermissionGranted(): boolean {
@@ -766,17 +767,55 @@ function accessibilityPermissionGranted(): boolean {
 }
 
 function missingPermissionCount(): number {
-  return Number(!microphonePermissionGranted()) +
-    Number(!accessibilityPermissionGranted());
+  return (
+    Number(!microphonePermissionGranted()) +
+    Number(pasteAvailable() && !accessibilityPermissionGranted())
+  );
+}
+
+function microphonePermissionDetail(): string {
+  if (state.macos?.microphone_permission === "not-determined")
+    return t(
+      "Microphone access has not been requested yet. Allow access to record.",
+    );
+  return t(
+    "Allow microphone access in System Settings. If OpenWhisper is already enabled, remove it and allow it again.",
+  );
 }
 
 function permissionBanner(): string {
   const banners: string[] = [];
-  if (!microphonePermissionGranted()) {
-    banners.push(`<div class="permission-banner permission-banner-warning" role="status"><span class="permission-dot" aria-hidden="true"></span><div><strong>${esc(t("No microphone access"))}</strong><p>${esc(t("Without microphone permission, recording cannot start."))}</p></div><button type="button" data-settings-view="permissions">${esc(t("Grant permission"))}</button></div>`);
+  const reason =
+    state.recording_available === false
+      ? state.recording_unavailable_reason
+      : undefined;
+  if (reason || !microphonePermissionGranted()) {
+    const microphone =
+      reason === "permission" || (!reason && !microphonePermissionGranted());
+    const title = microphone
+      ? t("Microphone access is not allowed.")
+      : recordingUnavailableMessage();
+    const detail = microphone
+      ? `<p>${esc(microphonePermissionDetail())}</p>`
+      : "";
+    const action = microphone
+      ? `<button type="button" data-command="allow_microphone">${esc(t(state.macos?.microphone_permission === "not-determined" ? "Allow microphone access" : "System Settings"))}</button>`
+      : reason === "model"
+        ? `<button type="button" data-open-model-drawer>${esc(t("Open models"))}</button>`
+        : reason === "audio"
+          ? `<button type="button" data-settings-view="recording" data-settings-section="settings-recording-microphone">${esc(t("Microphone settings"))}</button>`
+          : "";
+    banners.push(
+      `<div class="permission-banner permission-banner-warning" role="status"><span class="permission-dot" aria-hidden="true"></span><div><strong>${esc(title)}</strong>${detail}</div>${action}</div>`,
+    );
   }
-  if (!accessibilityPermissionGranted()) {
-    banners.push(`<div class="permission-banner permission-banner-accessibility" role="status"><span class="permission-dot" aria-hidden="true"></span><div><strong>${esc(t("Accessibility access is missing"))}</strong><p>${esc(t("The shortcut only works while OpenWhisper is in the foreground, and insertion is disabled."))}</p></div><button type="button" data-settings-view="permissions">${esc(t("Grant permission"))}</button></div>`);
+  if (
+    !accessibilityPermissionGranted() &&
+    state.preferences.output === "paste"
+  ) {
+    banners.push(
+      `<div class="permission-banner permission-banner-accessibility" role="status"><span class="permission-dot" aria-hidden="true"></span><div><strong>${esc(t(isMac() ? "Accessibility access is missing" : "Automatic insertion is unavailable"))}</strong><p>${esc(t("Text is copied instead. Allow keyboard access to insert it automatically."))}</p></div><button type="button" data-settings-view="permissions">${esc(t("Grant permission"))}</button></div>`,
+    );
   }
   return banners.join("");
 }
@@ -806,10 +845,6 @@ async function command(
 ): Promise<boolean> {
   if (name === "complete_setup" && !hasInstalledSelectedModel()) {
     notice("Download and select a model to continue.");
-    return false;
-  }
-  if (name === "complete_setup" && missingPermissionCount() > 0) {
-    notice("Grant both permissions before finishing setup.");
     return false;
   }
   try {
@@ -961,7 +996,10 @@ function syncPreferenceControls() {
   document
     .querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-pref]")
     .forEach((input) => {
-      const value = state.preferences[input.dataset.pref as keyof Preferences];
+      const value =
+        input.dataset.pref === "output"
+          ? effectiveOutput()
+          : state.preferences[input.dataset.pref as keyof Preferences];
       if (input instanceof HTMLInputElement && input.type === "checkbox")
         input.checked = !!value;
       else if (input instanceof HTMLInputElement && input.type === "radio")
@@ -981,22 +1019,7 @@ function syncPreferenceControls() {
   }
 }
 function recordingUnavailableMessage(): string {
-  switch (state.recording_unavailable_reason) {
-    case "model":
-      return t("Choose a speech model before recording.");
-    case "audio":
-      return t(
-        "No audio input is available. Check your microphone and audio settings.",
-      );
-    case "permission":
-      return t("Microphone permission is required. Check Recording settings.");
-    case "host":
-      return t(
-        "The recording service could not start. Restart OpenWhisper and try again.",
-      );
-    default:
-      return t("Recording is unavailable. Check your settings and try again.");
-  }
+  return t(recordingUnavailableTitle(state));
 }
 
 function recognitionModeStatus(): string {
@@ -1366,12 +1389,20 @@ function recordingStatusTitle(): string {
   if (busy) return t("Finding your words");
   if (recovery || state.status === "error")
     return t("Something needs attention");
-  if (
-    state.recording_available === false &&
-    state.recording_unavailable_reason === "model"
-  )
-    return t("Choose a model");
-  if (state.recording_available === false) return t("Recording is unavailable");
+  if (state.recording_available === false) {
+    switch (state.recording_unavailable_reason) {
+      case "model":
+        return t("Choose a model");
+      case "permission":
+        return t("Microphone access is not allowed.");
+      case "audio":
+        return t("No microphone available");
+      case "host":
+        return t("Recording service unavailable");
+      default:
+        return t("Recording is unavailable");
+    }
+  }
   return t("Ready");
 }
 
@@ -1482,7 +1513,10 @@ function recordControl() {
           );
           return;
         }
-        tab = "recording";
+        tab =
+          state.recording_unavailable_reason === "permission"
+            ? "permissions"
+            : "recording";
         render();
       });
   }
@@ -1550,7 +1584,7 @@ function recordControl() {
         recovery ||
         busy ||
         (output.dataset.output === "paste" &&
-          (!accessibilityPermissionGranted() || portalBusy || state.paste_configuring === true));
+          (portalBusy || state.paste_configuring === true));
     });
   const unavailableAction = document.querySelector<HTMLButtonElement>(
     "#record-unavailable-action",
@@ -1559,7 +1593,11 @@ function recordControl() {
   unavailableAction.hidden =
     !unavailable || state.recording_unavailable_reason === "host";
   unavailableAction.dataset.goto =
-    state.recording_unavailable_reason === "model" ? "models" : "recording";
+    state.recording_unavailable_reason === "model"
+      ? "models"
+      : state.recording_unavailable_reason === "permission"
+        ? "permissions"
+        : "recording";
   unavailableAction.textContent = t(
     state.recording_unavailable_reason === "model"
       ? "Open models"
@@ -1678,8 +1716,9 @@ function renderWorkspace() {
     state.recommended_models,
     state.recording_available,
     state.recording_unavailable_reason,
-    state.macos?.microphone_allowed,
+    state.macos,
     state.paste_ready,
+    state.preferences.output,
     state.recovery_available,
     state.history,
     state.transcript,
@@ -1737,7 +1776,7 @@ function renderWorkspace() {
         : state.recovery_available
           ? t("Something needs attention")
           : state.recording_available === false
-            ? t("Recording is unavailable")
+            ? recordingUnavailableMessage()
             : t("Ready");
   const recordingReady = state.recording_available !== false;
   const modeTitle = recognitionHardwareStatus();
@@ -1758,6 +1797,11 @@ function renderWorkspace() {
       if (selectedHistoryIndex !== null) {
         void command("copy_history", { index: selectedHistoryIndex });
       } else void command("copy_transcript");
+    });
+  main
+    .querySelector<HTMLButtonElement>('[data-command="allow_microphone"]')
+    ?.addEventListener("click", () => {
+      void command("allow_microphone");
     });
   bindHistoryActions(rail);
   rail
@@ -1807,6 +1851,8 @@ function render() {
     settingsDialog.close();
   }
   document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((b) => {
+    if (b.dataset.tab === "permissions")
+      b.textContent = `${t("Permissions")}${missingPermissionCount() ? ` · ${missingPermissionCount()}` : ""}`;
     const selected = b.dataset.tab === tab;
     b.classList.toggle("selected", selected);
     b.setAttribute("aria-current", selected ? "page" : "false");
@@ -2240,8 +2286,8 @@ function render() {
         "settings-recording-permissions",
       );
   } else if (tab === "permissions") {
-    const microphoneRow = `<div class="permission-row"><div class="permission-row-copy"><strong>${esc(t("Microphone"))}</strong><span>${esc(t("Records your voice. Audio stays on this device."))}</span>${microphonePermissionGranted() ? "" : `<small>${esc(t("Without permission, recording cannot start."))}</small>`}</div><span class="permission-badge ${microphonePermissionGranted() ? "permission-badge-ok" : "permission-badge-warning"}">${esc(t(microphonePermissionGranted() ? "Allowed" : "Required · missing"))}</span>${microphonePermissionGranted() ? `<button type="button" disabled>${esc(t("Allowed"))}</button>` : isMac() ? `<button type="button" data-command="allow_microphone">${esc(t("Allow"))}</button>` : `<button type="button" data-command="refresh_microphones">${esc(t("Check again"))}</button>`}</div>`;
-    const accessibilityRow = `<div class="permission-row"><div class="permission-row-copy"><strong>${esc(isMac() ? t("Accessibility access") : t("Keyboard access"))}</strong><span>${esc(t("Recognizes your shortcut and inserts text into the active window."))}</span>${accessibilityPermissionGranted() ? "" : `<small>${esc(t("Without permission, the shortcut only works while OpenWhisper is in the foreground, and text is copied instead."))}</small>`}</div><span class="permission-badge ${accessibilityPermissionGranted() ? "permission-badge-ok" : "permission-badge-accessibility"}">${esc(t(accessibilityPermissionGranted() ? "Allowed" : "Required · missing"))}</span>${accessibilityPermissionGranted() ? `<button type="button" disabled>${esc(t("Allowed"))}</button>` : permissionButton()}</div>`;
+    const microphoneRow = `<div class="permission-row"><div class="permission-row-copy"><strong>${esc(t("Microphone"))}</strong><span>${esc(t("Records your voice. Audio stays on this device."))}</span>${microphonePermissionGranted() ? "" : `<small>${esc(microphonePermissionDetail())}</small>`}</div><span class="permission-badge ${microphonePermissionGranted() ? "permission-badge-ok" : "permission-badge-warning"}">${esc(t(microphonePermissionGranted() ? "Allowed" : "Required · missing"))}</span>${microphonePermissionGranted() ? `<button type="button" disabled>${esc(t("Allowed"))}</button>` : isMac() ? `<button type="button" data-command="allow_microphone">${esc(t(state.macos?.microphone_permission === "not-determined" ? "Allow microphone access" : "System Settings"))}</button>` : `<button type="button" data-command="refresh_microphones">${esc(t("Check again"))}</button>`}</div>`;
+    const accessibilityRow = `<div class="permission-row"><div class="permission-row-copy"><strong>${esc(isMac() ? t("Accessibility access") : t("Keyboard access"))}</strong><span>${esc(t("Recognizes your shortcut and inserts text into the active window."))}</span>${accessibilityPermissionGranted() ? "" : `<small>${esc(t("Text is copied instead. Allow keyboard access to insert it automatically."))}</small>`}</div><span class="permission-badge ${accessibilityPermissionGranted() ? "permission-badge-ok" : "permission-badge-accessibility"}">${esc(t(accessibilityPermissionGranted() ? "Allowed" : pasteAvailable() ? "Optional · missing" : "Unavailable"))}</span>${accessibilityPermissionGranted() ? `<button type="button" disabled>${esc(t("Allowed"))}</button>` : permissionButton()}</div>`;
     content.innerHTML = section(
       t("Permissions"),
       `<div class="permission-list">${microphoneRow}${accessibilityRow}</div><p class="secondary">${esc(t("Permission status refreshes automatically when OpenWhisper returns to the foreground."))}</p>`,

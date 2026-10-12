@@ -124,6 +124,7 @@ export type Model = z.infer<typeof modelSchema>;
 
 const macStateSchema = z.strictObject({
   microphone_allowed: z.boolean(),
+  microphone_permission: z.enum(["not-determined", "granted", "denied", "restricted", "unknown"]).optional(),
   recording_shortcut: z.boolean(),
   shortcut_toggle_only: z.boolean().optional(),
   clipboard_restore_available: z.boolean().optional(),

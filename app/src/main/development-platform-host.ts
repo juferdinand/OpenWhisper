@@ -59,6 +59,7 @@ export class DevelopmentPlatformCaptureBridge {
     if (request.command === "start") return this.start(request);
     const operation = Promise.resolve().then(async () => {
       switch (request.command) {
+        case "unavailable": { await this.capture.unavailable?.(); return this.success(request, { command: "unavailable" }); }
         case "status": return this.success(request, { command: "status", status: controlStatusSchema.parse(await this.capture.status()) });
         case "wire-status": {
           if (!this.capture.wireStatus) return this.failed(request, "UNAVAILABLE");

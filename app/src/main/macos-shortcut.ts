@@ -87,6 +87,7 @@ export class MacosShortcut {
   constructor(private readonly options: MacosShortcutOptions) {
     const capture: ControlCapturePort = {
       status: () => this.admitted() ? options.capture.status() : "unavailable",
+      unavailable: () => options.capture.unavailable?.(),
       start: (signal) => {
         if (!this.admitted()) return Promise.reject(new MacosShortcutError("UNAVAILABLE"));
         return options.capture.start(signal);

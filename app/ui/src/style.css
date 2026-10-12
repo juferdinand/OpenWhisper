@@ -3347,29 +3347,110 @@ html.setup-mode #record-control {
   border: 1px solid var(--border);
   border-radius: 12px;
 }
-.permission-banner-warning { background: rgba(240, 179, 90, .12); border-color: rgba(240, 179, 90, .32); }
-.permission-banner-accessibility { background: rgba(180, 156, 255, .12); border-color: rgba(180, 156, 255, .32); }
-.permission-banner > div { min-width: 0; flex: 1; }
-.permission-banner strong { display: block; font-size: 13px; }
-.permission-banner p { margin: 2px 0 0; color: var(--secondary); font-size: 12px; }
-.permission-banner button { flex: 0 0 auto; }
-.permission-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--warning); }
-.permission-banner-accessibility .permission-dot { background: var(--accent); }
-.permission-list { overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--sunken); }
-.permission-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 14px; padding: 14px 16px; }
-.permission-row + .permission-row { border-top: 1px solid var(--border); }
-.permission-row-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.permission-row-copy span { color: var(--muted); font-size: 12px; }
-.permission-row-copy small { color: var(--warning); font-size: 12px; }
-.permission-badge { padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap; }
-.permission-badge-ok { background: rgba(134, 217, 180, .12); color: var(--ok); }
-.permission-badge-warning { background: rgba(240, 179, 90, .12); color: var(--warning); }
-.permission-badge-accessibility { background: rgba(180, 156, 255, .12); color: var(--accent); }
-.permission-row button:disabled { opacity: .65; cursor: default; }
+.permission-banner-warning {
+  background: rgba(240, 179, 90, 0.12);
+  border-color: rgba(240, 179, 90, 0.32);
+}
+.permission-banner-accessibility {
+  background: rgba(180, 156, 255, 0.12);
+  border-color: rgba(180, 156, 255, 0.32);
+}
+.permission-banner > div {
+  min-width: 0;
+  flex: 1;
+}
+.permission-banner strong {
+  display: block;
+  font-size: 13px;
+}
+.permission-banner p {
+  margin: 2px 0 0;
+  color: var(--secondary);
+  font-size: 12px;
+}
+.permission-banner button {
+  flex: 0 0 auto;
+}
+.permission-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--warning);
+}
+.permission-banner-accessibility .permission-dot {
+  background: var(--accent);
+}
+.permission-list {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--sunken);
+}
+.permission-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+}
+.permission-row + .permission-row {
+  border-top: 1px solid var(--border);
+}
+.permission-row-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.permission-row-copy span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.permission-row-copy small {
+  color: var(--warning);
+  font-size: 12px;
+}
+.permission-badge {
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.permission-badge-ok {
+  background: rgba(134, 217, 180, 0.12);
+  color: var(--ok);
+}
+.permission-badge-warning {
+  background: rgba(240, 179, 90, 0.12);
+  color: var(--warning);
+}
+.permission-badge-accessibility {
+  background: rgba(180, 156, 255, 0.12);
+  color: var(--accent);
+}
+.permission-row button:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
 @media (max-width: 620px) {
-  .permission-row { grid-template-columns: minmax(0, 1fr) auto; }
-  .permission-row .permission-badge { grid-column: 2; grid-row: 1; }
-  .permission-row button { grid-column: 1 / -1; justify-self: start; }
-  .permission-banner { align-items: flex-start; flex-wrap: wrap; }
-  .permission-banner button { margin-left: 20px; }
+  .permission-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .permission-row .permission-badge {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .permission-row button {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+  .permission-banner {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .permission-banner button {
+    margin-left: 20px;
+  }
 }
