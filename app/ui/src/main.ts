@@ -82,6 +82,21 @@ document.documentElement.classList.toggle("overlay", overlay);
 app.innerHTML = '<div id="notice" role="alert" hidden></div>';
 const option = (value: string, label: string, selected: string) =>
   `<option value="${esc(value)}" ${value === selected ? "selected" : ""}>${esc(label)}</option>`;
+const formatModelId = (value: string) =>
+  value
+    .split(":")
+    .map((namespace) =>
+      namespace
+        .split("-")
+        .map((part) => {
+          if (part.toLowerCase() === "gpt") return "GPT";
+          const separated = part.replace(/([a-z])([0-9])/gi, "$1 $2");
+          return separated.charAt(0).toUpperCase() + separated.slice(1);
+        })
+        .join(" "),
+    )
+    .join(" · ")
+    .replace(/^GPT (\d)/, "GPT-$1");
 const modelRecommendations = () =>
   state.recommended_models ?? state.macos?.recommended ?? [];
 const hasInstalledSelectedModel = () =>
@@ -3176,19 +3191,27 @@ function renderConnectionsSettings(content: HTMLElement) {
               : (found?.models[0] ?? "")
             : "";
         const cliModels = found?.models ?? [];
-        const claudeOptions =
-          connection.provider === "claude_code"
-            ? (found?.model_options ??
-              cliModels.map((value) => ({
-                value,
-                display_name: value,
-                source: "cli" as const,
-              })))
-            : [];
-        const cliModelValues =
-          connection.provider === "claude_code"
-            ? claudeOptions.map((item) => item.value)
-            : cliModels;
+        const isClaude = connection.provider === "claude_code";
+        const cliOptions =
+          found?.model_options ??
+          cliModels.map((value) => ({
+            value,
+            display_name: formatModelId(value),
+            source: "cli" as const,
+          }));
+        const savedRecommendedClaude =
+          isClaude && connection.model === "default";
+        const selectableCliOptions = cliOptions
+          .filter((item) => !isClaude || item.value !== "default")
+          .map((item) => ({
+            ...item,
+            display_name:
+              item.display_name === item.value
+                ? formatModelId(item.value)
+                : item.display_name,
+          }));
+        const cliModelValues = selectableCliOptions.map((item) => item.value);
+        if (savedRecommendedClaude) cliModelValues.push("default");
         const savedCliModel =
           (connection.provider === "claude_code" ||
             connection.provider === "codex") &&
@@ -3197,10 +3220,10 @@ function renderConnectionsSettings(content: HTMLElement) {
             ? connection.model
             : "";
         const model = local
-          ? `<label class="connection-model"><span class="visually-hidden">${esc(t("Model"))}</span><select data-connection-model="${esc(connection.provider)}" aria-label="${esc(t("{provider} model", { provider: name }))}" ${!usable ? "disabled" : ""}>${connection.model && !found?.models.includes(connection.model) ? option(connection.model, connection.model, selectedModel) : ""}${found?.models.length ? found.models.map((item) => option(item, item, selectedModel)).join("") : option("", t("No models found"), selectedModel)}</select></label>`
+          ? `<label class="connection-model"><span class="visually-hidden">${esc(t("Model"))}</span><select data-connection-model="${esc(connection.provider)}" aria-label="${esc(t("{provider} model", { provider: name }))}" ${!usable ? "disabled" : ""}>${connection.model && !found?.models.includes(connection.model) ? option(connection.model, formatModelId(connection.model), selectedModel) : ""}${found?.models.length ? found.models.map((item) => option(item, formatModelId(item), selectedModel)).join("") : option("", t("No models found"), selectedModel)}</select></label>`
           : connection.provider === "claude_code" ||
               connection.provider === "codex"
-            ? `<label class="connection-model"><span class="visually-hidden">${esc(t("{provider} model", { provider: name }))}</span><select data-cli-model="${esc(connection.provider)}" aria-label="${esc(t("{provider} model", { provider: name }))}" ${controlsDisabled ? "disabled" : ""}>${option("", t("CLI default"), connection.model)}${connection.provider === "claude_code" ? claudeOptions.map((item) => option(item.value, item.display_name, connection.model)).join("") : cliModels.map((item) => option(item, item, connection.model)).join("")}${savedCliModel ? option(savedCliModel, savedCliModel, connection.model) : ""}</select></label>`
+            ? `<label class="connection-model"><span class="visually-hidden">${esc(t("{provider} model", { provider: name }))}</span><select data-cli-model="${esc(connection.provider)}" aria-label="${esc(t("{provider} model", { provider: name }))}" ${controlsDisabled ? "disabled" : ""}>${option("", t("Use tool settings"), connection.model)}${selectableCliOptions.map((item) => option(item.value, item.display_name, connection.model)).join("")}${savedRecommendedClaude ? option("default", t("Recommended Claude model"), connection.model) : ""}${savedCliModel ? option(savedCliModel, formatModelId(savedCliModel), connection.model) : ""}</select></label>`
             : `<div class="connection-cli-note"><p class="connection-model-note">${esc(custom ? (connection as CustomCliConnection).command : t("Uses the tool model"))}</p>${customNeedsPrompt ? `<p class="connection-state unavailable">${esc(t("Add {prompt} to the input template or an argument to use this connection in Conversation mode.", { prompt: "{prompt}" }))}</p>` : ""}</div>`;
         const enabledDisabled =
           (!usable || (local && !selectedModel) || customNeedsPrompt) &&

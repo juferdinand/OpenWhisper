@@ -191,7 +191,7 @@ export class LocalTextConnectionScanner {
     ]);
     const [claudeDiscovery, codexModels] = await Promise.all([
       claudeSupported && claude !== undefined ? discoverClaudeModels(claude) : { models: [], model_options: [] },
-      codexSupported && codex !== undefined ? discoverCodexModels(codex) : [],
+      codexSupported && codex !== undefined ? discoverCodexModels(codex) : { models: [], model_options: [] },
     ]);
     const result: TextConnectionAvailability[] = [
       { provider: "ollama", detected: ollama.detected, usable: ollama.models.length > 0, models: [...ollama.models],
@@ -201,7 +201,8 @@ export class LocalTextConnectionScanner {
       { provider: "claude_code", detected: claude !== undefined, usable: claudeSupported, models: [...claudeDiscovery.models],
         ...(claudeDiscovery.model_options.length > 0 ? { model_options: [...claudeDiscovery.model_options] } : {}),
         reason: claude === undefined ? "not_installed" : claudeSupported ? null : "unsupported" },
-      { provider: "codex", detected: codex !== undefined, usable: codexSupported, models: codexModels,
+      { provider: "codex", detected: codex !== undefined, usable: codexSupported, models: [...codexModels.models],
+        ...(codexModels.model_options.length > 0 ? { model_options: [...codexModels.model_options] } : {}),
         reason: codex === undefined ? "not_installed" : codexSupported ? null : "unsupported" },
       ...settings.connections.filter((connection): connection is CustomCliConnection => "command" in connection)
         .map((connection, index): TextConnectionAvailability => ({ provider: connection.provider,

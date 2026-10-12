@@ -185,10 +185,12 @@ test("built-in CLI model catalogs refresh and save by provider identity", async 
 
   const codexModel = page.locator('[data-cli-model="codex"]');
   await expect(codexModel).toBeEnabled();
-  await expect(codexModel.locator("option").first()).toHaveText("CLI default");
+  await expect(codexModel.locator("option").first()).toHaveText(
+    "Use tool settings",
+  );
   await expect(codexModel.locator("option")).toHaveText([
-    "CLI default",
-    "codex-fast",
+    "Use tool settings",
+    "Codex Fast",
   ]);
   await codexModel.selectOption("codex-fast");
   await expect
@@ -201,11 +203,18 @@ test("built-in CLI model catalogs refresh and save by provider identity", async 
     )
     .toMatchObject({ provider: "codex", model: "codex-fast" });
 
+  const ollamaModel = page.locator('[data-connection-model="ollama"]');
+  await expect(ollamaModel.locator("option")).toHaveText([
+    "Llama 3.2",
+    "Qwen 2.5",
+    "Qwen 3 · 8b",
+  ]);
+
   await page.getByRole("button", { name: "Move Claude Code up" }).click();
 
   const claudeModel = page.locator('[data-cli-model="claude_code"]');
   await expect(claudeModel.locator("option")).toHaveText([
-    "CLI default",
+    "Use tool settings",
     "Sonnet",
     "Opus",
     "Opus 5",
@@ -214,6 +223,7 @@ test("built-in CLI model catalogs refresh and save by provider identity", async 
     "Fable 5.1",
   ]);
   await expect(claudeModel.locator("optgroup")).toHaveCount(0);
+  await expect(claudeModel.locator('option[value="default"]')).toHaveCount(0);
   await claudeModel.selectOption("claude-opus-5");
   await expect
     .poll(() =>
@@ -230,6 +240,11 @@ test("built-in CLI model catalogs refresh and save by provider identity", async 
       claude_code: ["sonnet"],
       claude_model_options: [
         {
+          value: "default",
+          display_name: "Default",
+          source: "cli",
+        },
+        {
           value: "sonnet",
           display_name: "Sonnet",
           source: "cli",
@@ -240,19 +255,26 @@ test("built-in CLI model catalogs refresh and save by provider identity", async 
           source: "catalog",
         },
       ],
-      codex: ["codex-fast"],
+      codex: ["codex-fast", "gpt-6.1-sol"],
+      codex_options: null,
     };
   });
   await page.getByRole("button", { name: "Scan again" }).click();
   await expect(page.getByRole("button", { name: "Scan again" })).toBeEnabled();
   await expect(claudeModel.locator("option")).toHaveText([
-    "CLI default",
+    "Use tool settings",
     "Sonnet",
     "Sonnet 5.5",
-    "claude-opus-5",
+    "Claude Opus 5",
   ]);
   await expect(claudeModel).toHaveValue("claude-opus-5");
   await expect(claudeModel.locator("optgroup")).toHaveCount(0);
+  await expect(codexModel.locator("option")).toHaveText([
+    "Use tool settings",
+    "Codex Fast",
+    "GPT-6.1 Sol",
+  ]);
+  await expect(codexModel).toHaveValue("codex-fast");
 
   await claudeModel.selectOption("");
   await expect
@@ -272,7 +294,30 @@ test("built-in CLI model catalogs refresh and save by provider identity", async 
   });
   await expect(
     page.locator('[data-cli-model="claude_code"] option').first(),
-  ).toHaveText("CLI-Standard");
+  ).toHaveText("Einstellung des Tools verwenden");
+
+  await page.evaluate(() => {
+    const claude = window.testState.text_connections.settings.connections.find(
+      (connection) => connection.provider === "claude_code",
+    );
+    if (claude && "model" in claude) claude.model = "default";
+    window.publishState();
+  });
+  const recommendedClaude = claudeModel.locator('option[value="default"]');
+  await expect(recommendedClaude).toHaveCount(1);
+  await expect(recommendedClaude).toHaveText("Empfohlenes Claude-Modell");
+  await expect(claudeModel).toHaveValue("default");
+  await claudeModel.selectOption("");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.testState.text_connections.settings.connections.find(
+            (connection) => connection.provider === "claude_code",
+          )?.model,
+      ),
+    )
+    .toBe("");
 });
 
 test("rapid CLI model edits and reorder serialize without losing pending settings", async ({
@@ -1551,7 +1596,7 @@ async function start(
               provider: "ollama",
               detected: true,
               usable: true,
-              models: ["llama3.2", "qwen2.5"],
+              models: ["llama3.2", "qwen2.5", "qwen3:8b"],
               reason: null,
             },
             {
@@ -1570,6 +1615,11 @@ async function start(
                 {
                   value: "sonnet",
                   display_name: "Sonnet",
+                  source: "cli",
+                },
+                {
+                  value: "default",
+                  display_name: "Default",
                   source: "cli",
                 },
                 {
@@ -1605,6 +1655,17 @@ async function start(
               detected: true,
               usable: true,
               models: host.cliModelCatalog?.codex ?? ["codex-fast"],
+              ...(host.cliModelCatalog?.codex_options === null
+                ? {}
+                : {
+                    model_options: host.cliModelCatalog?.codex_options ?? [
+                      {
+                        value: "codex-fast",
+                        display_name: "codex-fast",
+                        source: "cli",
+                      },
+                    ],
+                  }),
               reason: null,
             },
             ...state.text_connections.settings.connections

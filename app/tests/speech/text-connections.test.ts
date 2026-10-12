@@ -273,7 +273,7 @@ process.stdin.on('data', chunk => { pending += chunk; while (pending.includes('\
   if (request.method === 'initialize') process.stdout.write(JSON.stringify({ id: request.id, result: {} }) + '\\n');
   else if (request.method === 'initialized') { if (request.id !== undefined) process.exit(42); }
   else if (request.method === 'model/list') process.stdout.write(JSON.stringify({ id: request.id, result: {
-    data: [{ id: 'gpt-5.4-codex', hidden: false }, { id: 'hidden', hidden: true }], nextCursor: null,
+    data: [{ id: 'gpt-5.4-codex', hidden: false, displayName: 'GPT-5.4 Codex' }, { id: 'hidden', hidden: true }], nextCursor: null,
   } }) + '\\n');
   else process.exit(43);
 } });
@@ -299,7 +299,8 @@ process.stdin.on('end', () => process.exit(0));
   });
   assert.equal(claude?.model_options?.find(({ value }) => value === "claude-sonnet-5")?.source, "catalog");
   const codex = availability.find(({ provider }) => provider === "codex");
-  assert.deepEqual(codex, { provider: "codex", detected: true, usable: true, models: ["gpt-5.4-codex"], reason: null });
+  assert.deepEqual(codex, { provider: "codex", detected: true, usable: true, models: ["gpt-5.4-codex"],
+    model_options: [{ value: "gpt-5.4-codex", display_name: "GPT-5.4 Codex", source: "cli" }], reason: null });
 });
 
 test("CLI metadata failure leaves a supported installed CLI usable with its inherited model", async () => {

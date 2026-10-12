@@ -79,16 +79,23 @@ does not remove agent tools, and configured CLI policy still applies. Only a com
 successful turn's assistant answer is accepted; progress and commentary are excluded.
 
 Choose Claude Code and Codex models from the dropdowns in **Settings → Connections**.
-**CLI default** uses the CLI's configured model; an explicit selection is passed as
-`--model` without changing global CLI settings. Discovered choices come from the installed CLI:
+**Use tool settings** omits `--model`, leaving model selection to the CLI's configuration
+and policy. This does not resume the model or chat from an unrelated CLI process.
+An explicit selection is passed as `--model` without changing global CLI settings.
+Discovered choices come from the installed CLI:
 Codex's app-server `model/list` and Claude's initialization control response. Metadata
 sessions use private pipes and the existing owned process boundary, then close; no
 model turn is started. OpenWhisper does not read or copy CLI credentials.
 
 Claude's initialization response lists its picker entries, which can be aliases rather
 than every model version. The dropdown shows plain model names, including the current
-family choice and specific versions. It preserves the selected CLI value; values such
-as Fable's `[1m]` suffix remain unchanged when selected.
+family choice and specific versions. Codex uses the display names returned by its CLI;
+local model identifiers use readable labels while retaining version and tag distinctions.
+The displayed label never changes the selected model identifier; values such as Fable's
+`[1m]` suffix remain unchanged when selected. Claude's separate `default` alias is not
+offered alongside the inherited setting. An existing saved `default` selection remains
+available as **Recommended Claude model**, preserving its explicit `--model default`
+behavior.
 
 Additional versions come from a small catalog of active Anthropic model IDs, verified
 against the official model lifecycle reference
@@ -99,7 +106,7 @@ does not download it or discover every version enabled for the account.
 
 Neither the CLI list nor the additional catalog verifies account entitlements. Claude
 checks access and applies its configured model restrictions when a request runs. If
-metadata discovery fails, CLI default and any saved model remain selectable. Saved
+metadata discovery fails, the inherited setting and any saved model remain selectable. Saved
 models absent from the refreshed choices remain selectable. The selection persists in
 the active profile, and changing the selected connection's model starts a fresh
 conversation.

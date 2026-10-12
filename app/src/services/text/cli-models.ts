@@ -8,7 +8,7 @@ const MODEL_OUTPUT_BYTES = 1024 * 1024;
 const MAX_MODEL_PAGES = 8;
 const requestRecord = z.record(z.string(), z.unknown());
 const codexPageSchema = z.object({
-  data: z.array(z.object({ id: z.string().max(1024), hidden: z.boolean() })).max(MODEL_LIMIT),
+  data: z.array(z.object({ id: z.string().max(1024), hidden: z.boolean(), displayName: z.unknown().optional() })).max(MODEL_LIMIT),
   nextCursor: z.string().max(1024).nullable().optional(),
 });
 const claudeModelsSchema = z.array(z.object({ value: z.string().max(1024), resolvedModel: z.string().max(1024).optional(),
@@ -34,18 +34,21 @@ const activeClaudeModels: readonly ClaudeCatalogModel[] = [
   { value: "claude-haiku-4-5-20251001", displayName: "Haiku 4.5", family: "haiku" },
 ];
 
-export interface ClaudeModelDiscovery {
+export interface CliModelDiscovery {
   readonly models: readonly string[];
   readonly model_options: readonly TextModelOption[];
 }
+
+const emptyCliModelDiscovery = (): CliModelDiscovery => ({ models: [], model_options: [] });
 
 function lineJson(line: string): Record<string, unknown> {
   return requestRecord.parse(JSON.parse(line));
 }
 
 /** Read model metadata through the installed Codex app-server without creating a thread or turn. */
-export async function discoverCodexModels(executable: string): Promise<string[]> {
+export async function discoverCodexModels(executable: string): Promise<CliModelDiscovery> {
   const models = new Set<string>();
+  const options = new Map<string, TextModelOption>();
   const seenCursors = new Set<string>();
   let stage: "initialize" | "models" | "done" = "initialize";
   let completed = false;
@@ -76,7 +79,12 @@ export async function discoverCodexModels(executable: string): Promise<string[]>
         pages += 1;
         for (const model of page.data) if (!model.hidden) {
           const parsed = cliTextModelSchema.safeParse(model.id);
-          if (parsed.success) models.add(parsed.data);
+          if (!parsed.success || parsed.data.length === 0) continue;
+          models.add(parsed.data);
+          const displayName = typeof model.displayName === "string" ? model.displayName : parsed.data;
+          const option = textModelOptionSchema.safeParse({ value: parsed.data, display_name: displayName, source: "cli" });
+          const fallback = textModelOptionSchema.parse({ value: parsed.data, display_name: parsed.data, source: "cli" });
+          if (!options.has(parsed.data)) options.set(parsed.data, option.success ? option.data : fallback);
         }
         const cursor = page.nextCursor;
         if (models.size >= MODEL_LIMIT || cursor === undefined || cursor === null) {
@@ -93,12 +101,12 @@ export async function discoverCodexModels(executable: string): Promise<string[]>
         return { write: `${JSON.stringify(next)}\n` };
       },
     });
-    if (!completed) return [];
-    return [...models].slice(0, MODEL_LIMIT);
-  } catch { return []; }
+    if (!completed) return emptyCliModelDiscovery();
+    return { models: [...models].slice(0, MODEL_LIMIT), model_options: [...options.values()].slice(0, MODEL_LIMIT) };
+  } catch { return emptyCliModelDiscovery(); }
 }
 
-function discoverClaudeOptions(metadata: readonly z.infer<typeof claudeModelsSchema>[number][]): ClaudeModelDiscovery {
+function discoverClaudeOptions(metadata: readonly z.infer<typeof claudeModelsSchema>[number][]): CliModelDiscovery {
   const models = new Set<string>();
   const options = new Map<string, TextModelOption>();
   const validId = (value: string): string | undefined => {
@@ -152,8 +160,8 @@ function discoverClaudeOptions(metadata: readonly z.infer<typeof claudeModelsSch
 }
 
 /** Read the installed Claude CLI's initialize metadata only; no user prompt or turn is sent. */
-export async function discoverClaudeModels(executable: string): Promise<ClaudeModelDiscovery> {
-  let discovery: ClaudeModelDiscovery | undefined;
+export async function discoverClaudeModels(executable: string): Promise<CliModelDiscovery> {
+  let discovery: CliModelDiscovery | undefined;
   let completed = false;
   const requestId = "openwhisper-model-catalog";
   const initial = JSON.stringify({ type: "control_request", request_id: requestId,
@@ -179,8 +187,8 @@ export async function discoverClaudeModels(executable: string): Promise<ClaudeMo
         return { end: true };
       },
     });
-    return completed ? discovery ?? { models: [], model_options: [] } : { models: [], model_options: [] };
+    return completed ? discovery ?? emptyCliModelDiscovery() : emptyCliModelDiscovery();
   } catch {
-    return { models: [], model_options: [] };
+    return emptyCliModelDiscovery();
   }
 }

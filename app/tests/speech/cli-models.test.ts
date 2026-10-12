@@ -37,19 +37,26 @@ test("Codex metadata discovery performs initialized paginated model/list only", 
         } else if (message.method === 'model/list' && seen.filter(item => item === 'model/list').length === 1) {
           if (seen.join(',') !== 'initialize,initialized,model/list' || message.params.limit !== 128 || message.params.includeHidden !== false) process.exit(32);
           process.stdout.write(JSON.stringify({ id: message.id, result: { data: [
-            { id: 'codex-one', hidden: false }, { id: 'hidden-model', hidden: true },
+            { id: 'codex-one', hidden: false, displayName: 'GPT-5.4 Codex' }, { id: 'hidden-model', hidden: true, displayName: 'Hidden' },
           ], nextCursor: 'next-page' } }) + '\\n');
         } else if (message.method === 'model/list') {
           if (seen.join(',') !== 'initialize,initialized,model/list,model/list' || message.params.cursor !== 'next-page' ||
               message.params.limit !== 127 || message.params.includeHidden !== false) process.exit(33);
           process.stdout.write(JSON.stringify({ id: message.id, result: { data: [
-            { id: 'codex-one', hidden: false }, { id: '--unsafe-id', hidden: false }, { id: 'codex-two', hidden: false },
+            { id: 'codex-one', hidden: false, displayName: 'Duplicate label' }, { id: '--unsafe-id', hidden: false },
+            { id: 'codex-two', hidden: false }, { id: 'codex-three', hidden: false, displayName: 'Bad\\nlabel' },
           ], nextCursor: null } }) + '\\n');
         } else process.exit(34);
       }
     });
   `);
-  assert.deepEqual(await discoverCodexModels(executable), ["codex-one", "codex-two"]);
+  const discovery = await discoverCodexModels(executable);
+  assert.deepEqual(discovery.models, ["codex-one", "codex-two", "codex-three"]);
+  assert.deepEqual(discovery.model_options, [
+    { value: "codex-one", display_name: "GPT-5.4 Codex", source: "cli" },
+    { value: "codex-two", display_name: "codex-two", source: "cli" },
+    { value: "codex-three", display_name: "codex-three", source: "cli" },
+  ]);
 });
 
 test("Codex metadata errors and repeated cursors fail closed without returning partial catalogs", async () => {
@@ -59,7 +66,7 @@ test("Codex metadata errors and repeated cursors fail closed without returning p
       process.stdout.write(JSON.stringify({ id: message.id, error: { code: -32601, message: 'unsupported' } }) + '\\n');
     });
   `);
-  assert.deepEqual(await discoverCodexModels(errorExecutable), []);
+  assert.deepEqual(await discoverCodexModels(errorExecutable), { models: [], model_options: [] });
 
   const cursorExecutable = await fixtureExecutable(`
     let pending = '';
@@ -73,7 +80,7 @@ test("Codex metadata errors and repeated cursors fail closed without returning p
       }
     }});
   `);
-  assert.deepEqual(await discoverCodexModels(cursorExecutable), []);
+  assert.deepEqual(await discoverCodexModels(cursorExecutable), { models: [], model_options: [] });
 });
 
 test("Claude metadata discovery preserves aliases and resolved IDs and adds bounded active-version suggestions", async () => {
