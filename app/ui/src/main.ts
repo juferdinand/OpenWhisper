@@ -68,6 +68,7 @@ let connectionInstructionDraft: string | undefined;
 let conversationInstructionDraft: string | undefined;
 let pendingConnectionSettings: TextConnectionSettings | undefined;
 let connectionSaveQueue = Promise.resolve();
+let connectionSaveFeedback: "saving" | "saved" | undefined;
 let customConnectionDraft: CustomCliConnection | undefined;
 let customConnectionDraftIsNew = false;
 const customConnectionsAwaitingScan = new Set<string>();
@@ -939,26 +940,44 @@ async function savePreferences(
 async function preference(name: string, value: unknown) {
   return savePreferences(preferencePatchSchema.parse({ [name]: value }));
 }
+function updateConnectionSaveFeedback() {
+  const status = document.querySelector<HTMLElement>("#connection-save-status");
+  if (!status) return;
+  status.textContent = connectionSaveFeedback
+    ? t(connectionSaveFeedback === "saving" ? "Saving…" : "Saved")
+    : "";
+  status.hidden = connectionSaveFeedback === undefined;
+}
 async function saveConnections(
   settings: TextConnectionSettings,
 ): Promise<boolean> {
+  const instructionDraft = connectionInstructionDraft;
+  const conversationDraft = conversationInstructionDraft;
   const nextSettings = {
     ...settings,
-    instruction: connectionInstructionDraft ?? settings.instruction,
+    instruction: instructionDraft ?? settings.instruction,
     conversationInstruction:
-      conversationInstructionDraft ?? settings.conversationInstruction,
+      conversationDraft ?? settings.conversationInstruction,
   };
   pendingConnectionSettings = nextSettings;
+  connectionSaveFeedback = "saving";
+  updateConnectionSaveFeedback();
   const save = connectionSaveQueue.then(async () => {
     try {
       const savedState = await invoke("save_connections", {
         settings: nextSettings,
       });
       if (pendingConnectionSettings === nextSettings) {
+        const draftsUnchanged =
+          connectionInstructionDraft === instructionDraft &&
+          conversationInstructionDraft === conversationDraft;
         state = savedState;
         pendingConnectionSettings = undefined;
-        connectionInstructionDraft = undefined;
-        conversationInstructionDraft = undefined;
+        if (connectionInstructionDraft === instructionDraft)
+          connectionInstructionDraft = undefined;
+        if (conversationInstructionDraft === conversationDraft)
+          conversationInstructionDraft = undefined;
+        connectionSaveFeedback = draftsUnchanged ? "saved" : undefined;
         contentKey = "";
         render();
       }
@@ -966,6 +985,8 @@ async function saveConnections(
     } catch (error) {
       if (pendingConnectionSettings === nextSettings) {
         pendingConnectionSettings = undefined;
+        connectionSaveFeedback = undefined;
+        updateConnectionSaveFeedback();
         notice(String(error));
       }
       return false;
@@ -1508,7 +1529,7 @@ function processingStageLabel(stage = state.text_processing?.stage): string {
     case "snippets":
       return t("Expanding snippets");
     case "model":
-      return t("Optimizing with connection");
+      return t("Processing text with AI");
     default:
       return t("Processing text");
   }
@@ -1517,7 +1538,7 @@ function processingStageLabel(stage = state.text_processing?.stage): string {
 function processingStatusText(): string {
   const event = state.text_processing;
   if (state.text_connections.processing.status === "fallback")
-    return t("Optional model was not applied; deterministic text was kept.");
+    return t("AI text processing was skipped; your text was kept.");
   if (!event) return t("Finding your words");
   const label = processingStageLabel(event.stage);
   if (event.status === "completed")
@@ -1948,7 +1969,7 @@ function renderWorkspace() {
     transcriptAvailable &&
     state.status !== "transcribing" &&
     state.text_connections.processing.status === "fallback"
-      ? `<p class="processing-fallback-notice" role="status">${esc(t("Optional model was not applied; deterministic text was kept."))}</p>`
+      ? `<p class="processing-fallback-notice" role="status">${esc(t("AI text processing was skipped; your text was kept."))}</p>`
       : "";
   const selectedConnection = state.text_connections.settings.connections.find(
     (item) => item.enabled,
@@ -2636,7 +2657,7 @@ function render() {
       `<section class="text-processing-card" id="settings-cleanup"><header class="text-processing-heading"><i class="text-processing-dot cleanup" aria-hidden="true"></i><div><h2>1. ${esc(t("Cleanup"))}</h2><p class="text-processing-description">${esc(t("Remove obvious recognition artifacts while preserving your words and meaning."))}</p></div></header><div class="text-processing-body">${toggle(t("Clean up recognized text"), "cleanup_enabled", p.cleanup_enabled)}</div></section>` +
       `<section class="text-processing-card" id="settings-vocabulary"><header class="text-processing-heading"><i class="text-processing-dot vocabulary" aria-hidden="true"></i><div><h2>2. ${esc(t("Vocabulary"))}</h2><p class="text-processing-description">${esc(t("Add names and technical terms as canonical spellings. Similar spellings are corrected after recognition with any model. Whisper models also receive these terms during recognition."))}</p></div></header><div class="text-processing-body"><div id="vocabulary-editor"></div></div></section>` +
       `<form id="snippet-form"><section class="text-processing-card"><header class="text-processing-heading"><i class="text-processing-dot snippets" aria-hidden="true"></i><div><h2>3. ${esc(t("Snippets"))}</h2><p class="text-processing-description">${esc(t("Say a trigger word to insert its saved text. Matching ignores letter case, hyphens, and trailing punctuation."))}</p></div></header><div class="text-processing-body"><div id="snippets">${p.snippets.length ? p.snippets.map(snippetRow).join("") : `<p id="empty-snippets" class="secondary">${esc(t("No snippets yet. For example, say “my YouTube link” to insert a URL instead."))}</p>`}</div><div class="snippet-card-actions"><button type="button" id="add-snippet">${esc(t("Add snippet"))}</button><div class="edit-actions" id="snippet-actions" hidden><button type="submit">${esc(t("Save snippets"))}</button><button type="button" data-discard-snippets>${esc(t("Discard"))}</button></div></div></div></section></form>` +
-      `<section class="text-processing-card optional-model-card"><header class="text-processing-heading"><i class="text-processing-dot model" aria-hidden="true"></i><div><h2>4. ${esc(t("Optional model"))}</h2><p class="text-processing-description">${esc(t("An enabled connection can refine the text after cleanup, vocabulary, and snippets."))}</p></div></header><div class="optional-model-summary"><span>${esc(state.text_connections.settings.connections.some((connection) => connection.enabled) ? t("Connection enabled") : t("Off by default"))}</span><button type="button" data-settings-view="connections">${esc(t("Manage connections"))}</button></div></section>`;
+      `<section class="text-processing-card optional-model-card"><header class="text-processing-heading"><i class="text-processing-dot model" aria-hidden="true"></i><div><h2>4. ${esc(t("AI text processing"))}</h2><p class="text-processing-description">${esc(t("An enabled connection can apply your instruction to the text after cleanup, vocabulary, and snippets."))}</p></div></header><div class="optional-model-summary"><span>${esc(state.text_connections.settings.connections.some((connection) => connection.enabled) ? t("Connection enabled") : t("Off by default"))}</span><button type="button" data-settings-view="connections">${esc(t("Manage connections"))}</button></div></section>`;
     renderVocabularyRows(
       content.querySelector<HTMLElement>("#vocabulary-editor")!,
       vocabularyDraft,
@@ -3234,12 +3255,16 @@ function renderConnectionsSettings(content: HTMLElement) {
       .join("")}</ol>` +
     `<section class="custom-connection-actions"><button type="button" id="add-custom-connection" ${settings.connections.length >= 20 ? "disabled" : ""}>${esc(t("Add CLI connection"))}</button>${customConnectionDraft ? `<div class="custom-connection-editor"><h3>${esc(t(customConnectionDraftIsNew ? "New CLI connection" : "Edit CLI connection"))}</h3><label>${esc(t("Connection name"))}<input id="custom-name" maxlength="128" value="${esc(customConnectionDraft.name)}"></label><label>${esc(t("Executable or command"))}<input id="custom-command" maxlength="1024" value="${esc(customConnectionDraft.command)}"></label><label>${esc(t("Arguments (one per line)"))}<textarea id="custom-args" rows="3">${esc(customConnectionDraft.args.join("\n"))}</textarea></label><label>${esc(t("Input template"))}<input id="custom-stdin" maxlength="8192" value="${esc(customConnectionDraft.stdin)}"></label><label>${esc(t("Output format"))}<select id="custom-output"><option value="text" ${customConnectionDraft.output === "text" ? "selected" : ""}>${esc(t("Plain text"))}</option><option value="json" ${customConnectionDraft.output === "json" ? "selected" : ""}>JSON</option></select></label><label>${esc(t("JSON response field"))}<input id="custom-response-path" maxlength="512" value="${esc(customConnectionDraft.responsePath)}"></label><p>${esc(t("Commands run directly without a shell. Example: gemini with --output-format and json, input {prompt}, JSON field response."))}</p><div class="edit-actions"><button id="save-custom-connection" type="button">${esc(t("Save CLI connection"))}</button><button id="cancel-custom-connection" type="button">${esc(t("Cancel"))}</button></div></div>` : ""}</section>` +
     `<p class="connection-privacy">${esc(t("Only the first enabled connection is used; it receives transcript text. Local servers do not prove local-only processing. CLI tools and custom commands may send text to cloud services or use their configured tools."))}</p>` +
-    `<section class="connection-instruction"><h2>${esc(t("How to use connections"))}</h2><label class="connection-mode-label">${esc(t("Processing mode"))}<select id="connection-mode"><option value="single" ${settings.mode === "single" ? "selected" : ""}>${esc(t("Single recording"))}</option><option value="conversation" ${settings.mode === "conversation" ? "selected" : ""}>${esc(t("Voice conversation"))}</option></select></label>${settings.mode === "conversation" ? `<label>${esc(t("Conversation instruction"))}<textarea id="conversation-instruction" rows="3" maxlength="8192">${esc(conversationInstructionDraft ?? settings.conversationInstruction)}</textarea></label>` : `<label>${esc(t("Recording instruction"))}<textarea id="connection-instruction" rows="3" maxlength="8192" aria-label="${esc(t("Recording instruction"))}">${esc(connectionInstructionDraft ?? settings.instruction)}</textarea></label>`}<div class="edit-actions"><button type="button" id="save-connections">${esc(t("Save connections"))}</button></div></section>`;
+    `<section class="connection-instruction"><h2>${esc(t("AI text processing"))}</h2><label class="connection-mode-label">${esc(t("Processing mode"))}<select id="connection-mode"><option value="single" ${settings.mode === "single" ? "selected" : ""}>${esc(t("Single recording"))}</option><option value="conversation" ${settings.mode === "conversation" ? "selected" : ""}>${esc(t("Voice conversation"))}</option></select></label>${settings.mode === "conversation" ? `<label>${esc(t("Conversation instruction"))}<textarea id="conversation-instruction" rows="3" maxlength="8192">${esc(conversationInstructionDraft ?? settings.conversationInstruction)}</textarea></label>` : `<label>${esc(t("Instruction"))}<textarea id="connection-instruction" rows="3" maxlength="8192" aria-label="${esc(t("Instruction"))}">${esc(connectionInstructionDraft ?? settings.instruction)}</textarea></label><p>${esc(t("What should the AI do with your recorded text?"))}</p>`}<div class="edit-actions"><button type="button" id="save-connections">${esc(t("Save connections"))}</button><span id="connection-save-status" role="status" aria-live="polite" ${connectionSaveFeedback ? "" : "hidden"}>${esc(connectionSaveFeedback ? t(connectionSaveFeedback === "saving" ? "Saving…" : "Saved") : "")}</span></div></section>`;
   content
     .querySelector<HTMLTextAreaElement>("#connection-instruction")
     ?.addEventListener("input", (event) => {
       connectionInstructionDraft = (event.currentTarget as HTMLTextAreaElement)
         .value;
+      if (connectionSaveFeedback === "saved") {
+        connectionSaveFeedback = undefined;
+        updateConnectionSaveFeedback();
+      }
     });
   content
     .querySelector<HTMLTextAreaElement>("#conversation-instruction")
@@ -3247,6 +3272,10 @@ function renderConnectionsSettings(content: HTMLElement) {
       conversationInstructionDraft = (
         event.currentTarget as HTMLTextAreaElement
       ).value;
+      if (connectionSaveFeedback === "saved") {
+        connectionSaveFeedback = undefined;
+        updateConnectionSaveFeedback();
+      }
     });
   const updateCustomDraft = () => {
     if (!customConnectionDraft) return;

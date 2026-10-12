@@ -360,6 +360,64 @@ test("rapid CLI model edits and reorder serialize without losing pending setting
   ).toBe(3);
 });
 
+test("connection save feedback confirms persisted instructions and preserves newer drafts", async ({
+  page,
+}) => {
+  await start(page, "linux");
+  await selectSettingsTab(page, "connections");
+  await page.evaluate(() => {
+    (window as any).connectionSaveDelay = 300;
+  });
+
+  const instruction = page.locator("#connection-instruction");
+  const save = page.getByRole("button", { name: "Save connections" });
+  const status = page.locator("#connection-save-status");
+
+  await instruction.fill("First saved instruction.");
+  await save.click();
+  await expect(status).toHaveText("Saving…");
+  await instruction.fill("Newer unsaved instruction.");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.testState.text_connections.settings.instruction,
+      ),
+    )
+    .toBe("First saved instruction.");
+  await expect(instruction).toHaveValue("Newer unsaved instruction.");
+  await expect(status).toBeHidden();
+
+  await save.click();
+  await expect(status).toHaveText("Saving…");
+  await expect(status).toHaveText("Saved");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.testState.text_connections.settings.instruction,
+      ),
+    )
+    .toBe("Newer unsaved instruction.");
+
+  await instruction.fill("Changed after save.");
+  await expect(status).toBeHidden();
+  await page.evaluate(() => {
+    (window as any).rejectConnectionSave = true;
+  });
+  await save.click();
+  await expect(status).toHaveText("Saving…");
+  await expect(page.locator("#settings-notice")).toContainText(
+    "Could not save connections",
+  );
+  await expect(status).toBeHidden();
+  await expect(status).not.toHaveText("Saved");
+
+  await page.evaluate(() => {
+    (window as any).rejectConnectionSave = false;
+  });
+  await save.click();
+  await expect(status).toHaveText("Saved");
+});
+
 test("first local enable saves the discovered default model", async ({
   page,
 }) => {
@@ -523,7 +581,7 @@ test("Text processing settings keep the deterministic cleanup vocabulary snippet
   );
   await expect(page.locator("#snippet-form h2")).toHaveText("3. Snippets");
   await expect(page.locator(".optional-model-card h2")).toHaveText(
-    "4. Optional model",
+    "4. AI text processing",
   );
   const cleanup = page.locator('[data-pref="cleanup_enabled"]');
   await expect(cleanup).toBeChecked();
@@ -664,7 +722,7 @@ test("completed text processing keeps a fallback notice with raw and final text"
     "Raw recognized text.",
   );
   await expect(page.locator(".processing-fallback-notice")).toHaveText(
-    "Optional model was not applied; deterministic text was kept.",
+    "AI text processing was skipped; your text was kept.",
   );
 
   await page.evaluate(() => {
@@ -1685,6 +1743,8 @@ async function start(
           await new Promise((resolve) =>
             setTimeout(resolve, host.connectionSaveDelay),
           );
+        if (command === "save_connections" && host.rejectConnectionSave)
+          throw new Error("Could not save connections");
         if (command === "save_connections")
           state.text_connections.settings = args.settings;
         if (command === "new_conversation") {
