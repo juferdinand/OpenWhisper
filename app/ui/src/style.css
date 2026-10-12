@@ -537,6 +537,16 @@ svg {
 .dictation-transcript-body .dictation-empty p {
   color: var(--muted);
 }
+.processing-fallback-notice {
+  margin: 14px 0 0;
+  padding: 8px 11px;
+  border-left: 3px solid var(--warning);
+  border-radius: 0 8px 8px 0;
+  background: var(--group);
+  color: var(--secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
 .dictation-empty {
   min-height: 100%;
   display: block;
@@ -547,68 +557,74 @@ svg {
 .dictation-empty-mark {
   display: none;
 }
-.dictation-feature-cards {
+.dictation-processing-strip {
+  min-width: 0;
   flex: 0 0 auto;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
   margin-top: 12px;
-}
-.dictation-feature-cards > * {
-  min-width: 0;
+  padding: 10px 14px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--group);
 }
-.dictation-feature-card {
-  min-height: 72px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
-  padding: 10px 12px;
-  white-space: normal;
-  text-align: left;
-}
-.dictation-feature-heading {
+.processing-progress-copy {
   min-width: 0;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
+  flex: 0 0 180px;
+  color: var(--secondary);
+  font-size: 12px;
+  font-weight: 550;
 }
-.dictation-feature-heading strong {
-  font-size: 13px;
-  font-weight: 600;
-}
-.dictation-feature-dot {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 8px;
-  border-radius: 3px;
-  background: var(--border);
-}
-.dictation-feature-dot.snippets {
-  background: var(--border);
-}
-.dictation-feature-description {
-  color: var(--muted);
-  font-size: 11.5px;
-  line-height: 1.35;
-}
-.dictation-feature-card strong {
+.indeterminate-progress {
+  min-width: 0;
+  flex: 1 1 auto;
+  position: relative;
+  height: 5px;
   overflow: hidden;
-  max-width: 100%;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  border-radius: 4px;
+  background: var(--border);
 }
-.dictation-feature-card small {
-  max-width: 100%;
+.indeterminate-progress > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 30%;
+  border-radius: inherit;
+  background: var(--accent);
+  animation: processing-sweep 1.4s ease-in-out infinite alternate;
+}
+.indeterminate-progress.determinate > span {
+  width: 100%;
+  transform: scaleX(var(--progress-fraction, 0));
+  transform-origin: left center;
+  animation: none;
+}
+@keyframes processing-sweep {
+  from {
+    transform: translateX(-5%);
+  }
+  to {
+    transform: translateX(238%);
+  }
+}
+.dictation-processing-strip .indeterminate-progress {
+  width: auto;
+}
+.raw-transcript {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
   color: var(--muted);
-  font-size: 11.5px;
-  line-height: 1.35;
+  font-size: 12px;
+}
+.raw-transcript summary {
+  width: fit-content;
+  cursor: pointer;
+}
+.raw-transcript .transcript {
+  margin-top: 8px;
+  color: var(--secondary);
+  font-size: 15px;
 }
 .dictation-history {
   min-width: 0;
@@ -802,7 +818,7 @@ main.dictation-main .dictation-activity {
   margin-top: 14px;
 }
 main.dictation-main .dictation-transcript,
-main.dictation-main .dictation-feature-cards {
+main.dictation-main .dictation-processing-strip {
   margin-top: 12px;
 }
 dialog#model-drawer,
@@ -1389,6 +1405,27 @@ dialog#settings-dialog {
 .settings-content .text-processing-dot.snippets {
   background: var(--warning);
 }
+.settings-content .text-processing-dot.cleanup {
+  background: var(--ok);
+}
+.settings-content .text-processing-dot.model {
+  background: var(--accent);
+}
+.settings-content .optional-model-summary {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.settings-content .optional-model-summary button {
+  min-height: 30px;
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  font-size: 12px;
+}
 .settings-content .text-processing-description {
   margin: 2px 0 0;
   color: var(--muted);
@@ -1405,6 +1442,93 @@ dialog#settings-dialog {
   min-width: 0;
   margin: 0;
   background: var(--field);
+}
+.settings-content .vocabulary-table {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  border-spacing: 0;
+  overflow: hidden;
+  background: var(--field);
+  font-size: 12px;
+}
+.settings-content .vocabulary-table th {
+  padding: 8px 10px;
+  background: var(--group);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+}
+.settings-content .vocabulary-table td {
+  padding: 7px 10px;
+  border-top: 1px solid var(--border);
+}
+.settings-content .vocabulary-table th:first-child,
+.settings-content .vocabulary-table td:first-child {
+  width: 34%;
+}
+.settings-content .vocabulary-table th:last-child,
+.settings-content .vocabulary-table td:last-child {
+  width: 34px;
+  padding-right: 7px;
+  padding-left: 4px;
+}
+.settings-content .vocabulary-table input {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--sunken);
+  color: var(--text);
+  font: inherit;
+}
+.settings-content .vocabulary-table button {
+  width: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  font-size: 17px;
+}
+.settings-content .vocabulary-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-content .vocabulary-add-row input {
+  min-width: 0;
+  min-height: 34px;
+  flex: 1 1 auto;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+.settings-content .vocabulary-add-row button {
+  flex: 0 0 auto;
+}
+.settings-content .vocabulary-use,
+.settings-content .vocabulary-empty {
+  color: var(--muted);
+  font-size: 11px;
+}
+.settings-content .vocabulary-editor-actions {
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.settings-content .vocabulary-editor-actions > button,
+.settings-content .vocabulary-editor-actions .edit-actions button {
+  min-height: 30px;
+  padding: 5px 12px;
+  border-radius: 9px;
+  font-size: 12.5px;
 }
 .settings-content .text-processing-body .edit-actions,
 .settings-content .snippet-card-actions {
@@ -1461,6 +1585,166 @@ dialog#settings-dialog {
   margin: 0;
   color: var(--muted);
   font-size: 12px;
+}
+.settings-content .connections-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0;
+}
+.settings-content .connections-intro p,
+.settings-content .connection-instruction p,
+.settings-content .connection-privacy {
+  min-width: 0;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.settings-content .connections-intro button,
+.settings-content .connection-order button {
+  min-height: 30px;
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.settings-content .connection-list {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  margin: 8px 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--sunken);
+  list-style: none;
+}
+.settings-content .connection-card {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 22px minmax(110px, 1fr) minmax(100px, 1.2fr) 32px 60px;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 11px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+.settings-content .connection-card:last-child {
+  border-bottom: 0;
+}
+.settings-content .connection-number {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.settings-content .connection-identity,
+.settings-content .connection-identity strong,
+.settings-content .connection-order,
+.settings-content .connection-model,
+.settings-content .connection-model-slot {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-content .connection-identity {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 3px;
+  line-height: 1.3;
+}
+.settings-content .connection-identity strong {
+  flex-wrap: wrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+.settings-content .connection-default {
+  padding: 1px 7px;
+  border-radius: 99px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+}
+.settings-content .connection-order {
+  justify-content: flex-end;
+  gap: 4px;
+}
+.settings-content .connection-order button {
+  width: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  border-radius: 7px;
+  font-size: 13px;
+}
+.settings-content .connection-identity > .connection-state {
+  flex-wrap: wrap;
+}
+.settings-content .connection-state,
+.settings-content .connection-model-note {
+  color: var(--muted);
+  font-size: 11px;
+}
+.settings-content .connection-state.available {
+  color: var(--ok);
+}
+.settings-content .connection-state.unavailable {
+  color: var(--secondary);
+}
+.settings-content .connection-toggle {
+  display: inline-flex;
+  justify-content: center;
+  flex: 0 0 auto;
+  align-items: center;
+}
+.settings-content .connection-switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.settings-content .connection-model {
+  width: 100%;
+}
+.settings-content .connection-model select {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+.settings-content .connection-model-note {
+  margin: 0;
+  line-height: 1.35;
+}
+.settings-content .connection-instruction h2 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.settings-content .connection-instruction {
+  min-width: 0;
+  margin-top: 10px;
+}
+.settings-content .connection-instruction textarea {
+  min-height: 78px;
+  margin: 0;
+  background: var(--field);
+}
+.settings-content .connection-instruction .edit-actions {
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+.settings-content .connection-privacy {
+  margin: 8px 0 0;
+  font-size: 10px;
+  line-height: 1.35;
+}
+.settings-content #content[data-settings-tab="connections"] {
+  gap: 8px;
 }
 main::-webkit-scrollbar,
 .settings-dialog-scroll::-webkit-scrollbar,
@@ -2666,11 +2950,8 @@ dialog#update-dialog {
   .dictation-transcript-body .dictation-empty p {
     font-size: 19px;
   }
-  .dictation-feature-cards {
-    gap: 6px;
-  }
-  .dictation-feature-cards > * {
-    padding: 8px;
+  .processing-progress-copy {
+    flex-basis: 140px;
   }
   .record-output-label {
     display: none;
@@ -2708,7 +2989,7 @@ dialog#update-dialog {
   .dictation-transcript {
     margin-top: 8px;
   }
-  .dictation-feature-cards {
+  .dictation-processing-strip {
     margin-top: 8px;
   }
   #record-control {
@@ -2768,10 +3049,8 @@ html.overlay,
   padding: 0 8px 0 18px;
   border: 1px solid var(--border);
   border-radius: 99px;
-  background: rgb(27 24 34 / 90%);
-  box-shadow: 0 18px 50px rgb(0 0 0 / 45%);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
+  background: rgb(27 24 34 / 94%);
+  box-shadow: none;
   overflow: hidden;
 }
 .overlay .capsule {
@@ -2873,6 +3152,15 @@ html.overlay,
   font-weight: 600;
 }
 .overlay #status {
+  display: none;
+}
+.overlay #overlay-progress {
+  display: block;
+  width: 100%;
+  height: 3px;
+  margin-top: 4px;
+}
+.overlay #overlay-progress[hidden] {
   display: none;
 }
 .overlay .audio-mark {
@@ -3322,6 +3610,43 @@ html.setup-mode #record-control {
   justify-content: space-between;
 }
 @media (max-width: 620px) {
+  .settings-content .connection-list {
+    width: 100%;
+  }
+  .settings-content .connection-card {
+    grid-template-columns: 22px minmax(0, 1fr) 32px 56px;
+    grid-template-rows: auto auto;
+    gap: 7px 8px;
+    padding: 8px 10px;
+  }
+  .settings-content .connection-number {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .settings-content .connection-identity {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .settings-content .connection-model-slot {
+    grid-column: 2 / 5;
+    grid-row: 2;
+  }
+  .settings-content .connection-toggle {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .settings-content .connection-order {
+    grid-column: 4;
+    grid-row: 1;
+  }
+  .settings-content .connections-intro {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .processing-progress-copy {
+    flex-basis: 112px;
+    font-size: 11px;
+  }
   html.setup-mode main.setup-main {
     padding: 14px 14px 18px;
   }

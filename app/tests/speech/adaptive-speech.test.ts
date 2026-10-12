@@ -6,6 +6,7 @@ import { z } from "zod";
 import { recordingRequestSchema, type PreparedAudio, type RecordingRequest, type WorkContext } from "../../src/core/recording/recording.js";
 import { MAX_WINDOW_SAMPLES, SAMPLE_RATE, planSpeechWindow, selectSpeechWindow, type SampleRange } from "../../src/core/speech/windows.js";
 import { AdaptiveSpeechBoundary, AdaptiveSpeechError, createUtilitySpeechEffects, processRawSpeechParts,
+  processRawSpeechPartsDetailed,
   type AdaptiveSpeechEffects, type SpeechProgress } from "../../src/services/speech/adaptive-speech.js";
 import { SpeechClient, SpeechWorkerError, type SpeechChannel } from "../../src/services/speech/speech-client.js";
 import type { SpeechRequest } from "../../src/workers/speech/speech-protocol.js";
@@ -59,8 +60,8 @@ function fixture(count = 976000, options: { readonly gpu?: boolean; readonly gpu
       plans.push({ start, maximum }); return await base.plan(input, start, maximum, owner);
     },
     read: async (input, range, owner) => { ranges.push(range); return await base.read(input, range, owner); },
-    process: async (parts, input, owner) => {
-      rawParts.push([...parts]); return await base.process(parts, input, owner);
+    process: async (parts, input, owner, onStage) => {
+      rawParts.push([...parts]); return await base.process(parts, input, owner, onStage);
     },
   };
   return { request, audio, context, controller, plans, ranges, inference, progress, rawParts, effects };
@@ -240,7 +241,7 @@ test("explicit retry after exhaustion starts from retained audio without pretend
   fail = false;
   const audio = { ...f.audio, attempt: 2 }, context = { ...f.context, attempt: 2 };
   const result = await service.transcribe(audio, f.request, context);
-  assert.deepEqual(result, { generation: 1, attempt: 2, text: "recovered" });
+  assert.deepEqual(result, { generation: 1, attempt: 2, text: "recovered", rawText: "recovered" });
   assert.deepEqual(f.plans.at(-1), { start: 0, maximum: 480000 });
   assert.equal(f.audio.chunks[0]?.length, 16001);
 });
@@ -276,7 +277,7 @@ for (const phase of ["plan", "read", "infer", "process"] as const) {
     f.controller.abort(); await rejected;
     const next = { generation: 2, attempt: 2, signal: new AbortController().signal };
     assert.deepEqual(await service.transcribe({ ...f.audio, generation: 2, attempt: 2 }, f.request, next),
-      { generation: 2, attempt: 2, text: "fresh" });
+      { generation: 2, attempt: 2, text: "fresh", rawText: "fresh" });
     const completedBeforeLate = f.progress.length;
     blocked.resolve(phase === "plan" ? { generation: 1, attempt: 1, range: { start: 0, end: 1 } }
       : phase === "read" ? { generation: 1, attempt: 1, samples: new Float32Array([0.25]) }
@@ -415,6 +416,43 @@ test("raw parts use Rust whitespace semantics and preserve multilingual text wit
   const result = processRawSpeechParts(parts, f.request);
   assert.ok(new TextEncoder().encode(result).length > 4 * 1024 * 1024);
   assert.ok(result === parts.join(" "));
+});
+
+test("text pipeline preserves raw recognition and reports actual cleanup, vocabulary, and snippet outputs", () => {
+  const f = fixture(0);
+  const request = { ...f.request, vocabulary: "Kubernetes", snippets: [{ id: "owned", trigger: "Kubernetes",
+    expansion: "K8s", enabled: true }] };
+  const stages: { stage: string; text: string; status?: string }[] = [];
+  const result = processRawSpeechPartsDetailed([" [Music] Kubernetis "], request,
+    (stage, text, status) => { stages.push({ stage, text, ...(status ? { status } : {}) }); });
+  assert.deepEqual(result, { rawText: "[Music] Kubernetis", text: "K8s" });
+  assert.deepEqual(stages, [
+    { stage: "recognition", text: "[Music] Kubernetis" },
+    { stage: "cleanup", text: "Kubernetis", status: "completed" },
+    { stage: "vocabulary", text: "Kubernetes" },
+    { stage: "snippets", text: "K8s" },
+  ]);
+  const cleanupOff: { stage: string; text: string; status?: string }[] = [];
+  const preserved = processRawSpeechPartsDetailed([" [Music] Kubernetis "], { ...request, cleanup_enabled: false },
+    (stage, text, status) => { cleanupOff.push({ stage, text, ...(status ? { status } : {}) }); });
+  assert.deepEqual(preserved, { rawText: "[Music] Kubernetis", text: "[Music] K8s" });
+  assert.deepEqual(cleanupOff[1], { stage: "cleanup", text: "[Music] Kubernetis", status: "skipped" });
+});
+
+test("adaptive stage events retain the live generation and attempt with measured recognition samples", async () => {
+  const f = fixture(2); const events: import("../../src/contracts/text/processing.js").TextProcessingStageEvent[] = [];
+  const result = await new AdaptiveSpeechBoundary(f.effects).transcribe(f.audio, f.request, f.context,
+    (event) => { events.push(event); });
+  assert.equal(result.rawText, "text");
+  assert.deepEqual(events[0], { generation: 1, attempt: 1, stage: "recognition", status: "progress",
+    completedSamples: 2, totalSamples: 2 });
+  assert.deepEqual(events.slice(1).map(({ stage, status, text }) => ({ stage, status, text })), [
+    { stage: "recognition", status: "completed", text: "text" },
+    { stage: "cleanup", status: "completed", text: "text" },
+    { stage: "vocabulary", status: "completed", text: "text" },
+    { stage: "snippets", status: "completed", text: "text" },
+  ]);
+  assert.ok(events.every((event) => event.generation === 1 && event.attempt === 1));
 });
 
 test("cleanup then vocabulary then snippets runs once after joining raw chunk boundaries", async () => {

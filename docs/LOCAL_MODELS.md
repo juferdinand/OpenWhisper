@@ -1,116 +1,101 @@
-# Local model communication groundwork
+# Optional text-model connections
 
-Start with [README.md](../README.md) for current release behavior. The isolated Dev host
-contains optional LM Studio and Ollama adapters for [#11](https://github.com/juferdinand/OpenWhisper/issues/11).
-The former manual preview form has been removed from the redesigned UI at the owner's request.
-The future Connections interface is deferred; opening settings and ordinary dictation do not
-contact these providers. Existing optional profile files remain intact.
+Start with [README.md](../README.md) for released behavior. This branch implements
+[Connections (#11)](https://github.com/juferdinand/OpenWhisper/issues/11); it is not part
+of release 0.4.2. Ordinary recording remains independent of these optional integrations.
 
-The current Text processing settings contain vocabulary and snippet editing only. They do
-not imply LLM cleanup, conversation, automatic provider discovery or text-to-speech.
+## Processing and selection
 
-## Provider boundary
+Text processing runs in this order: recognition, optional deterministic cleanup,
+vocabulary correction, snippets, then an optional model. Cleanup removes recognized
+artifacts; it does not promise semantic punctuation or filler-word removal. Disabling
+cleanup preserves the recognition result for the following steps. Existing profiles
+retain cleanup enabled by default.
 
-| Provider | Default endpoint | Host request |
+Connections discovers running Ollama and LM Studio servers and installed CLI tools.
+Discovery reads model metadata and the Claude CLI version; it never starts a server,
+downloads a model, reads authentication files, or submits text. Use **Scan again** after
+changing a server or installation. Enabled saved connections are checked before their
+first processing request after launch.
+
+All connections start disabled. Choose a local model before enabling its connection.
+The ordered list defines priority: only the first enabled connection receives text,
+using the shared instruction. A failed or unavailable connection never silently selects
+another provider. Its deterministic input remains the result. Skipping model processing
+also keeps that input; cancelling the recording or quitting abandons delivery.
+
+The app and floating bar show host-reported stages. Recognition progress uses processed
+audio samples; other stages do not invent percentages. Recognized source and final text
+remain reviewable for the current recording, subject to display bounds. History still
+stores the final result; durable source history, TTS and Obsidian are later increments.
+
+## Provider boundaries
+
+| Provider | Discovery | Processing |
 | --- | --- | --- |
-| LM Studio | `http://127.0.0.1:1234/v1` | `POST /v1/chat/completions` |
-| Ollama | `http://127.0.0.1:11434` | `POST /api/chat` |
+| Ollama | `127.0.0.1:11434/api/tags` | `POST /api/chat` |
+| LM Studio 0.4+ | `127.0.0.1:1234/api/v1/models` | `POST /v1/chat/completions` |
+| Claude Code | Installed executable and supported version | Fixed print-mode invocation using the existing CLI login |
+| Codex | Installed executable | Unavailable until a complete model-tool boundary is verified |
 
-The adapters send separate system/user messages, the chosen model, `stream: false`,
-temperature zero and the configured token limit. Their contracts remain covered by synthetic
-HTTP tests. Live LM Studio/Ollama quality trials and the future interface remain follow-up work.
+LM Studio discovery uses typed native metadata to exclude embedding and decision models.
+Local requests originate in the Electron host, with separate system/user messages,
+temperature zero and non-streaming replies. Connections uses the fixed numeric IPv4
+addresses above. The underlying adapter additionally accepts numeric IPv6 loopback
+through its validated profile contract. Hostnames, credentials, remote addresses,
+alternate paths, queries and fragments are rejected. Requests use no DNS resolution,
+environment proxy, redirects, cookies or implicit credentials.
 
-## Privacy and limits
+A loopback address does not prove that the server/model executes locally: the server
+can forward text elsewhere. Check its configuration before enabling a connection.
+Claude Code can use cloud models and its existing account. No API-key form or arbitrary
+shell command is provided. Model replies are plain text, never executed as HTML or actions.
 
-Requests originate in the Electron host. The sandboxed renderer cannot fetch model endpoints.
-Only HTTP with exact numeric `127.0.0.1` or `[::1]`, an explicit port from 1 to 65535 and
-the provider's base path is accepted. Hostnames, credentials, remote addresses, alternate
-paths, queries and fragments are rejected. The host uses no DNS resolution, environment
-proxy, redirects, cookies, implicit credentials, API-key field or cloud fallback.
+Claude Code must support `--safe-mode` (version 2.1.259 or later). The adapter uses
+print mode, an empty tool list, safe mode, no session persistence and no permission
+prompts. Model-requested tools and user/project customizations are disabled; trusted
+administrator-managed CLI policy still applies, including managed hooks. This is not
+a claim that the installed CLI executes no code. Input goes through stdin, with no shell,
+from a private empty working directory. Output and total time are bounded; cancellation
+terminates the owned process group. Authentication files are not read or copied by the app.
 
-A loopback destination does not prove that the chosen server/model executes locally.
-Check that server's configuration before sending; it can itself forward text elsewhere.
-Replies are plain text and never executed as instructions, HTML or coding-agent actions.
-Diagnostics expose only fixed categories, never submitted text or server response bodies.
+Codex read-only mode alone does not disable agent tools. Current public configuration
+does not establish a complete empty tool registry, so discovery does not enable execution.
+
+## Limits and storage
 
 | Bound | Value |
 | --- | --- |
-| Endpoint / model identifier | 256 UTF-8 bytes each |
-| Processing instruction | Nonblank; 8192 UTF-8 bytes |
-| Preview input / valid reply | Nonblank; 65536 UTF-8 bytes each |
-| Output tokens | 32–4096; default 1024 |
-| Total request deadline | 1–120 seconds; default 30 |
-| HTTP response body | 1048576 bytes, including chunked bodies |
+| Model identifier | 256 UTF-8 bytes |
+| Shared instruction | Nonblank; 8192 UTF-8 bytes |
+| Model input / accepted reply | Nonblank; 65536 UTF-8 bytes each |
+| Local output token budget / deadline | 1024 tokens / 30 seconds |
+| Claude total deadline | 120 seconds |
+| HTTP response / CLI stdout | 1048576 bytes |
 
-Oversized content is rejected rather than shortened. These preview bounds do not limit
-recording duration. Replies must contain a completed assistant text response; truncated
-answers, tool calls, refusals and unexpected control characters are rejected.
+Oversized model input is rejected rather than shortened, preserving the deterministic
+result. These bounds do not limit recording duration or truncate audio. Local replies
+must be completed assistant text; truncated answers, tool calls, refusals and unexpected
+control characters are rejected. Only a successful Claude result envelope is accepted.
+Diagnostics expose fixed failure categories, never submitted text or response bodies.
 
-The runtime profile contract and defaults are defined by the Zod schemas in
-`app/src/contracts/speech/local-processing.ts`. Shared endpoint, profile and response regression
-vectors live under `app/tests/fixtures/local-processing/`; runtime schemas also validate UTF-8
-bytes. Optional preferences live in
-the Dev profile's `config/settings/local-processing.json` with mode `0600`, outside ordinary
-preferences. Invalid saved content is preserved while disabled defaults are used in memory;
-only an explicit valid edit replaces that file. Unsafe filesystem paths still fail closed.
+The connection registry lives in the active profile's `config/settings/text-connections.json`.
+Its canonical schema is `app/src/contracts/text/connections.ts`; storage uses the existing
+private state store. The older optional `local-processing.json` profile remains intact.
+Local adapter contracts live in `app/src/contracts/speech/local-processing.ts`, with
+independent regression vectors under `app/tests/fixtures/local-processing/`.
 
-## Automated evidence
+## Validation
 
-Owned HTTP and contract tests cover both providers over IPv4/IPv6, exact multilingual input,
-response validation, proxy bypass, redirect rejection, byte bounds, header/body/trickle deadlines,
-server disconnection, cancellation and reuse. These checks use synthetic servers and do not
-establish model quality. Renderer and owned Electron checks verify that the removed preview
-is absent, settings preserve ordinary preferences, and no provider traffic starts automatically.
+Synthetic HTTP, fake-process, pipeline and renderer tests cover discovery, priority,
+disabled defaults, model selection, cancellation, failures, source/final delivery,
+stage ownership, byte bounds and transparent overlay margins. They do not establish
+live model quality or physical desktop/device coverage. Live local-model trials use
+synthetic text only and are reported separately. Cloud-account calls are not required
+for automated checks. New feature acceptance remains required before merge.
 
-TTS, Obsidian and coding-agent actions remain later stages; ordinary local dictation stays
-independent of optional integrations. See the [roadmap](ROADMAP.md) for delivery order.
-
-## Planned Connections increment
-
-This section describes the next implementation, not functionality shipped in 0.4.2.
-The supplied Connections and Text processing designs define the interface.
-
-1. Detect running numeric-loopback Ollama and LM Studio servers and list their models.
-   Detect installed Claude Code and Codex tools without reading their credentials or
-   initiating a model request. Discovery never starts a server or downloads a model.
-2. Store a small, validated connection registry: enabled state, explicit priority, local
-   model selection, and one shared instruction. All connections start disabled. An
-   explicit enable action permits text processing using that connection. Show that CLI
-   tools can use cloud models and that a loopback server can itself forward text remotely.
-3. Use the highest-priority enabled connection for the optional model step after local
-   recognition, cleanup, vocabulary correction, and snippets. A provider failure never
-   silently selects another provider. Keep the deterministic result and explain the
-   failure; never truncate a long transcript to fit a provider limit.
-4. Preserve the recognized source and each successful processing result for the current
-   recording. Offer source/final review without translating user text. Keep existing
-   history persistence unchanged in this increment; durable source history is separate.
-5. Render one host-driven stage/progress strip in the app and floating bar. Recognition
-   uses actual inference progress; synchronous text stages and model requests do not
-   invent percentages. Correct transparent margins outside the floating pill and cover
-   them with synthetic screenshot evidence on both renderer platform layouts.
-6. Match the design's Connections priority controls, local model selectors and common
-   instruction. Text processing shows cleanup, vocabulary and snippets in their actual
-   order. Descriptions must match implemented deterministic behavior, rather than promise
-   semantic punctuation or filler removal that the cleaner does not perform.
-
-CLI adapters are fixed host implementations, not configurable shell commands. Submit text
-through stdin; use no shell, no project working directory, bounded output and total time,
-and explicit cancellation/child cleanup. Do not read or copy CLI authentication files.
-Claude Code's supported print mode, empty tool list, safe mode and no-session-persistence
-flags provide the candidate text-only boundary. Verify supported flags before enabling it.
-Codex discovery is included, but execution requires an independently verified boundary:
-read-only mode alone does not disable its agent tools, and public configuration currently
-does not establish a complete empty tool registry. Do not claim it is a text-only provider
-until that gap is resolved.
-
-Validation proceeds from schema/pipeline tests to private loopback and fake-process tests,
-then English/German renderer checks, then synthetic live requests to explicitly selected
-installed local models. No real microphone, user transcript, cloud-account request or
-user installation is needed for automated checks. Common preflight, app tests/build,
-renderer build/tests and independent review precede the functional PR. User acceptance
-remains required before merge of this new feature.
-
-Primary API references: [LM Studio Chat Completions](https://lmstudio.ai/docs/developer/openai-compat/chat-completions),
+Primary references: [LM Studio Chat Completions](https://lmstudio.ai/docs/developer/openai-compat/chat-completions),
+[LM Studio native model metadata](https://lmstudio.ai/docs/developer/rest/list),
 [Ollama chat](https://docs.ollama.com/api/chat), [Ollama model list](https://docs.ollama.com/api/tags),
 [Claude Code CLI](https://code.claude.com/docs/en/cli-usage),
 [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode),

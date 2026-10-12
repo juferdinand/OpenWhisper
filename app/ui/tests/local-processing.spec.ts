@@ -136,6 +136,7 @@ test("renderer keeps optional local processing out of the ordinary dictation wor
     "General",
     "Recording & shortcuts",
     "Text processing",
+    "Connections",
     "History",
     "Permissions",
     "About",
@@ -150,10 +151,8 @@ test("renderer keeps optional local processing out of the ordinary dictation wor
   }
 
   await page.locator("#close-settings").click();
-  await page
-    .locator(".dictation-feature-card")
-    .filter({ hasText: "Snippets" })
-    .click();
+  await page.locator("#open-settings").click();
+  await page.locator('.settings-dialog-nav [data-tab="text"]').click();
   await expect(dialog).toBeVisible();
   await expect(page.locator('[data-tab="text"]')).toHaveAttribute(
     "aria-current",

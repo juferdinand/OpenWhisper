@@ -6,7 +6,10 @@ import { recordingRequestSchema,
 import { MAX_WINDOW_SAMPLES, MIN_WINDOW_SAMPLES, SAMPLE_RATE, planSpeechWindow, sampleRangeSchema, selectSpeechWindow,
   type SampleRange,
 } from "../../core/speech/windows.js";
-import { processTranscript } from "../../core/text/snippet-expander.js";
+import { cleanTranscript } from "../../core/text/transcript-cleaner.js";
+import { correctVocabulary, parseVocabulary } from "../../core/text/vocabulary-corrector.js";
+import { expandSnippets } from "../../core/text/snippet-expander.js";
+import { textProcessingStageEventSchema, type TextProcessingStageEvent } from "../../contracts/text/processing.js";
 import { SpeechWorkerError, type SpeechClient } from "./speech-client.js";
 import { speechModelSchema, speechTextSchema, speechVocabularySchema, speechWindowSchema } from "../../workers/speech/native-speech.js";
 
@@ -14,7 +17,7 @@ const ownership = { generation: z.number().int().positive().max(Number.MAX_SAFE_
   attempt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) };
 const rangeReplySchema = z.strictObject({ ...ownership, range: sampleRangeSchema });
 const windowReplySchema = z.strictObject({ ...ownership, samples: z.instanceof(Float32Array) });
-const processedReplySchema = z.strictObject({ ...ownership, text: z.string() });
+const processedReplySchema = z.strictObject({ ...ownership, text: z.string(), rawText: z.string().optional() });
 const contextSchema = z.strictObject({ ...ownership, signal: z.instanceof(AbortSignal) });
 
 export type AdaptiveSpeechFailureCode = "BUSY" | "CANCELLED" | "INVALID_INPUT" | "INVALID_WINDOW"
@@ -36,7 +39,9 @@ export interface AdaptiveSpeechEffects {
   /** Worker/utility-local effects; do not serialize the whole recording through main. */
   plan(audio: PreparedAudio, start: number, maximum: number, context: WorkContext): Promise<unknown>;
   read(audio: PreparedAudio, range: SampleRange, context: WorkContext): Promise<unknown>;
-  process(parts: readonly string[], request: RecordingRequest, context: WorkContext): Promise<unknown>;
+  process(parts: readonly string[], request: RecordingRequest, context: WorkContext,
+    onStage?: (stage: "recognition" | "cleanup" | "vocabulary" | "snippets", text: string,
+      status?: "completed" | "skipped") => void): Promise<unknown>;
   readonly progress?: (progress: SpeechProgress) => void;
 }
 export interface AdaptiveSpeechOptions { readonly effectTimeoutMs?: number }
@@ -113,13 +118,13 @@ export function createUtilitySpeechEffects(options: UtilitySpeechOptions): Adapt
     },
     read: async (audio, range, context) => ({ generation: context.generation, attempt: context.attempt,
       samples: await read(audio, range, context) }),
-    process: async (parts, request, context) => {
+    process: async (parts, request, context, onStage) => {
       await nextTurn();
       if (context.signal.aborted) throw new AdaptiveSpeechError("CANCELLED");
-      const text = processRawSpeechParts(parts, request);
+      const result = processRawSpeechPartsDetailed(parts, request, onStage);
       await nextTurn();
       if (context.signal.aborted) throw new AdaptiveSpeechError("CANCELLED");
-      return { generation: context.generation, attempt: context.attempt, text };
+      return { generation: context.generation, attempt: context.attempt, ...result };
     },
   };
 }
@@ -127,14 +132,36 @@ export function createUtilitySpeechEffects(options: UtilitySpeechOptions): Adapt
 /** Call only in a utility/worker. Preserve Rust White_Space trim and processing order.
  * Neither raw parts nor final user text are truncated to a transport-sized substring. */
 export function processRawSpeechParts(parts: readonly string[], request: RecordingRequest): string {
+  return processRawSpeechPartsDetailed(parts, request).text;
+}
+
+export function processRawSpeechPartsDetailed(parts: readonly string[], request: RecordingRequest,
+  onStage?: (stage: "recognition" | "cleanup" | "vocabulary" | "snippets", text: string,
+    status?: "completed" | "skipped") => void): Readonly<{ rawText: string; text: string }> {
   const validated = recordingRequestSchema.parse(request);
   const raw = parts.map((part) => speechTextSchema.parse(part)
     .replace(/^\p{White_Space}+|\p{White_Space}+$/gu, "")).filter((part) => part.length > 0).join(" ");
-  return processTranscript(raw, validated.vocabulary, validated.snippets);
+  onStage?.("recognition", raw);
+  const cleanupEnabled = validated.cleanup_enabled !== false;
+  const cleaned = cleanupEnabled ? cleanTranscript(raw) : raw;
+  onStage?.("cleanup", cleaned, cleanupEnabled ? "completed" : "skipped");
+  const corrected = correctVocabulary(cleaned, parseVocabulary(validated.vocabulary));
+  onStage?.("vocabulary", corrected);
+  const text = expandSnippets(corrected, validated.snippets);
+  onStage?.("snippets", text);
+  return Object.freeze({ rawText: raw, text });
 }
 
 function owned(value: { generation: number; attempt: number }, context: WorkContext): boolean {
   return value.generation === context.generation && value.attempt === context.attempt;
+}
+
+function emitTextStage(callback: ((event: TextProcessingStageEvent) => void) | undefined,
+  input: unknown): void {
+  const parsed = textProcessingStageEventSchema.safeParse(input);
+  if (parsed.success) {
+    try { callback?.(parsed.data); } catch { /* Observability cannot change transcription. */ }
+  }
 }
 
 /** Cancellation rejects promptly, while observing late effects so they cannot publish or reject unhandled.
@@ -184,7 +211,8 @@ export class AdaptiveSpeechBoundary implements SpeechBoundary {
     }
   }
 
-  async transcribe(audio: PreparedAudio, input: RecordingRequest, inputContext: WorkContext): Promise<SpeechResult> {
+  async transcribe(audio: PreparedAudio, input: RecordingRequest, inputContext: WorkContext,
+    onTextStage?: (event: TextProcessingStageEvent) => void): Promise<SpeechResult> {
     if (this.active) throw new AdaptiveSpeechError("BUSY");
     const parsedContext = contextSchema.safeParse(inputContext);
     const parsedRequest = recordingRequestSchema.safeParse(input);
@@ -212,8 +240,12 @@ export class AdaptiveSpeechBoundary implements SpeechBoundary {
     };
     const progress = (): void => {
       current();
-      this.effects.progress?.(Object.freeze({ generation: context.generation, attempt: context.attempt,
-        completedSamples: start, gpuFallback: initiallyGpu && !gpu }));
+      const value = Object.freeze({ generation: context.generation, attempt: context.attempt,
+        completedSamples: start, gpuFallback: initiallyGpu && !gpu });
+      this.effects.progress?.(value);
+      if (audio.sampleCount > 0) emitTextStage(onTextStage, { generation: context.generation,
+        attempt: context.attempt, stage: "recognition", status: "progress", completedSamples: start,
+        totalSamples: audio.sampleCount });
     };
     try {
       while (start < audio.sampleCount) {
@@ -256,11 +288,17 @@ export class AdaptiveSpeechBoundary implements SpeechBoundary {
         progress();
       }
       const processed = processedReplySchema.safeParse(await awaitEffect(
-        () => this.effects.process(Object.freeze(parts), request, context), controller.signal, this.effectTimeoutMs));
+        () => this.effects.process(Object.freeze(parts), request, context, (stage, text, status = "completed") => {
+          current();
+          emitTextStage(onTextStage, { generation: context.generation, attempt: context.attempt,
+            stage, status, text });
+        }), controller.signal, this.effectTimeoutMs));
       current();
       if (!processed.success) throw new AdaptiveSpeechError("EFFECT_FAILED");
       if (!owned(processed.data, context)) throw new AdaptiveSpeechError("OWNERSHIP_FAILED");
-      return processed.data;
+      const rawText = processed.data.rawText ?? parts.map((part) => part
+        .replace(/^\p{White_Space}+|\p{White_Space}+$/gu, "")).filter((part) => part.length > 0).join(" ");
+      return { ...processed.data, rawText };
     } catch (error: unknown) {
       if (error instanceof AdaptiveSpeechError) throw error;
       if (error instanceof SpeechWorkerError) {

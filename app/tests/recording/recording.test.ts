@@ -125,7 +125,8 @@ function fixture(platform: "macos" | "linux" = "linux", recoveryStore?: OwnedRec
   let deliveryCalls = 0;
   let configure: ((capture: OwnedCapture) => void) | undefined;
   let speechHook: ((samples: PreparedAudio, input: RecordingRequest, context: WorkContext) => Promise<SpeechResult>) | undefined;
-  let deliveryHook: ((text: string, context: WorkContext, identity: DeliveryIdentity) => Promise<DeliveryReceipt>) | undefined;
+  let deliveryHook: ((text: string, context: WorkContext, identity: DeliveryIdentity,
+    metadata?: { readonly rawText: string }) => Promise<DeliveryReceipt>) | undefined;
   const common = {
     clock: { now: () => time },
     capture: { create(callbacks: CaptureCallbacks) {
@@ -136,9 +137,10 @@ function fixture(platform: "macos" | "linux" = "linux", recoveryStore?: OwnedRec
       if (speechHook) return speechHook(samples, input, context);
       return { ...ownership(context), text: "  Unchanged fixture 日本語 👩‍💻  " };
     } },
-    delivery: { async deliver(text: string, context: WorkContext, identity: DeliveryIdentity) {
+    delivery: { async deliver(text: string, context: WorkContext, identity: DeliveryIdentity,
+      metadata?: { readonly rawText: string }) {
       deliveryCalls++; events.push("delivery");
-      if (deliveryHook) return deliveryHook(text, context, identity);
+      if (deliveryHook) return deliveryHook(text, context, identity, metadata);
       return copied(context);
     } },
   };
@@ -163,6 +165,39 @@ async function until(condition: () => boolean): Promise<void> {
   }
   assert.fail("Owned deferred boundary did not reach its expected stage");
 }
+
+test("delivery keeps raw source separate and publishes the exact confirmed processed output", async () => {
+  const f = fixture("macos"); let delivered: { text: string; rawText?: string } | undefined;
+  f.speech(async (_audio, _request, context) => ({ ...ownership(context), text: "deterministic output", rawText: "raw source" }));
+  f.delivery(async (text, context, _identity, metadata) => {
+    delivered = { text, ...(metadata ? { rawText: metadata.rawText } : {}) };
+    return { ...copied(context), deliveredText: "accepted model output" };
+  });
+  assert.equal((await f.coordinator.start(request)).ok, true);
+  await f.coordinator.stop(); await f.coordinator.completion();
+  assert.deepEqual(delivered, { text: "deterministic output", rawText: "raw source" });
+  assert.equal(f.coordinator.snapshot().transcript, "accepted model output");
+});
+
+test("malformed, unconfirmed, or stale delivery receipts cannot replace the deterministic transcript", async () => {
+  for (const receiptKind of ["malformed", "unconfirmed", "stale"] as const) {
+    const f = fixture("macos");
+    f.speech(async (_audio, _request, context) => ({ ...ownership(context), text: "deterministic output" }));
+    f.delivery(async (_text, context) => {
+      if (receiptKind === "malformed") return { ...copied(context), outcome: "clipboard", clipboardConfirmed: true,
+        deliveredText: 42 } as never;
+      if (receiptKind === "unconfirmed") return { ...copied(context), outcome: "failed", clipboardConfirmed: false,
+        deliveredText: "unconfirmed output" };
+      return { ...copied(context), generation: context.generation + 1, outcome: "clipboard", clipboardConfirmed: true,
+        deliveredText: "stale output" };
+    });
+    assert.equal((await f.coordinator.start(request)).ok, true);
+    await f.coordinator.stop(); await f.coordinator.completion();
+    assert.notEqual(f.coordinator.snapshot().transcript, "unconfirmed output");
+    assert.notEqual(f.coordinator.snapshot().transcript, "stale output");
+    if (receiptKind === "malformed") assert.equal(f.coordinator.snapshot().transcript, "deterministic output");
+  }
+});
 
 test("clean cancellation and failed start rollback release fenced capture without preparing or saving", async () => {
   for (const mode of ["cancel", "start-failure"] as const) {

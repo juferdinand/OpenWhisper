@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { defaultTextConnectionAvailability, defaultTextConnectionSettings, idleTextConnectionProcessing } from "../../src/contracts/text/connections.js";
 import type { AppState } from "../../src/contracts/ui/state.js";
 import { overlayWindowBounds, overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "../../src/main/recording-overlay.js";
 
@@ -10,10 +11,14 @@ function state(): AppState {
     preferences: {
       ui_language: "en", setup_completed: true, model: "tiny", language: "auto", microphone: "",
       vocabulary: "", snippets: [], output: "clipboard", hold_to_record: false, gpu: false, keep_history: true,
+      cleanup_enabled: true,
     },
     models: [], installed: [], microphones: [], session: "Wayland", desktop: "Owned fixture", clipboard_available: true,
     shortcut_portal: false, paste_portal: false, shortcut: null, paste_ready: false, gpu_available: false,
     download: null, progress: 0, elapsed: 0, model_directory: "", recording_available: true,
+    text_connections: { settings: defaultTextConnectionSettings(), available: defaultTextConnectionAvailability(), scanning: false,
+      processing: idleTextConnectionProcessing() },
+    text_processing: null,
   };
 }
 

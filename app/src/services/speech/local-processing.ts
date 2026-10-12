@@ -114,7 +114,7 @@ interface ActivePreview {
   readonly controller: AbortController;
 }
 
-/** Manual, one-request service. It never reads or writes dictation, history, or recovery state. */
+/** Single-request adapter. It never reads or writes recording, history, or recovery state. */
 export class LocalProcessingService {
   private active: ActivePreview | undefined;
   private generation = 0;

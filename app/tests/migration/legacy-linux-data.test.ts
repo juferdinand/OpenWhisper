@@ -18,7 +18,8 @@ const legacy = {
 test("legacy stable preferences retain ordinary values, both independent profiles and enabled service preferences", () => {
   const input = { settings: structuredClone(legacy), history: ["Ein vollständiger Satz.", "東京 café 👩‍💻"] };
   const before = structuredClone(input), converted = convertLegacyLinuxData(input);
-  assert.deepEqual(converted.preferences, { ...legacy, snippets: [legacy.snippets[0], { ...legacy.snippets[1], id: "" }] });
+  assert.deepEqual(converted.preferences, { ...legacy, cleanup_enabled: true,
+    snippets: [legacy.snippets[0], { ...legacy.snippets[1], id: "" }] });
   assert.equal(converted.preferences.auto_check_updates, true); assert.equal(converted.preferences.launch_at_login, true);
   assert.equal(converted.preferences.gpu, false); assert.equal(converted.preferences.hold_to_record, true);
   assert.deepEqual(preferencesSchema.parse(converted.preferences), converted.preferences);

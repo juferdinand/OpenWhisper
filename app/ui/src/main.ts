@@ -16,12 +16,17 @@ import {
   type Model,
   type Snippet,
 } from "../../src/contracts/ui/state.js";
+import type {
+  TextConnectionSettings,
+  TextProvider,
+} from "../../src/contracts/text/connections.js";
 
 let state: State;
-type View = Tab | "dictation" | "recording" | "text" | "permissions";
+type View = Tab | "dictation" | "recording" | "text" | "connections" | "permissions";
 let tab: View = "dictation";
 let dirty = false;
 const dirtyTextParts = new Set<"vocabulary" | "snippets">();
+let vocabularyDraft: string[] | undefined;
 let portalBusy = false;
 let pendingInsertOutput = false;
 let insertPermissionActionPending = false;
@@ -57,6 +62,8 @@ let focusSetupTitle = false;
 const expandedModelFamilies = new Set<string>();
 let preferenceQueue = Promise.resolve();
 let pendingPreferences = 0;
+let connectionInstructionDraft: string | undefined;
+let connectionScanStarted = false;
 let mouseTriggerCandidate: number | undefined;
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const overlay =
@@ -85,6 +92,7 @@ const tabs: [View, string, string][] = [
     "M6 6h12v12H6zM9 9h6v6H9zM8 2v4m8-4v4M8 18v4m8-4v4M2 8h4m-4 8h4M18 8h4m-4 8h4",
   ],
   ["text", "Text processing", "M3 5h18M3 10h12M3 15h9M3 20h9m6-6v8m-4-4h8"],
+  ["connections", "Connections", "M4 7h16M4 12h16M4 17h16M8 4v6m8 0v4m-8 0v6"],
   ["history", "History", "M4 8a9 9 0 1 1-1 7M4 3v5h5m3-1v5l4 2"],
   ["about", "About", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18M12 11v6m0-10v1"],
 ];
@@ -908,6 +916,41 @@ async function savePreferences(
 async function preference(name: string, value: unknown) {
   return savePreferences(preferencePatchSchema.parse({ [name]: value }));
 }
+async function saveConnections(settings: TextConnectionSettings) {
+  try {
+    state = await invoke("save_connections", {
+      settings: {
+        ...settings,
+        instruction: connectionInstructionDraft ?? settings.instruction,
+      },
+    });
+    connectionInstructionDraft = undefined;
+    contentKey = "";
+    render();
+  } catch (error) {
+    notice(String(error));
+  }
+}
+async function scanConnections() {
+  connectionScanStarted = true;
+  const button = document.querySelector<HTMLButtonElement>("#scan-connections");
+  if (button) {
+    button.disabled = true;
+    button.textContent = t("Scanning …");
+  }
+  try {
+    state = await invoke("scan_connections", {});
+    contentKey = "";
+    render();
+  } catch (error) {
+    connectionScanStarted = false;
+    if (button) {
+      button.disabled = false;
+      button.textContent = t("Scan again");
+    }
+    notice(String(error));
+  }
+}
 async function selectOutput(value: string) {
   if (value !== "paste") {
     pendingInsertOutput = false;
@@ -1275,6 +1318,7 @@ function renderShell() {
     ["general", "General"],
     ["recording", "Recording & shortcuts"],
     ["text", "Text processing"],
+    ["connections", "Connections"],
     ["history", "History"],
     ["permissions", "Permissions"],
     ["about", "About"],
@@ -1379,12 +1423,41 @@ app.addEventListener("click", (event) => {
   render();
 });
 
+function processingStageLabel(stage = state.text_processing?.stage): string {
+  switch (stage) {
+    case "recognition":
+      return t("Recognizing speech");
+    case "cleanup":
+      return t("Cleaning up text");
+    case "vocabulary":
+      return t("Applying vocabulary");
+    case "snippets":
+      return t("Expanding snippets");
+    case "model":
+      return t("Optimizing with connection");
+    default:
+      return t("Processing text");
+  }
+}
+
+function processingStatusText(): string {
+  const event = state.text_processing;
+  if (state.text_connections.processing.status === "fallback")
+    return t("Optional model was not applied; deterministic text was kept.");
+  if (!event) return t("Finding your words");
+  const label = processingStageLabel(event.stage);
+  if (event.status === "completed")
+    return t("{stage} complete", { stage: label });
+  if (event.status === "skipped") return t("{stage} skipped", { stage: label });
+  return label;
+}
+
 function recordingStatusTitle(): string {
   const recording = state.status === "recording";
   const busy = state.status === "transcribing";
   const recovery = !!state.recovery_available && !recording && !busy;
   if (recording) return t("Listening to you");
-  if (busy) return t("Finding your words");
+  if (busy) return processingStatusText();
   if (recovery || state.status === "error")
     return t("Something needs attention");
   if (state.recording_available === false) {
@@ -1413,7 +1486,7 @@ function recordControl() {
         time: `${Math.floor(state.elapsed / 60)}:${String(state.elapsed % 60).padStart(2, "0")}`,
       })
     : busy
-      ? t("Transcribing …")
+      ? processingStatusText()
       : recovery
         ? t("Retry transcription")
         : t("Start dictation");
@@ -1444,7 +1517,7 @@ function recordControl() {
     const outputControls = `<div class="record-output" role="group" aria-label="${esc(t("Output"))}"><span class="record-output-label">${esc(t("Output"))}</span>${outputModes.map(([value, label, fullLabel]) => `<button type="button" data-output="${value}" data-pref="output" aria-label="${esc(fullLabel)}" title="${esc(fullLabel)}" aria-pressed="${effectiveOutput() === value}" ${recording || recovery || busy || (value === "paste" && (!accessibilityPermissionGranted() || portalBusy || state.paste_configuring)) ? "disabled" : ""}>${esc(label)}</button>`).join("")}</div>`;
     const overlayBars = Array.from({ length: 5 }, () => "<i></i>").join("");
     controls.innerHTML = overlay
-      ? `<div class="record-actions"><div class="record-status"><div class="audio-mark" aria-hidden="true">${overlayBars}<canvas class="live-waveform" data-waveform="overlay" aria-hidden="true"></canvas></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div><span id="record-label"></span><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-action-label" class="record-action-label"></span></button></div>`
+      ? `<div class="record-actions"><div class="record-status"><div class="audio-mark" aria-hidden="true">${overlayBars}<canvas class="live-waveform" data-waveform="overlay" aria-hidden="true"></canvas></div><div class="record-copy"><strong id="status-title" aria-live="polite"></strong><span id="status" role="status"></span><div id="overlay-progress" class="indeterminate-progress" role="progressbar" aria-label="${esc(t("Text processing progress"))}" hidden><span aria-hidden="true"></span></div></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div><span id="record-label"></span><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-action-label" class="record-action-label"></span></button></div>`
       : `<div class="record-leading"><button id="discard-result" type="button" title="${esc(t("Clear current text; saved history is kept."))}" aria-label="${esc(t("Clear current text; saved history is kept."))}">${esc(t("Discard"))}</button><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><div class="record-status"><div class="audio-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div></div><div class="record-center"><button id="record" class="capsule"><span id="record-symbol"></span></button><span id="record-label"></span></div>${outputControls}`;
     document
       .querySelector("#record")!
@@ -1535,7 +1608,7 @@ function recordControl() {
     ? recording
       ? ""
       : busy
-        ? t("Transcribing …")
+        ? processingStatusText()
         : recovery
           ? t("Retry transcription")
           : state.status === "error"
@@ -1597,6 +1670,36 @@ function recordControl() {
     : unavailable
       ? recordingUnavailableMessage()
       : t(state.message);
+  const overlayProgress =
+    document.querySelector<HTMLProgressElement>("#overlay-progress");
+  if (overlayProgress) {
+    const event = state.text_processing;
+    overlayProgress.hidden = !busy;
+    overlayProgress.classList.remove("determinate");
+    overlayProgress.style.removeProperty("--progress-fraction");
+    overlayProgress.removeAttribute("aria-valuenow");
+    overlayProgress.removeAttribute("aria-valuemax");
+    if (
+      busy &&
+      event?.stage === "recognition" &&
+      event.completedSamples !== undefined &&
+      event.totalSamples !== undefined &&
+      event.totalSamples > 0
+    ) {
+      const completed = Math.min(event.completedSamples, event.totalSamples);
+      overlayProgress.classList.add("determinate");
+      overlayProgress.style.setProperty(
+        "--progress-fraction",
+        String(completed / event.totalSamples),
+      );
+      overlayProgress.setAttribute("aria-valuemax", String(event.totalSamples));
+      overlayProgress.setAttribute("aria-valuenow", String(completed));
+    }
+    overlayProgress.setAttribute(
+      "aria-label",
+      processingStageLabel(event?.stage),
+    );
+  }
   syncDictationState();
 }
 
@@ -1711,6 +1814,10 @@ function renderWorkspace() {
     state.recovery_available,
     state.history,
     state.transcript,
+    state.raw_transcript,
+    state.raw_transcript_preview_omitted,
+    state.text_processing,
+    state.text_connections.processing,
     state.transcript_preview_omitted,
     state.gpu_supported,
     state.gpu_checked,
@@ -1744,9 +1851,35 @@ function renderWorkspace() {
   const transcriptMarkup =
     selectedHistoryText !== undefined
       ? `<p class="transcript">${esc(selectedHistoryText)}</p>`
-      : transcriptAvailable
-        ? `<p class="transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</p>`
-        : `<div class="dictation-empty"><p>${esc(t("Press Record or the shortcut. Your text will appear here."))}</p></div>`;
+      : state.status === "transcribing" && state.text_processing?.text
+        ? `<p class="transcript">${esc(state.text_processing_preview_omitted ? t("The current text preview is too large.") : state.text_processing.text)}</p>`
+        : state.status === "transcribing" &&
+            (state.raw_transcript !== undefined ||
+              state.raw_transcript_preview_omitted)
+          ? `<p class="transcript">${esc(state.raw_transcript_preview_omitted ? t("The raw transcript is too large to preview.") : (state.raw_transcript ?? ""))}</p>`
+          : transcriptAvailable
+            ? `<p class="transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</p>${state.raw_transcript !== undefined || state.raw_transcript_preview_omitted ? `<details class="raw-transcript"><summary>${esc(t("Raw recognition"))}</summary><p class="transcript">${esc(state.raw_transcript_preview_omitted ? t("The raw transcript is too large to preview.") : (state.raw_transcript ?? ""))}</p></details>` : ""}`
+            : `<div class="dictation-empty"><p>${esc(t("Press Record or the shortcut. Your text will appear here."))}</p></div>`;
+  const processingFallbackNotice =
+    selectedHistoryText === undefined &&
+    transcriptAvailable &&
+    state.status !== "transcribing" &&
+    state.text_connections.processing.status === "fallback"
+      ? `<p class="processing-fallback-notice" role="status">${esc(t("Optional model was not applied; deterministic text was kept."))}</p>`
+      : "";
+  const processingEvent = state.text_processing;
+  const hasSampleProgress =
+    processingEvent?.stage === "recognition" &&
+    processingEvent.completedSamples !== undefined &&
+    processingEvent.totalSamples !== undefined &&
+    processingEvent.totalSamples > 0;
+  const progressFraction = hasSampleProgress
+    ? Math.min(
+        processingEvent!.completedSamples!,
+        processingEvent!.totalSamples!,
+      ) / processingEvent!.totalSamples!
+    : undefined;
+  const processingMarkup = `<section class="dictation-processing-strip" aria-label="${esc(t("Text processing progress"))}" ${state.status !== "transcribing" ? "hidden" : ""}><span class="processing-progress-copy" role="status" aria-live="polite">${esc(processingStatusText())}</span><div class="indeterminate-progress ${hasSampleProgress ? "determinate" : ""}" role="progressbar" aria-label="${esc(processingStageLabel(processingEvent?.stage))}" ${hasSampleProgress ? `aria-valuemin="0" aria-valuemax="${processingEvent!.totalSamples}" aria-valuenow="${processingEvent!.completedSamples}" style="--progress-fraction:${progressFraction}"` : ""}><span aria-hidden="true"></span></div></section>`;
   const mode = isMac()
     ? t("Native")
     : state.preferences.gpu && state.gpu_checked === false
@@ -1761,7 +1894,7 @@ function renderWorkspace() {
     state.status === "recording"
       ? t("Listening to you")
       : state.status === "transcribing"
-        ? t("Finding your words")
+        ? processingStatusText()
         : state.recovery_available
           ? t("Something needs attention")
           : state.recording_available === false
@@ -1774,7 +1907,7 @@ function renderWorkspace() {
     : t("History is not saved.");
   const retainedWaveformCanvas = mainWaveform?.canvas;
   retainedWaveformCanvas?.remove();
-  main.innerHTML = `${permissionBanner()}<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true"><canvas class="live-waveform" data-waveform="main" aria-hidden="true"></canvas></div></section><section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}</div></section><section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
+  main.innerHTML = `${permissionBanner()}<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true"><canvas class="live-waveform" data-waveform="main" aria-hidden="true"></canvas></div></section>${processingMarkup}<section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}${processingFallbackNotice}</div></section><section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
   if (retainedWaveformCanvas)
     main
       .querySelector<HTMLElement>(".dictation-waveform")
@@ -1891,12 +2024,17 @@ function render() {
               model: state.preferences.model,
               output: state.preferences.output,
             }
-          : tab === "about"
+          : tab === "connections"
             ? {
-                ui_language: state.preferences.ui_language,
-                setup_completed: state.preferences.setup_completed,
+                settings: state.text_connections.settings,
+                available: state.text_connections.available,
               }
-            : state.preferences,
+            : tab === "about"
+              ? {
+                  ui_language: state.preferences.ui_language,
+                  setup_completed: state.preferences.setup_completed,
+                }
+              : state.preferences,
       state.installed,
       state.microphones,
       state.microphone_labels,
@@ -1962,6 +2100,7 @@ function render() {
     );
   }
   const content = document.querySelector<HTMLDivElement>("#content")!;
+  content.dataset.settingsTab = tab;
   const main =
     document.querySelector<HTMLElement>(".settings-dialog-scroll") ??
     document.querySelector<HTMLElement>(".setup-main")!;
@@ -2331,40 +2470,17 @@ function render() {
       .querySelector("#show-models")!
       .addEventListener("click", () => void command("show_models_folder"));
   } else if (tab === "text") {
+    if (!dirtyTextParts.has("vocabulary") || vocabularyDraft === undefined)
+      vocabularyDraft = vocabularyEntries(p.vocabulary);
     content.innerHTML =
-      `<section class="text-processing-card" id="settings-vocabulary"><header class="text-processing-heading"><i class="text-processing-dot vocabulary" aria-hidden="true"></i><div><h2>${esc(t("Vocabulary"))}</h2><p class="text-processing-description">${esc(t("Names and technical terms, separated by commas. Similar spellings are corrected after recognition with any model. Whisper models also receive these terms during recognition."))}</p></div></header><div class="text-processing-body"><textarea id="vocabulary" rows="3" maxlength="8192" aria-label="${esc(t("Custom vocabulary"))}" placeholder="${esc(t("e.g. Kubernetes, Jira, SwiftUI, Grafana"))}">${esc(p.vocabulary)}</textarea><div class="edit-actions" id="vocabulary-actions" hidden><button id="save-vocabulary">${esc(t("Save"))}</button><button type="button" data-discard-vocabulary>${esc(t("Discard"))}</button></div></div></section>` +
-      `<form id="snippet-form"><section class="text-processing-card"><header class="text-processing-heading"><i class="text-processing-dot snippets" aria-hidden="true"></i><div><h2>${esc(t("Snippets"))}</h2><p class="text-processing-description">${esc(t("Say a trigger word to insert its saved text. Matching ignores letter case, hyphens, and trailing punctuation."))}</p></div></header><div class="text-processing-body"><div id="snippets">${p.snippets.length ? p.snippets.map(snippetRow).join("") : `<p id="empty-snippets" class="secondary">${esc(t("No snippets yet. For example, say “my YouTube link” to insert a URL instead."))}</p>`}</div><div class="snippet-card-actions"><button type="button" id="add-snippet">${esc(t("Add snippet"))}</button><div class="edit-actions" id="snippet-actions" hidden><button type="submit">${esc(t("Save snippets"))}</button><button type="button" data-discard-snippets>${esc(t("Discard"))}</button></div></div></div></section></form>`;
-    const vocabulary =
-      content.querySelector<HTMLTextAreaElement>("#vocabulary");
-    if (vocabulary) {
-      vocabulary.oninput = () => {
-        dirtyTextParts.add("vocabulary");
-        dirty = true;
-        content.querySelector<HTMLElement>("#vocabulary-actions")!.hidden =
-          false;
-      };
-      content
-        .querySelector("#save-vocabulary")
-        ?.addEventListener("click", () => {
-          void (async () => {
-            if (await savePreferences({ vocabulary: vocabulary.value })) {
-              dirtyTextParts.delete("vocabulary");
-              dirty = dirtyTextParts.size > 0;
-              render();
-            }
-          })();
-        });
-      content
-        .querySelector("[data-discard-vocabulary]")
-        ?.addEventListener("click", () => {
-          vocabulary.value = p.vocabulary;
-          content.querySelector<HTMLElement>("#vocabulary-actions")!.hidden =
-            true;
-          dirtyTextParts.delete("vocabulary");
-          dirty = dirtyTextParts.size > 0;
-          if (!dirty) render();
-        });
-    }
+      `<section class="text-processing-card" id="settings-cleanup"><header class="text-processing-heading"><i class="text-processing-dot cleanup" aria-hidden="true"></i><div><h2>1. ${esc(t("Cleanup"))}</h2><p class="text-processing-description">${esc(t("Remove obvious recognition artifacts while preserving your words and meaning."))}</p></div></header><div class="text-processing-body">${toggle(t("Clean up recognized text"), "cleanup_enabled", p.cleanup_enabled)}</div></section>` +
+      `<section class="text-processing-card" id="settings-vocabulary"><header class="text-processing-heading"><i class="text-processing-dot vocabulary" aria-hidden="true"></i><div><h2>2. ${esc(t("Vocabulary"))}</h2><p class="text-processing-description">${esc(t("Add names and technical terms as canonical spellings. Similar spellings are corrected after recognition with any model. Whisper models also receive these terms during recognition."))}</p></div></header><div class="text-processing-body"><div id="vocabulary-editor"></div></div></section>` +
+      `<form id="snippet-form"><section class="text-processing-card"><header class="text-processing-heading"><i class="text-processing-dot snippets" aria-hidden="true"></i><div><h2>3. ${esc(t("Snippets"))}</h2><p class="text-processing-description">${esc(t("Say a trigger word to insert its saved text. Matching ignores letter case, hyphens, and trailing punctuation."))}</p></div></header><div class="text-processing-body"><div id="snippets">${p.snippets.length ? p.snippets.map(snippetRow).join("") : `<p id="empty-snippets" class="secondary">${esc(t("No snippets yet. For example, say “my YouTube link” to insert a URL instead."))}</p>`}</div><div class="snippet-card-actions"><button type="button" id="add-snippet">${esc(t("Add snippet"))}</button><div class="edit-actions" id="snippet-actions" hidden><button type="submit">${esc(t("Save snippets"))}</button><button type="button" data-discard-snippets>${esc(t("Discard"))}</button></div></div></div></section></form>` +
+      `<section class="text-processing-card optional-model-card"><header class="text-processing-heading"><i class="text-processing-dot model" aria-hidden="true"></i><div><h2>4. ${esc(t("Optional model"))}</h2><p class="text-processing-description">${esc(t("An enabled connection can refine the text after cleanup, vocabulary, and snippets."))}</p></div></header><div class="optional-model-summary"><span>${esc(state.text_connections.settings.connections.some((connection) => connection.enabled) ? t("Connection enabled") : t("Off by default"))}</span><button type="button" data-settings-view="connections">${esc(t("Manage connections"))}</button></div></section>`;
+    renderVocabularyRows(
+      content.querySelector<HTMLElement>("#vocabulary-editor")!,
+      vocabularyDraft,
+    );
     const mark = () => {
       dirtyTextParts.add("snippets");
       dirty = true;
@@ -2421,6 +2537,8 @@ function render() {
         render();
       }
     };
+  } else if (tab === "connections") {
+    renderConnectionsSettings(content);
   } else if (tab === "history") {
     const historyBytes = state.history.reduce(
       (bytes, text) => bytes + new TextEncoder().encode(text).byteLength,
@@ -2767,6 +2885,208 @@ window.addEventListener("blur", () => {
 });
 function snippetRow(s?: Snippet) {
   return `<div class="snippet-row" data-id="${esc(s?.id ?? crypto.randomUUID())}"><input class="switch" type="checkbox" name="enabled" aria-label="${esc(t("Enable snippet"))}" ${!s || s.enabled ? "checked" : ""}><input name="trigger" aria-label="${esc(t("When I say"))}" placeholder="${esc(t("When I say …"))}" value="${esc(s?.trigger ?? "")}" maxlength="128"><span>→</span><textarea name="expansion" aria-label="${esc(t("Insert"))}" placeholder="${esc(t("… insert"))}" rows="2">${esc(s?.expansion ?? "")}</textarea><button type="button" data-remove aria-label="${esc(t("Remove snippet"))}">×</button></div>`;
+}
+
+function vocabularyEntries(value: string): string[] {
+  return value
+    .split(/[,;\n\r]/u)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function renderVocabularyRows(target: HTMLElement, entries: string[]): void {
+  target.innerHTML = `<table class="vocabulary-table"><thead><tr><th>${esc(t("Canonical spelling"))}</th><th>${esc(t("How it is used"))}</th><th><span class="visually-hidden">${esc(t("Actions"))}</span></th></tr></thead><tbody>${entries.length ? entries.map((entry, index) => `<tr><td><input data-vocabulary-entry="${index}" aria-label="${esc(t("Vocabulary spelling {number}", { number: String(index + 1) }))}" value="${esc(entry)}" maxlength="256"></td><td class="vocabulary-use">${esc(t("Similar spellings are matched after recognition."))}</td><td><button type="button" data-remove-vocabulary="${index}" aria-label="${esc(t("Remove vocabulary spelling {number}", { number: String(index + 1) }))}">×</button></td></tr>`).join("") : `<tr><td colspan="3" class="vocabulary-empty">${esc(t("No vocabulary terms yet."))}</td></tr>`}</tbody></table><div class="vocabulary-add-row"><input id="vocabulary-new-entry" maxlength="256" aria-label="${esc(t("Canonical spelling"))}" placeholder="${esc(t("Enter a spelling, such as a name"))}"><button type="button" id="add-vocabulary">${esc(t("Add spelling"))}</button></div><div class="vocabulary-editor-actions"><div class="edit-actions" id="vocabulary-actions" ${dirtyTextParts.has("vocabulary") ? "" : "hidden"}><button type="button" id="save-vocabulary">${esc(t("Save"))}</button><button type="button" data-discard-vocabulary>${esc(t("Discard"))}</button></div></div>`;
+  target
+    .querySelectorAll<HTMLInputElement>("[data-vocabulary-entry]")
+    .forEach((input) => {
+      input.oninput = () => {
+        entries[Number(input.dataset.vocabularyEntry)] = input.value;
+        markVocabularyDirty(target);
+      };
+    });
+  target
+    .querySelectorAll<HTMLButtonElement>("[data-remove-vocabulary]")
+    .forEach((button) => {
+      button.onclick = () => {
+        entries.splice(Number(button.dataset.removeVocabulary), 1);
+        markVocabularyDirty(target);
+        renderVocabularyRows(target, entries);
+      };
+    });
+  target.querySelector<HTMLButtonElement>("#add-vocabulary")!.onclick = () => {
+    const input = target.querySelector<HTMLInputElement>(
+      "#vocabulary-new-entry",
+    )!;
+    const value = input.value.trim();
+    if (!value) {
+      input.focus();
+      return;
+    }
+    entries.push(value);
+    markVocabularyDirty(target);
+    renderVocabularyRows(target, entries);
+    target.querySelector<HTMLInputElement>("#vocabulary-new-entry")?.focus();
+  };
+  target.querySelector<HTMLInputElement>("#vocabulary-new-entry")!.onkeydown = (
+    event,
+  ) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      target.querySelector<HTMLButtonElement>("#add-vocabulary")!.click();
+    }
+  };
+  target
+    .querySelector<HTMLButtonElement>("#save-vocabulary")
+    ?.addEventListener("click", () => {
+      void (async () => {
+        const value = entries
+          .map((entry) => entry.trim())
+          .filter(Boolean)
+          .join(", ");
+        if (await savePreferences({ vocabulary: value })) {
+          dirtyTextParts.delete("vocabulary");
+          vocabularyDraft = undefined;
+          dirty = dirtyTextParts.size > 0;
+          render();
+        }
+      })();
+    });
+  target
+    .querySelector<HTMLButtonElement>("[data-discard-vocabulary]")
+    ?.addEventListener("click", () => {
+      dirtyTextParts.delete("vocabulary");
+      vocabularyDraft = vocabularyEntries(state.preferences.vocabulary);
+      dirty = dirtyTextParts.size > 0;
+      renderVocabularyRows(target, vocabularyDraft);
+      if (!dirty) render();
+    });
+}
+
+function markVocabularyDirty(target: HTMLElement): void {
+  dirtyTextParts.add("vocabulary");
+  dirty = true;
+  target.querySelector<HTMLElement>("#vocabulary-actions")!.hidden = false;
+}
+
+function renderConnectionsSettings(content: HTMLElement) {
+  const { settings, available, scanning } = state.text_connections;
+  const availability = new Map(available.map((item) => [item.provider, item]));
+  const names: Record<TextProvider, string> = {
+    ollama: "Ollama",
+    lm_studio: "LM Studio",
+    claude_code: "Claude Code",
+    codex: "Codex",
+  };
+  const reason = (value: string | null) => {
+    switch (value) {
+      case "not_running":
+        return t("Not running");
+      case "not_installed":
+        return t("Not detected");
+      case "no_models":
+        return t("No models found");
+      case "unsupported":
+        return t("Detected, but not available for text processing");
+      case "scan_failed":
+        return t("Could not check this connection");
+      default:
+        return t("Available");
+    }
+  };
+  const standardIndex = settings.connections.findIndex(
+    (connection) => connection.enabled,
+  );
+  content.innerHTML =
+    `<section class="connections-intro"><p>${esc(t("Find local Ollama or LM Studio servers and installed Claude Code or Codex tools. Connections start off."))}</p><button type="button" id="scan-connections" ${scanning ? "disabled" : ""}>${esc(scanning ? t("Scanning …") : t("Scan again"))}</button></section>` +
+    `<ol class="connection-list">${settings.connections
+      .map((connection, index) => {
+        const found = availability.get(connection.provider)!;
+        const local =
+          connection.provider === "ollama" ||
+          connection.provider === "lm_studio";
+        const usable = found.usable;
+        const name = names[connection.provider];
+        const selectedModel =
+          connection.provider === "ollama" ||
+          connection.provider === "lm_studio"
+            ? connection.model && found.models.includes(connection.model)
+              ? connection.model
+              : (found.models[0] ?? "")
+            : "";
+        const model = local
+          ? `<label class="connection-model"><span class="visually-hidden">${esc(t("Model"))}</span><select data-connection-model="${index}" aria-label="${esc(t("{provider} model", { provider: name }))}" ${!usable ? "disabled" : ""}>${connection.model && !found.models.includes(connection.model) ? option(connection.model, connection.model, selectedModel) : ""}${found.models.length ? found.models.map((item) => option(item, item, selectedModel)).join("") : option("", t("No models found"), selectedModel)}</select></label>`
+          : `<p class="connection-model-note">${esc(t("Uses the tool model"))}</p>`;
+        const enabledDisabled =
+          (!usable || (local && !selectedModel)) && !connection.enabled;
+        return `<li class="connection-card connection-row" data-provider="${connection.provider}"><span class="connection-number">${index + 1}</span><div class="connection-identity"><strong>${esc(name)}${index === standardIndex ? `<span class="connection-default">${esc(t("Standard"))}</span>` : ""}</strong><span class="connection-state ${usable ? "available" : "unavailable"}">${esc(reason(found.reason))}</span></div><div class="connection-model-slot">${model}</div><label class="connection-toggle" title="${esc(t("Enabled"))}"><input class="switch connection-switch" type="checkbox" data-connection-enabled="${index}" ${connection.enabled ? "checked" : ""} ${enabledDisabled && !connection.enabled ? "disabled" : ""}><span class="visually-hidden">${esc(t("Enabled"))}</span></label><div class="connection-order"><button type="button" data-connection-move="up" data-index="${index}" aria-label="${esc(t("Move {provider} up", { provider: name }))}" ${index === 0 ? "disabled" : ""}>↑</button><button type="button" data-connection-move="down" data-index="${index}" aria-label="${esc(t("Move {provider} down", { provider: name }))}" ${index === settings.connections.length - 1 ? "disabled" : ""}>↓</button></div></li>`;
+      })
+      .join("")}</ol>` +
+    `<p class="connection-privacy">${esc(t("Only the first enabled connection is used; it receives transcript text. A local server does not prove local-only processing. Claude Code may send text to its configured cloud service. Model-requested tools are disabled; managed CLI policy still applies."))}</p>` +
+    `<section class="connection-instruction"><h2>${esc(t("Shared instruction"))}</h2><textarea id="connection-instruction" rows="3" maxlength="8192" aria-label="${esc(t("Shared instruction"))}">${esc(connectionInstructionDraft ?? settings.instruction)}</textarea><div class="edit-actions"><button type="button" id="save-connections">${esc(t("Save connections"))}</button></div></section>`;
+  const instruction = content.querySelector<HTMLTextAreaElement>(
+    "#connection-instruction",
+  )!;
+  instruction.oninput = () => {
+    connectionInstructionDraft = instruction.value;
+  };
+  content
+    .querySelector("#scan-connections")
+    ?.addEventListener("click", () => void scanConnections());
+  content
+    .querySelector("#save-connections")
+    ?.addEventListener("click", () => void saveConnections(settings));
+  content
+    .querySelectorAll<HTMLInputElement>("[data-connection-enabled]")
+    .forEach((input) => {
+      input.onchange = () => {
+        const index = Number(input.dataset.connectionEnabled);
+        const connections = settings.connections.map((entry, i) => {
+          if (i !== index) return entry;
+          if (
+            (entry.provider === "ollama" || entry.provider === "lm_studio") &&
+            input.checked
+          ) {
+            const selected =
+              content.querySelector<HTMLSelectElement>(
+                `[data-connection-model="${index}"]`,
+              )?.value ?? "";
+            return { ...entry, model: selected, enabled: selected.length > 0 };
+          }
+          return { ...entry, enabled: input.checked };
+        });
+        void saveConnections({ ...settings, connections });
+      };
+    });
+  content
+    .querySelectorAll<HTMLSelectElement>("[data-connection-model]")
+    .forEach((select) => {
+      select.onchange = () => {
+        const index = Number(select.dataset.connectionModel);
+        const connections = settings.connections.map((entry, i) =>
+          i === index &&
+          (entry.provider === "ollama" || entry.provider === "lm_studio")
+            ? { ...entry, model: select.value }
+            : entry,
+        );
+        void saveConnections({ ...settings, connections });
+      };
+    });
+  content
+    .querySelectorAll<HTMLButtonElement>("[data-connection-move]")
+    .forEach((button) => {
+      button.onclick = () => {
+        const index = Number(button.dataset.index);
+        const next = index + (button.dataset.connectionMove === "up" ? -1 : 1);
+        if (next < 0 || next >= settings.connections.length) return;
+        const connections = [...settings.connections];
+        [connections[index], connections[next]] = [
+          connections[next]!,
+          connections[index]!,
+        ];
+        void saveConnections({ ...settings, connections });
+      };
+    });
+  if (!connectionScanStarted) void scanConnections();
 }
 
 async function start() {

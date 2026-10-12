@@ -120,8 +120,8 @@ export class MacCaptureRuntime {
       // A quick start/stop or silent recording returns to idle instead of keeping an empty recording.
       this.coordinator = new RecordingCoordinator({ platform: "macos", capture, clock: { now: () => performance.now() },
         speechGate: new SilenceSpeechGate(),
-        delivery: { deliver: async (text, context, identity) => {
-          const receipt = await this.effects.delivery.deliver(text, context, identity);
+        delivery: { deliver: async (text, context, identity, metadata) => {
+          const receipt = await this.effects.delivery.deliver(text, context, identity, metadata);
           if (identity.kind === "memory" && identity.generation === context.generation
               && receipt.generation === context.generation && receipt.attempt === context.attempt
               && ((receipt.clipboardConfirmed && (receipt.outcome === "clipboard" || receipt.outcome === "paste"))
@@ -129,10 +129,11 @@ export class MacCaptureRuntime {
             this.confirmedDelivery.set(context.generation, { generation: context.generation, attempt: context.attempt });
           }
           return receipt;
-        } }, speech: { transcribe: (audio, selected, context) => {
+        } }, onTextStage: (event) => { this.emit({ kind: "text-stage", event }); },
+        speech: { transcribe: (audio, selected, context, onStage) => {
           const adaptive = new AdaptiveSpeechBoundary(createUtilitySpeechEffects({ gpuAvailable: false,
             infer: this.effects.infer(context), progress: (value) => { this.emit({ kind: "progress", ...value }); } }));
-          return adaptive.transcribe(audio, selected, context);
+          return adaptive.transcribe(audio, selected, context, onStage);
         } },
       });
       this.timer = setInterval(() => { try { this.publish(); } catch { void this.close().catch(() => {}); } }, 100);
