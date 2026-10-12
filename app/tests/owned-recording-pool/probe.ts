@@ -13,7 +13,7 @@ import { loadNativeCapture } from "../../src/workers/recording/native-capture.js
 import type { NativeCaptureSession } from "../../src/workers/recording/native-capture.js";
 import { WorkerRecordingEffects } from "../../src/workers/recording/recording-effects.js";
 import { PrivateAudioRecovery } from "../../src/workers/recording/recovery.js";
-import { LinuxSpeechGate } from "../../src/workers/speech/speech-gate.js";
+import { SilenceSpeechGate } from "../../src/workers/speech/speech-gate.js";
 import { EXPANSION, RECOVERY, SAMPLE_COUNT, modeSchema, phaseSchema, readySchema, workerResultSchema, runSchema } from "./contracts.js";
 
 const epoch = z.string().uuid().parse(process.argv[2]);
@@ -127,7 +127,7 @@ async function run(): Promise<void> {
             sha256: expectedHash, afterStopAck: true, fenced: true }); return audio;
         },
       };
-    } }, clock: { now: () => performance.now() }, delivery: rpc.delivery, speechGate: new LinuxSpeechGate(),
+    } }, clock: { now: () => performance.now() }, delivery: rpc.delivery, speechGate: new SilenceSpeechGate(),
     speech: { transcribe: async (audio, selected, context) => {
       validate(audio);
       const wire = rpc.infer(context);

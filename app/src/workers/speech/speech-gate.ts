@@ -5,8 +5,9 @@ const minimumSamples = 3200;
 const minimumMeanSquare = 0.00000025;
 const yieldSamples = 16384;
 
-/** Legacy Linux silence policy. Instantiate only in the capture utility. */
-export class LinuxSpeechGate implements SpeechGate {
+/** Silence policy for both platforms: recordings shorter than 0.2 s or below the energy floor are
+ * discarded without inference. Instantiate only in the capture utilities. */
+export class SilenceSpeechGate implements SpeechGate {
   async classify(audio: PreparedAudio, context: WorkContext): Promise<SpeechDisposition> {
     if (audio.sampleRate !== 16000 || !Number.isSafeInteger(audio.sampleCount) || audio.sampleCount < 0
       || audio.generation !== context.generation || audio.attempt !== context.attempt) {
