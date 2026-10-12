@@ -1832,7 +1832,6 @@ function render() {
       state.paste_ready,
       state.paste_configuring,
       state.download,
-      Math.round(state.progress * 100),
       state.history,
       state.transcript,
       state.transcript_preview_omitted,
@@ -1860,6 +1859,12 @@ function render() {
         : value;
     },
   );
+  // Download progress updates the bar in place; re-rendering would reset scrolling and focus.
+  document
+    .querySelectorAll<HTMLProgressElement>("#content .model-row progress")
+    .forEach((progress) => {
+      progress.value = state.progress;
+    });
   if (contentKey === nextKey) return;
   contentKey = nextKey;
   if (overlay) return;

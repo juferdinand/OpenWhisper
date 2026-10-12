@@ -3898,6 +3898,11 @@ for (const platform of ["linux", "macos"] as const) {
     await expect
       .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
       .toBe("download_model");
+    // Progress must update in place so scrolling and the open family survive each tick.
+    await page.evaluate(() => {
+      (window as any).setupBodyBeforeProgress =
+        document.querySelector(".setup-card-body");
+    });
     await page.evaluate(() => {
       window.testState.progress = 0.42;
       window.publishState();
@@ -3906,6 +3911,13 @@ for (const platform of ["linux", "macos"] as const) {
       "value",
       0.42,
     );
+    expect(
+      await page.evaluate(
+        () =>
+          (window as any).setupBodyBeforeProgress ===
+          document.querySelector(".setup-card-body"),
+      ),
+    ).toBe(true);
     await baseModel.getByRole("button", { name: "Cancel" }).click();
     await expect(
       baseModel.getByRole("button", { name: "Download" }),
