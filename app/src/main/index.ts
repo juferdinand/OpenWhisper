@@ -49,6 +49,7 @@ import { overlayWindowBounds, overlayWindowOptions, shouldShowRecordingOverlay, 
 import { WaylandRecordingOverlay } from "./wayland-recording-overlay.js";
 import type { SurfaceUnavailableReason } from "../contracts/platforms/wayland-surface.js";
 import { MacosShortcut } from "./macos-shortcut.js";
+import { MacosMouseTrigger } from "./macos-mouse-trigger.js";
 import { MacosPaste } from "./macos-paste.js";
 import { MacosAutostart } from "./macos-autostart.js";
 import { APPLICATION_MACOS_UPDATE_BUILD } from "./macos-update-build.js";
@@ -228,6 +229,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let overlayUnavailableReason: SurfaceUnavailableReason | undefined;
   let tray: Tray | undefined, trayKey = "";
   let macShortcut: MacosShortcut | undefined;
+  let macMouse: MacosMouseTrigger | undefined;
   let recording = recordingSnapshotSchema.parse({ phase: "idle", generation: 0, elapsedMs: 0, level: 0,
     busy: false, recoveryAvailable: false, error: null, transcript: "" });
   let message = "", inferenceProgress = 0;
@@ -434,7 +436,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       native_shortcuts: macShortcutState?.available ?? shortcut.nativeAvailable,
       shortcut_configuring: shortcut.configuring && !shortcut.nativeX11,
       native_x11: shortcut.nativeX11 ?? false, native_paste: !!macPaste,
-      native_mouse: shortcut.nativeMouse ?? false, native_middle_mouse: shortcut.nativeMiddleMouse ?? false,
+      native_mouse: macShortcut?.mouseAvailable() ?? shortcut.nativeMouse ?? false, native_middle_mouse: macShortcut?.mouseAvailable() ?? shortcut.nativeMiddleMouse ?? false,
       recording_shortcut: (macShortcutState?.configuring ?? false) || !!keyCapture || !!shortcut.nativeX11 && shortcut.configuring,
       paste_ready: macPaste ? accessibilityAllowed : pasteState.ready, paste_configuring: pasteState.configuring,
       gpu_available: gpuSelection.available, gpu_supported: gpuSelection.supported, gpu_checked: gpuSelection.checked,
@@ -613,7 +615,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     cancelRequested = true; if (host?.isConfigured()) await host.command("cancel");
   });
   if (host && macRecording && process.platform === "darwin") {
-    macShortcut = new MacosShortcut({ shortcuts: globalShortcut,
+    macMouse = MacosMouseTrigger.create();
+    macShortcut = new MacosShortcut({ shortcuts: globalShortcut, ...(macMouse ? { mouse: macMouse } : {}),
       allowed: () => !shutdownInProgress && updateReserved !== "install" && !recordingControl && !recording.recoveryAvailable &&
         !["stopping", "transcribing", "restoring", "discarding"].includes(recording.phase),
       setupAllowed: () => !shutdownInProgress && updateReserved !== "install" && !recording.busy && !recording.recoveryAvailable,
@@ -623,7 +626,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       changed: (value) => {
         contents.setIgnoreMenuShortcuts(value.configuring);
         const messages = { NONE: "", ENABLED: "", CANCELLED: "Shortcut setup was cancelled. Window recording remains usable.",
-          UNSUPPORTED: "Use a regular key or shortcut. Fn and mouse triggers are not available in this build.",
+          UNSUPPORTED: "Use a regular key, a shortcut, or the middle, back or forward mouse button.",
           CONFLICT: "This trigger conflicts with an existing desktop shortcut. Choose another trigger.",
           FAILED: "Shortcut setup or recording failed. Window recording remains usable." };
         message = messages[value.result];
@@ -633,6 +636,12 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         }
         notify();
       } });
+    const savedTrigger = preferences.snapshot().macos_shortcut;
+    if (savedTrigger) {
+      // Saved triggers are registered again at startup; a failure keeps window recording usable.
+      try { macShortcut.bind(savedTrigger); }
+      catch { message = "Shortcut setup or recording failed. Window recording remains usable."; }
+    }
     notify();
   }
   if (host && descriptor?.platform === "linux" && descriptor.platformServices) {
@@ -761,7 +770,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     const closeOwners = async (): Promise<void> => {
       await recordingOperation?.catch(() => {}); await downloading; await downloads.finalize();
       nativeCleanupStarted = true;
-      await macShortcut?.close(); macPaste?.close(); await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); await waylandOverlay?.close();
+      await macShortcut?.close(); macMouse?.close(); macPaste?.close(); await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); await waylandOverlay?.close();
       if (macRecording) { recordingRetired = true; host = undefined; configured = false; }
     };
     shutdownTask = (async () => {
@@ -1010,6 +1019,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       clear_shortcut: () => shortcutAction("clear"),
       cancel_shortcut: () => shortcutAction("cancel"),
       capture_mouse_trigger: ({ button }) => recordingAction(async () => {
+        if (macShortcut) {
+          if (!window?.isFocused() || recording.busy || recording.recoveryAvailable || shutdownInProgress) throw new Error("Mouse trigger setup is unavailable.");
+          macShortcut.captureMouse(button); return;
+        }
         if (!keyCapture || !shortcut.nativeMouse || !platformHost || !window?.isFocused() ||
             recording.busy || recording.recoveryAvailable || shutdownInProgress) {
           throw new Error("Mouse trigger setup is unavailable.");

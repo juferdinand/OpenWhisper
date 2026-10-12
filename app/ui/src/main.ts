@@ -2554,7 +2554,15 @@ function modifierOnlyTrigger() {
     (trigger.key & 0x01ffffff) <= 0x01000023
   );
 }
+function mouseButtonLabel(button: number) {
+  if (button === 2) return t("Middle mouse button");
+  if (button === 8) return t("Mouse back button");
+  if (button === 9) return t("Mouse forward button");
+  return t("Mouse button {number}", { number: String(button - 4) });
+}
 function triggerLabel() {
+  const macMouse = isMac() ? /^Mouse(\d)$/u.exec(state.shortcut ?? "") : null;
+  if (macMouse) return mouseButtonLabel(Number(macMouse[1]));
   const trigger = state.preferences.native_trigger;
   if (
     !isMac() &&
@@ -2562,10 +2570,7 @@ function triggerLabel() {
     state.native_shortcuts &&
     trigger?.kind === "mouse"
   ) {
-    if (trigger.button === 2) return t("Middle mouse button");
-    if (trigger.button === 8) return t("Mouse back button");
-    if (trigger.button === 9) return t("Mouse forward button");
-    return t("Mouse button {number}", { number: String(trigger.button - 4) });
+    return mouseButtonLabel(trigger.button);
   }
   return state.shortcut ?? t("Set trigger …");
 }
