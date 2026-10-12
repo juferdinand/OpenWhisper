@@ -196,4 +196,3 @@ export async function ensureTextProviderAvailability(provider: TextProvider,
   try { return textConnectionAvailabilityListSchema.parse(await scan()); }
   catch { return safeAvailabilityFallback(); }
 }
-
