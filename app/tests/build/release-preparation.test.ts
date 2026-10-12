@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 import { prepareRelease, applyPreparedRelease } from "../../scripts/prepare-release.js";
 import { releaseContextFromFiles } from "../../scripts/release-context.js";
+import { bumpDevelopmentVersion } from "../../scripts/bump-development-version.js";
+import { parsePublicReleaseRecord, verifyPublicReleaseRecovery } from "../../scripts/verify-release-recovery.js";
 
 const versionFiles = (version: string): Record<string, string> => ({
   VERSION: `${version}\n`,
@@ -80,5 +82,55 @@ test("explicit patch, minor, and major targets are accepted while downgrades and
     const prepared = await prepareRelease(root, "0.4.2", highlights);
     await applyPreparedRelease(prepared);
     await assert.rejects(prepareRelease(root, "0.4.2", { en: ["Different English"], de: ["Andere deutsche Notiz"] }), /different prepared content/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("post-publication bump synchronizes the next patch and is idempotent", async () => {
+  const root = await fixture();
+  try {
+    const release = await prepareRelease(root, "0.4.2", highlights);
+    await applyPreparedRelease(release);
+    const bumped = await bumpDevelopmentVersion(root, "0.4.2");
+    assert.deepEqual(bumped, { version: "0.4.3", changed: true });
+    assert.match(await readFile(join(root, "README.md"), "utf8"), /current release is \*\*0\.4\.2\*\*/);
+    assert.match(await readFile(join(root, ".github/release-notes.md"), "utf8"), /What's new in OpenWhisper 0\.4\.2/);
+    assert.deepEqual(await releaseContextFromFiles(Object.fromEntries(await Promise.all(
+      Object.keys(versionFiles("0.4.3")).map(async (path) => [path, await readFile(join(root, path), "utf8")] as const),
+    ))), { currentVersion: "0.4.3", successorVersion: "0.4.4" });
+    assert.deepEqual(await bumpDevelopmentVersion(root, "0.4.2"), { version: "0.4.3", changed: false });
+    const nextRelease = await prepareRelease(root, "0.4.3", highlights);
+    assert.equal(nextRelease.targetVersion, "0.4.3");
+    await applyPreparedRelease(nextRelease);
+    assert.match(await readFile(join(root, "README.md"), "utf8"), /current release is \*\*0\.4\.3\*\*/);
+    assert.match(await readFile(join(root, ".github/release-notes.md"), "utf8"), /What's new in OpenWhisper 0\.4\.3/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("post-publication bump refuses unrelated version movement", async () => {
+  const root = await fixture();
+  try {
+    await assert.rejects(bumpDevelopmentVersion(root, "0.4.2"), /Cannot bump after publishing/);
+    assert.equal(await readFile(join(root, "VERSION"), "utf8"), "0.4.1\n");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("release recovery requires an exact public tag, exact asset set, and matching staged bytes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "openwhisper-release-recovery-"));
+  const staged = join(root, "staged"), downloaded = join(root, "downloaded");
+  const names = ["OpenWhisper-macOS.dmg", "OpenWhisper-macOS.zip", "OpenWhisper-Linux-x86_64.AppImage",
+    "OpenWhisper-Linux-amd64.deb", "OpenWhisper-Linux-x86_64.AppImage.sig", "OpenWhisper-Linux-amd64.deb.sig",
+    "latest.json", "SHA256SUMS"];
+  const release = { tag_name: "v0.4.2", draft: false, assets: names.map((name) => ({ name })) };
+  try {
+    await Promise.all([mkdir(staged), mkdir(downloaded)]);
+    await Promise.all(names.map(async (name) => {
+      await writeFile(join(staged, name), `staged:${name}`);
+      await writeFile(join(downloaded, name), `staged:${name}`);
+    }));
+    await verifyPublicReleaseRecovery(release, "v0.4.2", staged, downloaded);
+    assert.throws(() => parsePublicReleaseRecord({ ...release, draft: true }, "v0.4.2"), /RELEASE_RECOVERY_NOT_PUBLIC/);
+    assert.throws(() => parsePublicReleaseRecord(release, "v0.4.3"), /RELEASE_RECOVERY_TAG_MISMATCH/);
+    await writeFile(join(downloaded, "OpenWhisper-macOS.dmg"), "different bytes");
+    await assert.rejects(verifyPublicReleaseRecovery(release, "v0.4.2", staged, downloaded), /RELEASE_RECOVERY_ASSET_BYTES_MISMATCH/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

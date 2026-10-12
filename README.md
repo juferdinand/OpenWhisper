@@ -25,12 +25,10 @@ source and evidence remain available as an immutable reference.
 The immutable [0.2.5 source snapshot](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4)
 preserves the legacy hosts and their historical evidence.
 
-Maintainers can prepare a review-only release change with the **Prepare release review** workflow,
-using authored English and German highlights. Before its first run, enable **Settings → Actions →
-General → Workflow permissions → Allow GitHub Actions to create and approve pull requests**.
-Review the generated PR and confirm its CI; GitHub may require maintainer approval or a manual CI
-dispatch for workflows on bot-created PRs. Preparation does not publish a release. Local preview,
-recovery, and publication steps are in the [development guide](docs/ELECTRON-DEVELOPMENT.md#release-preparation).
+Maintainers start a release from `main` with the **Release** workflow, selecting a version and
+providing English and German highlights. It commits release metadata, checks and builds that exact
+source, publishes the signed assets, then advances the development version. Recovery steps are in
+the [development guide](docs/ELECTRON-DEVELOPMENT.md#release-preparation).
 
 Linux release evidence covers owned KDE Plasma 5.27 Wayland and X11 profiles, plus a package
 transition on one Kubuntu 24 baseline. Other desktop and distribution combinations require

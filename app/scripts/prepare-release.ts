@@ -1,4 +1,3 @@
-import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -41,31 +40,38 @@ export async function prepareRelease(root: string, targetVersionInput: unknown, 
   parseUpdateVersion(targetVersion);
   if (targetVersion === context.currentVersion) {
     const [readme, releaseNotes] = await Promise.all([readFile(resolve(root, "README.md"), "utf8"), readFile(resolve(root, ".github/release-notes.md"), "utf8")]);
+    const currentStatement = `The current release is **${targetVersion}**`;
     const intro = "<!-- Prepared for the gated release workflow; repository status lives in README.md. -->\n\n";
-    if (readme.includes(`The current release is **${targetVersion}**`) && releaseNotes.startsWith(`${intro}${releaseNotesBlock(targetVersion, highlights)}\n\n`)) {
-      return Object.freeze({ currentVersion: context.currentVersion, targetVersion, notes: releaseNotesBlock(targetVersion, highlights), changes: Object.freeze([]) });
+    if (readme.includes(currentStatement)) {
+      if (readme.split(currentStatement).length === 2 && releaseNotes.startsWith(`${intro}${releaseNotesBlock(targetVersion, highlights)}\n\n`)) {
+        return Object.freeze({ currentVersion: context.currentVersion, targetVersion, notes: releaseNotesBlock(targetVersion, highlights), changes: Object.freeze([]) });
+      }
+      throw new Error("A release at the current version already exists with different prepared content.");
     }
-    throw new Error("A release at the current version already exists with different prepared content.");
   }
-  if (!isNewerUpdateVersion(targetVersion, context.currentVersion)) throw new Error("Target release version must be newer than VERSION.");
+  if (targetVersion !== context.currentVersion && !isNewerUpdateVersion(targetVersion, context.currentVersion)) {
+    throw new Error("Target release version must be newer than VERSION.");
+  }
   const versionUpdates = await prepareVersionUpdates(root, targetVersion);
   const [readme, releaseNotes] = await Promise.all([
     readFile(resolve(root, "README.md"), "utf8"),
     readFile(resolve(root, ".github/release-notes.md"), "utf8"),
   ]);
-  const currentStatement = `The current release is **${context.currentVersion}**`;
-  assert.equal(readme.split(currentStatement).length - 1, 1, "README must have one authoritative current-release statement.");
-  const currentNotesHeading = `## What's new in OpenWhisper ${context.currentVersion}`;
-  const readmeContents = readme.replace(currentStatement, `The current release is **${targetVersion}**`);
+  const readmeReleases = [...readme.matchAll(/The current release is \*\*((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))\*\*/gu)];
   const marker = "Recognition runs locally.";
   const markerIndex = releaseNotes.indexOf(marker);
   const firstHeading = releaseNotes.indexOf("## What's new in OpenWhisper ");
-  const germanHeading = `## Neu in OpenWhisper ${context.currentVersion}`;
-  if (firstHeading < 0 || markerIndex < firstHeading ||
-      releaseNotes.slice(firstHeading, markerIndex).split(currentNotesHeading).length !== 2 ||
-      releaseNotes.slice(firstHeading, markerIndex).split(germanHeading).length !== 2) {
+  const curatedNotes = firstHeading < 0 || markerIndex < firstHeading ? "" : releaseNotes.slice(firstHeading, markerIndex);
+  const englishVersions = [...curatedNotes.matchAll(/^## What's new in OpenWhisper ((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$/gmu)].map((match) => match[1]!);
+  const germanVersions = [...curatedNotes.matchAll(/^## Neu in OpenWhisper ((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$/gmu)].map((match) => match[1]!);
+  if (readmeReleases.length !== 1 || firstHeading < 0 || markerIndex < firstHeading ||
+      englishVersions.length !== 1 || germanVersions.length !== 1 ||
+      englishVersions[0] !== readmeReleases[0]![1] || germanVersions[0] !== readmeReleases[0]![1] ||
+      isNewerUpdateVersion(readmeReleases[0]![1]!, context.currentVersion)) {
     throw new Error("Release notes must contain exactly one current bilingual curated section before the stable guidance.");
   }
+  const currentStatement = `The current release is **${readmeReleases[0]![1]}**`;
+  const readmeContents = readme.replace(currentStatement, `The current release is **${targetVersion}**`);
   const intro = "<!-- Prepared for the gated release workflow; repository status lives in README.md. -->\n\n";
   const notes = `${intro}${releaseNotesBlock(targetVersion, highlights)}\n\n${releaseNotes.slice(markerIndex)}`;
   const changes = [...versionUpdates, { path: resolve(root, "README.md"), contents: readmeContents },

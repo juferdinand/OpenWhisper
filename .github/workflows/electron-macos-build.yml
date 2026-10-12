@@ -7,6 +7,10 @@ on:
         description: Exact project version to package without changing source manifests
         required: true
         type: string
+      source_commit:
+        description: Exact release metadata commit admitted by the parent workflow
+        required: true
+        type: string
     secrets:
       SIGNING_CERT_P12:
         required: true
@@ -31,10 +35,11 @@ jobs:
     timeout-minutes: 30
     env:
       VERSION: ${{ inputs.version }}
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.source_commit }}
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -55,7 +60,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --import tsx scripts/verify-release-source.ts --version "$VERSION" --commit "$GITHUB_SHA"
+          node --import tsx scripts/verify-release-source.ts --version "$VERSION" --commit "$SOURCE_COMMIT"
       - name: Build stable recording app and admit native outputs before credentials
         working-directory: app
         env:
@@ -64,7 +69,7 @@ jobs:
           set -euo pipefail
           npm run build -- --recording --stable
           node --import tsx scripts/verify-macos-release-workflow.ts thin-build \
-            --version "$VERSION" --commit "$GITHUB_SHA" --architecture "$EXPECTED_ARCH"
+            --version "$VERSION" --commit "$SOURCE_COMMIT" --architecture "$EXPECTED_ARCH"
           test -z "$(git status --porcelain)"
       - name: Import the existing persistent identity into an isolated keychain
         id: identity
@@ -110,7 +115,7 @@ jobs:
             --output "$output" --signing-mode persistent-validation --enable-updates --construction-mode release \
             > "$result"
           node --import tsx scripts/verify-macos-release-workflow.ts thin-result \
-            --result "$result" --output "$output" --version "$VERSION" --commit "$GITHUB_SHA" \
+            --result "$result" --output "$output" --version "$VERSION" --commit "$SOURCE_COMMIT" \
             --architecture "$EXPECTED_ARCH" --identity "$SIGN_IDENTITY"
       - name: Restore keychain and remove signing material
         if: always()
@@ -133,7 +138,7 @@ jobs:
       - name: Upload the same-source signed thin input and receipt
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: OpenWhisper-electron-macos-thin-${{ matrix.arch }}-${{ github.sha }}
+          name: OpenWhisper-electron-macos-thin-${{ matrix.arch }}-${{ inputs.source_commit }}
           path: |
             ${{ runner.temp }}/mac-release-input-${{ matrix.arch }}/*.zip
             ${{ runner.temp }}/mac-release-input-${{ matrix.arch }}/release-input.json
@@ -147,10 +152,11 @@ jobs:
     timeout-minutes: 20
     env:
       VERSION: ${{ inputs.version }}
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.source_commit }}
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -160,25 +166,25 @@ jobs:
       - name: Download exact same-run arm64 input
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: OpenWhisper-electron-macos-thin-arm64-${{ github.sha }}
+          name: OpenWhisper-electron-macos-thin-arm64-${{ inputs.source_commit }}
           path: ${{ runner.temp }}/thin-arm64
       - name: Download exact same-run Intel input
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: OpenWhisper-electron-macos-thin-x64-${{ github.sha }}
+          name: OpenWhisper-electron-macos-thin-x64-${{ inputs.source_commit }}
           path: ${{ runner.temp }}/thin-x64
       - name: Admit source, version, package bytes and signing identity before secrets
         working-directory: app
         shell: bash
         run: |
           set -euo pipefail
-          node --import tsx scripts/verify-release-source.ts --version "$VERSION" --commit "$GITHUB_SHA"
+          node --import tsx scripts/verify-release-source.ts --version "$VERSION" --commit "$SOURCE_COMMIT"
           for arch in arm64 x64; do
             input="$RUNNER_TEMP/thin-$arch"
             receipt="$input/release-input.json"
             test "$(jq -er '.status' "$receipt")" = PASS
             test "$(jq -er '.architecture' "$receipt")" = "$arch"
-            test "$(jq -er '.sourceCommit' "$receipt")" = "$GITHUB_SHA"
+            test "$(jq -er '.sourceCommit' "$receipt")" = "$SOURCE_COMMIT"
             test "$(jq -er '.sourceModified' "$receipt")" = false
             test "$(jq -er '.version' "$receipt")" = "$VERSION"
             test "$(jq -er '.classification' "$receipt")" = STABLE_RELEASE_INPUT
@@ -193,7 +199,7 @@ jobs:
             mkdir -m 700 "$RUNNER_TEMP/extracted-$arch"
             /usr/bin/ditto -x -k "${archives[0]}" "$RUNNER_TEMP/extracted-$arch"
             app="$RUNNER_TEMP/extracted-$arch/OpenWhisper.app"
-            test "$(jq -er '.commit' "$app/Contents/Resources/app/dist/resources/development-build.json")" = "$GITHUB_SHA"
+            test "$(jq -er '.commit' "$app/Contents/Resources/app/dist/resources/development-build.json")" = "$SOURCE_COMMIT"
             test "$(jq -er '.modified' "$app/Contents/Resources/app/dist/resources/development-build.json")" = false
             test "$(cat "$app/Contents/Resources/app/dist/resources/VERSION")" = "$VERSION"
             test "$(jq -er '.sourceVersion' "$app/Contents/Resources/notices/mac-stable-release-input.json")" = "$VERSION"
@@ -202,7 +208,7 @@ jobs:
           done
           test "$(jq -er '.certificateFingerprint' "$RUNNER_TEMP/thin-arm64/release-input.json")" = "$(jq -er '.certificateFingerprint' "$RUNNER_TEMP/thin-x64/release-input.json")"
           node --import tsx scripts/verify-macos-release-workflow.ts universal-inputs \
-            --runner-temp "$RUNNER_TEMP" --version "$VERSION" --commit "$GITHUB_SHA"
+            --runner-temp "$RUNNER_TEMP" --version "$VERSION" --commit "$SOURCE_COMMIT"
       - name: Import the existing persistent identity into an isolated keychain
         working-directory: app
         env:
@@ -248,7 +254,7 @@ jobs:
           cd "$output"
           /usr/bin/shasum -a 256 OpenWhisper-macOS.dmg OpenWhisper-macOS.zip > SHA256SUMS
           /usr/bin/shasum -a 256 -c SHA256SUMS
-          printf '{"status":"PASS","version":"%s","sourceCommit":"%s","architecture":"universal","updateConfigured":true}\n' "$VERSION" "$GITHUB_SHA" > OpenWhisper-macOS-release.json
+          printf '{"status":"PASS","version":"%s","sourceCommit":"%s","architecture":"universal","updateConfigured":true}\n' "$VERSION" "$SOURCE_COMMIT" > OpenWhisper-macOS-release.json
       - name: Restore keychain and remove signing material
         if: always()
         shell: bash
