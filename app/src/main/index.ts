@@ -575,6 +575,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       emit("state", snapshot);
       updateTray(snapshot);
       syncOverlayVisibility(snapshot);
+      // macOS reports a background or covered window as hidden and pauses its animation frames,
+      // which left gaps in the live waveform. Keep the window unthrottled only while recording.
+      const throttle = snapshot.status !== "recording";
+      if (!contents.isDestroyed() && contents.getBackgroundThrottling() !== throttle) contents.setBackgroundThrottling(throttle);
     }
     catch { console.error("OpenWhisper Dev could not publish its UI state."); }
   };
