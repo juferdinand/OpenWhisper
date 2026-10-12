@@ -732,18 +732,19 @@ function setupModelGroups(): string {
     .join("")}</div>`;
 }
 const outputs = () =>
-  `<div class="radio-group">${[["paste", t("Paste at the cursor")], ["clipboard", t("Copy to clipboard only")], ...(isMac() ? [["editor", t("Open in a text editor")]] : [])].map(([v, l]) => `<label><input type="radio" name="output" data-pref="output" value="${v}" ${effectiveOutput() === v ? "checked" : ""} >${l}</label>`).join("")}</div>`;
+  `<div class="radio-group">${[
+    ["paste", t("Paste at the cursor")],
+    ["clipboard", t("Copy to clipboard only")],
+  ]
+    .map(
+      ([v, l]) =>
+        `<label><input type="radio" name="output" data-pref="output" value="${v}" ${effectiveOutput() === v ? "checked" : ""} ${v === "paste" && !accessibilityPermissionGranted() ? "disabled" : ""}>${l}</label>`,
+    )
+    .join("")}</div>`;
 const settingOutputs = () => {
   const modes: [string, string, string][] = [
     ["paste", "Insert", "Paste at the cursor"],
     ["clipboard", "Copy", "Copy to clipboard only"],
-    ...(isMac()
-      ? ([ ["editor", "Editor", "Open in a text editor"] ] as [
-          string,
-          string,
-          string,
-        ][])
-      : []),
   ];
   return `<fieldset class="settings-output-segment" aria-label="${esc(t("Output"))}">${modes.map(([value, label, fullLabel]) => `<label><input type="radio" name="settings-output" data-pref="output" value="${value}" aria-label="${esc(t(fullLabel))}" ${effectiveOutput() === value ? "checked" : ""} ><span>${esc(t(label))}</span></label>`).join("")}</fieldset>`;
 };
@@ -754,9 +755,6 @@ function effectiveOutput(): string {
     ? "clipboard"
     : state.preferences.output;
 }
-const setupTriggerOutput = () =>
-  `<div class="setup-trigger-output"><span class="setup-trigger-output-label">${esc(t("Output"))}<small>${esc(t(isMac() ? "Insert uses Accessibility access; Copy uses the clipboard." : "Insert uses keyboard access; Copy uses the clipboard."))}</small></span>${settingOutputs()}</div>`;
-
 function microphonePermissionGranted(): boolean {
   if (isMac()) return state.macos?.microphone_allowed === true;
   return true;
@@ -1442,15 +1440,6 @@ function recordControl() {
     const outputModes: [string, string, string][] = [
       ["paste", t("Insert"), t("Paste at the cursor")],
       ["clipboard", t("Copy"), t("Copy to clipboard only")],
-      ...(isMac()
-        ? ([
-            [
-              "editor",
-              t("Editor"),
-              t("Open in a text editor"),
-            ],
-          ] as [string, string, string][])
-        : []),
     ];
     const outputControls = `<div class="record-output" role="group" aria-label="${esc(t("Output"))}"><span class="record-output-label">${esc(t("Output"))}</span>${outputModes.map(([value, label, fullLabel]) => `<button type="button" data-output="${value}" data-pref="output" aria-label="${esc(fullLabel)}" title="${esc(fullLabel)}" aria-pressed="${effectiveOutput() === value}" ${recording || recovery || busy || (value === "paste" && (!accessibilityPermissionGranted() || portalBusy || state.paste_configuring)) ? "disabled" : ""}>${esc(label)}</button>`).join("")}</div>`;
     const overlayBars = Array.from({ length: 5 }, () => "<i></i>").join("");
