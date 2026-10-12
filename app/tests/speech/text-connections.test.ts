@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { chmod, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 import {
   cliTextModelSchema, customCliConnectionSchema, defaultTextConnectionAvailability, defaultTextConnectionSettings,
@@ -214,14 +214,44 @@ test("local discovery never follows redirects and distinguishes empty model inve
   assert.equal(available.find(({ provider }) => provider === "lm_studio")?.reason, "no_models");
 });
 
-test("CLI detection resolves executable files from PATH without running them", async () => {
+test("CLI discovery resolves executables and reads model metadata without starting a model turn", async () => {
   const directory = await mkdtemp(join(tmpdir(), "openwhisper-cli-discovery-test-"));
   directories.push(directory);
   const executable = join(directory, "claude");
-  await writeFile(executable, "#!/bin/sh\nprintf '2.1.260 (Claude Code)\\n'\n", { mode: 0o700 });
+  await writeFile(executable, `#!/usr/bin/env node
+if (process.argv.includes('--version')) { process.stdout.write('2.1.260 (Claude Code)\\n'); process.exit(0); }
+let pending = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => { pending += chunk; for (const line of pending.split('\\n').slice(0, -1)) {
+  pending = pending.slice(line.length + 1); if (!line) continue;
+  const request = JSON.parse(line);
+  if (request.type !== 'control_request' || request.request?.subtype !== 'initialize') process.exit(41);
+  process.stdout.write(JSON.stringify({ type: 'control_response', response: { request_id: request.request_id,
+    subtype: 'success', response: { models: [{ value: 'claude-sonnet', displayName: 'Sonnet' }] } } }) + '\\n');
+} });
+process.stdin.on('end', () => process.exit(0));
+`, { mode: 0o700 });
   await chmod(executable, 0o700);
   const codexExecutable = join(directory, "codex");
-  await writeFile(codexExecutable, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  await writeFile(codexExecutable, `#!/usr/bin/env node
+if (process.argv.includes('exec') && process.argv.includes('--help')) {
+  process.stdout.write('--json --sandbox --skip-git-repo-check --ephemeral --model --color\\n'); process.exit(0);
+}
+if (process.argv.includes('--help')) { process.stdout.write('-a --color\\n'); process.exit(0); }
+let pending = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => { pending += chunk; while (pending.includes('\\n')) {
+  const end = pending.indexOf('\\n'), line = pending.slice(0, end); pending = pending.slice(end + 1); if (!line) continue;
+  const request = JSON.parse(line);
+  if (request.method === 'initialize') process.stdout.write(JSON.stringify({ id: request.id, result: {} }) + '\\n');
+  else if (request.method === 'initialized') { if (request.id !== undefined) process.exit(42); }
+  else if (request.method === 'model/list') process.stdout.write(JSON.stringify({ id: request.id, result: {
+    data: [{ id: 'gpt-5.4-codex', hidden: false }, { id: 'hidden', hidden: true }], nextCursor: null,
+  } }) + '\\n');
+  else process.exit(43);
+} });
+process.stdin.on('end', () => process.exit(0));
+`, { mode: 0o700 });
   await chmod(codexExecutable, 0o700);
   const canonicalExecutable = await realpath(executable);
   assert.equal(await resolveTextCliExecutable("claude", directory), canonicalExecutable);
@@ -232,11 +262,30 @@ test("CLI detection resolves executable files from PATH without running them", a
   const emptyPort = await serve((path, response) => response.end(JSON.stringify(path === "/api/tags" ? { models: [] } : { models: [
     { key: "nomic-embed", type: "embedding" }, { key: "decision-model", type: "decision" },
   ] })));
-  const availability = await new LocalTextConnectionScanner({ PATH: directory, HOME: directory },
+  const fixturePath = [directory, dirname(process.execPath), "/usr/bin", "/bin"].join(delimiter);
+  const availability = await new LocalTextConnectionScanner({ PATH: fixturePath, HOME: directory },
+    { ollama: emptyPort, lm_studio: emptyPort }).scan();
+  assert.deepEqual(availability.find(({ provider }) => provider === "claude_code"), {
+    provider: "claude_code", detected: true, usable: true, models: ["claude-sonnet"], reason: null,
+  });
+  const codex = availability.find(({ provider }) => provider === "codex");
+  assert.deepEqual(codex, { provider: "codex", detected: true, usable: true, models: ["gpt-5.4-codex"], reason: null });
+});
+
+test("CLI metadata failure leaves a supported installed CLI usable with its inherited model", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "openwhisper-cli-empty-catalog-test-"));
+  directories.push(directory);
+  const executable = join(directory, "claude");
+  await writeFile(executable, `#!/usr/bin/env node
+if (process.argv.includes('--version')) { process.stdout.write('2.1.260\\n'); process.exit(0); }
+process.stdin.once('data', () => process.stdout.write('{not-json}\\n'));
+`, { mode: 0o700 });
+  await chmod(executable, 0o700);
+  const emptyPort = await serve((_path, response) => response.end(JSON.stringify({ models: [] })));
+  const fixturePath = [directory, dirname(process.execPath), "/usr/bin", "/bin"].join(delimiter);
+  const availability = await new LocalTextConnectionScanner({ PATH: fixturePath, HOME: directory },
     { ollama: emptyPort, lm_studio: emptyPort }).scan();
   assert.deepEqual(availability.find(({ provider }) => provider === "claude_code"), {
     provider: "claude_code", detected: true, usable: true, models: [], reason: null,
   });
-  const codex = availability.find(({ provider }) => provider === "codex");
-  assert.deepEqual(codex, { provider: "codex", detected: true, usable: false, models: [], reason: "unsupported" });
 });

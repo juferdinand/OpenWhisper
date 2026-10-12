@@ -11,6 +11,7 @@ import {
   type CustomCliConnection, type TextConnectionAvailability, type TextConnectionSettings, type TextProvider,
 } from "../../contracts/text/connections.js";
 import { checkCodexTextCapabilities } from "./codex.js";
+import { discoverClaudeModels, discoverCodexModels } from "./cli-models.js";
 
 const MAX_DISCOVERY_BYTES = 1024 * 1024;
 const DISCOVERY_TIMEOUT_MS = 1800;
@@ -184,16 +185,22 @@ export class LocalTextConnectionScanner {
       ...settings.connections.filter((connection): connection is CustomCliConnection => "command" in connection)
         .map((connection) => resolveCustomTextCliExecutable(connection, this.environment["PATH"], this.environment["HOME"])),
     ]);
-    const claudeSupported = claude !== undefined && await supportedClaudeVersion(claude, this.environment);
-    const codexSupported = codex !== undefined && await checkCodexTextCapabilities(codex);
+    const [claudeSupported, codexSupported] = await Promise.all([
+      claude === undefined ? false : supportedClaudeVersion(claude, this.environment),
+      codex === undefined ? false : checkCodexTextCapabilities(codex),
+    ]);
+    const [claudeModels, codexModels] = await Promise.all([
+      claudeSupported && claude !== undefined ? discoverClaudeModels(claude) : [],
+      codexSupported && codex !== undefined ? discoverCodexModels(codex) : [],
+    ]);
     const result: TextConnectionAvailability[] = [
       { provider: "ollama", detected: ollama.detected, usable: ollama.models.length > 0, models: [...ollama.models],
         reason: ollama.failed ? "scan_failed" : ollama.models.length > 0 ? null : ollama.detected ? "no_models" : "not_running" },
       { provider: "lm_studio", detected: lmStudio.detected, usable: lmStudio.models.length > 0, models: [...lmStudio.models],
         reason: lmStudio.failed ? "scan_failed" : lmStudio.models.length > 0 ? null : lmStudio.detected ? "no_models" : "not_running" },
-      { provider: "claude_code", detected: claude !== undefined, usable: claudeSupported, models: [],
+      { provider: "claude_code", detected: claude !== undefined, usable: claudeSupported, models: claudeModels,
         reason: claude === undefined ? "not_installed" : claudeSupported ? null : "unsupported" },
-      { provider: "codex", detected: codex !== undefined, usable: codexSupported, models: [],
+      { provider: "codex", detected: codex !== undefined, usable: codexSupported, models: codexModels,
         reason: codex === undefined ? "not_installed" : codexSupported ? null : "unsupported" },
       ...settings.connections.filter((connection): connection is CustomCliConnection => "command" in connection)
         .map((connection, index): TextConnectionAvailability => ({ provider: connection.provider,

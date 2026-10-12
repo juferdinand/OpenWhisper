@@ -1711,8 +1711,7 @@ dialog#settings-dialog {
 .settings-content .connection-model {
   width: 100%;
 }
-.settings-content .connection-model select,
-.settings-content .connection-model input {
+.settings-content .connection-model select {
   width: 100%;
   min-width: 0;
   min-height: 30px;
@@ -1722,16 +1721,6 @@ dialog#settings-dialog {
 .settings-content .connection-model-note {
   margin: 0;
   line-height: 1.35;
-}
-.settings-content .connection-cli-model {
-  width: 100%;
-  min-width: 0;
-}
-.settings-content .connection-cli-model-help {
-  margin: 2px 0 0;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.25;
 }
 .settings-content .connection-instruction h2 {
   margin: 0 0 6px;

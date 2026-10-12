@@ -7,6 +7,7 @@ import { delimiter, dirname, isAbsolute, join } from "node:path";
 export const MAX_TEXT_CLI_STDOUT_BYTES = 1024 * 1024;
 const MAX_TEXT_CLI_TIMEOUT_MS = 120_000;
 const MAX_TEXT_CLI_STDIN_BYTES = 384 * 1024;
+const MAX_TEXT_CLI_LINE_BYTES = 64 * 1024;
 
 export type TextCliProcessErrorCode = "UNAVAILABLE" | "TIMEOUT" | "CANCELLED" | "FAILED" | "INVALID_RESPONSE";
 export class TextCliProcessError extends Error {
@@ -20,6 +21,9 @@ export interface TextCliProcessOptions {
   readonly signal: AbortSignal;
   readonly timeoutMs: number;
   readonly maxStdoutBytes?: number;
+  /** Keep stdin open for a bounded JSONL control dialogue; omitted for one-shot calls. */
+  readonly onLine?: (line: string) => { readonly write?: string; readonly end?: boolean } | undefined;
+  readonly keepStdinOpen?: boolean;
 }
 
 export function safeTextCliEnvironment(environment: NodeJS.ProcessEnv = process.env, executable?: string): NodeJS.ProcessEnv {
@@ -56,7 +60,8 @@ export async function runTextCliProcess(options: TextCliProcessOptions): Promise
       !Number.isInteger(options.timeoutMs) || options.timeoutMs < 100 || options.timeoutMs > MAX_TEXT_CLI_TIMEOUT_MS ||
       !Number.isSafeInteger(options.maxStdoutBytes ?? MAX_TEXT_CLI_STDOUT_BYTES) ||
       (options.maxStdoutBytes ?? MAX_TEXT_CLI_STDOUT_BYTES) < 1 ||
-      Buffer.byteLength(options.input, "utf8") > MAX_TEXT_CLI_STDIN_BYTES) {
+      Buffer.byteLength(options.input, "utf8") > MAX_TEXT_CLI_STDIN_BYTES ||
+      options.onLine !== undefined && options.keepStdinOpen !== true) {
     throw new TextCliProcessError("UNAVAILABLE");
   }
   if (options.signal.aborted) throw new TextCliProcessError("CANCELLED");
@@ -64,9 +69,10 @@ export async function runTextCliProcess(options: TextCliProcessOptions): Promise
   try {
     if (options.signal.aborted) throw new TextCliProcessError("CANCELLED");
     return await new Promise<Buffer>((resolveResult, reject) => {
-      let settled = false, stdoutBytes = 0;
+      let settled = false, stdoutBytes = 0, stdinBytes = Buffer.byteLength(options.input, "utf8"), stdinEnded = false;
       let exitError: TextCliProcessError | undefined, killTimer: NodeJS.Timeout | undefined;
       const stdout: Buffer[] = [];
+      let lineBuffer = Buffer.alloc(0);
       const child = spawn(options.executable, [...options.args], {
         cwd, env: safeTextCliEnvironment(process.env, options.executable), shell: false, windowsHide: true, detached: process.platform !== "win32",
         stdio: ["pipe", "pipe", "pipe"],
@@ -94,6 +100,35 @@ export async function runTextCliProcess(options: TextCliProcessOptions): Promise
         if (error) reject(error); else resolveResult(value ?? Buffer.alloc(0));
       };
       const abort = (): void => { exitError = new TextCliProcessError("CANCELLED"); terminate(); };
+      const failProtocol = (): void => { exitError = new TextCliProcessError("INVALID_RESPONSE"); terminate(); };
+      const dispatchLine = (line: Buffer): void => {
+        if (!options.onLine || exitError) return;
+        if (line.byteLength > MAX_TEXT_CLI_LINE_BYTES) { failProtocol(); return; }
+        try {
+          const action = options.onLine(new TextDecoder("utf-8", { fatal: true }).decode(line));
+          if (action?.write !== undefined) {
+            const bytes = Buffer.byteLength(action.write, "utf8");
+            if (stdinEnded || action.write.includes("\0") || (stdinBytes += bytes) > MAX_TEXT_CLI_STDIN_BYTES) {
+              failProtocol(); return;
+            }
+            child.stdin.write(action.write);
+          }
+          if (action?.end && !stdinEnded) { stdinEnded = true; child.stdin.end(); }
+        } catch { failProtocol(); }
+      };
+      const collectLines = (chunk: Buffer): void => {
+        if (!options.onLine || exitError) return;
+        lineBuffer = Buffer.concat([lineBuffer, chunk]);
+        if (lineBuffer.byteLength > MAX_TEXT_CLI_LINE_BYTES && !lineBuffer.includes(0x0a)) { failProtocol(); return; }
+        let newline = lineBuffer.indexOf(0x0a);
+        while (newline >= 0 && !exitError) {
+          const line = lineBuffer.subarray(0, newline);
+          dispatchLine(line.byteLength > 0 && line.at(-1) === 0x0d ? line.subarray(0, -1) : line);
+          lineBuffer = lineBuffer.subarray(newline + 1);
+          if (lineBuffer.byteLength > MAX_TEXT_CLI_LINE_BYTES && !lineBuffer.includes(0x0a)) { failProtocol(); return; }
+          newline = lineBuffer.indexOf(0x0a);
+        }
+      };
       const timer = setTimeout(() => { exitError = new TextCliProcessError("TIMEOUT"); terminate(); }, options.timeoutMs);
       child.stdout.on("data", (chunk: Buffer) => {
         if (exitError) return;
@@ -102,10 +137,12 @@ export async function runTextCliProcess(options: TextCliProcessOptions): Promise
           exitError = new TextCliProcessError("INVALID_RESPONSE"); terminate(); return;
         }
         stdout.push(chunk);
+        collectLines(chunk);
       });
       child.stderr.on("data", () => {});
       child.on("error", () => finish(new TextCliProcessError("UNAVAILABLE")));
       child.on("close", (code) => {
+        if (!exitError && options.onLine && lineBuffer.byteLength > 0) exitError = new TextCliProcessError("INVALID_RESPONSE");
         if (exitError) { finish(exitError); return; }
         if (code !== 0) { finish(new TextCliProcessError("FAILED")); return; }
         finish(undefined, Buffer.concat(stdout, stdoutBytes));
@@ -113,7 +150,8 @@ export async function runTextCliProcess(options: TextCliProcessOptions): Promise
       child.stdin.on("error", () => {});
       options.signal.addEventListener("abort", abort, { once: true });
       if (options.signal.aborted) { abort(); return; }
-      child.stdin.end(options.input);
+      if (options.keepStdinOpen) child.stdin.write(options.input);
+      else { stdinEnded = true; child.stdin.end(options.input); }
     });
   } finally { await rm(cwd, { recursive: true, force: true }); }
 }

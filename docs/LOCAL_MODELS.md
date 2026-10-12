@@ -16,8 +16,10 @@ cleanup preserves the recognition result for the following steps. Existing profi
 retain cleanup enabled by default.
 
 Connections discovers running Ollama and LM Studio servers and installed CLI tools.
-Discovery reads model metadata, the Claude CLI version and Codex help capabilities; it never starts a server,
-downloads a model, reads authentication files, or submits text. Use **Scan again** after
+Discovery reads model metadata, the Claude CLI version and Codex help capabilities.
+Short-lived CLI metadata sessions supply the Claude and Codex model dropdowns without
+starting a conversation or submitting text. Discovery never launches Ollama or LM Studio,
+downloads a model, or imports authentication files. Use **Scan again** after
 changing a server or installation. Enabled saved connections are checked before their
 first processing request after launch.
 
@@ -45,8 +47,8 @@ starts a fresh context. Cancelled, skipped, failed or undelivered results add no
 | --- | --- | --- |
 | Ollama | `127.0.0.1:11434/api/tags` | `POST /api/chat` |
 | LM Studio 0.4+ | `127.0.0.1:1234/api/v1/models` | `POST /v1/chat/completions` |
-| Claude Code | Installed executable and supported version | Fixed print-mode invocation using the existing CLI login |
-| Codex | Installed executable and required help capabilities | Non-interactive JSONL invocation using the existing CLI login |
+| Claude Code | Installed executable, supported version and initialization model catalog | Fixed print-mode invocation using the existing CLI login |
+| Codex | Installed executable, required help capabilities and `model/list` catalog | Non-interactive JSONL invocation using the existing CLI login |
 | Custom CLI | Configured executable only | User-configured arguments and stdin; text or selected JSON-field response |
 
 LM Studio discovery uses typed native metadata to exclude embedding and decision models.
@@ -76,12 +78,18 @@ Codex uses `-a never exec --sandbox read-only --skip-git-repo-check --ephemeral 
 does not remove agent tools, and configured CLI policy still applies. Only a completed
 successful turn's assistant answer is accepted; progress and commentary are excluded.
 
-For Claude Code and Codex, enter a model identifier in **Settings → Connections**.
-An empty field uses the CLI's configured default; an explicit identifier is passed as
-`--model` without changing global CLI settings. Claude also offers alias suggestions.
-These fields do not list account entitlements: the installed CLI determines which
-models are available. The selection persists in the active profile, and changing the
-selected connection's model starts a fresh conversation.
+Choose Claude Code and Codex models from the dropdowns in **Settings → Connections**.
+**CLI default** uses the CLI's configured model; an explicit selection is passed as
+`--model` without changing global CLI settings. Catalogs come from the installed CLI:
+Codex's app-server `model/list` and Claude's initialization control response. Metadata
+sessions use private pipes and the existing owned process boundary, then close; no
+model turn is started. OpenWhisper does not read or copy CLI credentials.
+
+A catalog is not an account-entitlement check: the CLI determines access when a model
+request runs. If metadata discovery fails, CLI default and any saved model remain
+selectable. Saved models absent from a refreshed catalog are labeled accordingly.
+The selection persists in the active profile, and changing the selected connection's
+model starts a fresh conversation.
 
 ## Custom CLI configuration
 
@@ -146,6 +154,8 @@ Primary references: [LM Studio Chat Completions](https://lmstudio.ai/docs/develo
 [LM Studio native model metadata](https://lmstudio.ai/docs/developer/rest/list),
 [Ollama chat](https://docs.ollama.com/api/chat), [Ollama model list](https://docs.ollama.com/api/tags),
 [Claude Code CLI](https://code.claude.com/docs/en/cli-usage),
+[Claude SDK model metadata](https://code.claude.com/docs/en/agent-sdk/typescript#query-object),
+[Codex app-server model catalog](https://learn.chatgpt.com/docs/app-server#list-models-modellist),
 [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode),
 and [Codex configuration](https://learn.chatgpt.com/docs/config-file/config-reference),
 plus [Gemini CLI headless mode](https://geminicli.com/docs/cli/headless/).

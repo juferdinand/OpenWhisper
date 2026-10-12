@@ -607,7 +607,7 @@
   "Model": "Model",
   "{provider} model": "{provider} model",
   "CLI default": "CLI default",
-  "Model ID or alias; leave empty to use CLI default.": "Model ID or alias; leave empty to use CLI default.",
+  "Saved, not discovered": "saved, not discovered",
   "Uses the tool model": "Uses the tool model",
   "Enabled": "Enabled",
   "Priority {number}": "Priority {number}",

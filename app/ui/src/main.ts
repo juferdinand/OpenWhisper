@@ -70,7 +70,6 @@ let pendingConnectionSettings: TextConnectionSettings | undefined;
 let connectionSaveQueue = Promise.resolve();
 let customConnectionDraft: CustomCliConnection | undefined;
 let customConnectionDraftIsNew = false;
-const cliModelDrafts = new Map<string, string>();
 const customConnectionsAwaitingScan = new Set<string>();
 let connectionScanStarted = false;
 let mouseTriggerCandidate: number | undefined;
@@ -930,12 +929,6 @@ async function saveConnections(
 ): Promise<boolean> {
   const nextSettings = {
     ...settings,
-    connections: settings.connections.map((entry) =>
-      (entry.provider === "claude_code" || entry.provider === "codex") &&
-      cliModelDrafts.has(entry.provider)
-        ? { ...entry, model: cliModelDrafts.get(entry.provider)! }
-        : entry,
-    ),
     instruction: connectionInstructionDraft ?? settings.instruction,
     conversationInstruction:
       conversationInstructionDraft ?? settings.conversationInstruction,
@@ -951,12 +944,6 @@ async function saveConnections(
         pendingConnectionSettings = undefined;
         connectionInstructionDraft = undefined;
         conversationInstructionDraft = undefined;
-        for (const entry of nextSettings.connections)
-          if (
-            (entry.provider === "claude_code" || entry.provider === "codex") &&
-            cliModelDrafts.get(entry.provider) === entry.model
-          )
-            cliModelDrafts.delete(entry.provider);
         contentKey = "";
         render();
       }
@@ -976,16 +963,7 @@ async function saveConnections(
   return save;
 }
 function latestConnectionSettings(): TextConnectionSettings {
-  const latest = pendingConnectionSettings ?? state.text_connections.settings;
-  return {
-    ...latest,
-    connections: latest.connections.map((entry) =>
-      (entry.provider === "claude_code" || entry.provider === "codex") &&
-      cliModelDrafts.has(entry.provider)
-        ? { ...entry, model: cliModelDrafts.get(entry.provider)! }
-        : entry,
-    ),
-  };
+  return pendingConnectionSettings ?? state.text_connections.settings;
 }
 async function scanConnections() {
   connectionScanStarted = true;
@@ -3197,11 +3175,19 @@ function renderConnectionsSettings(content: HTMLElement) {
               ? connection.model
               : (found?.models[0] ?? "")
             : "";
+        const cliModels = found?.models ?? [];
+        const savedCliModel =
+          (connection.provider === "claude_code" ||
+            connection.provider === "codex") &&
+          connection.model &&
+          !cliModels.includes(connection.model)
+            ? connection.model
+            : "";
         const model = local
           ? `<label class="connection-model"><span class="visually-hidden">${esc(t("Model"))}</span><select data-connection-model="${esc(connection.provider)}" aria-label="${esc(t("{provider} model", { provider: name }))}" ${!usable ? "disabled" : ""}>${connection.model && !found?.models.includes(connection.model) ? option(connection.model, connection.model, selectedModel) : ""}${found?.models.length ? found.models.map((item) => option(item, item, selectedModel)).join("") : option("", t("No models found"), selectedModel)}</select></label>`
           : connection.provider === "claude_code" ||
               connection.provider === "codex"
-            ? `<div class="connection-cli-model"><label class="connection-model cli-model"><span class="visually-hidden">${esc(t("{provider} model", { provider: name }))}</span><input data-cli-model="${esc(connection.provider)}" aria-label="${esc(t("{provider} model", { provider: name }))}" value="${esc(cliModelDrafts.get(connection.provider) ?? connection.model)}" placeholder="${esc(t("CLI default"))}" ${connection.provider === "claude_code" ? 'list="claude-model-suggestions"' : ""} maxlength="256" ${controlsDisabled ? "disabled" : ""}></label>${connection.provider === "claude_code" ? '<datalist id="claude-model-suggestions"><option value="opus"></option><option value="sonnet"></option><option value="haiku"></option></datalist>' : ""}<p class="connection-cli-model-help">${esc(t("Model ID or alias; leave empty to use CLI default."))}</p></div>`
+            ? `<label class="connection-model"><span class="visually-hidden">${esc(t("{provider} model", { provider: name }))}</span><select data-cli-model="${esc(connection.provider)}" aria-label="${esc(t("{provider} model", { provider: name }))}" ${controlsDisabled ? "disabled" : ""}>${option("", t("CLI default"), connection.model)}${cliModels.map((item) => option(item, item, connection.model)).join("")}${savedCliModel ? option(savedCliModel, `${savedCliModel} (${t("Saved, not discovered")})`, connection.model) : ""}</select></label>`
             : `<div class="connection-cli-note"><p class="connection-model-note">${esc(custom ? (connection as CustomCliConnection).command : t("Uses the tool model"))}</p>${customNeedsPrompt ? `<p class="connection-state unavailable">${esc(t("Add {prompt} to the input template or an argument to use this connection in Conversation mode.", { prompt: "{prompt}" }))}</p>` : ""}</div>`;
         const enabledDisabled =
           (!usable || (local && !selectedModel) || customNeedsPrompt) &&
@@ -3299,41 +3285,28 @@ function renderConnectionsSettings(content: HTMLElement) {
       };
     });
   content
-    .querySelectorAll<HTMLInputElement>("[data-cli-model]")
-    .forEach((input) => {
-      const saveModel = () => {
-        const provider = input.dataset.cliModel! as "claude_code" | "codex";
-        const value = input.value.trim();
-        cliModelDrafts.set(provider, value);
+    .querySelectorAll<HTMLSelectElement>("[data-cli-model]")
+    .forEach((select) => {
+      select.onchange = () => {
+        const provider = select.dataset.cliModel!;
         const latest = latestConnectionSettings();
-        const storedSettings =
-          pendingConnectionSettings ?? state.text_connections.settings;
-        const current = storedSettings.connections.find(
+        const current = latest.connections.find(
           (entry) => entry.provider === provider,
         );
         if (
           current &&
           (current.provider === "claude_code" ||
             current.provider === "codex") &&
-          current.model === value
+          current.model === select.value
         )
           return;
         const connections = latest.connections.map((entry) =>
-          entry.provider === provider ? { ...entry, model: value } : entry,
+          entry.provider === provider
+            ? { ...entry, model: select.value }
+            : entry,
         );
         void saveConnections({ ...latest, connections });
       };
-      input.addEventListener("input", () => {
-        cliModelDrafts.set(input.dataset.cliModel!, input.value);
-      });
-      input.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          input.blur();
-        }
-      });
-      input.addEventListener("change", saveModel);
-      input.addEventListener("blur", saveModel);
     });
   content
     .querySelector<HTMLSelectElement>("#connection-mode")

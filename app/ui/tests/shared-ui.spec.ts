@@ -76,14 +76,11 @@ test("Connections discovers supported providers and saves priority, model, opt-i
       .evaluate((input) => getComputedStyle(input).backgroundColor),
   ).not.toBe("rgba(0, 0, 0, 0)");
   await expect(page.locator(".connection-default")).toHaveCount(0);
-  await expect(page.locator('li[data-provider="codex"]')).toContainText(
-    "Detected, but not available for text processing",
-  );
-  await expect(
-    page.locator('[data-connection-enabled="codex"]'),
-  ).toBeDisabled();
   await page.getByRole("button", { name: "Scan again" }).click();
   await expect(page.locator('li[data-provider="ollama"]')).toContainText(
+    "Available",
+  );
+  await expect(page.locator('li[data-provider="codex"]')).toContainText(
     "Available",
   );
   await page.screenshot({
@@ -105,8 +102,7 @@ test("Connections discovers supported providers and saves priority, model, opt-i
   await page
     .locator('[data-connection-model="ollama"]')
     .selectOption("llama3.2");
-  await page.locator('[data-cli-model="claude_code"]').fill("sonnet");
-  await page.locator('[data-cli-model="claude_code"]').press("Enter");
+  await page.locator('[data-cli-model="claude_code"]').selectOption("sonnet");
   await page.locator("label.connection-toggle").nth(0).click();
   await page.locator("label.connection-toggle").nth(2).click();
   await page.getByRole("button", { name: "Move LM Studio up" }).click();
@@ -179,7 +175,7 @@ test("Connections discovers supported providers and saves priority, model, opt-i
   });
 });
 
-test("built-in CLI model IDs save by provider identity and clear to the CLI default", async ({
+test("built-in CLI model catalogs refresh and save by provider identity", async ({
   page,
 }) => {
   await start(page, "linux");
@@ -189,9 +185,12 @@ test("built-in CLI model IDs save by provider identity and clear to the CLI defa
 
   const codexModel = page.locator('[data-cli-model="codex"]');
   await expect(codexModel).toBeEnabled();
-  await expect(codexModel).toHaveAttribute("placeholder", "CLI default");
-  await codexModel.fill("vendor/custom-codex-model");
-  await codexModel.press("Enter");
+  await expect(codexModel.locator("option").first()).toHaveText("CLI default");
+  await expect(codexModel.locator("option")).toHaveText([
+    "CLI default",
+    "codex-fast",
+  ]);
+  await codexModel.selectOption("codex-fast");
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -200,13 +199,17 @@ test("built-in CLI model IDs save by provider identity and clear to the CLI defa
         ),
       ),
     )
-    .toMatchObject({ provider: "codex", model: "vendor/custom-codex-model" });
+    .toMatchObject({ provider: "codex", model: "codex-fast" });
 
   await page.getByRole("button", { name: "Move Claude Code up" }).click();
 
   const claudeModel = page.locator('[data-cli-model="claude_code"]');
-  await claudeModel.fill("opus");
-  await claudeModel.press("Enter");
+  await expect(claudeModel.locator("option")).toHaveText([
+    "CLI default",
+    "sonnet",
+    "opus",
+  ]);
+  await claudeModel.selectOption("opus");
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -217,8 +220,22 @@ test("built-in CLI model IDs save by provider identity and clear to the CLI defa
     )
     .toMatchObject({ provider: "claude_code", model: "opus" });
 
-  await claudeModel.fill("");
-  await claudeModel.press("Enter");
+  await page.evaluate(() => {
+    (window as any).cliModelCatalog = {
+      claude_code: ["sonnet"],
+      codex: ["codex-fast"],
+    };
+  });
+  await page.getByRole("button", { name: "Scan again" }).click();
+  await expect(page.getByRole("button", { name: "Scan again" })).toBeEnabled();
+  await expect(claudeModel.locator("option")).toHaveText([
+    "CLI default",
+    "sonnet",
+    "opus (saved, not discovered)",
+  ]);
+  await expect(claudeModel).toHaveValue("opus");
+
+  await claudeModel.selectOption("");
   await expect
     .poll(() =>
       page.evaluate(
@@ -234,13 +251,9 @@ test("built-in CLI model IDs save by provider identity and clear to the CLI defa
     window.testState.preferences.ui_language = "de";
     window.publishState();
   });
-  await expect(page.locator('[data-cli-model="claude_code"]')).toHaveAttribute(
-    "placeholder",
-    "CLI-Standard",
-  );
-  await expect(page.locator(".connection-cli-model-help").first()).toHaveText(
-    "Modell-ID oder Alias; leer lassen, um den CLI-Standard zu verwenden.",
-  );
+  await expect(
+    page.locator('[data-cli-model="claude_code"] option').first(),
+  ).toHaveText("CLI-Standard");
 });
 
 test("rapid CLI model edits and reorder serialize without losing pending settings", async ({
@@ -254,10 +267,8 @@ test("rapid CLI model edits and reorder serialize without losing pending setting
     (window as any).connectionSaveDelay = 500;
   });
 
-  await page.locator('[data-cli-model="claude_code"]').fill("sonnet");
-  await page.locator('[data-cli-model="claude_code"]').press("Enter");
-  await page.locator('[data-cli-model="codex"]').fill("custom-codex-id");
-  await page.locator('[data-cli-model="codex"]').press("Enter");
+  await page.locator('[data-cli-model="claude_code"]').selectOption("sonnet");
+  await page.locator('[data-cli-model="codex"]').selectOption("codex-fast");
   await page.getByRole("button", { name: "Move Claude Code up" }).click();
   await expect
     .poll(() =>
@@ -274,7 +285,7 @@ test("rapid CLI model edits and reorder serialize without losing pending setting
       { provider: "ollama", model: "" },
       { provider: "claude_code", model: "sonnet" },
       { provider: "lm_studio", model: "" },
-      { provider: "codex", model: "custom-codex-id" },
+      { provider: "codex", model: "codex-fast" },
     ]);
   expect(
     await page.evaluate(
@@ -1535,15 +1546,15 @@ async function start(
               provider: "claude_code",
               detected: true,
               usable: true,
-              models: [],
+              models: host.cliModelCatalog?.claude_code ?? ["sonnet", "opus"],
               reason: null,
             },
             {
               provider: "codex",
               detected: true,
-              usable: false,
-              models: [],
-              reason: "unsupported",
+              usable: true,
+              models: host.cliModelCatalog?.codex ?? ["codex-fast"],
+              reason: null,
             },
             ...state.text_connections.settings.connections
               .filter((connection: any) =>
