@@ -56,7 +56,7 @@ export const textConnectionAvailabilityListSchema = z.array(textConnectionAvaila
     }
   });
 
-export const textConnectionProcessingSchema = z.strictObject({
+const textConnectionProcessingSchema = z.strictObject({
   status: z.enum(["idle", "processing", "complete", "fallback"]),
   provider: textProviderSchema.nullable(),
   reason: z.enum(["unavailable", "failed", "cancelled"]).nullable(),
@@ -85,7 +85,14 @@ export function defaultTextConnectionAvailability(): TextConnectionAvailability[
     detected: false,
     usable: false,
     models: [],
-    reason: provider === "ollama" || provider === "lm_studio" ? "not_running"
-      : provider === "codex" ? "unsupported" : "not_installed",
+    reason: provider === "ollama" || provider === "lm_studio" ? "not_running" : "not_installed",
   }));
 }
+
+// The host snapshot and renderer wire contract share one authoritative shape.
+export const textConnectionsStateSchema = z.strictObject({
+  settings: textConnectionSettingsSchema,
+  available: textConnectionAvailabilityListSchema,
+  scanning: z.boolean(),
+  processing: textConnectionProcessingSchema.default(() => idleTextConnectionProcessing()),
+});

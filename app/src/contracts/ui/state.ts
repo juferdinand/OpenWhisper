@@ -2,8 +2,8 @@ import { z } from "zod";
 import { updateDownloadProgressSchema } from "../update/update-download-progress.js";
 import { speechLanguageSchema } from "../speech/speech.js";
 import {
-  defaultTextConnectionAvailability, defaultTextConnectionSettings, textConnectionAvailabilityListSchema,
-  idleTextConnectionProcessing, textConnectionProcessingSchema, textConnectionSettingsSchema,
+  defaultTextConnectionAvailability, defaultTextConnectionSettings, idleTextConnectionProcessing,
+  textConnectionSettingsSchema, textConnectionsStateSchema,
 } from "../text/connections.js";
 import { textProcessingStageEventSchema } from "../text/processing.js";
 import {
@@ -211,12 +211,7 @@ export const appStateSchema = z.strictObject({
   recording_unavailable_reason: z.enum(["host", "audio", "model", "permission"]).optional(),
   local_processing: localProcessingProfileSchema.optional(),
   local_processing_invalid_profile: z.boolean().optional(),
-  text_connections: z.strictObject({
-    settings: textConnectionSettingsSchema,
-    available: textConnectionAvailabilityListSchema,
-    scanning: z.boolean(),
-    processing: textConnectionProcessingSchema.default(() => idleTextConnectionProcessing()),
-  }).default(() => ({ settings: defaultTextConnectionSettings(),
+  text_connections: textConnectionsStateSchema.default(() => ({ settings: defaultTextConnectionSettings(),
     available: defaultTextConnectionAvailability(), scanning: false,
     processing: idleTextConnectionProcessing() })),
   text_processing: textProcessingStageEventSchema.nullable().default(null),

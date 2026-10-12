@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import {
   defaultTextConnectionAvailability, idleTextConnectionProcessing,
-  textConnectionAvailabilityListSchema,
+  textConnectionAvailabilityListSchema, textConnectionsStateSchema,
   type TextConnectionAvailability, type TextConnectionSettings, type TextProvider,
 } from "../../contracts/text/connections.js";
 import type { TextProcessingStageEvent } from "../../contracts/text/processing.js";
@@ -15,11 +16,7 @@ export class TextProviderUnavailableError extends Error {
   constructor() { super("The selected text provider is unavailable."); this.name = "TextProviderUnavailableError"; }
 }
 
-export interface OptionalTextProcessingSnapshot {
-  readonly availability: readonly TextConnectionAvailability[];
-  readonly scanning: boolean;
-  readonly processing: ReturnType<typeof idleTextConnectionProcessing>;
-}
+type OptionalTextProcessingSnapshot = Pick<z.infer<typeof textConnectionsStateSchema>, "available" | "scanning" | "processing">;
 
 export interface OptionalTextProcessingOptions {
   readonly settings: () => TextConnectionSettings;
@@ -43,7 +40,7 @@ export class OptionalTextProcessing {
   constructor(private readonly options: OptionalTextProcessingOptions) {}
 
   snapshot(): OptionalTextProcessingSnapshot {
-    return { availability: [...this.availability], scanning: this.scanning, processing: this.processing };
+    return { available: [...this.availability], scanning: this.scanning, processing: this.processing };
   }
 
   get busy(): boolean { return this.active !== undefined; }

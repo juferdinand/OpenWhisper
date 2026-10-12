@@ -1131,7 +1131,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           throw new Error("Finish the current recording before changing text connections.");
         }
         const checked = textConnectionSettingsSchema.parse(settings);
-        validateTextConnectionChanges(textConnectionStore.snapshot(), checked, textProcessor.snapshot().availability);
+        validateTextConnectionChanges(textConnectionStore.snapshot(), checked, textProcessor.snapshot().available);
         await textConnectionStore.update(() => checked);
         return state();
       }),

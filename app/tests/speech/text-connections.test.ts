@@ -5,12 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import {
-  defaultTextConnectionAvailability, defaultTextConnectionSettings, textConnectionSettingsSchema,
+  defaultTextConnectionAvailability, defaultTextConnectionSettings, textConnectionSettingsSchema, textConnectionsStateSchema,
 } from "../../src/contracts/text/connections.js";
 import { validateCommandInput, appStateSchema } from "../../src/contracts/ui/state.js";
 import { ensureTextProviderAvailability, LocalTextConnectionScanner, resolveTextCliExecutable,
   validateTextConnectionChanges } from "../../src/services/text/connections.js";
 import { boundedTextPreview } from "../../src/services/text/text-preview.js";
+import { OptionalTextProcessing } from "../../src/services/text/optional-text-processing.js";
 
 const servers: Server[] = [];
 const directories: string[] = [];
@@ -35,6 +36,8 @@ test("text connections default disabled and preserve explicit provider order", (
   const defaults = defaultTextConnectionSettings();
   assert.deepEqual(defaults.connections.map(({ provider }) => provider), ["ollama", "lm_studio", "claude_code", "codex"]);
   assert.ok(defaults.connections.every(({ enabled }) => !enabled));
+  assert.ok(defaultTextConnectionAvailability().filter(({ provider }) => provider === "claude_code" || provider === "codex")
+    .every((entry) => !entry.detected && entry.reason === "not_installed"));
   const reordered = { ...defaults, connections: [...defaults.connections].reverse() };
   assert.deepEqual(textConnectionSettingsSchema.parse(reordered).connections.map(({ provider }) => provider),
     ["codex", "claude_code", "lm_studio", "ollama"]);
@@ -101,6 +104,22 @@ test("state and IPC validate connection settings and host-owned availability", (
   assert.throws(() => validateCommandInput("save_connections", { settings: { ...defaultTextConnectionSettings(), extra: true } }));
 });
 
+test("optional processor snapshot matches the strict AppState text-connection wire schema", () => {
+  const settings = defaultTextConnectionSettings();
+  const processor = new OptionalTextProcessing({
+    settings: () => settings,
+    scan: async () => defaultTextConnectionAvailability(),
+    runProvider: async (_connection, _instruction, text) => text,
+    isShuttingDown: () => false,
+  });
+  const snapshot = processor.snapshot();
+  assert.deepEqual(Object.keys(snapshot).sort(), ["available", "processing", "scanning"]);
+  assert.deepEqual(textConnectionsStateSchema.parse({ settings, ...snapshot }), {
+    settings, available: defaultTextConnectionAvailability(), scanning: false,
+    processing: { status: "idle", provider: null, reason: null },
+  });
+});
+
 test("local discovery uses only fixed loopback routes and reports bounded model choices", async () => {
   const port = await serve((path, response) => {
     response.setHeader("Content-Type", "application/json");
@@ -156,6 +175,9 @@ test("CLI detection resolves executable files from PATH without running them", a
   const executable = join(directory, "claude");
   await writeFile(executable, "#!/bin/sh\nprintf '2.1.260 (Claude Code)\\n'\n", { mode: 0o700 });
   await chmod(executable, 0o700);
+  const codexExecutable = join(directory, "codex");
+  await writeFile(codexExecutable, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  await chmod(codexExecutable, 0o700);
   const canonicalExecutable = await realpath(executable);
   assert.equal(await resolveTextCliExecutable("claude", directory), canonicalExecutable);
   const directoryAlias = join(directory, "alias");
@@ -171,5 +193,5 @@ test("CLI detection resolves executable files from PATH without running them", a
     provider: "claude_code", detected: true, usable: true, models: [], reason: null,
   });
   const codex = availability.find(({ provider }) => provider === "codex");
-  assert.ok(codex && !codex.usable && (codex.reason === "not_installed" || codex.reason === "unsupported"));
+  assert.deepEqual(codex, { provider: "codex", detected: true, usable: false, models: [], reason: "unsupported" });
 });
