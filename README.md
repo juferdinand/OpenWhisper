@@ -157,6 +157,7 @@ export all keychain identities or commit signing material.
 - [Linux implementation and acceptance](docs/LINUX.md)
 - [Platform architecture](docs/PLATFORMS.md)
 - [Release signing](docs/SIGNING.md)
+- [Data locations](docs/DATA-LOCATIONS.md)
 - [Security policy](SECURITY.md)
 - [Local model communication groundwork](docs/LOCAL_MODELS.md)
 - [Frontend redesign plan](docs/UI-REDESIGN.md)

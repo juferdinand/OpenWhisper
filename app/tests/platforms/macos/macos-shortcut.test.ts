@@ -26,7 +26,7 @@ class Shortcuts {
 function key(type: "keyDown" | "keyUp", name = "F8", overrides: Partial<MacosShortcutInput> = {}): MacosShortcutInput {
   return { type, key: name, code: name, shift: false, control: false, alt: false, meta: false, ...overrides };
 }
-function fixture(configure = async () => {}, setupAllowed?: () => boolean) {
+function fixture(configure = async () => {}, setupAllowed?: () => boolean, mouse?: Shortcuts) {
   const shortcuts = new Shortcuts(), states: MacosShortcutState[] = [], commands: string[] = [];
   let allowed = true, identity: RecordingIdentity = { epoch: "original", generation: 0 };
   let snapshot: Pick<RecordingSnapshot, "phase" | "busy" | "recoveryAvailable"> =
@@ -46,7 +46,7 @@ function fixture(configure = async () => {}, setupAllowed?: () => boolean) {
       return identity;
     } }, snapshot: () => snapshot, available: () => allowed, configure, serialize, cleanupSerialize: serialize,
   });
-  const adapter = new MacosShortcut({ shortcuts, capture, allowed: () => allowed,
+  const adapter = new MacosShortcut({ shortcuts, capture, allowed: () => allowed, ...(mouse ? { mouse } : {}),
     ...(setupAllowed ? { setupAllowed } : {}), changed: (state) => { states.push(state); } });
   return { adapter, shortcuts, states, commands,
     deny: () => { allowed = false; },
@@ -122,7 +122,7 @@ test("modifier-only, Fn, mouse, composition and keypad setup preserve the old pr
     f.adapter.bind("F8");
     const unsupported: MacosShortcutInput[][] = [
       [key("keyDown", "Control"), key("keyUp", "Control")],
-      [key("keyDown", "Fn")], [key("keyDown", "F9", { modifiers: ["fn"] })],
+      [key("keyDown", "Fn")], [key("keyDown", "a", { code: "KeyA", modifiers: ["fn"] })],
       [{ ...key("keyDown"), type: "mouseDown" }],
       [key("keyDown", "a", { code: "KeyA", isComposing: true })],
       [key("keyDown", "1", { code: "Numpad1" })],
@@ -131,6 +131,28 @@ test("modifier-only, Fn, mouse, composition and keypad setup preserve the old pr
       f.adapter.prepareCapture(); for (const input of sequence) f.adapter.consume(input);
       assert.equal(f.adapter.state().result, "UNSUPPORTED");
       assert.equal(f.adapter.state().accelerator, "F8"); assert.equal(f.shortcuts.callbacks.has("F8"), true);
+    }
+  } finally { await f.adapter.close(); }
+});
+
+test("capture uses physical key positions for non-US layouts, Option characters and the function row", async () => {
+  const f = fixture();
+  try {
+    const cases: [MacosShortcutInput, string][] = [
+      // German layout: the key right of 0 produces "ß"; Option+A produces "å".
+      [key("keyDown", "ß", { code: "Minus", meta: true }), "Command+-"],
+      [key("keyDown", "å", { code: "KeyA", alt: true, control: true }), "Control+Alt+A"],
+      [key("keyDown", "!", { code: "Digit1", shift: true, control: true }), "Control+Shift+1"],
+      // macOS marks function-row and navigation keys with Fn even when Fn is not held.
+      [key("keyDown", "F9", { modifiers: ["fn"] }), "F9"],
+      [key("keyDown", "ArrowUp", { code: "ArrowUp", control: true, modifiers: ["fn"] }), "Control+Up"],
+    ];
+    for (const [down, accelerator] of cases) {
+      f.adapter.prepareCapture();
+      f.adapter.consume(down);
+      f.adapter.consume({ ...down, type: "keyUp" });
+      assert.equal(f.adapter.state().result, "ENABLED", accelerator);
+      assert.equal(f.adapter.state().accelerator, accelerator);
     }
   } finally { await f.adapter.close(); }
 });
@@ -205,4 +227,36 @@ test("a native Start that finishes after shutdown is cancelled through its origi
   await turn(); assert.equal(signal?.aborted, true); assert.equal(completed, false);
   acquired.accept(); await close;
   assert.equal(cancels, 1); assert.equal(stops, 0);
+});
+
+test("extra mouse buttons can be captured, restored and toggle recording through the mouse listener", async () => {
+  const mouse = new Shortcuts(), f = fixture(async () => {}, undefined, mouse);
+  try {
+    assert.equal(f.adapter.mouseAvailable(), true);
+    f.adapter.bind("F8");
+    f.adapter.prepareCapture();
+    f.adapter.captureMouse(8);
+    assert.equal(f.adapter.state().result, "ENABLED"); assert.equal(f.adapter.state().accelerator, "Mouse8");
+    assert.equal(f.shortcuts.callbacks.has("F8"), false); assert.equal(mouse.callbacks.has("Mouse8"), true);
+    mouse.fire("Mouse8"); await turn(); assert.deepEqual(f.commands, ["start"]);
+    f.adapter.bind("F9");
+    assert.equal(mouse.callbacks.has("Mouse8"), false); assert.equal(f.shortcuts.callbacks.has("F9"), true);
+    f.adapter.bind("Mouse2"); assert.equal(mouse.callbacks.has("Mouse2"), true);
+    assert.throws(() => { f.adapter.captureMouse(2); }, (error: unknown) => error instanceof MacosShortcutError && error.code === "UNAVAILABLE");
+  } finally { await f.adapter.close(); }
+});
+
+test("mouse triggers are unsupported without a mouse listener and printable character events never end setup", async () => {
+  const f = fixture();
+  try {
+    assert.equal(f.adapter.mouseAvailable(), false);
+    assert.throws(() => { f.adapter.bind("Mouse8"); }, (error: unknown) => error instanceof MacosShortcutError && error.code === "UNSUPPORTED");
+    f.adapter.prepareCapture();
+    assert.throws(() => { f.adapter.captureMouse(8); }, (error: unknown) => error instanceof MacosShortcutError && error.code === "UNSUPPORTED");
+    f.adapter.prepareCapture();
+    f.adapter.consume(key("keyDown", "a", { code: "KeyA", control: true }));
+    f.adapter.consume({ ...key("keyDown", "a", { code: "KeyA", control: true }), type: "char" as never });
+    f.adapter.consume(key("keyUp", "a", { code: "KeyA" }));
+    assert.equal(f.adapter.state().result, "ENABLED"); assert.equal(f.adapter.state().accelerator, "Control+A");
+  } finally { await f.adapter.close(); }
 });

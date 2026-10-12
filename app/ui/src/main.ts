@@ -29,6 +29,8 @@ let contentKey = "";
 let workspaceKey = "";
 let shellKey = "";
 let renderedTab: View | undefined;
+// The setup card body scrolls; keep its position when the same step re-renders (for example on download progress).
+let renderedSetupStep: number | undefined;
 let historyRailOpen = true;
 let mainWaveform: LiveWaveform | undefined;
 let overlayWaveform: LiveWaveform | undefined;
@@ -45,8 +47,11 @@ let pendingSettingsSection = "";
 let modelDialogKey = "";
 let modelFocusRestorePending = false;
 let setupStep = -1;
-const SETUP_STEP_COUNT = 7;
-const SETUP_MODEL_STEP = 1;
+// macOS builds recognize on the CPU only (Apple Silicon has no separate GPU device to choose),
+// so the hardware step is shown on Linux only.
+const setupHasHardwareStep = () => state.platform !== "macos";
+const setupStepCount = () => (setupHasHardwareStep() ? 7 : 6);
+const setupModelStep = () => (setupHasHardwareStep() ? 1 : 0);
 let focusSetupTitle = false;
 const expandedModelFamilies = new Set<string>();
 let preferenceQueue = Promise.resolve();
@@ -726,29 +731,39 @@ function setupModelGroups(): string {
     .join("")}</div>`;
 }
 const outputs = () =>
-  `<div class="radio-group">${[["paste", t("Paste at the cursor")], ["clipboard", t("Copy to clipboard only")], ...(isMac() ? [["editor", t("Open in a text editor")]] : [])].map(([v, l]) => `<label><input type="radio" name="output" data-pref="output" value="${v}" ${state.preferences.output === v ? "checked" : ""}>${l}</label>`).join("")}</div>`;
+  `<div class="radio-group">${[
+    ["paste", t("Paste at the cursor")],
+    ["clipboard", t("Copy to clipboard only")],
+  ]
+    .map(
+      ([v, l]) =>
+        `<label><input type="radio" name="output" data-pref="output" value="${v}" ${state.preferences.output === v ? "checked" : ""}>${l}</label>`,
+    )
+    .join("")}</div>`;
 const settingOutputs = () => {
   const modes: [string, string, string][] = [
     ["paste", "Insert", "Paste at the cursor"],
     ["clipboard", "Copy", "Copy to clipboard only"],
-    ...(isMac()
-      ? ([["editor", "Editor", "Open in a text editor"]] as [
-          string,
-          string,
-          string,
-        ][])
-      : []),
   ];
   return `<fieldset class="settings-output-segment" aria-label="${esc(t("Output"))}">${modes.map(([value, label, fullLabel]) => `<label><input type="radio" name="settings-output" data-pref="output" value="${value}" aria-label="${esc(t(fullLabel))}" ${state.preferences.output === value ? "checked" : ""}><span>${esc(t(label))}</span></label>`).join("")}</fieldset>`;
 };
-const setupTriggerOutput = () =>
-  `<div class="setup-trigger-output"><span class="setup-trigger-output-label">${esc(t("Output"))}<small>${esc(t(isMac() ? "Insert uses Accessibility access; Copy uses the clipboard." : "Insert uses keyboard access; Copy uses the clipboard."))}</small></span>${settingOutputs()}</div>`;
 
 function notice(text: string) {
   const el = document.querySelector<HTMLDialogElement>("#settings-dialog")?.open
     ? document.querySelector<HTMLElement>("#settings-notice")!
     : document.querySelector<HTMLElement>("#notice")!;
-  el.textContent = t(text);
+  const message = document.createElement("span");
+  message.textContent = t(text);
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "notice-close";
+  close.setAttribute("aria-label", t("Close"));
+  close.title = t("Close");
+  close.addEventListener("click", () => {
+    el.hidden = true;
+    el.replaceChildren();
+  });
+  el.replaceChildren(message, close);
   el.hidden = false;
 }
 async function command(
@@ -1358,17 +1373,8 @@ function recordControl() {
     const outputModes: [string, string, string][] = [
       ["paste", t("Insert"), t("Paste at the cursor")],
       ["clipboard", t("Copy"), t("Copy to clipboard only")],
-      ...(isMac()
-        ? [
-            ["editor", t("Editor"), t("Open in a text editor")] as [
-              string,
-              string,
-              string,
-            ],
-          ]
-        : []),
     ];
-    const outputControls = `<div class="record-output" role="group" aria-label="${esc(t("Output"))}"><span class="record-output-label">${esc(t("Output"))}</span>${outputModes.map(([value, label, fullLabel]) => `<button type="button" data-output="${value}" data-pref="output" aria-label="${esc(fullLabel)}" title="${esc(fullLabel)}" aria-pressed="${state.preferences.output === value}" ${recording || recovery || (value === "paste" && (portalBusy || state.paste_configuring)) ? "disabled" : ""}>${esc(label)}</button>`).join("")}</div>`;
+    const outputControls = `<div class="record-output" role="group" aria-label="${esc(t("Output"))}"><span class="record-output-label">${esc(t("Output"))}</span>${outputModes.map(([value, label, fullLabel]) => `<button type="button" data-output="${value}" data-pref="output" aria-label="${esc(fullLabel)}" title="${esc(fullLabel)}" aria-pressed="${state.preferences.output === value}" ${recording || recovery || busy || (value === "paste" && (portalBusy || state.paste_configuring)) ? "disabled" : ""}>${esc(label)}</button>`).join("")}</div>`;
     const overlayBars = Array.from({ length: 5 }, () => "<i></i>").join("");
     controls.innerHTML = overlay
       ? `<div class="record-actions"><div class="record-status"><div class="audio-mark" aria-hidden="true">${overlayBars}<canvas class="live-waveform" data-waveform="overlay" aria-hidden="true"></canvas></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div><span id="record-label"></span><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-action-label" class="record-action-label"></span></button></div>`
@@ -1495,6 +1501,7 @@ function recordControl() {
       output.disabled =
         recording ||
         recovery ||
+        busy ||
         (output.dataset.output === "paste" &&
           (portalBusy || state.paste_configuring === true));
     });
@@ -1825,7 +1832,6 @@ function render() {
       state.paste_ready,
       state.paste_configuring,
       state.download,
-      Math.round(state.progress * 100),
       state.history,
       state.transcript,
       state.transcript_preview_omitted,
@@ -1853,6 +1859,12 @@ function render() {
         : value;
     },
   );
+  // Download progress updates the bar in place; re-rendering would reset scrolling and focus.
+  document
+    .querySelectorAll<HTMLProgressElement>("#content .model-row progress")
+    .forEach((progress) => {
+      progress.value = state.progress;
+    });
   if (contentKey === nextKey) return;
   contentKey = nextKey;
   if (overlay) return;
@@ -1872,13 +1884,17 @@ function render() {
   const p = state.preferences;
   if (tab === "setup") {
     const panels = [
-      {
-        title: t("Choose recognition hardware"),
-        detail: t(
-          "Choose CPU or GPU for recognition. The next step suggests models for your selection.",
-        ),
-        content: recognitionModeControl(true),
-      },
+      ...(setupHasHardwareStep()
+        ? [
+            {
+              title: t("Choose recognition hardware"),
+              detail: t(
+                "Choose CPU or GPU for recognition. The next step suggests models for your selection.",
+              ),
+              content: recognitionModeControl(true),
+            },
+          ]
+        : []),
       {
         title: t("Download a speech model"),
         detail: t(
@@ -1894,7 +1910,9 @@ function render() {
           "Microphone access is needed to record your voice. Everything stays on your computer.",
         ),
         content: isMac()
-          ? `<button data-command="allow_microphone">${esc(t("Allow"))}</button>`
+          ? state.macos?.microphone_allowed
+            ? `<p class="success">${esc(t("Microphone access allowed"))}</p>${microphoneControl()}`
+            : `<button data-command="allow_microphone">${esc(t("Allow"))}</button>`
           : microphoneControl(),
       },
       {
@@ -1919,7 +1937,7 @@ function render() {
             : t("Allow keyboard access"),
         detail: isMac()
           ? t(
-              "Required for automatic insertion and advanced triggers. Clipboard-only output remains available.",
+              "Accessibility access is needed for automatic insertion and advanced triggers. Clipboard-only output remains available.",
             )
           : nativePaste()
             ? t(
@@ -1928,7 +1946,9 @@ function render() {
             : t(
                 "Optional permission for automatic pasting. Only keyboard access is requested; no screen capture.",
               ),
-        content: `${permissionButton()}${!pasteAvailable() ? `<p class="secondary">${esc(t("Your desktop does not expose this portal. Clipboard output remains available."))}</p>` : ""}`,
+        // Clipboard output remains usable without Accessibility access.
+        accessibility: true,
+        content: `${isMac() && state.paste_ready ? `<p class="success">${esc(t("Accessibility access allowed"))}</p>` : ""}${permissionButton()}${!pasteAvailable() ? `<p class="secondary">${esc(t("Your desktop does not expose this portal. Clipboard output remains available."))}</p>` : ""}`,
       },
       {
         title: t("How do you start the recording?"),
@@ -1944,12 +1964,19 @@ function render() {
               : t(
                   "Choose a shortcut in your desktop’s dialog. Press it to start recording and press it again to stop.",
                 ),
-        content: `<div class="setup-trigger-panel">${shortcutButton()}${setupTriggerOutput()}</div>`,
+        content: `<div class="setup-trigger-panel">${shortcutButton()}</div>`,
       },
     ];
     const modelRequired =
       !hasInstalledSelectedModel() &&
-      (setupStep === SETUP_MODEL_STEP || setupStep === panels.length - 1);
+      (setupStep === setupModelStep() || setupStep === panels.length - 1);
+    const accessibilityRequired =
+      isMac() &&
+      state.preferences.output === "paste" &&
+      state.paste_ready !== true &&
+      setupStep >= 0 &&
+      (panels[setupStep] as { accessibility?: boolean } | undefined)
+        ?.accessibility === true;
     const navigation = (welcome: boolean) => {
       const permissionFlowActive =
         portalBusy ||
@@ -1962,7 +1989,7 @@ function render() {
       const primaryDisabled =
         permissionFlowActive ||
         pendingPreferences > 0 ||
-        (!welcome && modelRequired)
+        (!welcome && (modelRequired || accessibilityRequired))
           ? "disabled"
           : "";
       return `<footer class="setup-navigation">${welcome ? "" : `<button class="setup-back" data-setup-back ${disabled}>${esc(t("Back"))}</button>`}<span></span>${welcome || setupStep < panels.length - 1 ? `<button class="setup-primary" data-setup-next ${primaryDisabled}>${esc(t("Continue"))}</button>` : `<button class="setup-primary" data-command="complete_setup" ${primaryDisabled}>${esc(t("Finish setup"))}</button>`}</footer>`;
@@ -1971,12 +1998,20 @@ function render() {
       content.innerHTML = `<section class="setup-card" aria-labelledby="setup-title"><div class="setup-card-body setup-welcome"><img class="setup-logo" src="./branding/mark-on-dark.svg" width="72" height="72" alt="OpenWhisper"><h1 id="setup-title" tabindex="-1">${esc(t("Speak. OpenWhisper writes with you."))}</h1><p class="setup-intro">${esc(t("OpenWhisper turns speech into text directly on this computer. No account, cloud, or subscription. Your recordings never leave your computer."))}</p><p class="setup-language-label">${esc(t("Interface language"))}</p><div class="setup-language" role="group" aria-label="${esc(t("Interface language"))}"><button data-ui-language="de" aria-pressed="${state.preferences.ui_language === "de"}">Deutsch</button><button data-ui-language="en" aria-pressed="${state.preferences.ui_language === "en"}">${esc(t("English"))}</button></div></div>${navigation(true)}</section>`;
     } else {
       const panel = panels[setupStep]!;
+      const setupScrollTop =
+        renderedSetupStep === setupStep
+          ? (content.querySelector<HTMLElement>(".setup-card-body")
+              ?.scrollTop ?? 0)
+          : 0;
+      renderedSetupStep = setupStep;
       const progress = Array.from(
         { length: panels.length },
         (_, index) =>
           `<span${index === setupStep ? ' class="current"' : ""}></span>`,
       ).join("");
-      content.innerHTML = `<section class="setup-card" aria-labelledby="setup-title"><div class="setup-card-body"><div class="setup-segments" aria-hidden="true">${progress}</div><div class="setup-progress" role="status">${esc(t("Step {step} of {total}", { step: setupStep + 1, total: panels.length }))}</div><h1 id="setup-title" tabindex="-1">${esc(panel.title)}</h1><p class="setup-intro">${esc(panel.detail)}</p><div class="setup-panel-content">${panel.content}</div>${modelRequired ? `<p class="setup-footnote setup-model-required" role="status">${esc(t("Download and select a model to continue."))}</p>` : ""}${setupStep === panels.length - 1 ? `<p class="setup-footnote">${esc(t("You can change permissions, shortcuts, and recording preferences in General at any time."))}</p>` : ""}</div>${navigation(false)}</section>`;
+      content.innerHTML = `<section class="setup-card" aria-labelledby="setup-title"><div class="setup-card-body"><div class="setup-segments" aria-hidden="true">${progress}</div><div class="setup-progress" role="status">${esc(t("Step {step} of {total}", { step: setupStep + 1, total: panels.length }))}</div><h1 id="setup-title" tabindex="-1">${esc(panel.title)}</h1><p class="setup-intro">${esc(panel.detail)}</p><div class="setup-panel-content">${panel.content}</div>${modelRequired ? `<p class="setup-footnote setup-model-required" role="status">${esc(t("Download and select a model to continue."))}</p>` : ""}${accessibilityRequired ? `<p class="setup-footnote setup-model-required" role="status">${esc(t("Allow Accessibility access to continue."))}</p>` : ""}${setupStep === panels.length - 1 ? `<p class="setup-footnote">${esc(t("You can change permissions, shortcuts, and recording preferences in General at any time."))}</p>` : ""}</div>${navigation(false)}</section>`;
+      const setupBody = content.querySelector<HTMLElement>(".setup-card-body");
+      if (setupBody) setupBody.scrollTop = setupScrollTop;
     }
     if (focusSetupTitle) {
       content.querySelector<HTMLElement>("#setup-title")?.focus();
@@ -1987,7 +2022,7 @@ function render() {
     const systemDetails = isMac()
       ? row(
           t("System"),
-          `<span class="settings-system-status">${esc(state.desktop)} · macOS</span>`,
+          `<span class="settings-system-status">${esc(state.desktop)} · ${esc(state.session)}</span>`,
         )
       : (state.native_x11
           ? row(
@@ -2075,8 +2110,8 @@ function render() {
     const microphoneAccess = isMac()
       ? row(
           t("Microphone access"),
-          `<button data-command="allow_microphone">${esc(t("System Settings"))}</button>`,
-        )
+          `${macPermissionStatus(state.macos?.microphone_allowed === true)}<button data-command="allow_microphone">${esc(t("System Settings"))}</button>`,
+        ) + row(t("Microphone"), microphoneControl())
       : row(t("Microphone"), microphoneControl());
     const permissions =
       row(
@@ -2085,7 +2120,7 @@ function render() {
           : nativePaste()
             ? t("Automatic X11 paste")
             : t("Keyboard access"),
-        permissionButton(),
+        `${isMac() ? macPermissionStatus(state.paste_ready === true) : ""}${permissionButton()}`,
       ) +
       `<p class="secondary">${esc(
         isMac()
@@ -2099,7 +2134,7 @@ function render() {
               ),
       )}</p>`;
     const outputExtras =
-      (isMac() &&
+      isMac() &&
       state.macos?.clipboard_restore_available !== false &&
       p.output === "paste"
         ? toggle(
@@ -2107,13 +2142,7 @@ function render() {
             "restore_clipboard",
             !!p.restore_clipboard,
           )
-        : "") +
-      (isMac() && p.output === "editor"
-        ? row(
-            esc(state.macos!.editor),
-            `<button data-command="choose_editor">${esc(t("Choose another editor …"))}</button>`,
-          )
-        : "");
+        : "";
     content.innerHTML =
       section(
         t("Keyboard"),
@@ -2387,12 +2416,12 @@ function render() {
   content
     .querySelector<HTMLButtonElement>("[data-setup-next]")
     ?.addEventListener("click", () => {
-      if (setupStep === SETUP_MODEL_STEP && !hasInstalledSelectedModel()) {
+      if (setupStep === setupModelStep() && !hasInstalledSelectedModel()) {
         notice("Download and select a model to continue.");
         return;
       }
       if (pendingPreferences > 0) return;
-      setupStep = Math.min(setupStep + 1, SETUP_STEP_COUNT - 1);
+      setupStep = Math.min(setupStep + 1, setupStepCount() - 1);
       focusSetupTitle = true;
       contentKey = "";
       render();
@@ -2458,6 +2487,10 @@ function nativePaste() {
 }
 function pasteAvailable() {
   return state.paste_portal || !!state.native_paste;
+}
+/** macOS permissions are granted in System Settings; show whether macOS currently reports access. */
+function macPermissionStatus(allowed: boolean) {
+  return `<span class="permission-status ${allowed ? "success" : "secondary"}">${esc(t(allowed ? "Allowed" : "Not allowed"))}</span>`;
 }
 function permissionButton() {
   const pending = !isMac() && state.paste_configuring;
@@ -2534,7 +2567,15 @@ function modifierOnlyTrigger() {
     (trigger.key & 0x01ffffff) <= 0x01000023
   );
 }
+function mouseButtonLabel(button: number) {
+  if (button === 2) return t("Middle mouse button");
+  if (button === 8) return t("Mouse back button");
+  if (button === 9) return t("Mouse forward button");
+  return t("Mouse button {number}", { number: String(button - 4) });
+}
 function triggerLabel() {
+  const macMouse = isMac() ? /^Mouse(\d)$/u.exec(state.shortcut ?? "") : null;
+  if (macMouse) return mouseButtonLabel(Number(macMouse[1]));
   const trigger = state.preferences.native_trigger;
   if (
     !isMac() &&
@@ -2542,10 +2583,7 @@ function triggerLabel() {
     state.native_shortcuts &&
     trigger?.kind === "mouse"
   ) {
-    if (trigger.button === 2) return t("Middle mouse button");
-    if (trigger.button === 8) return t("Mouse back button");
-    if (trigger.button === 9) return t("Mouse forward button");
-    return t("Mouse button {number}", { number: String(trigger.button - 4) });
+    return mouseButtonLabel(trigger.button);
   }
   return state.shortcut ?? t("Set trigger …");
 }

@@ -182,6 +182,30 @@ test("Insert requests permission only on intent and persists once after an inter
   expect(await enableRequests()).toBe(2);
 });
 
+test("Mac settings show whether Accessibility and microphone access are allowed", async ({
+  page,
+}) => {
+  await start(page, "macos");
+  await page.evaluate(() => {
+    window.testState.paste_ready = false;
+    window.testState.macos!.microphone_allowed = false;
+    window.publishState();
+  });
+  await selectSettingsTab(page, "recording");
+  const permissions = page.locator("#settings-recording-permissions");
+  await expect(
+    permissions.getByText("Not allowed", { exact: true }),
+  ).toHaveCount(1);
+  await page.evaluate(() => {
+    window.testState.paste_ready = true;
+    window.publishState();
+  });
+  await expect(permissions.getByText("Allowed", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("combobox", { name: "Microphone", exact: true }),
+  ).toBeVisible();
+});
+
 test("Mac Insert opens Accessibility settings, then saves only after the user retries", async ({
   page,
 }) => {
@@ -607,6 +631,24 @@ test("workspace command failure keeps the global notice visible above the worksp
   await page.screenshot({
     path: "test-results/linux-global-command-error.png",
   });
+  await notice.getByRole("button", { name: "Close" }).click();
+  await expect(notice).toBeHidden();
+});
+
+test("Mac output controls offer only Insert and Copy and lock while transcribing", async ({
+  page,
+}) => {
+  await start(page, "macos");
+  const outputs = page.locator("#record-control [data-output]");
+  await expect(outputs).toHaveCount(2);
+  await expect(page.locator('[data-output="editor"]')).toHaveCount(0);
+  await page.evaluate(() => {
+    window.testState.status = "transcribing";
+    window.publishState();
+  });
+  await expect(
+    page.locator('#record-control [data-output="clipboard"]'),
+  ).toBeDisabled();
 });
 
 test("saved Linux recordings can be retried or discarded without starting capture", async ({
@@ -999,6 +1041,7 @@ async function waveformPixels(page: Page, selector: string) {
       peakStrength,
       peakDistance,
       signature,
+      strongColumns: columns.filter((value) => value > 0).length,
     };
   });
 }
@@ -1315,6 +1358,52 @@ test("recording canvas moves accepted historical peaks left without changing the
   ).toBe(0);
 });
 
+test("a hidden waveform draws the missed recording time when it becomes visible again", async ({
+  page,
+}) => {
+  const fixedTime = new Date("2026-10-11T12:00:00.000Z");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.clock.install({ time: fixedTime });
+  await page.clock.pauseAt(fixedTime);
+  await blockMicrophoneInput(page);
+  await page.setViewportSize({ width: 476, height: 68 });
+  await start(page, "macos", true, false, false, null);
+  const selector = '.audio-mark canvas.live-waveform[data-waveform="overlay"]';
+  const setHidden = (hidden: boolean) =>
+    page.evaluate((value) => {
+      Object.defineProperty(document, "hidden", {
+        configurable: true,
+        get: () => value,
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+    }, hidden);
+  const pulse = (elapsed: number) =>
+    page.evaluate((elapsed) => {
+      Object.assign(window.testState, {
+        status: "recording",
+        recording_generation: 7,
+        elapsed,
+        level: 0,
+      });
+      window.publishState();
+      window.publishTelemetry({ generation: 7, elapsed, level: 0.9 });
+    }, elapsed);
+  await pulse(0);
+  await page.clock.runFor(200);
+  // The overlay is hidden while another window is in front; telemetry keeps arriving.
+  await setHidden(true);
+  for (let step = 1; step <= 10; step++) {
+    await pulse(step);
+    await page.clock.runFor(150);
+  }
+  await setHidden(false);
+  await page.clock.runFor(50);
+  const pixels = await waveformPixels(page, selector);
+  const strong = pixels.strongColumns;
+  // About 1.5 s of hidden recording scrolls roughly 96 CSS pixels of loud bars into view.
+  expect(strong / pixels.pixelRatio).toBeGreaterThan(60);
+});
+
 test("main and overlay waveforms share telemetry timing and level mapping", async ({
   page,
 }) => {
@@ -1434,9 +1523,7 @@ for (const platform of ["linux", "macos"] as const) {
       "Snippets",
     ]);
     await expect(page.locator(".record-output-label")).toHaveText("Output");
-    await expect(page.locator(".record-output [data-output]")).toHaveCount(
-      platform === "macos" ? 3 : 2,
-    );
+    await expect(page.locator(".record-output [data-output]")).toHaveCount(2);
     const insertOutput = page.locator('.record-output [data-output="paste"]');
     await insertOutput.click();
     await expect(insertOutput).toHaveAttribute("aria-pressed", "true");
@@ -1885,7 +1972,7 @@ for (const platform of ["linux", "macos"] as const) {
         await expect(page.locator("#cancel")).toBeInViewport();
         await expect(page.locator(".record-output")).toBeVisible();
         await expect(page.locator(".record-output [data-output]")).toHaveCount(
-          platform === "macos" ? 3 : 2,
+          2,
         );
         for (const output of await page
           .locator(".record-output [data-output]")
@@ -3600,6 +3687,7 @@ for (const platform of ["linux", "macos"] as const) {
       window.publishState();
     });
     await expect(page.locator("#record-control")).toBeHidden();
+    const modelStepLabel = platform === "macos" ? "Step 1 of 6" : "Step 2 of 7";
     const cpuDevice =
       platform === "macos"
         ? "Synthetic macOS test CPU"
@@ -3621,133 +3709,138 @@ for (const platform of ["linux", "macos"] as const) {
       { cpuDevice, platform },
     );
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await expect(page.getByText("Step 1 of 7", { exact: true })).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Choose recognition hardware" }),
-    ).toBeVisible();
     const cpuMode = page.locator('input[name="gpu-mode"][value="false"]');
     const gpuMode = page.locator('input[name="gpu-mode"][value="true"]');
-    await expect(cpuMode).toBeChecked();
-    await expect(gpuMode).toBeDisabled();
-    await expect(page.getByText(cpuDevice, { exact: true })).toBeVisible();
-    if (platform === "macos") {
+    // macOS recognizes on the CPU only, so its setup starts with the model step.
+    if (platform === "linux") {
       await expect(
-        page.getByText(
-          `GPU recognition is unavailable in this build. CPU remains available: ${cpuDevice}`,
-          { exact: true },
-        ),
+        page.getByText("Step 1 of 7", { exact: true }),
       ).toBeVisible();
-    } else {
-      await page.evaluate(
-        ({ cpuDevice, gpuDevice }) => {
-          Object.assign(window.testState, {
-            cpu_device: cpuDevice,
-            gpu_device: gpuDevice,
-            gpu_supported: true,
-            gpu_checked: false,
-            gpu_available: false,
-          });
-          window.publishState();
-        },
-        { cpuDevice, gpuDevice },
-      );
-      await expect(gpuMode).toBeDisabled();
       await expect(
-        page.getByText("Checking GPU hardware …", { exact: true }),
+        page.getByRole("heading", { name: "Choose recognition hardware" }),
       ).toBeVisible();
-      await page.evaluate(() => window.publishState());
-      await expect(
-        page.getByText("Checking GPU hardware …", { exact: true }),
-      ).toBeVisible();
-      await page.evaluate(() => {
-        window.testState.gpu_checked = true;
-        window.publishState();
-      });
-      await expect(
-        page.getByText(
-          `No compatible GPU was detected. Recognition uses the CPU: ${cpuDevice}`,
-          { exact: true },
-        ),
-      ).toBeVisible();
-      await expect(gpuMode).toBeDisabled();
-      await page.evaluate(() => window.publishState());
-      await expect(
-        page.getByText(
-          `No compatible GPU was detected. Recognition uses the CPU: ${cpuDevice}`,
-          { exact: true },
-        ),
-      ).toBeVisible();
-      await page.evaluate(
-        ({ gpuDevice }) => {
-          window.testState.gpu_available = true;
-          window.testState.gpu_device = gpuDevice;
-          window.publishState();
-        },
-        { gpuDevice },
-      );
-      await expect(gpuMode).toBeEnabled();
-      await expect(
-        page.getByText(`CPU selected; Vulkan GPU available: ${gpuDevice}`, {
-          exact: true,
-        }),
-      ).toBeVisible();
-
-      await page.evaluate(() => {
-        const host = window as any;
-        host.rejectSave = true;
-        host.saveDelay = 50;
-      });
-      await gpuMode.check();
-      await expect(
-        page.getByRole("button", { name: "Continue", exact: true }),
-      ).toBeDisabled();
-      await expect(
-        page.getByRole("button", { name: "Back", exact: true }),
-      ).toBeDisabled();
       await expect(cpuMode).toBeChecked();
-      await expect(gpuMode).not.toBeChecked();
-      await expect(
-        page.getByRole("button", { name: "Continue", exact: true }),
-      ).toBeEnabled();
-      await expect(
-        page.getByText("Step 1 of 7", { exact: true }),
-      ).toBeVisible();
+      await expect(gpuMode).toBeDisabled();
+      await expect(page.getByText(cpuDevice, { exact: true })).toBeVisible();
+      if (platform === "macos") {
+        await expect(
+          page.getByText(
+            `GPU recognition is unavailable in this build. CPU remains available: ${cpuDevice}`,
+            { exact: true },
+          ),
+        ).toBeVisible();
+      } else {
+        await page.evaluate(
+          ({ cpuDevice, gpuDevice }) => {
+            Object.assign(window.testState, {
+              cpu_device: cpuDevice,
+              gpu_device: gpuDevice,
+              gpu_supported: true,
+              gpu_checked: false,
+              gpu_available: false,
+            });
+            window.publishState();
+          },
+          { cpuDevice, gpuDevice },
+        );
+        await expect(gpuMode).toBeDisabled();
+        await expect(
+          page.getByText("Checking GPU hardware …", { exact: true }),
+        ).toBeVisible();
+        await page.evaluate(() => window.publishState());
+        await expect(
+          page.getByText("Checking GPU hardware …", { exact: true }),
+        ).toBeVisible();
+        await page.evaluate(() => {
+          window.testState.gpu_checked = true;
+          window.publishState();
+        });
+        await expect(
+          page.getByText(
+            `No compatible GPU was detected. Recognition uses the CPU: ${cpuDevice}`,
+            { exact: true },
+          ),
+        ).toBeVisible();
+        await expect(gpuMode).toBeDisabled();
+        await page.evaluate(() => window.publishState());
+        await expect(
+          page.getByText(
+            `No compatible GPU was detected. Recognition uses the CPU: ${cpuDevice}`,
+            { exact: true },
+          ),
+        ).toBeVisible();
+        await page.evaluate(
+          ({ gpuDevice }) => {
+            window.testState.gpu_available = true;
+            window.testState.gpu_device = gpuDevice;
+            window.publishState();
+          },
+          { gpuDevice },
+        );
+        await expect(gpuMode).toBeEnabled();
+        await expect(
+          page.getByText(`CPU selected; Vulkan GPU available: ${gpuDevice}`, {
+            exact: true,
+          }),
+        ).toBeVisible();
 
-      await page.evaluate(() => {
-        const host = window as any;
-        host.rejectSave = false;
-        host.saveDelay = 180;
+        await page.evaluate(() => {
+          const host = window as any;
+          host.rejectSave = true;
+          host.saveDelay = 50;
+        });
+        await gpuMode.check();
+        await expect(
+          page.getByRole("button", { name: "Continue", exact: true }),
+        ).toBeDisabled();
+        await expect(
+          page.getByRole("button", { name: "Back", exact: true }),
+        ).toBeDisabled();
+        await expect(cpuMode).toBeChecked();
+        await expect(gpuMode).not.toBeChecked();
+        await expect(
+          page.getByRole("button", { name: "Continue", exact: true }),
+        ).toBeEnabled();
+        await expect(
+          page.getByText("Step 1 of 7", { exact: true }),
+        ).toBeVisible();
+
+        await page.evaluate(() => {
+          const host = window as any;
+          host.rejectSave = false;
+          host.saveDelay = 180;
+        });
+        await gpuMode.check();
+        await expect(
+          page.getByRole("button", { name: "Continue", exact: true }),
+        ).toBeDisabled();
+        await expect(
+          page.getByText("Step 1 of 7", { exact: true }),
+        ).toBeVisible();
+        await expect
+          .poll(() => page.evaluate(() => window.testState.preferences.gpu))
+          .toBe(true);
+        await expect(
+          page.getByRole("button", { name: "Continue", exact: true }),
+        ).toBeEnabled();
+        await expect(
+          page.getByText(`GPU selected. Vulkan device detected: ${gpuDevice}`, {
+            exact: true,
+          }),
+        ).toBeVisible();
+      }
+      await page.setViewportSize({ width: 740, height: 560 });
+      await page.screenshot({
+        path: `test-results/${platform}-setup-hardware-minimum.png`,
       });
-      await gpuMode.check();
-      await expect(
-        page.getByRole("button", { name: "Continue", exact: true }),
-      ).toBeDisabled();
-      await expect(
-        page.getByText("Step 1 of 7", { exact: true }),
-      ).toBeVisible();
-      await expect
-        .poll(() => page.evaluate(() => window.testState.preferences.gpu))
-        .toBe(true);
-      await expect(
-        page.getByRole("button", { name: "Continue", exact: true }),
-      ).toBeEnabled();
-      await expect(
-        page.getByText(`GPU selected. Vulkan device detected: ${gpuDevice}`, {
-          exact: true,
-        }),
-      ).toBeVisible();
+      await page.setViewportSize({ width: 960, height: 680 });
+      await page.screenshot({
+        path: `test-results/${platform}-setup-hardware.png`,
+      });
+      await page.setViewportSize({ width: 740, height: 560 });
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
     }
-    await page.setViewportSize({ width: 740, height: 560 });
-    await page.screenshot({
-      path: `test-results/${platform}-setup-hardware-minimum.png`,
-    });
-    await page.setViewportSize({ width: 960, height: 680 });
-    await page.screenshot({
-      path: `test-results/${platform}-setup-hardware.png`,
-    });
-    await page.setViewportSize({ width: 740, height: 560 });
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await expect(page.getByText("Step 2 of 7", { exact: true })).toBeVisible();
+    await expect(page.getByText(modelStepLabel, { exact: true })).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Download a speech model" }),
     ).toBeVisible();
@@ -3865,7 +3958,7 @@ for (const platform of ["linux", "macos"] as const) {
       (button as HTMLButtonElement).disabled = false;
       (button as HTMLButtonElement).click();
     });
-    await expect(page.getByText("Step 2 of 7", { exact: true })).toBeVisible();
+    await expect(page.getByText(modelStepLabel, { exact: true })).toBeVisible();
     await setupContinue.evaluate((button) => {
       (button as HTMLButtonElement).disabled = true;
     });
@@ -3876,6 +3969,11 @@ for (const platform of ["linux", "macos"] as const) {
     await expect
       .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
       .toBe("download_model");
+    // Progress must update in place so scrolling and the open family survive each tick.
+    await page.evaluate(() => {
+      (window as any).setupBodyBeforeProgress =
+        document.querySelector(".setup-card-body");
+    });
     await page.evaluate(() => {
       window.testState.progress = 0.42;
       window.publishState();
@@ -3884,6 +3982,13 @@ for (const platform of ["linux", "macos"] as const) {
       "value",
       0.42,
     );
+    expect(
+      await page.evaluate(
+        () =>
+          (window as any).setupBodyBeforeProgress ===
+          document.querySelector(".setup-card-body"),
+      ),
+    ).toBe(true);
     await baseModel.getByRole("button", { name: "Cancel" }).click();
     await expect(
       baseModel.getByRole("button", { name: "Download" }),
@@ -3931,23 +4036,22 @@ for (const platform of ["linux", "macos"] as const) {
       page.getByRole("heading", { name: microphoneHeading }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Back", exact: true }).click();
-    await expect(page.getByText("Step 2 of 7", { exact: true })).toBeVisible();
+    await expect(page.getByText(modelStepLabel, { exact: true })).toBeVisible();
     await expect(whisperFamily).toHaveJSProperty("open", true);
     await expect(baseModel.getByText("Active", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Back", exact: true }).click();
-    await expect(page.getByText("Step 1 of 7", { exact: true })).toBeVisible();
     if (platform === "linux") {
+      await page.getByRole("button", { name: "Back", exact: true }).click();
+      await expect(
+        page.getByText("Step 1 of 7", { exact: true }),
+      ).toBeVisible();
       await expect(gpuMode).toBeChecked();
       await expect(cpuMode).not.toBeChecked();
       await expect
         .poll(() => page.evaluate(() => window.testState.preferences.gpu))
         .toBe(true);
-    } else {
-      await expect(cpuMode).toBeChecked();
-      await expect(gpuMode).toBeDisabled();
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
     }
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await expect(page.getByText("Step 2 of 7", { exact: true })).toBeVisible();
+    await expect(page.getByText(modelStepLabel, { exact: true })).toBeVisible();
     await expect(baseModel.getByText("Active", { exact: true })).toBeVisible();
 
     const smallModel = page
@@ -3958,7 +4062,7 @@ for (const platform of ["linux", "macos"] as const) {
       .poll(() => page.evaluate(() => window.testState.preferences.model))
       .toBe("small");
     await expect(smallModel.getByText("Active", { exact: true })).toBeVisible();
-    await expect(page.getByText("Step 2 of 7", { exact: true })).toBeVisible();
+    await expect(page.getByText(modelStepLabel, { exact: true })).toBeVisible();
     await expect(setupContinue).toBeEnabled();
     await baseModel.getByRole("button", { name: "Use", exact: true }).click();
     await expect(baseModel.getByText("Active", { exact: true })).toBeVisible();
@@ -4034,6 +4138,34 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(
       page.getByRole("heading", { name: microphoneHeading }),
     ).toBeVisible();
+    if (platform === "macos") {
+      await page.evaluate(() => {
+        window.testState.macos!.microphone_allowed = true;
+        window.testState.microphones = ["AppleUSBAudioEngine:Synthetic Mic:1"];
+        window.testState.microphone_labels = [
+          {
+            id: "AppleUSBAudioEngine:Synthetic Mic:1",
+            name: "Synthetic USB microphone",
+          },
+        ];
+        window.publishState();
+      });
+      await expect(
+        page.getByText("Microphone access allowed", { exact: true }),
+      ).toBeVisible();
+      const macMicrophone = page.getByRole("combobox", { name: "Microphone" });
+      await expect(macMicrophone).toBeVisible();
+      await macMicrophone.selectOption("AppleUSBAudioEngine:Synthetic Mic:1");
+      await expect
+        .poll(() =>
+          page.evaluate(() => window.testState.preferences.microphone),
+        )
+        .toBe("AppleUSBAudioEngine:Synthetic Mic:1");
+      await macMicrophone.selectOption("");
+      await expect(
+        page.getByRole("button", { name: "Allow", exact: true }),
+      ).toHaveCount(0);
+    }
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(
       page.getByRole("combobox", { name: "Language", exact: true }),
@@ -4108,6 +4240,27 @@ for (const platform of ["linux", "macos"] as const) {
       expect(
         await page.evaluate(() => window.calls.map((call) => call.command)),
       ).not.toContain("allow_microphone");
+      // Insert requires Accessibility; clipboard output can finish without it.
+      await page.evaluate(() => {
+        window.testState.paste_ready = false;
+        window.testState.preferences.output = "paste";
+        window.publishState();
+      });
+      await expect(
+        page.getByRole("button", { name: "Continue", exact: true }),
+      ).toBeDisabled();
+      await expect(
+        page.getByText("Allow Accessibility access to continue.", {
+          exact: true,
+        }),
+      ).toBeVisible();
+      await page.evaluate(() => {
+        window.testState.paste_ready = true;
+        window.publishState();
+      });
+      await expect(
+        page.getByText("Accessibility access allowed", { exact: true }),
+      ).toBeVisible();
     }
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(
@@ -4116,43 +4269,10 @@ for (const platform of ["linux", "macos"] as const) {
     const setupKeycap = page.locator(".setup-trigger-button");
     await expect(setupKeycap).toBeVisible();
     await expect(setupKeycap.locator(".setup-trigger-key")).toBeVisible();
-    const setupOutput = page.locator(".setup-trigger-output");
-    await expect(setupOutput).toBeVisible();
+    // The output is chosen in its own step; the trigger step must not repeat it.
     await expect(
-      setupOutput.locator('input[name="settings-output"]'),
-    ).toHaveCount(platform === "macos" ? 3 : 2);
-    const pasteOutput = setupOutput.locator('input[value="paste"]');
-    const pasteRequestsBeforeChoice = await page.evaluate(
-      () =>
-        window.calls.filter((call) => call.command === "enable_paste").length,
-    );
-    await pasteOutput.focus();
-    await page.keyboard.press("Space");
-    await expect
-      .poll(() => page.evaluate(() => window.testState.preferences.output))
-      .toBe("paste");
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () =>
-            window.calls.filter((call) => call.command === "enable_paste")
-              .length,
-        ),
-      )
-      .toBe(pasteRequestsBeforeChoice + 1);
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () =>
-            window.calls.filter(
-              (call) =>
-                call.command === "save_preferences" &&
-                (call.args as { changes?: { output?: string } } | undefined)
-                  ?.changes?.output === "paste",
-            ).length,
-        ),
-      )
-      .toBe(1);
+      page.locator('.setup-trigger-panel input[name="settings-output"]'),
+    ).toHaveCount(0);
     await page.evaluate(() => {
       window.testState.native_shortcuts = true;
       window.testState.native_mouse = window.testState.platform === "linux";
@@ -5015,7 +5135,7 @@ for (const platform of ["linux", "macos"] as const) {
     await page.setViewportSize({ width: 740, height: 560 });
     await page.getByRole("button", { name: "Weiter", exact: true }).click();
     const titles = [
-      "Erkennungshardware auswählen",
+      ...(platform === "macos" ? [] : ["Erkennungshardware auswählen"]),
       "Sprachmodell herunterladen",
       platform === "macos" ? "Mikrofonzugriff erlauben" : "Mikrofon wählen",
       "Sprache wählen",
@@ -5025,7 +5145,9 @@ for (const platform of ["linux", "macos"] as const) {
     ];
     for (const [index, title] of titles.entries()) {
       await expect(
-        page.getByText(`Schritt ${index + 1} von 7`, { exact: true }),
+        page.getByText(`Schritt ${index + 1} von ${titles.length}`, {
+          exact: true,
+        }),
       ).toBeVisible();
       if (title) {
         await expect(
@@ -5039,7 +5161,7 @@ for (const platform of ["linux", "macos"] as const) {
           .locator("main")
           .evaluate((e) => e.scrollWidth <= e.clientWidth),
       ).toBe(true);
-      if (index === 1) {
+      if (title === "Sprachmodell herunterladen") {
         await page.screenshot({
           path: `test-results/${platform}-setup-model-de-minimum.png`,
         });
@@ -5049,7 +5171,7 @@ for (const platform of ["linux", "macos"] as const) {
         });
         await page.setViewportSize({ width: 740, height: 560 });
       }
-      if (index === 6) {
+      if (index === titles.length - 1) {
         await page.screenshot({
           path: resolve(
             recordingPolishScreenshots,
@@ -5065,9 +5187,16 @@ for (const platform of ["linux", "macos"] as const) {
         });
         await page.setViewportSize({ width: 740, height: 560 });
       }
+      if (platform === "macos" && index === titles.length - 2) {
+        await page.evaluate(() => {
+          window.testState.paste_ready = true;
+          window.publishState();
+        });
+      }
       await page
         .getByRole("button", {
-          name: index === 6 ? "Einrichtung abschließen" : "Weiter",
+          name:
+            index === titles.length - 1 ? "Einrichtung abschließen" : "Weiter",
           exact: true,
         })
         .click();
@@ -5766,3 +5895,49 @@ for (const platform of ["linux", "macos"] as const) {
     }
   });
 }
+
+test("macOS clipboard setup finishes without Accessibility access and keeps the permission action", async ({
+  page,
+}) => {
+  await start(page, "macos", false, true, false, null);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page.locator("#setup-title")).toHaveText(
+    "Download a speech model",
+  );
+  for (const title of [
+    "Allow microphone access",
+    "Choose a language",
+    "Where should the text go?",
+    "Allow Accessibility access",
+  ]) {
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(page.locator("#setup-title")).toHaveText(title);
+    if (title === "Where should the text go?")
+      await page.getByRole("radio", { name: "Copy to clipboard only" }).check();
+  }
+  await expect(page.locator(".setup-intro")).toContainText(
+    "Clipboard-only output remains available.",
+  );
+  await expect(page.locator('[data-portal="enable_paste"]')).toBeVisible();
+  await expect(page.locator('[data-portal="enable_paste"]')).toBeEnabled();
+  await expect
+    .poll(() => page.evaluate(() => window.testState.paste_ready))
+    .toBe(false);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page.locator("#setup-title")).toHaveText(
+    "How do you start the recording?",
+  );
+  await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.testState.preferences.setup_completed),
+    )
+    .toBe(true);
+  await expect
+    .poll(() => page.evaluate(() => window.testState.preferences.output))
+    .toBe("clipboard");
+  expect(
+    await page.evaluate(() => window.calls.map((call) => call.command)),
+  ).not.toContain("enable_paste");
+  expect(await page.evaluate(() => window.testState.paste_ready)).toBe(false);
+});

@@ -25,7 +25,8 @@ export class LiveWaveform {
   private readonly onVisibilityChange = () => {
     if (!document.hidden) {
       this.lastFrameAt = undefined;
-      this.lastColumnAt = performance.now();
+      // Fill the time this view was hidden from received telemetry instead of leaving a gap.
+      this.backfill(performance.now());
       this.draw(performance.now());
     }
     this.syncAnimation();
@@ -38,6 +39,8 @@ export class LiveWaveform {
     this.syncAnimation();
   };
   private columns: Column[] = [];
+  /** Received levels, kept so time without animation frames can be drawn afterwards. */
+  private samples: Column[] = [];
   private active = false;
   private generation: number | undefined;
   private targetLevel = 0;
@@ -85,6 +88,7 @@ export class LiveWaveform {
     this.active = true;
     this.generation = generation;
     this.columns = [];
+    this.samples = [];
     this.targetLevel = 0;
     this.displayedLevel = 0;
     this.lastInputAt = undefined;
@@ -111,6 +115,8 @@ export class LiveWaveform {
 
     this.lastInputAt = at;
     this.targetLevel = level;
+    this.samples.push({ level, at });
+    if (this.samples.length > MAX_HISTORY) this.samples.shift();
     this.scheduleStaleClear();
     if (this.reducedMotion?.matches) {
       this.displayedLevel = level;
@@ -198,11 +204,41 @@ export class LiveWaveform {
         });
         if (this.columns.length > MAX_HISTORY) this.columns.shift();
       }
-      if (due > 2) this.lastColumnAt = at;
+      // Frames were delayed (throttled or covered window): draw the missed time from samples.
+      if (due > 2) this.backfill(at);
     }
     this.draw(at, false);
     this.syncAnimation();
   };
+
+  private levelAt(at: number): number {
+    for (let index = this.samples.length - 1; index >= 0; index--) {
+      const sample = this.samples[index]!;
+      if (sample.at <= at) return sample.level;
+    }
+    return 0;
+  }
+
+  private backfill(until: number): void {
+    if (!this.active) return;
+    if (this.lastColumnAt === undefined) {
+      const first = this.samples[0];
+      if (!first) return;
+      this.lastColumnAt = first.at - COLUMN_INTERVAL_MS;
+    }
+    const missed = Math.floor((until - this.lastColumnAt) / COLUMN_INTERVAL_MS);
+    if (missed > MAX_HISTORY)
+      this.lastColumnAt += (missed - MAX_HISTORY) * COLUMN_INTERVAL_MS;
+    while (this.lastColumnAt + COLUMN_INTERVAL_MS <= until) {
+      this.lastColumnAt += COLUMN_INTERVAL_MS;
+      this.columns.push({
+        level: this.levelAt(this.lastColumnAt),
+        at: this.lastColumnAt,
+      });
+    }
+    if (this.columns.length > MAX_HISTORY)
+      this.columns.splice(0, this.columns.length - MAX_HISTORY);
+  }
 
   private draw(at: number, advance = true): void {
     const context = this.context;
@@ -350,6 +386,7 @@ export class LiveWaveform {
 
   private clear(): void {
     this.columns = [];
+    this.samples = [];
     this.targetLevel = 0;
     this.displayedLevel = 0;
     this.lastInputAt = undefined;

@@ -34,9 +34,17 @@ function canonical(value: unknown): string {
     `${JSON.stringify(key)}:${canonical(Reflect.get(value, key))}`).join(",")}}`;
   return JSON.stringify(value);
 }
+/**
+ * StoreKit, loaded with every Electron app on macOS, records this timestamp in the app's own
+ * defaults domain at each launch. The in-memory value can differ from the file, so it is
+ * excluded from the coherence comparison; it is never legacy OpenWhisper data.
+ */
+const systemManagedKeys = new Set(["SKPurchaseIntentUpdatesLastChecked"]);
 function snapshotIdentity(value: DecodedLegacyMacosPlist): string {
   const checked = decodedLegacyMacosPlistSchema.parse(value);
-  return canonical({ plist: checked.plist, nativeValues: [...checked.nativeValues].sort((a, b) =>
+  const plist = Object.fromEntries(Object.entries(checked.plist).filter(([key]) => !systemManagedKeys.has(key)));
+  const nativeValues = checked.nativeValues.filter((entry) => typeof entry.path[0] !== "string" || !systemManagedKeys.has(entry.path[0]));
+  return canonical({ plist, nativeValues: [...nativeValues].sort((a, b) =>
     canonical(a.path).localeCompare(canonical(b.path), "en")) });
 }
 function agree(access: MacosMigrationAccess, decoded: DecodedLegacyMacosPlist): void {

@@ -27,13 +27,27 @@ function safeFile(value: BigIntStats, expected: DevelopmentArtifact): boolean {
     (value.uid === BigInt(process.getuid?.() ?? -1) || value.uid === 0n) &&
     (value.mode & 0o022n) === 0n && value.size === BigInt(expected.bytes);
 }
+const MACOS_ADMIN_GID = 80n;
+type AncestorStats = Pick<BigIntStats, "uid" | "gid" | "mode" | "isDirectory" | "isSymbolicLink">;
+/**
+ * Accepts directories owned by root or the current user that other users cannot replace.
+ * Root-owned sticky directories such as /tmp are allowed. On macOS, /Applications is
+ * root:admin 0775 by default; admin members can already act as root, so a root-owned,
+ * admin-group-writable directory without world write access is trusted as well.
+ */
+export function trustedAncestor(value: AncestorStats, uid: bigint, platform: NodeJS.Platform): boolean {
+  if (!value.isDirectory() || value.isSymbolicLink() || (value.uid !== 0n && value.uid !== uid)) return false;
+  if ((value.mode & 0o022n) === 0n) return true;
+  if (value.uid !== 0n) return false;
+  if ((value.mode & 0o1000n) !== 0n) return true;
+  return platform === "darwin" && value.gid === MACOS_ADMIN_GID && (value.mode & 0o002n) === 0n;
+}
 async function checkAncestors(path: string): Promise<void> {
   for (let cursor = dirname(path);; cursor = dirname(cursor)) {
     const value = await lstat(cursor, { bigint: true });
-    const stickyTemporary = value.uid === 0n && (value.mode & 0o1000n) !== 0n;
-    if (!value.isDirectory() || value.isSymbolicLink() ||
-      (value.uid !== 0n && value.uid !== BigInt(process.getuid?.() ?? -1)) ||
-      ((value.mode & 0o022n) !== 0n && !stickyTemporary)) throw new DevelopmentArtifactError("INTEGRITY_FAILED");
+    if (!trustedAncestor(value, BigInt(process.getuid?.() ?? -1), process.platform)) {
+      throw new DevelopmentArtifactError("INTEGRITY_FAILED");
+    }
     if (dirname(cursor) === cursor) break;
   }
 }

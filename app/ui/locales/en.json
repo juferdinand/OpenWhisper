@@ -124,7 +124,6 @@
   "Recording": "Recording",
   "Recording mode": "Recording mode",
   "Remove snippet": "Remove snippet",
-  "Required for automatic insertion and advanced triggers. Clipboard-only output remains available.": "Required for automatic insertion and advanced triggers. Clipboard-only output remains available.",
   "Restore the previous clipboard afterward": "Restore the previous clipboard afterward",
   "Revoke": "Revoke",
   "Russian": "Russian",
@@ -550,5 +549,12 @@
   "Install and restart now": "Install and restart now",
   "Restart now": "Restart now",
   "Install the downloaded update and restart now, or choose Later.": "Install the downloaded update and restart now, or choose Later.",
-  "Release notes are shown in English.": "Release notes are shown in English."
+  "Release notes are shown in English.": "Release notes are shown in English.",
+  "Microphone access allowed": "Microphone access allowed",
+  "Use a regular key, a shortcut, or the middle, back or forward mouse button.": "Use a regular key, a shortcut, or the middle, back or forward mouse button.",
+  "Accessibility access allowed": "Accessibility access allowed",
+  "Allowed": "Allowed",
+  "Not allowed": "Not allowed",
+  "Accessibility access is needed for automatic insertion and advanced triggers. Clipboard-only output remains available.": "Accessibility access is needed for automatic insertion and advanced triggers. Clipboard-only output remains available.",
+  "Allow Accessibility access to continue.": "Allow Accessibility access to continue."
 }

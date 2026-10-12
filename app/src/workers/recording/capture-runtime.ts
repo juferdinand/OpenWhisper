@@ -4,7 +4,7 @@ import { RecordingCoordinator, type CaptureBoundary, type ControlReply, type Del
 import { AdaptiveSpeechBoundary, createUtilitySpeechEffects } from "../../services/speech/adaptive-speech.js";
 import type { NativeCapturedHandle } from "../../services/recording/capture.js";
 import type { SpeechClient } from "../../services/speech/speech-client.js";
-import { LinuxSpeechGate } from "../speech/speech-gate.js";
+import { SilenceSpeechGate } from "../speech/speech-gate.js";
 import { recordingHostReplySchema, recordingHostRequestSchema,
   type RecordingConfiguration, type RecordingEnumeration, type RecordingHostReply,
   type RecordingHostRequest, type RecordingSource } from "./recording-host-protocol.js";
@@ -138,7 +138,7 @@ export class CaptureRuntime {
         },
       };
       this.coordinator = new RecordingCoordinator({ platform: "linux", capture: prepared.capture, recovery,
-        clock: { now: () => performance.now() }, speechGate: new LinuxSpeechGate(), delivery: {
+        clock: { now: () => performance.now() }, speechGate: new SilenceSpeechGate(), delivery: {
           deliver: async (text, context, identity) => {
             const receipt = await this.effects.delivery.deliver(text, context, identity);
             if (identity.kind === "recovery" && receipt.generation === context.generation && receipt.attempt === context.attempt

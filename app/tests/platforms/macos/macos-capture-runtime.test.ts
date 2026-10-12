@@ -62,7 +62,7 @@ function fixture() {
   const command = (name: Exclude<MacRecordingHostRequest["command"], "configure">) =>
     ({ version: 1 as const, channel: "recording-host" as const, epoch, id: randomUUID(), command: name });
   const configuration = (): MacRecordingConfiguration => ({ version: 1, channel: "recording-host", epoch, id: randomUUID(), command: "configure",
-    capture: { bytes: 123, sha256: "a".repeat(64) }, request: structuredClone(request) });
+    capture: { bytes: 123, sha256: "a".repeat(64) }, source: "", request: structuredClone(request) });
   const last = () => messages.filter((reply) => reply.kind === "snapshot").at(-1)?.snapshot;
   async function terminal() {
     const until = performance.now() + 3000;
@@ -82,8 +82,10 @@ function fixture() {
 }
 test("Mac protocol admits only fixed CPU configuration and shared content-bounded control replies", () => {
   const f = fixture(), config = f.configuration(); macRecordingHostRequestSchema.parse(config);
+  // A CoreAudio device UID may be selected; malformed identifiers are refused.
+  macRecordingHostRequestSchema.parse({ ...config, source: "AppleUSBAudioEngine:Synthetic Mic:1" });
   for (const changed of [{ ...config, binding: "/untrusted.node" }, { ...config, recoveryPath: "/owned/recovery" },
-    { ...config, server: "unix:/owned/pulse/native" }, { ...config, source: "device" }, { ...config, selection: { mode: "synthetic" } },
+    { ...config, server: "unix:/owned/pulse/native" }, { ...config, source: " leading-space" }, { ...config, source: "line\nbreak" }, { ...config, selection: { mode: "synthetic" } },
     { ...config, request: { ...config.request, model: { ...config.request.model, gpu: true } } },
     { ...config, command: "enumerate-sources" }, { ...config, samples: new Float32Array(1) }]) {
     assert.equal(macRecordingHostRequestSchema.safeParse(changed).success, false);

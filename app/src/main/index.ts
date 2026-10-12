@@ -18,7 +18,7 @@ import type { HostProfile } from "../services/settings/host-profile.js";
 import type { BuildIdentity } from "../contracts/application/build-identity.js";
 import { APPLICATION_BUILD } from "./application-build.js";
 import { selectApplicationBuild } from "./build-selection.js";
-import { formatBootstrapFailure, initializeStableLinuxProfile, initializeStableMacosProfile, observeBootstrapLoginStatus,
+import { formatBootstrapFailure, formatStartFailure, initializeStableLinuxProfile, initializeStableMacosProfile, observeBootstrapLoginStatus,
   type ApplicationBootstrapStage, type ApplicationBootstrapLoginStatus } from "./stable-profile-startup.js";
 import { verifyMacApplicationBundle, macosMigrationContext } from "./macos-stable-admission.js";
 import { StableMigrationError } from "../contracts/migration/stable-migration.js";
@@ -49,6 +49,8 @@ import { overlayWindowBounds, overlayWindowOptions, shouldShowRecordingOverlay, 
 import { WaylandRecordingOverlay } from "./wayland-recording-overlay.js";
 import type { SurfaceUnavailableReason } from "../contracts/platforms/wayland-surface.js";
 import { MacosShortcut } from "./macos-shortcut.js";
+import { MacosMouseTrigger } from "./macos-mouse-trigger.js";
+import { macosAudioInputSources } from "./macos-audio-devices.js";
 import { MacosPaste } from "./macos-paste.js";
 import { MacosAutostart } from "./macos-autostart.js";
 import { APPLICATION_MACOS_UPDATE_BUILD } from "./macos-update-build.js";
@@ -228,6 +230,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let overlayUnavailableReason: SurfaceUnavailableReason | undefined;
   let tray: Tray | undefined, trayKey = "";
   let macShortcut: MacosShortcut | undefined;
+  let macMouse: MacosMouseTrigger | undefined;
   let recording = recordingSnapshotSchema.parse({ phase: "idle", generation: 0, elapsedMs: 0, level: 0,
     busy: false, recoveryAvailable: false, error: null, transcript: "" });
   let message = "", inferenceProgress = 0;
@@ -371,6 +374,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         return delivered;
       } },
     });
+    // macOS lists CoreAudio inputs in main; only device UIDs and display names are read.
+    if (descriptor.platform === "darwin") sources = macosAudioInputSources();
     if (descriptor.platform === "linux") {
       try { audioServer = await checkedAudioServer(); sources = await host.enumerate(audioServer); }
       catch { message = "A local audio server is not available."; }
@@ -426,13 +431,15 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         gpuFallback: gpuSelection.fallback,
         memoryBytes: totalmem(),
       }), preferenceSnapshot.language === "auto" ? preferenceSnapshot.ui_language : preferenceSnapshot.language).map((model) => model.id),
-      session: process.env["XDG_SESSION_TYPE"] ?? "unknown",
-      desktop: process.env["XDG_CURRENT_DESKTOP"] ?? "unknown", clipboard_available: descriptor !== null,
+      // XDG variables exist only on Linux desktops; macOS reports its version and architecture instead.
+      session: process.platform === "darwin" ? process.arch : process.env["XDG_SESSION_TYPE"] ?? "unknown",
+      desktop: process.platform === "darwin" ? `macOS ${process.getSystemVersion()}` : process.env["XDG_CURRENT_DESKTOP"] ?? "unknown",
+      clipboard_available: descriptor !== null,
       shortcut_portal: shortcut.available, paste_portal: pasteState.available, shortcut: macShortcutState?.label ?? shortcut.label,
       native_shortcuts: macShortcutState?.available ?? shortcut.nativeAvailable,
       shortcut_configuring: shortcut.configuring && !shortcut.nativeX11,
       native_x11: shortcut.nativeX11 ?? false, native_paste: !!macPaste,
-      native_mouse: shortcut.nativeMouse ?? false, native_middle_mouse: shortcut.nativeMiddleMouse ?? false,
+      native_mouse: macShortcut?.mouseAvailable() ?? shortcut.nativeMouse ?? false, native_middle_mouse: macShortcut?.mouseAvailable() ?? shortcut.nativeMiddleMouse ?? false,
       recording_shortcut: (macShortcutState?.configuring ?? false) || !!keyCapture || !!shortcut.nativeX11 && shortcut.configuring,
       paste_ready: macPaste ? accessibilityAllowed : pasteState.ready, paste_configuring: pasteState.configuring,
       gpu_available: gpuSelection.available, gpu_supported: gpuSelection.supported, gpu_checked: gpuSelection.checked,
@@ -568,6 +575,13 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       emit("state", snapshot);
       updateTray(snapshot);
       syncOverlayVisibility(snapshot);
+      // macOS reports a background or covered window as hidden and pauses its animation frames,
+      // which left gaps in the live waveform. Keep the main window and the recording overlay
+      // unthrottled only while recording.
+      const throttle = snapshot.status !== "recording";
+      for (const target of [contents, overlay && !overlay.isDestroyed() ? overlay.webContents : undefined]) {
+        if (target && !target.isDestroyed() && target.getBackgroundThrottling() !== throttle) target.setBackgroundThrottling(throttle);
+      }
     }
     catch { console.error("OpenWhisper Dev could not publish its UI state."); }
   };
@@ -598,7 +612,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       gpu: selected.gpu && gpuSelection.supported },
       language: selected.language, vocabulary: selected.vocabulary, snippets: selected.snippets });
     await host.configure({ id: model.model.id, request,
-      ...(macRecording ? {} : { server: audioServer ?? `unix:${join(process.env.XDG_RUNTIME_DIR ?? profile.paths.locks, "pulse/native")}`,
+      ...(macRecording ? { source: selected.microphone } : { server: audioServer ?? `unix:${join(process.env.XDG_RUNTIME_DIR ?? profile.paths.locks, "pulse/native")}`,
         source: selected.microphone }) }); configured = true;
   };
   const toggleRecording = (): Promise<void> => recordingAction(async () => {
@@ -611,7 +625,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     cancelRequested = true; if (host?.isConfigured()) await host.command("cancel");
   });
   if (host && macRecording && process.platform === "darwin") {
-    macShortcut = new MacosShortcut({ shortcuts: globalShortcut,
+    macMouse = MacosMouseTrigger.create();
+    macShortcut = new MacosShortcut({ shortcuts: globalShortcut, ...(macMouse ? { mouse: macMouse } : {}),
       allowed: () => !shutdownInProgress && updateReserved !== "install" && !recordingControl && !recording.recoveryAvailable &&
         !["stopping", "transcribing", "restoring", "discarding"].includes(recording.phase),
       setupAllowed: () => !shutdownInProgress && updateReserved !== "install" && !recording.busy && !recording.recoveryAvailable,
@@ -621,7 +636,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       changed: (value) => {
         contents.setIgnoreMenuShortcuts(value.configuring);
         const messages = { NONE: "", ENABLED: "", CANCELLED: "Shortcut setup was cancelled. Window recording remains usable.",
-          UNSUPPORTED: "Use a regular key or shortcut. Fn and mouse triggers are not available in this build.",
+          UNSUPPORTED: "Use a regular key, a shortcut, or the middle, back or forward mouse button.",
           CONFLICT: "This trigger conflicts with an existing desktop shortcut. Choose another trigger.",
           FAILED: "Shortcut setup or recording failed. Window recording remains usable." };
         message = messages[value.result];
@@ -631,6 +646,12 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         }
         notify();
       } });
+    const savedTrigger = preferences.snapshot().macos_shortcut;
+    if (savedTrigger) {
+      // Saved triggers are registered again at startup; a failure keeps window recording usable.
+      try { macShortcut.bind(savedTrigger); }
+      catch { message = "Shortcut setup or recording failed. Window recording remains usable."; }
+    }
     notify();
   }
   if (host && descriptor?.platform === "linux" && descriptor.platformServices) {
@@ -759,7 +780,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     const closeOwners = async (): Promise<void> => {
       await recordingOperation?.catch(() => {}); await downloading; await downloads.finalize();
       nativeCleanupStarted = true;
-      await macShortcut?.close(); macPaste?.close(); await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); await waylandOverlay?.close();
+      await macShortcut?.close(); macMouse?.close(); macPaste?.close(); await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); await waylandOverlay?.close();
       if (macRecording) { recordingRetired = true; host = undefined; configured = false; }
     };
     shutdownTask = (async () => {
@@ -1008,6 +1029,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       clear_shortcut: () => shortcutAction("clear"),
       cancel_shortcut: () => shortcutAction("cancel"),
       capture_mouse_trigger: ({ button }) => recordingAction(async () => {
+        if (macShortcut) {
+          if (!window?.isFocused() || recording.busy || recording.recoveryAvailable || shutdownInProgress) throw new Error("Mouse trigger setup is unavailable.");
+          macShortcut.captureMouse(button); return;
+        }
         if (!keyCapture || !shortcut.nativeMouse || !platformHost || !window?.isFocused() ||
             recording.busy || recording.recoveryAvailable || shutdownInProgress) {
           throw new Error("Mouse trigger setup is unavailable.");
@@ -1033,7 +1058,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       retry_transcription: () => recordingAction(async () => { await configureRecording(); if (cancelRequested) return; inferenceProgress = 0; await host?.command("retry"); }),
       discard_recovery: () => recordingAction(async () => { await configureRecording(); if (!cancelRequested) await host?.command("discard"); }),
       refresh_microphones: () => recordingAction(async () => { if (!host) throw new Error("Recording unavailable.");
-        if (macRecording) { microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted"; return; }
+        if (macRecording) { microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted"; sources = macosAudioInputSources(); return; }
         audioServer = await checkedAudioServer(); sources = await host.enumerate(audioServer); }),
       allow_microphone: () => action(async () => {
         if (!macRecording) throw new Error("Microphone permission is unavailable.");
@@ -1081,10 +1106,16 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     },
   });
   try {
-    const icon = nativeImage.createFromPath(join(distribution, "ui/app-icon.png")).resize({ width: 18, height: 18 });
+    // macOS renders menu bar template images from alpha only, so it needs a monochrome mark;
+    // the opaque application icon would show as a solid square there.
+    const icon = process.platform === "darwin"
+      ? nativeImage.createFromPath(join(distribution, "ui/branding/trayTemplate.png"))
+      : nativeImage.createFromPath(join(distribution, "ui/app-icon.png")).resize({ width: 18, height: 18 });
     if (icon.isEmpty()) throw new Error("Tray icon unavailable.");
     if (process.platform === "darwin") icon.setTemplateImage(true);
-    tray = new Tray(icon); tray.setToolTip(profile.productName); tray.on("click", showSettings);
+    tray = new Tray(icon); tray.setToolTip(profile.productName);
+    // macOS shows the menu (with Settings and Stop recording) on click; opening the window there hid its actions.
+    if (process.platform !== "darwin") tray.on("click", showSettings);
     updateTray = (snapshot) => {
       if (!tray || tray.isDestroyed()) return;
       const key = JSON.stringify([snapshot.status, snapshot.recording_available, snapshot.recovery_available, snapshot.preferences.ui_language]);
@@ -1127,7 +1158,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   window.on("restore", syncOverlayAfterWindowEvent);
   if (macRecording) window.on("focus", () => {
     microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted";
-    accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(false); notify();
+    sources = macosAudioInputSources();
+    accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(false);
+    try { macMouse?.refresh(String(accessibilityAllowed)); } catch { message = "Shortcut setup or recording failed. Window recording remains usable."; }
+    notify();
   });
   if (autostart) window.on("focus", () => { void refreshLogin().then(notify); });
   // Configure the saved request to discover private stopped audio before showing
@@ -1199,8 +1233,8 @@ if (control) {
     app.exit(1);
     return undefined;
   });
-  if (bootstrap) void start(bootstrap).catch(() => {
-    console.error("OpenWhisper could not initialize its application services or UI.");
+  if (bootstrap) void start(bootstrap).catch((error: unknown) => {
+    console.error(formatStartFailure(error));
     app.exit(1);
   });
 }

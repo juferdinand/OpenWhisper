@@ -16,6 +16,11 @@ const utf8 = (limit: number) => z.string().max(limit).refine(
   { message: "String exceeds the supported UTF-8 byte length" },
 );
 const label = utf8(1024);
+/**
+ * Recording source identifiers: PulseAudio source names on Linux and CoreAudio device UIDs on
+ * macOS. CoreAudio UIDs may contain spaces, so printable ASCII is allowed without outer spaces.
+ */
+export const recordingSourceIdSchema = z.string().regex(/^[!-~](?:[ -~]{0,253}[!-~])?$/u);
 export const hardwareDeviceNameSchema = utf8(256).refine(
   (value) => value.length > 0 && value === value.trim() && !/\p{Cc}/u.test(value),
 );
@@ -157,7 +162,7 @@ export const appStateSchema = z.strictObject({
   models: z.array(modelSchema).max(128),
   installed: z.array(modelId).max(128),
   microphones: z.array(label).max(256),
-  microphone_labels: z.array(z.strictObject({ id: z.string().regex(/^[A-Za-z0-9_.:-]{1,255}$/u), name: label })).max(256).optional(),
+  microphone_labels: z.array(z.strictObject({ id: recordingSourceIdSchema, name: label })).max(256).optional(),
   recommended_models: z.array(modelId).max(128).optional(),
   session: label,
   desktop: label,

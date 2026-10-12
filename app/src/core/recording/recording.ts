@@ -126,7 +126,7 @@ interface CommonOptions<C extends CapturedHandle> {
 }
 export type RecordingOptions<C extends CapturedHandle> = CommonOptions<C> & (
   | { readonly platform: "linux"; readonly recovery: RecoveryBoundary; readonly speechGate?: SpeechGate }
-  | { readonly platform: "macos"; readonly recovery?: never; readonly speechGate?: never }
+  | { readonly platform: "macos"; readonly recovery?: never; readonly speechGate?: SpeechGate }
 );
 interface CaptureOwner<C extends CapturedHandle> {
   readonly generation: number;
@@ -213,9 +213,6 @@ export class RecordingCoordinator<C extends CapturedHandle> {
   constructor(private readonly options: RecordingOptions<C>) {
     if (options.platform === "macos" && options.recovery !== undefined) {
       throw new Error("macOS recording recovery must remain in memory.");
-    }
-    if (options.platform === "macos" && options.speechGate !== undefined) {
-      throw new Error("macOS recording must not use the Linux silence gate.");
     }
     if (options.platform === "linux" && options.recovery === undefined) {
       throw new Error("Linux recording requires a private recovery boundary.");
@@ -589,7 +586,7 @@ export class RecordingCoordinator<C extends CapturedHandle> {
       }
       if (!this.current(job)) return;
       const audio: PreparedAudio = { ...pending.prepared, generation: context.generation, attempt: context.attempt };
-      const gate = this.options.platform === "linux" ? this.options.speechGate : undefined;
+      const gate = this.options.speechGate;
       if (gate && !pending.token && !pending.captureFailed) {
         if (pending.speechDetected === undefined) {
           const disposition = await gate.classify(audio, context);

@@ -125,7 +125,6 @@
   "Recording": "Aufnahme",
   "Recording mode": "Aufnahmemodus",
   "Remove snippet": "Textbaustein entfernen",
-  "Required for automatic insertion and advanced triggers. Clipboard-only output remains available.": "Für automatisches Einfügen und erweiterte Auslöser erforderlich. Die reine Zwischenablage-Ausgabe bleibt verfügbar.",
   "Restore the previous clipboard afterward": "Vorherige Zwischenablage danach wiederherstellen",
   "Revoke": "Widerrufen",
   "Russian": "Russisch",
@@ -550,5 +549,12 @@
   "Install and restart now": "Jetzt installieren und neu starten",
   "Restart now": "Jetzt neu starten",
   "Install the downloaded update and restart now, or choose Later.": "Installiere das heruntergeladene Update jetzt und starte neu oder wähle Später.",
-  "Release notes are shown in English.": "Die Versionshinweise werden auf Englisch angezeigt."
+  "Release notes are shown in English.": "Die Versionshinweise werden auf Englisch angezeigt.",
+  "Microphone access allowed": "Mikrofonzugriff erlaubt",
+  "Use a regular key, a shortcut, or the middle, back or forward mouse button.": "Verwende eine normale Taste, ein Tastenkürzel oder die mittlere, Zurück- oder Vorwärts-Maustaste.",
+  "Accessibility access allowed": "Bedienungshilfen-Zugriff erlaubt",
+  "Allowed": "Erlaubt",
+  "Not allowed": "Nicht erlaubt",
+  "Accessibility access is needed for automatic insertion and advanced triggers. Clipboard-only output remains available.": "Bedienungshilfen-Zugriff wird für automatisches Einfügen und erweiterte Auslöser benötigt. Die reine Zwischenablage-Ausgabe bleibt verfügbar.",
+  "Allow Accessibility access to continue.": "Erlaube den Bedienungshilfen-Zugriff, um fortzufahren."
 }

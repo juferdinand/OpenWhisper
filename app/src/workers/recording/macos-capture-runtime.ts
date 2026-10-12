@@ -3,6 +3,7 @@ import { RecordingCoordinator, type CaptureBoundary, type ControlReply, type Del
   type RecordingSnapshot, type WorkContext } from "../../core/recording/recording.js";
 import { AdaptiveSpeechBoundary, createUtilitySpeechEffects } from "../../services/speech/adaptive-speech.js";
 import type { NativeCapturedHandle } from "../../services/recording/capture.js";
+import { SilenceSpeechGate } from "../speech/speech-gate.js";
 import type { SpeechClient } from "../../services/speech/speech-client.js";
 import { macRecordingHostReplySchema, macRecordingHostRequestSchema,
   type MacRecordingConfiguration, type MacRecordingHostReply, type MacRecordingHostRequest } from "./macos-recording-host-protocol.js";
@@ -116,7 +117,9 @@ export class MacCaptureRuntime {
           },
         };
       } };
+      // A quick start/stop or silent recording returns to idle instead of keeping an empty recording.
       this.coordinator = new RecordingCoordinator({ platform: "macos", capture, clock: { now: () => performance.now() },
+        speechGate: new SilenceSpeechGate(),
         delivery: { deliver: async (text, context, identity) => {
           const receipt = await this.effects.delivery.deliver(text, context, identity);
           if (identity.kind === "memory" && identity.generation === context.generation
