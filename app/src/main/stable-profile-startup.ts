@@ -2,6 +2,7 @@ import { Worker } from "node:worker_threads";
 import { readMacBundleFailure } from "./macos-stable-admission.js";
 import { stableMigrationFailureSchema, stableMigrationReplySchema, type StableMigrationReply } from "../contracts/migration/stable-migration.js";
 import { resolveStableProfile, stableProfileInputSchema, stableMacosMigrationRequestSchema, validateStableProfile, type StableProfile } from "../services/settings/stable-profile.js";
+import { relocateStableStorage, type StableStorageRelocation } from "../services/settings/stable-storage-relocation.js";
 
 const bootstrapStages = ["bootstrap", "package-identity", "mac-bundle", "mac-context", "stable-migration",
   "development-profile", "pre-ready", "private-paths"] as const;
@@ -39,10 +40,18 @@ export function formatStartFailure(error: unknown): string {
     ` error=${category(name, /^[A-Za-z]{1,64}Error$/u)} code=${category(code, /^[A-Z][A-Z0-9_]{0,63}$/u)}`;
 }
 
+/** Moves pre-#65 storage first; startup diagnostics name only the affected root kinds, never paths. */
+function relocate(input: unknown): void {
+  const result: StableStorageRelocation = relocateStableStorage(input);
+  if (result.keptPrevious.length) console.warn(`OpenWhisper kept its current storage and left earlier storage untouched. roots=${result.keptPrevious.join(",")} code=PREVIOUS_STORAGE_KEPT`);
+  if (result.skippedCache) console.warn("OpenWhisper started with a new cache; the earlier cache was left untouched. code=CACHE_NOT_RELOCATED");
+}
+
 /** Select only after the host's packaged stable identity is verified. Never runs in Dev bootstrap. */
 export async function initializeStableLinuxProfile(options: unknown): Promise<StableProfile> {
   const input = stableProfileInputSchema.parse(options);
   if (process.platform !== "linux" || input.platform !== "linux") throw new Error("UNSAFE_SOURCE");
+  relocate(input);
   const profile = resolveStableProfile(input);
   await runMigrationWorker(input);
   return validateStableProfile(profile);
@@ -52,6 +61,7 @@ export async function initializeStableLinuxProfile(options: unknown): Promise<St
 export async function initializeStableMacosProfile(options: unknown, context: unknown): Promise<StableProfile> {
   const input = stableProfileInputSchema.parse(options);
   if (process.platform !== "darwin" || input.platform !== "darwin") throw new Error("UNSAFE_SOURCE");
+  relocate(input);
   const profile = resolveStableProfile(input);
   await runMigrationWorker(stableMacosMigrationRequestSchema.parse({ profile: input, context }));
   return validateStableProfile(profile);

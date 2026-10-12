@@ -63,10 +63,14 @@ assert.equal(packageMetadata.sourceVersion,
   releaseContextFromCommit(resolve(process.cwd(), ".."), packageSource.commit).currentVersion);
 assert.deepEqual(packageMetadata.applicationBuild, capturedBuild);
 
-const ownedHome = join(evidence, "home"), legacyRoot = join(ownedHome, "Library/Application Support/WhisperFree");
-const legacySnippets = join(legacyRoot, "snippets.json"), legacyModel = join(legacyRoot, "Models/ggml-tiny.bin");
-const configRoot = join(ownedHome, "Library/Application Support/io.github.whisperfree/electron");
-const cacheRoot = join(ownedHome, "Library/Caches/io.github.whisperfree/electron");
+// Legacy 0.2.x sources are seeded at the pre-#65 WhisperFree folder; the stable startup relocates
+// that folder unchanged (same inodes) to Application Support/OpenWhisper/Data before migrating it.
+const ownedHome = join(evidence, "home"), previousLegacyRoot = join(ownedHome, "Library/Application Support/WhisperFree");
+const legacyRoot = join(ownedHome, "Library/Application Support/OpenWhisper/Data");
+let relocated = false;
+const legacyFiles = (): string[] => ["snippets.json", "Models/ggml-tiny.bin"].map((name) => join(relocated ? legacyRoot : previousLegacyRoot, name));
+const configRoot = join(ownedHome, "Library/Application Support/OpenWhisper/Config/electron");
+const cacheRoot = join(ownedHome, "Library/Caches/OpenWhisper/electron");
 const ownedSnippet = snippetSchema.parse({ id: "b445efb4-72bb-4b98-97a7-576866917ec5", trigger: "owned package",
   expansion: "OpenWhisper owned stable fixture 日本語", enabled: true });
 const vocabulary = "OwnedStableFixture, 日本語";
@@ -84,7 +88,8 @@ const migrationPaths = [join(configRoot, "migration.json"), join(configRoot, "le
 async function preserved(): Promise<void> {
   assert.deepEqual(await readFile(sourceDescriptorPath), sourceDescriptor);
   assert.deepEqual(await readFile(join(appPath, "dist/main/development-recording-build.js")), sourceDescriptor);
-  assert.deepEqual(await Promise.all([legacySnippets, legacyModel].map(frozenFile)), originals);
+  assert.deepEqual(await Promise.all(legacyFiles().map(frozenFile)), originals);
+  if (relocated) await assert.rejects(lstat(previousLegacyRoot), { code: "ENOENT" });
   if (completionFiles) assert.deepEqual(await Promise.all(migrationPaths.map(frozenFile)), completionFiles);
   await assert.rejects(lstat(join(ownedHome, "Library/Preferences/io.github.whisperfree.plist")), { code: "ENOENT" });
 }
@@ -127,7 +132,8 @@ try {
     assert.deepEqual(parseApplicationBuildModule(await readFile(join(appPath, "dist/main/application-build.js"), "utf8")), capturedBuild);
     stage = "owned-stable-legacy-source";
     await mkdir(ownedHome, { mode: 0o700 });
-    await mkdir(join(legacyRoot, "Models"), { recursive: true, mode: 0o700 });
+    await mkdir(join(previousLegacyRoot, "Models"), { recursive: true, mode: 0o700 });
+    const [legacySnippets, legacyModel] = legacyFiles() as [string, string];
     const fixture = join(fixtures, "ggml-tiny.bin");
     assert.equal(await realpath(fixtures), fixtures);
     assert.ok((await lstat(fixture)).isFile() && !(await lstat(fixture)).isSymbolicLink());
@@ -136,7 +142,7 @@ try {
     assert.equal(digest(fixtureBytes), "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21");
     await copyFile(fixture, legacyModel); await chmod(legacyModel, 0o644);
     await writeFile(legacySnippets, JSON.stringify([ownedSnippet]), { flag: "wx", mode: 0o600 });
-    originals = await Promise.all([legacySnippets, legacyModel].map(frozenFile));
+    originals = await Promise.all(legacyFiles().map(frozenFile));
     await assert.rejects(lstat(configRoot), { code: "ENOENT" });
     environment["HOME"] = ownedHome;
     environment["TMPDIR"] = evidence;
@@ -477,7 +483,8 @@ try {
     const manifest = z.object({ version: z.literal(1), appId: z.literal("io.github.whisperfree"),
       sourceFormat: z.literal("macos-v0.2.5"), preferences: z.null(), snippets: backup, decoded: backup, conversion: backup })
       .parse(JSON.parse(await readFile(migrationPaths[0]!, "utf8")) as unknown);
-    const rawSnippet = await readFile(legacySnippets);
+    relocated = true;
+    const rawSnippet = await readFile(legacyFiles()[0]!);
     assert.deepEqual(await readFile(migrationPaths[1]!), rawSnippet);
     for (const [path, expected] of [[migrationPaths[1]!, manifest.snippets], [migrationPaths[2]!, manifest.decoded],
       [migrationPaths[3]!, manifest.conversion]] as const) {
@@ -500,7 +507,7 @@ try {
       const metadata = await lstat(path); assert.ok(metadata.isDirectory() && !metadata.isSymbolicLink());
       assert.equal(metadata.uid, process.getuid?.()); assert.equal(metadata.mode & 0o7777, 0o700);
     }
-    assert.ok((await readdir(join(ownedHome, "Library/Application Support/io.github.whisperfree")))
+    assert.ok((await readdir(join(ownedHome, "Library/Application Support/OpenWhisper/Config")))
       .every((name) => !name.startsWith(".electron-migration-")));
     completionFiles = await Promise.all(migrationPaths.map(frozenFile)); await preserved();
     stableMigration = { context: nativeContext, preferencesDomain: "actual OS current user / io.github.whisperfree / AnyHost; empty",

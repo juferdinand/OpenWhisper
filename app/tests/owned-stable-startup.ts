@@ -24,9 +24,11 @@ try {
     if (process.env["GITHUB_ACTIONS"] !== "true" || process.env["RUNNER_ENVIRONMENT"] !== "github-hosted") {
       throw new Error("The Mac compiled native snapshot check requires an owned GitHub-hosted account.");
     }
-    const models = join(home, "Library/Application Support/WhisperFree/Models");
-    await mkdir(models, { recursive: true, mode: 0o700 });
-    await writeFile(join(models, "ggml-tiny.bin"), "Inert retained model", { mode: 0o644 });
+    // Seeded at the pre-#65 location; startup relocates it to Application Support/OpenWhisper/Data.
+    const previousModels = join(home, "Library/Application Support/WhisperFree/Models");
+    const models = join(home, "Library/Application Support/OpenWhisper/Data/Models");
+    await mkdir(previousModels, { recursive: true, mode: 0o700 });
+    await writeFile(join(previousModels, "ggml-tiny.bin"), "Inert retained model", { mode: 0o644 });
     // Host facts are synthetic here; the worker's stopped-host/CFPreferences readers are real.
     // No legacy plist is seeded: the owned OS account must have an actually empty fixed domain.
     const context = { systemLanguage: "de-DE", loginStatus: "not-registered",
@@ -47,16 +49,19 @@ try {
     console.log(JSON.stringify({ status: "PASS", scope: "compiled Mac worker, native empty-domain snapshot and production stores",
       hostFacts: "SYNTHETIC", legacyPlist: "ABSENT", preferenceWrites: false, microphone: false }));
   } else {
-  const config = join(home, ".config/whisperfree"), recovery = join(config, "recovery"), models = join(home, ".local/share/whisperfree/models");
+  // Seeded at the pre-#65 XDG location; startup relocates whisperfree to openwhisper.
+  const previousConfig = join(home, ".config/whisperfree"), config = join(home, ".config/openwhisper");
+  const recovery = join(previousConfig, "recovery"), models = join(home, ".local/share/whisperfree/models");
   await mkdir(recovery, { recursive: true, mode: 0o700 }); await mkdir(models, { recursive: true, mode: 0o700 });
   const source = JSON.stringify({ ui_language: "de", setup_completed: true, model: "tiny", gpu: false, gpu_configured: true,
     vocabulary: "東京 café", launch_at_login: true, auto_check_updates: true });
-  await writeFile(join(config, "settings.json"), source, { mode: 0o600 });
-  await writeFile(join(config, "history.json"), JSON.stringify(["Complete old history"]), { mode: 0o600 });
+  await writeFile(join(previousConfig, "settings.json"), source, { mode: 0o600 });
+  await writeFile(join(previousConfig, "history.json"), JSON.stringify(["Complete old history"]), { mode: 0o600 });
   await writeFile(join(models, "ggml-tiny.bin"), "Inert retained model", { mode: 0o644 });
   const id = "12345678-1234-4567-8123-123456789abc", header = recoveryWavHeader(2n), pcm = Buffer.alloc(8);
   pcm.writeFloatLE(0.25, 0); pcm.writeFloatLE(-0.25, 4);
-  const originalAudio = Buffer.concat([header, pcm]), originalPath = join(recovery, `recording-00000001791410537123-${id}.wav`);
+  const originalAudio = Buffer.concat([header, pcm]), originalPath = join(recovery, `recording-00000001791410537123-${id}.wav`),
+    relocatedOriginalPath = join(config, "recovery", `recording-00000001791410537123-${id}.wav`);
   await writeFile(originalPath, originalAudio, { mode: 0o600 });
   const profile = await initializeStableLinuxProfile({ home, platform: "linux" });
   const store = await PreferenceStore.open(profile);
@@ -74,10 +79,12 @@ try {
   await saved.remove({ id }, { generation: 1, attempt: 0, signal: new AbortController().signal });
   const discarded = await initializeStableLinuxProfile({ home, platform: "linux" });
   assert.equal(await (await PrivateAudioRecovery.open(discarded.paths.recovery)).latest(), null);
-  assert.equal(await readFile(join(config, "settings.json"), "utf8"), source); assert.deepEqual(await readFile(originalPath), originalAudio);
+  assert.equal(await readFile(join(config, "settings.json"), "utf8"), source); assert.deepEqual(await readFile(relocatedOriginalPath), originalAudio);
+  await assert.rejects(readFile(originalPath), { code: "ENOENT" });
   assert.equal((await readdir(config)).some((name) => name.startsWith(".electron-migration-")), false);
-  const partialHome = join(root, "partial-home"), partial = join(partialHome, ".config/whisperfree/electron");
-  await mkdir(partial, { recursive: true, mode: 0o700 }); await writeFile(join(partial, "retained"), "Partial owned state", { mode: 0o600 });
+  const partialHome = join(root, "partial-home"), previousPartial = join(partialHome, ".config/whisperfree/electron");
+  const partial = join(partialHome, ".config/openwhisper/electron");
+  await mkdir(previousPartial, { recursive: true, mode: 0o700 }); await writeFile(join(previousPartial, "retained"), "Partial owned state", { mode: 0o600 });
   await assert.rejects(initializeStableLinuxProfile({ home: partialHome, platform: "linux" }), { message: "INCOMPLETE_STATE" });
   assert.deepEqual(await readdir(partial), ["retained"]); assert.equal(await readFile(join(partial, "retained"), "utf8"), "Partial owned state");
   await assert.rejects(initializeStableLinuxProfile({ home: join(root, "never-created"), platform: "darwin" }), { message: "UNSAFE_SOURCE" });

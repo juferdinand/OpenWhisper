@@ -108,7 +108,9 @@ and document individual runtime/system-tool exceptions in `app/knip.jsonc`.
   receipts. Expose only bounded, non-sensitive status through control interfaces.
 - Retain strict update-source, version, archive, signature, and installed-tree checks. Preserve the
   macOS signing identity, Linux update key, package identity `io.github.whisperfree`, and existing
-  data locations. Never relabel an old binary or silently fall back to ad-hoc release signing.
+  data locations described in [data locations](docs/DATA-LOCATIONS.md), including the one-time
+  relocation from the earlier `whisperfree` folders. Never relabel an old binary or silently fall
+  back to ad-hoc release signing.
 - Use private, owned fixtures for recording, replacement, and desktop tests. Never inherit the
   user's display, audio service, sockets, or input devices in unattended checks.
 - Preserve model and language fixtures, vocabulary and snippet behavior, and English test names.

@@ -4,6 +4,8 @@ export const stableMigrationFailureSchema = z.enum([
   "UNSAFE_SOURCE", "SOURCE_CHANGED", "INVALID_DATA", "INCOMPLETE_STATE", "INVALID_COMPLETION",
   "INVALID_TIMESTAMP", "PUBLICATION_UNAVAILABLE", "DESTINATION_EXISTS", "STORAGE_FAILED",
   "LEGACY_APP_RUNNING", "PREFERENCES_SNAPSHOT_UNAVAILABLE", "PREFERENCES_SNAPSHOT_INCOHERENT", "LOGIN_STATE_UNKNOWN",
+  // Pre-#65 storage could not be moved atomically to the OpenWhisper location (for example across volumes).
+  "RELOCATION_FAILED",
 ]);
 export class StableMigrationError extends Error {
   constructor(readonly code: z.infer<typeof stableMigrationFailureSchema>) {
