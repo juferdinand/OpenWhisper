@@ -3,6 +3,7 @@ import { setImmediate } from "node:timers/promises";
 import { test } from "node:test";
 import { RecordingCoordinator, recordingRequestSchema } from "../../src/core/recording/recording.js";
 import { SilenceSpeechGate } from "../../src/workers/speech/speech-gate.js";
+import type { TranscriptDeliveryMetadata } from "../../src/contracts/text/processing.js";
 import type {
   CaptureCallbacks, CapturedHandle, CaptureFinalization, CaptureSession, ControlReply,
   DeliveryIdentity, DeliveryReceipt, Ownership, PreparedAudio, RecordingOptions, RecordingRequest,
@@ -126,7 +127,7 @@ function fixture(platform: "macos" | "linux" = "linux", recoveryStore?: OwnedRec
   let configure: ((capture: OwnedCapture) => void) | undefined;
   let speechHook: ((samples: PreparedAudio, input: RecordingRequest, context: WorkContext) => Promise<SpeechResult>) | undefined;
   let deliveryHook: ((text: string, context: WorkContext, identity: DeliveryIdentity,
-    metadata?: { readonly rawText: string }) => Promise<DeliveryReceipt>) | undefined;
+    metadata?: TranscriptDeliveryMetadata) => Promise<DeliveryReceipt>) | undefined;
   const common = {
     clock: { now: () => time },
     capture: { create(callbacks: CaptureCallbacks) {
@@ -138,7 +139,7 @@ function fixture(platform: "macos" | "linux" = "linux", recoveryStore?: OwnedRec
       return { ...ownership(context), text: "  Unchanged fixture 日本語 👩‍💻  " };
     } },
     delivery: { async deliver(text: string, context: WorkContext, identity: DeliveryIdentity,
-      metadata?: { readonly rawText: string }) {
+      metadata?: TranscriptDeliveryMetadata) {
       deliveryCalls++; events.push("delivery");
       if (deliveryHook) return deliveryHook(text, context, identity, metadata);
       return copied(context);
@@ -166,17 +167,32 @@ async function until(condition: () => boolean): Promise<void> {
   assert.fail("Owned deferred boundary did not reach its expected stage");
 }
 
-test("delivery keeps raw source separate and publishes the exact confirmed processed output", async () => {
-  const f = fixture("macos"); let delivered: { text: string; rawText?: string } | undefined;
+test("delivery keeps raw source and exact recording snippets separate and publishes confirmed output", async () => {
+  const f = fixture("macos"); let delivered: { text: string; rawText?: string; snippets?: readonly unknown[] } | undefined;
   f.speech(async (_audio, _request, context) => ({ ...ownership(context), text: "deterministic output", rawText: "raw source" }));
   f.delivery(async (text, context, _identity, metadata) => {
-    delivered = { text, ...(metadata ? { rawText: metadata.rawText } : {}) };
+    delivered = { text, ...(metadata?.rawText === undefined ? {} : { rawText: metadata.rawText }),
+      ...(metadata?.snippets ? { snippets: metadata.snippets } : {}) };
     return { ...copied(context), deliveredText: "accepted model output" };
   });
-  assert.equal((await f.coordinator.start(request)).ok, true);
+  const capturedRequest = { ...request, snippets: [{ id: "owned-rule", trigger: "Kubernetes", expansion: "K8s", enabled: true }] };
+  assert.equal((await f.coordinator.start(capturedRequest)).ok, true);
   await f.coordinator.stop(); await f.coordinator.completion();
-  assert.deepEqual(delivered, { text: "deterministic output", rawText: "raw source" });
+  assert.deepEqual(delivered, { text: "deterministic output", rawText: "raw source", snippets: capturedRequest.snippets });
   assert.equal(f.coordinator.snapshot().transcript, "accepted model output");
+});
+
+test("captured snippets still cross delivery when a speech boundary omits raw text", async () => {
+  const f = fixture("macos"); let deliveredSnippets: readonly unknown[] | undefined;
+  f.speech(async (_audio, _request, context) => ({ ...ownership(context), text: "recognized output" }));
+  f.delivery(async (_text, context, _identity, metadata) => {
+    deliveredSnippets = metadata?.snippets;
+    return copied(context);
+  });
+  const capturedSnippets = [{ id: "captured", trigger: "name", expansion: "exact expansion", enabled: true }];
+  assert.equal((await f.coordinator.start({ ...request, snippets: capturedSnippets })).ok, true);
+  await f.coordinator.stop(); await f.coordinator.completion();
+  assert.deepEqual(deliveredSnippets, capturedSnippets);
 });
 
 test("malformed, unconfirmed, or stale delivery receipts cannot replace the deterministic transcript", async () => {

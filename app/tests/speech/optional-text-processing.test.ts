@@ -15,7 +15,7 @@ const available = (...models: string[]): TextConnectionAvailability[] => default
 
 function configured(enabled: readonly string[]) {
   const defaults = defaultTextConnectionSettings();
-  return { ...defaults, connections: defaults.connections.map((connection) => ({ ...connection,
+  return { ...defaults, revision: { ...defaults.revision!, enabled: true }, connections: defaults.connections.map((connection) => ({ ...connection,
     enabled: enabled.includes(connection.provider),
     ...(connection.provider === "ollama" ? { model: "qwen-local" }
       : connection.provider === "lm_studio" ? { model: "lm-local" } : {}),
@@ -65,10 +65,8 @@ test("disabled connections preserve ordinary dictation without scanning or makin
 
 test("linguistic all-off skips scanning and provider invocation with an explicit skipped stage", async () => {
   let scans = 0, requests = 0;
-  const settings = { ...configured(["ollama"]), linguistic_options: {
-    punctuation_capitalization: false, grammar: false, remove_fillers: false,
-    reduce_repetitions: false, improve_sentence_structure: false,
-  } };
+  const settings = { ...configured(["ollama"]), revision: { ...defaultTextConnectionSettings().revision!,
+    enabled: true, builtins: { spelling_grammar: false, resolve_verbal_corrections: false, paragraphs: false, numbers_times: false } } };
   const stages: Array<TextProcessingStageEvent | null> = [];
   const { instance } = processor({ settings, stage: (event) => stages.push(event),
     scan: async () => { scans += 1; return available("qwen-local"); },
@@ -80,7 +78,7 @@ test("linguistic all-off skips scanning and provider invocation with an explicit
   assert.deepEqual(stages, [{ generation: 8, attempt: 2, stage: "model", status: "skipped" }]);
 });
 
-test("legacy custom instruction remains active when old profile fields are absent", async () => {
+test("legacy custom instructions remain stored but do not execute as single-recording prompts", async () => {
   const defaults = defaultTextConnectionSettings();
   const legacy = textConnectionSettingsSchema.parse({
     connections: defaults.connections.map((entry) => entry.provider === "ollama"
@@ -88,14 +86,19 @@ test("legacy custom instruction remains active when old profile fields are absen
     instruction: "Translate the transcript.",
   });
   let observed = "";
+  let scans = 0;
+  const stages: Array<TextProcessingStageEvent | null> = [];
   const observedProcessor = new OptionalTextProcessing({
     settings: () => legacy,
-    scan: async () => available("qwen-local"),
+    scan: async () => { scans += 1; return available("qwen-local"); },
     isShuttingDown: () => false,
+    onStage: (event) => stages.push(event),
     runProvider: async (_connection, instruction) => { observed = instruction; return "processed text"; },
   });
-  assert.equal(await observedProcessor.process("recognized text", owner()), "processed text");
-  assert.equal(observed, legacy.instruction);
+  assert.equal(await observedProcessor.process("recognized text", owner()), "recognized text");
+  assert.equal(scans, 0);
+  assert.equal(observed, "");
+  assert.deepEqual(stages, [{ generation: 8, attempt: 2, stage: "model", status: "skipped" }]);
   assert.equal(legacy.instruction, "Translate the transcript.");
 });
 
@@ -109,7 +112,7 @@ test("CLI providers run with empty model catalogs and forward blank or explicit 
   const defaults = defaultTextConnectionSettings();
   for (const provider of ["claude_code", "codex"] as const) {
     for (const model of ["", `${provider}-model`]) {
-      const settings: TextConnectionSettings = { ...defaults, connections: defaults.connections.map((entry) =>
+      const settings: TextConnectionSettings = { ...defaults, revision: { ...defaults.revision!, enabled: true }, connections: defaults.connections.map((entry) =>
         entry.provider === provider ? { ...entry, enabled: true, model } : entry) };
       const forwarded: Array<string | undefined> = [];
       const { instance, calls } = processor({ settings, availability: availableCli(provider),
@@ -253,9 +256,8 @@ test("saved enabled provider refreshes unavailable startup state before its firs
 });
 
 test("conversation calls replay explicit prior turns and become eligible for commit only on success", async () => {
-  const settings = { ...configured(["ollama"]), mode: "conversation" as const, linguistic_options: {
-    punctuation_capitalization: false, grammar: false, remove_fillers: false,
-    reduce_repetitions: false, improve_sentence_structure: false,
+  const settings = { ...configured(["ollama"]), mode: "conversation" as const, revision: {
+    ...defaultTextConnectionSettings().revision!, enabled: false,
   } };
   let observedInstruction = "", observedContext: readonly { user: string; assistant: string }[] | undefined;
   const instance = new OptionalTextProcessing({

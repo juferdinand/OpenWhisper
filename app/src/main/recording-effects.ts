@@ -188,8 +188,7 @@ export class MainRecordingEffects {
     const cached = this.options.receipts.get(request.epoch, request.identity, context);
     if (cached) return recordingEffectReplySchema.parse({ ...envelope, kind: "deliver", receipt: cached });
     this.options.receipts.reserve(request.epoch, request.identity, request.id);
-    const metadata = request.rawText === undefined ? undefined : { rawText: request.rawText };
-    const raw = await this.options.delivery.deliver(request.text, context, request.identity, metadata);
+    const raw = await this.options.delivery.deliver(request.text, context, request.identity, request.metadata);
     const parsed = deliveryReceiptSchema.safeParse(raw);
     if (!parsed.success || parsed.data.generation !== context.generation || parsed.data.attempt !== context.attempt) {
       throw new RecordingEffectError("OWNERSHIP_FAILED");

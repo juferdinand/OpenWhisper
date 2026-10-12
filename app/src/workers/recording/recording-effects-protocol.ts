@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { transcriptDeliveryMetadataSchema } from "../../contracts/text/processing.js";
 import { speechLanguageSchema, speechModelSchema, speechTextSchema,
   speechVocabularySchema, speechWindowSchema } from "../speech/native-speech.js";
 
@@ -28,7 +29,7 @@ export const recordingEffectRequestSchema = z.discriminatedUnion("command", [
     samples: speechWindowSchema, language: speechLanguageSchema, vocabulary: speechVocabularySchema }),
   z.strictObject({ ...envelope, command: z.literal("deliver"), identity: deliveryIdentitySchema,
     // The complete processed transcript can exceed a native-window or optional-preview bound.
-    text: z.string().min(1), rawText: z.string().optional() }).refine((value) => value.identity.kind !== "memory"
+    text: z.string().min(1), metadata: transcriptDeliveryMetadataSchema.optional() }).refine((value) => value.identity.kind !== "memory"
       || value.identity.generation === value.generation),
   z.strictObject({ ...envelope, command: z.literal("cancel") }),
 ]);

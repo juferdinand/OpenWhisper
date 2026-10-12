@@ -8,7 +8,6 @@ import { MAX_WINDOW_SAMPLES, MIN_WINDOW_SAMPLES, SAMPLE_RATE, planSpeechWindow, 
 } from "../../core/speech/windows.js";
 import { cleanTranscript } from "../../core/text/transcript-cleaner.js";
 import { correctVocabulary, parseVocabulary } from "../../core/text/vocabulary-corrector.js";
-import { expandSnippets } from "../../core/text/snippet-expander.js";
 import { textProcessingStageEventSchema, type TextProcessingStageEvent } from "../../contracts/text/processing.js";
 import { SpeechWorkerError, type SpeechClient } from "./speech-client.js";
 import { speechModelSchema, speechTextSchema, speechVocabularySchema, speechWindowSchema } from "../../workers/speech/native-speech.js";
@@ -147,9 +146,7 @@ export function processRawSpeechPartsDetailed(parts: readonly string[], request:
   onStage?.("cleanup", cleaned, cleanupEnabled ? "completed" : "skipped");
   const corrected = correctVocabulary(cleaned, parseVocabulary(validated.vocabulary));
   onStage?.("vocabulary", corrected);
-  const text = expandSnippets(corrected, validated.snippets);
-  onStage?.("snippets", text);
-  return Object.freeze({ rawText: raw, text });
+  return Object.freeze({ rawText: raw, text: corrected });
 }
 
 function owned(value: { generation: number; attempt: number }, context: WorkContext): boolean {

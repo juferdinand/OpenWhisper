@@ -450,33 +450,29 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await expect(page.locator(".connection-row")).toHaveCount(4);
     await expect(page.locator(".connection-default")).toHaveCount(0);
     await expect(page.locator(".connection-switch:checked")).toHaveCount(0);
-    await expect(page.locator('[data-provider="codex"] .connection-state')).toHaveText("Not detected");
+    await expect(page.locator('[data-provider="codex"] .connection-state')).toHaveText("Not installed");
     await expect(page.locator('[data-provider="codex"] .connection-switch')).toBeDisabled();
+    const trustedSettingsUrl = page.url();
     await openSettings(page, "text");
     await expect(page.locator("#page-title")).toHaveText("Text processing");
-    const vocabulary = page.locator("#vocabulary-new-entry");
     const vocabularyEntries = ["Kubernetes", "Grüß Gott", "東京"];
-    const settingsUrl = page.url();
-    assert.equal(page.url(), settingsUrl, "Settings section navigation must preserve the trusted renderer URL.");
-    await expect(vocabulary).toBeInViewport();
-    while (await page.locator("[data-remove-vocabulary]").count()) await page.locator("[data-remove-vocabulary]").first().click();
+    assert.equal(page.url(), trustedSettingsUrl, "Settings section navigation must preserve the trusted renderer URL.");
     for (const entry of vocabularyEntries) {
-      await vocabulary.fill(entry);
+      await page.locator("#vocabulary-new-entry").fill(entry);
       await page.locator("#add-vocabulary").click();
     }
     const storedVocabulary = vocabularyEntries.join(", ");
     await expect(page.locator("[data-vocabulary-entry]")).toHaveCount(3);
-    await page.keyboard.press("Escape");
-    await expect(page.locator("#settings-dialog")).toBeVisible();
-    await expect(page.locator('[data-vocabulary-entry="2"]')).toHaveValue("東京");
-    await expect(page.locator("#settings-notice")).toBeVisible();
-    // The modal blocks pointer input to the titlebar; exercise its close handler directly.
-    await page.evaluate(() => document.querySelector<HTMLButtonElement>('[data-window-action="close"]')?.click());
-    await expect(page.locator("#settings-dialog")).toBeVisible();
-    await expect(page.locator('[data-vocabulary-entry="2"]')).toHaveValue("東京");
-    await expect(page.locator("#settings-notice")).toBeVisible();
-    await page.locator("#save-vocabulary").click();
     await expect.poll(async () => validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.vocabulary).toBe(storedVocabulary);
+    await page.locator("#add-snippet").click();
+    const snippetTrigger = page.locator(".snippet-row:last-child [name=trigger]");
+    const snippetExpansion = page.locator(".snippet-row:last-child [name=expansion]");
+    await snippetTrigger.fill("owned signoff");
+    await snippetExpansion.fill("Owned synthetic signature");
+    await expect.poll(async () => validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.snippets).toEqual([
+      { id: expect.any(String), trigger: "owned signoff", expansion: "Owned synthetic signature", enabled: true },
+    ]);
+    await expect(page.locator("#settings-notice")).toBeHidden();
     await page.keyboard.press("Escape");
     await expect(page.locator("#settings-dialog")).toBeHidden();
     await expect(page.locator("#open-settings")).toBeFocused();
@@ -506,9 +502,9 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await expect(page.locator('[data-vocabulary-entry="0"]')).toHaveValue("Kubernetes");
     await expect(page.locator('[data-vocabulary-entry="1"]')).toHaveValue("Grüß Gott");
     await expect(page.locator('[data-vocabulary-entry="2"]')).toHaveValue("東京");
-    await expect(page.locator("#snippet-form")).toBeVisible();
-    await expect(page.locator(".optional-model-card")).toContainText("Off by default");
-    await expect(page.locator('.optional-model-card [data-settings-view="connections"]')).toBeVisible();
+    await expect(page.locator("#settings-snippets")).toBeVisible();
+    await expect(page.locator("#settings-ai-revision")).toContainText("AI revision");
+    await expect(page.locator("#ai-revision-enabled")).not.toBeChecked();
     await expect(page.locator('nav [data-tab="models"], nav [data-tab="snippets"]')).toHaveCount(0);
     await screenshot(page, "dev-text-processing.png");
     await openSettings(page, "history");
@@ -518,18 +514,18 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await page.locator("#add-custom-connection").click();
     await page.locator("#custom-name").fill("Owned CLI");
     await page.locator("#custom-command").fill("/usr/bin/cat");
-    await page.locator("#custom-stdin").fill("{prompt}");
-    await page.locator("#custom-output").selectOption("text");
-    await page.locator("#save-custom-connection").click();
+    await page.locator("#custom-args").fill("--prompt\n{prompt}");
+    await page.locator("#ai-models-save").click();
     const customConnection = page.locator('.connection-row[data-provider^="custom:"]');
     await expect(customConnection).toHaveCount(1);
     await expect(customConnection.locator(".connection-switch")).not.toBeChecked();
-    await expect(customConnection).toContainText("Scan to check");
-    await page.locator("#scan-connections").click();
-    await expect(customConnection).toContainText(/Available|Not detected/);
-    await page.locator("#connection-mode").selectOption("conversation");
+    await expect(customConnection).toContainText("Available");
+    await page.locator("#close-settings").click();
+    await page.locator("#workspace-mode").selectOption("conversation");
+    await expect.poll(async () => validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).text_connections.settings.mode).toBe("conversation");
+    await openSettings(page, "text");
     await page.locator("#conversation-instruction").fill("Owned conversation instruction.");
-    await page.locator("#save-connections").click();
+    await expect.poll(async () => validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).text_connections.settings.conversationInstruction).toBe("Owned conversation instruction.");
     await page.locator("#close-settings").click();
     await expect(page.locator("#workspace-mode")).toHaveValue("conversation");
     await expect(page.locator("#manage-connections")).toBeVisible();
@@ -545,7 +541,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     assert.equal(saved.preferences.vocabulary, storedVocabulary);
     assert.equal(saved.preferences.ui_language, "en");
     assert.equal(saved.text_connections.settings.mode, "conversation");
-    assert.deepEqual(saved.text_connections.settings.connections.at(-1), { provider: saved.text_connections.settings.connections.at(-1)?.provider, enabled: false, name: "Owned CLI", command: "/usr/bin/cat", args: [], stdin: "{prompt}", output: "text", responsePath: "" });
+    assert.deepEqual(saved.text_connections.settings.connections.at(-1), { provider: saved.text_connections.settings.connections.at(-1)?.provider, enabled: false, name: "Owned CLI", command: "/usr/bin/cat", args: ["--prompt", "{prompt}"], stdin: "{prompt}", output: "text", responsePath: "" });
     assert.deepEqual(saved.text_connections.conversation, { id: conversationId, provider: null, turns: [] });
     await app.close();
     application = undefined;
@@ -562,7 +558,9 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await expect(reopened.locator('[data-vocabulary-entry="0"]')).toHaveValue("Kubernetes");
     await expect(reopened.locator('[data-vocabulary-entry="1"]')).toHaveValue("Grüß Gott");
     await expect(reopened.locator('[data-vocabulary-entry="2"]')).toHaveValue("東京");
-    await expect(reopened.locator(".optional-model-card")).toContainText("Off by default");
+    await expect(reopened.locator("#settings-snippets")).toBeVisible();
+    await expect(reopened.locator("#settings-ai-revision")).toHaveCount(0);
+    await expect(reopened.locator("#conversation-instruction")).toHaveValue("Owned conversation instruction.");
     assert.equal(restored.transcript, "");
     assert.deepEqual(restored.history, []);
     assert.deepEqual(await Promise.all(stableFiles.map(hash)), stableBefore);

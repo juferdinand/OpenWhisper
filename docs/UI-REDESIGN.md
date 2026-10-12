@@ -9,6 +9,32 @@ reference material rather than application dependencies.
 
 ## Priority and scope
 
+### Current settings follow-up
+
+The supplied `Status page redesign(3).zip` handoff narrows the next increment to
+settings and AI revision. Its `handoff/DIFF.md` defines behavior; `diff.html` and
+`openwhisper.css` define layout and values. Implement in this order:
+
+1. Replace settings and model-drawer Done/Close text with the accessible close icon.
+   Auto-save discrete changes immediately and text edits after 450 ms. Show pending,
+   confirmed and retryable failed saves in the settings header; flush edits before closing.
+2. Rename Connections to AI models, use the supplied list/status structure, and move
+   custom CLI creation/editing to a subpage with a fixed footer. New CLI connections use
+   the app's complete prompt on stdin, with no editable prompt-template field.
+3. Replace single-recording prompt controls with opt-in AI revision and ordered built-in
+   and custom linguistic rules. Preserve old settings as inactive migration data when
+   they cannot be mapped faithfully. Keep existing conversation data and behavior separate.
+4. Run recognition, cleanup, vocabulary, optional AI revision, then snippets. Capture
+   snippet settings with the recording so changes cannot affect an in-flight recording.
+   Disabled or failed AI retains the post-vocabulary text before snippet expansion.
+
+Automatic provider failover is a separate feature; current copy must describe the
+implemented first-enabled-provider policy. Summary, format conversion, agent actions,
+TTS and Obsidian remain outside this increment. Adapt existing tests for auto-save,
+close/flush/retry, rule persistence, pipeline ownership, CLI subpage and EN/DE geometry.
+Use focused host tests, the renderer suite, common preflight and independent review
+before updating the isolated Dev app and requesting owner acceptance.
+
 Deliver the new frontend for existing dictation features first, then reviewed AI text
 processing ([#11](https://github.com/juferdinand/OpenWhisper/issues/11)), then Windows
 ([#35](https://github.com/juferdinand/OpenWhisper/issues/35)). Continue concrete reliability

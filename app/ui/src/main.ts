@@ -21,14 +21,17 @@ import type {
   CustomCliConnection,
   TextConnectionSettings,
 } from "../../src/contracts/text/connections.js";
-import { customCliConnectionSchema } from "../../src/contracts/text/connections.js";
+import { SettingsAutosave, type SettingsSaveStatus } from "./settings-autosave";
+import { createAiModelsSettings } from "./settings/ai-models";
+import { aiRevisionMarkup, bindAiRevision } from "./settings/ai-revision";
 
 let state: State;
 type View = Tab | "dictation" | "recording" | "text" | "connections" | "permissions";
 let tab: View = "dictation";
-let dirty = false;
-const dirtyTextParts = new Set<"vocabulary" | "snippets">();
 let vocabularyDraft: string[] | undefined;
+let snippetDraft: Snippet[] | undefined;
+let vocabularyRevision = 0;
+let snippetRevision = 0;
 let portalBusy = false;
 let pendingInsertOutput = false;
 let insertPermissionActionPending = false;
@@ -64,16 +67,36 @@ let focusSetupTitle = false;
 const expandedModelFamilies = new Set<string>();
 let preferenceQueue = Promise.resolve();
 let pendingPreferences = 0;
-let connectionInstructionDraft: string | undefined;
 let conversationInstructionDraft: string | undefined;
 let pendingConnectionSettings: TextConnectionSettings | undefined;
-let connectionSaveQueue = Promise.resolve();
-let connectionSaveFeedback: "saving" | "saved" | undefined;
-let customConnectionDraft: CustomCliConnection | undefined;
-let customConnectionDraftIsNew = false;
-const customConnectionsAwaitingScan = new Set<string>();
 let connectionScanStarted = false;
 let mouseTriggerCandidate: number | undefined;
+let settingsSaveStatus: SettingsSaveStatus = "idle";
+const settingsAutosave = new SettingsAutosave({
+  onState: ({ status }) => {
+    settingsSaveStatus = status;
+    updateSettingsSaveStatus();
+    if (status === "saved" || status === "idle") render();
+  },
+});
+const aiModelsSettings = createAiModelsSettings({
+  getSnapshot: () => ({
+    available: state.text_connections.available,
+    scanning: state.text_connections.scanning,
+    busy:
+      state.status === "recording" ||
+      state.status === "transcribing" ||
+      state.text_connections.processing.status === "processing",
+  }),
+  getSettings: latestConnectionSettings,
+  saveSettings: saveConnections,
+  scan: () => void scanConnections(),
+  requestRender: () => {
+    contentKey = "";
+    render();
+  },
+  notice,
+});
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const overlay =
   new URLSearchParams(location.search).has("overlay") ||
@@ -83,21 +106,6 @@ document.documentElement.classList.toggle("overlay", overlay);
 app.innerHTML = '<div id="notice" role="alert" hidden></div>';
 const option = (value: string, label: string, selected: string) =>
   `<option value="${esc(value)}" ${value === selected ? "selected" : ""}>${esc(label)}</option>`;
-const formatModelId = (value: string) =>
-  value
-    .split(":")
-    .map((namespace) =>
-      namespace
-        .split("-")
-        .map((part) => {
-          if (part.toLowerCase() === "gpt") return "GPT";
-          const separated = part.replace(/([a-z])([0-9])/gi, "$1 $2");
-          return separated.charAt(0).toUpperCase() + separated.slice(1);
-        })
-        .join(" "),
-    )
-    .join(" · ")
-    .replace(/^GPT (\d)/, "GPT-$1");
 const modelRecommendations = () =>
   state.recommended_models ?? state.macos?.recommended ?? [];
 const hasInstalledSelectedModel = () =>
@@ -116,7 +124,7 @@ const tabs: [View, string, string][] = [
     "M6 6h12v12H6zM9 9h6v6H9zM8 2v4m8-4v4M8 18v4m8-4v4M2 8h4m-4 8h4M18 8h4m-4 8h4",
   ],
   ["text", "Text processing", "M3 5h18M3 10h12M3 15h9M3 20h9m6-6v8m-4-4h8"],
-  ["connections", "Connections", "M4 7h16M4 12h16M4 17h16M8 4v6m8 0v4m-8 0v6"],
+  ["connections", "AI models", "M4 7h16M4 12h16M4 17h16M8 4v6m8 0v4m-8 0v6"],
   ["history", "History", "M4 8a9 9 0 1 1-1 7M4 3v5h5m3-1v5l4 2"],
   ["about", "About", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18M12 11v6m0-10v1"],
 ];
@@ -208,8 +216,8 @@ function updateKicker() {
   }
 }
 function updateInstallBlockReason(): string {
-  if (dirty)
-    return t("Save or discard your changes before installing an update.");
+  if (settingsSaveStatus === "saving" || settingsSaveStatus === "error")
+    return t("Finish saving settings before installing an update.");
   if (!state.preferences.setup_completed)
     return t("Finish setup before installing an update.");
   if (state.recovery_available)
@@ -520,7 +528,7 @@ function modelDialogMarkup(): string {
   const models = state.models.filter(
     (model) => model.family === modelDrawerFamily,
   );
-  return `<div class="model-drawer-shell"><header class="model-drawer-heading" title="${esc(t("Current recognition device: {device}", { device: recognitionHardwareStatus() }))}"><div class="model-drawer-heading-top"><div><h2 id="model-drawer-title">${esc(t("Speech model for Dictation"))}</h2><p class="model-drawer-subtitle">${esc(t("Dictation"))}</p></div><button type="button" id="close-model-drawer" data-close-model-drawer>${esc(t("Close"))}</button></div><div class="model-drawer-families" role="group" aria-label="${esc(t("Model family"))}">${families.map(([family, label]) => `<button type="button" aria-pressed="${modelDrawerFamily === family}" data-drawer-family="${family}">${esc(t(label))}</button>`).join("")}</div></header><div id="model-drawer-notice" role="alert" hidden></div><div class="model-drawer-body">${models.map((model) => modelRow(model, true)).join("")}</div><footer class="model-drawer-footer">${isMac() ? `<button type="button" data-model-command="import_model">${esc(t("Import a model …"))}</button>` : ""}<button type="button" data-model-command="show_models_folder">${esc(t("Show in file manager"))}</button><button type="button" class="model-drawer-done" data-close-model-drawer>${esc(t("Done"))}</button></footer></div>`;
+  return `<div class="model-drawer-shell"><header class="model-drawer-heading" title="${esc(t("Current recognition device: {device}", { device: recognitionHardwareStatus() }))}"><div class="model-drawer-heading-top"><div><h2 id="model-drawer-title">${esc(t("Speech model for Dictation"))}</h2><p class="model-drawer-subtitle">${esc(t("Dictation"))}</p></div><button type="button" id="close-model-drawer" class="settings-close" data-close-model-drawer aria-label="${esc(t("Close"))}">${symbol("M6 6l12 12M18 6 6 18")}</button></div><div class="model-drawer-families" role="group" aria-label="${esc(t("Model family"))}">${families.map(([family, label]) => `<button type="button" aria-pressed="${modelDrawerFamily === family}" data-drawer-family="${family}">${esc(t(label))}</button>`).join("")}</div></header><div id="model-drawer-notice" role="alert" hidden></div><div class="model-drawer-body">${models.map((model) => modelRow(model, true)).join("")}</div><footer class="model-drawer-footer">${isMac() ? `<button type="button" data-model-command="import_model">${esc(t("Import a model …"))}</button>` : ""}<button type="button" data-model-command="show_models_folder">${esc(t("Show in file manager"))}</button></footer></div>`;
 }
 function modelDialogSemanticKey(): string {
   return JSON.stringify([
@@ -580,7 +588,9 @@ function syncModelDialog(force = false) {
     );
   dialog
     .querySelectorAll<HTMLButtonElement>("[data-close-model-drawer]")
-    .forEach((button) => button.addEventListener("click", closeModelDialog));
+    .forEach((button) =>
+      button.addEventListener("click", () => void requestCloseModelDialog()),
+    );
   let restore: HTMLButtonElement | undefined;
   if (wasClose)
     restore =
@@ -634,6 +644,9 @@ function openModelDialog(opener: HTMLElement) {
 function closeModelDialog() {
   const dialog = document.querySelector<HTMLDialogElement>("#model-drawer");
   if (dialog?.open) dialog.close();
+}
+async function requestCloseModelDialog() {
+  if (await flushSettings()) closeModelDialog();
 }
 function restoreModelDialogFocus(dialog: HTMLDialogElement) {
   if (!dialog.isConnected || dialog.open) return;
@@ -897,16 +910,8 @@ function enqueueWrite<T>(
   const result = queue.then(operation);
   return { result, next: result.then(() => {}) };
 }
-async function recoverState(): Promise<boolean> {
-  try {
-    state = await invoke("get_state");
-    return true;
-  } catch {
-    return false;
-  }
-}
 // Send only the edited fields. Serializing writes also keeps delayed host replies in order.
-async function savePreferences(
+async function writePreferences(
   changes: PreferencePatch,
   errorTarget?: () => HTMLElement | null,
 ): Promise<boolean> {
@@ -924,7 +929,6 @@ async function savePreferences(
         target.textContent = String(error);
         target.hidden = false;
       } else notice(String(error));
-      await recoverState();
       return false;
     } finally {
       pendingPreferences--;
@@ -937,81 +941,78 @@ async function savePreferences(
   preferenceQueue = saved.next;
   return saved.result;
 }
+async function savePreferences(
+  changes: PreferencePatch,
+  errorTarget?: () => HTMLElement | null,
+): Promise<boolean> {
+  if (tab === "setup" || tab === "dictation" || overlay)
+    return writePreferences(changes, errorTarget);
+  return settingsAutosave.save(
+    `preferences:${Object.keys(changes).sort().join(",")}`,
+    () => writePreferences(changes, errorTarget),
+  );
+}
 async function preference(name: string, value: unknown) {
   return savePreferences(preferencePatchSchema.parse({ [name]: value }));
 }
-function updateConnectionSaveFeedback() {
-  document
-    .querySelectorAll<HTMLElement>(
-      "#connection-save-status, #text-processing-save-status",
-    )
-    .forEach((status) => {
-      status.textContent = connectionSaveFeedback
-        ? t(connectionSaveFeedback === "saving" ? "Saving…" : "Saved")
-        : "";
-      status.hidden = connectionSaveFeedback === undefined;
-    });
+function updateSettingsSaveStatus() {
+  const status = document.querySelector<HTMLElement>("#settings-save-status");
+  if (!status) return;
+  status.dataset.status = settingsSaveStatus;
+  status.innerHTML =
+    settingsSaveStatus === "error"
+      ? `<button type="button" id="retry-settings-save">${esc(t("Not saved · Retry"))}</button>`
+      : settingsSaveStatus === "idle"
+        ? status.innerHTML
+        : `<span aria-hidden="true">${settingsSaveStatus === "saving" ? "●" : "✓"}</span> ${esc(t(settingsSaveStatus === "saving" ? "Saving…" : "Saved"))}`;
+  status
+    .querySelector<HTMLButtonElement>("#retry-settings-save")
+    ?.addEventListener("click", () => void settingsAutosave.retry());
+}
+async function flushSettings(): Promise<boolean> {
+  const saved = await settingsAutosave.flush();
+  if (!saved) notice(t("Not saved · Retry"));
+  return saved;
 }
 async function saveConnections(
   settings: TextConnectionSettings,
+  delayMs = 0,
 ): Promise<boolean> {
-  const instructionDraft = connectionInstructionDraft;
   const conversationDraft = conversationInstructionDraft;
   const nextSettings = {
     ...settings,
-    instruction: instructionDraft ?? settings.instruction,
     conversationInstruction:
       conversationDraft ?? settings.conversationInstruction,
   };
   pendingConnectionSettings = nextSettings;
-  connectionSaveFeedback = "saving";
-  updateConnectionSaveFeedback();
-  const save = connectionSaveQueue.then(async () => {
-    try {
-      const savedState = await invoke("save_connections", {
-        settings: nextSettings,
-      });
-      if (pendingConnectionSettings === nextSettings) {
-        const draftsUnchanged =
-          connectionInstructionDraft === instructionDraft &&
-          conversationInstructionDraft === conversationDraft;
-        state = savedState;
-        pendingConnectionSettings = undefined;
-        if (connectionInstructionDraft === instructionDraft)
-          connectionInstructionDraft = undefined;
-        if (conversationInstructionDraft === conversationDraft)
-          conversationInstructionDraft = undefined;
-        connectionSaveFeedback = draftsUnchanged ? "saved" : undefined;
-        contentKey = "";
-        render();
-      }
-      return true;
-    } catch (error) {
-      if (pendingConnectionSettings === nextSettings) {
-        pendingConnectionSettings = undefined;
-        connectionSaveFeedback = undefined;
-        updateConnectionSaveFeedback();
+  return settingsAutosave.save(
+    "connections",
+    async () => {
+      try {
+        const savedState = await invoke("save_connections", {
+          settings: nextSettings,
+        });
+        if (pendingConnectionSettings === nextSettings) {
+          state = savedState;
+          pendingConnectionSettings = undefined;
+          if (conversationInstructionDraft === conversationDraft)
+            conversationInstructionDraft = undefined;
+          contentKey = "";
+        }
+        return true;
+      } catch (error) {
         notice(String(error));
+        return false;
       }
-      return false;
-    }
-  });
-  connectionSaveQueue = save.then(
-    () => undefined,
-    () => undefined,
+    },
+    delayMs,
   );
-  return save;
 }
 function latestConnectionSettings(): TextConnectionSettings {
   return pendingConnectionSettings ?? state.text_connections.settings;
 }
 async function scanConnections() {
   connectionScanStarted = true;
-  const scannedCustomProviders = new Set(
-    state.text_connections.settings.connections
-      .filter((connection) => connection.provider.startsWith("custom:"))
-      .map((connection) => connection.provider),
-  );
   const button = document.querySelector<HTMLButtonElement>("#scan-connections");
   if (button) {
     button.disabled = true;
@@ -1021,8 +1022,6 @@ async function scanConnections() {
     const scannedState = await invoke("scan_connections", {});
     scannedState.text_connections.settings = latestConnectionSettings();
     state = scannedState;
-    for (const provider of scannedCustomProviders)
-      customConnectionsAwaitingScan.delete(provider);
     contentKey = "";
     render();
   } catch (error) {
@@ -1147,7 +1146,7 @@ function syncPreferenceControls() {
       else input.value = String(value ?? "");
     });
   const vocabulary = document.querySelector<HTMLTextAreaElement>("#vocabulary");
-  if (vocabulary && !dirty) vocabulary.value = state.preferences.vocabulary;
+  if (vocabulary) vocabulary.value = state.preferences.vocabulary;
   const recognition = document.querySelector("#recognition-backend");
   if (recognition) {
     recognition.textContent =
@@ -1272,6 +1271,10 @@ function bindModelDialogShell() {
   if (!dialog) return;
   dialog.onclose = (event) =>
     restoreModelDialogFocus(event.currentTarget as HTMLDialogElement);
+  dialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    void requestCloseModelDialog();
+  });
   bindDialogFocusTrap(dialog);
 }
 function bindUpdateDialogShell() {
@@ -1337,22 +1340,16 @@ function bindUpdateDialogShell() {
 function bindSettingsDialogShell() {
   const dialog = document.querySelector<HTMLDialogElement>("#settings-dialog");
   if (!dialog) return;
-  dialog.addEventListener("cancel", (event) => {
-    if (dirty) {
-      event.preventDefault();
-      const target = dialog.querySelector<HTMLElement>("#settings-notice");
-      if (target) {
-        target.textContent = t(
-          "Save or discard your changes before switching tabs or language.",
-        );
-        target.hidden = false;
-      }
-      return;
-    }
-    event.preventDefault();
+  const closeSettings = async () => {
+    if (!(await flushSettings())) return;
+    aiModelsSettings.cancelEdit();
     tab = "dictation";
     contentKey = "";
     render();
+  };
+  dialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    void closeSettings();
   });
   dialog.onclose = () => {
     if (dialog.open || !dialog.isConnected) return;
@@ -1369,26 +1366,17 @@ function bindSettingsDialogShell() {
   };
   dialog
     .querySelector<HTMLButtonElement>("#close-settings")
-    ?.addEventListener("click", () => {
-      if (dirty) {
-        const target = dialog.querySelector<HTMLElement>("#settings-notice");
-        if (target) {
-          target.textContent = t(
-            "Save or discard your changes before switching tabs or language.",
-          );
-          target.hidden = false;
-        }
-        return;
-      }
-      tab = "dictation";
-      contentKey = "";
-      render();
-    });
+    ?.addEventListener("click", () => void closeSettings());
   bindDialogFocusTrap(dialog);
 }
 function renderShell() {
   const key = `${state.preferences.ui_language}:${state.preferences.setup_completed}:${state.profile ?? "stable"}`;
   if (shellKey === key) return;
+  if (
+    shellKey &&
+    (settingsSaveStatus === "saving" || settingsSaveStatus === "error")
+  )
+    return;
   if (document.querySelector<HTMLDialogElement>("#model-drawer")?.open) {
     modelFocusRestorePending = true;
     closeModelDialog();
@@ -1417,21 +1405,25 @@ function renderShell() {
     ["general", "General"],
     ["recording", "Recording & shortcuts"],
     ["text", "Text processing"],
-    ["connections", "Connections"],
+    ["connections", "AI models"],
     ["history", "History"],
     ["permissions", "Permissions"],
     ["about", "About"],
   ];
-  app.innerHTML = `${windowTitlebar()}<div id="notice" role="alert" hidden></div><div id="dictation-workspace" class="dictation-workspace"><div class="workspace-frame${historyRailOpen ? "" : " history-collapsed"}"><main id="dictation-content" class="dictation-main"></main><aside id="dictation-history" class="dictation-history history-rail" aria-label="${esc(t("History"))}"></aside></div><div id="record-control"></div></div><dialog id="settings-dialog" aria-labelledby="page-title"><div class="settings-dialog-shell"><nav class="settings-dialog-nav" aria-label="${esc(t("Settings"))}">${settingsTabs.map(([id, title]) => `<button type="button" data-tab="${id}">${esc(t(title))}${id === "permissions" && missingPermissionCount() > 0 ? ` · ${missingPermissionCount()}` : ""}</button>`).join("")}<small class="settings-dialog-version">OpenWhisper ${esc(state.version)}</small></nav><div class="settings-dialog-panel"><header class="settings-dialog-heading"><h1 id="page-title"></h1><button type="button" id="close-settings">${esc(t("Done"))}</button></header><div id="settings-notice" role="alert" hidden></div><div class="settings-dialog-scroll"><div class="settings-content"><div id="content"></div></div></div></div></div></dialog>${emptyModelDialog()}${emptyUpdateDialog()}`;
+  app.innerHTML = `${windowTitlebar()}<div id="notice" role="alert" hidden></div><div id="dictation-workspace" class="dictation-workspace"><div class="workspace-frame${historyRailOpen ? "" : " history-collapsed"}"><main id="dictation-content" class="dictation-main"></main><aside id="dictation-history" class="dictation-history history-rail" aria-label="${esc(t("History"))}"></aside></div><div id="record-control"></div></div><dialog id="settings-dialog" aria-labelledby="page-title"><div class="settings-dialog-shell"><nav class="settings-dialog-nav" aria-label="${esc(t("Settings"))}">${settingsTabs.map(([id, title]) => `<button type="button" data-tab="${id}">${esc(t(title))}${id === "permissions" && missingPermissionCount() > 0 ? ` · ${missingPermissionCount()}` : ""}</button>`).join("")}<small class="settings-dialog-version">OpenWhisper ${esc(state.version)}</small></nav><div class="settings-dialog-panel"><header class="settings-dialog-heading"><h1 id="page-title"></h1><span id="settings-save-status" role="status" aria-live="polite"></span><button type="button" id="close-settings" class="settings-close" aria-label="${esc(t("Close"))}">${symbol("M6 6l12 12M18 6 6 18")}</button></header><div id="settings-notice" role="alert" hidden></div><div class="settings-dialog-scroll"><div class="settings-content"><div id="content"></div></div></div></div></div></dialog>${emptyModelDialog()}${emptyUpdateDialog()}`;
   bindModelDialogShell();
   bindUpdateDialogShell();
   bindSettingsDialogShell();
+  updateSettingsSaveStatus();
   if (overlay)
     app.innerHTML =
       '<div id="notice" role="alert" hidden></div><div id="record-control"></div>';
 }
 
 app.addEventListener("click", (event) => {
+  void handleShellClick(event);
+});
+async function handleShellClick(event: MouseEvent) {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
     "[data-tab], [data-settings-view], [data-ui-language], [data-window-action], [data-open-model-drawer], #open-settings, #toggle-history",
   );
@@ -1450,11 +1442,9 @@ app.addEventListener("click", (event) => {
     if (list) list.hidden = !historyRailOpen;
     return;
   }
+  if (!(await flushSettings())) return;
+  if (!button.dataset.windowAction) aiModelsSettings.cancelEdit();
   if (button.id === "open-settings") {
-    if (dirty) {
-      notice("Save or discard your changes before switching tabs or language.");
-      return;
-    }
     settingsDialogOpener = button;
     tab = "general";
     contentKey = "";
@@ -1462,10 +1452,6 @@ app.addEventListener("click", (event) => {
     return;
   }
   if (button.dataset.settingsView) {
-    if (dirty) {
-      notice("Save or discard your changes before switching tabs or language.");
-      return;
-    }
     settingsDialogOpener = button;
     tab = button.dataset.settingsView as View;
     pendingSettingsSection = button.dataset.settingsSection ?? "";
@@ -1480,12 +1466,6 @@ app.addEventListener("click", (event) => {
     return;
   }
   if (button.hasAttribute("data-open-model-drawer")) {
-    if (dirty) {
-      notice(
-        t("Save or discard your changes before switching tabs or language."),
-      );
-      return;
-    }
     if (button.closest("#settings-dialog")) {
       settingsDialogOpener = null;
       tab = "dictation";
@@ -1500,17 +1480,7 @@ app.addEventListener("click", (event) => {
     return;
   }
   if (button.dataset.windowAction) {
-    if (button.dataset.windowAction === "close" && dirty) {
-      notice("Save or discard your changes before switching tabs or language.");
-      return;
-    }
     void command("window_action", { action: button.dataset.windowAction });
-    return;
-  }
-  if (dirty) {
-    notice(
-      t("Save or discard your changes before switching tabs or language."),
-    );
     return;
   }
   if (button.dataset.uiLanguage) {
@@ -1520,7 +1490,7 @@ app.addEventListener("click", (event) => {
   if (button.dataset.tab && tab === "dictation") settingsDialogOpener = button;
   tab = button.dataset.tab as View;
   render();
-});
+}
 
 function processingStageLabel(stage = state.text_processing?.stage): string {
   switch (stage) {
@@ -1543,8 +1513,8 @@ const processingStageOrder = [
   "recognition",
   "cleanup",
   "vocabulary",
-  "snippets",
   "model",
+  "snippets",
 ] as const;
 
 function visibleProcessingStages() {
@@ -1552,10 +1522,16 @@ function visibleProcessingStages() {
     (connection) => connection.enabled,
   );
   const includeModel =
-    modelConfigured ||
+    (modelConfigured &&
+      (state.text_connections.settings.mode === "conversation" ||
+        state.text_connections.settings.revision?.enabled)) ||
     state.text_connections.processing.provider !== null ||
     state.text_processing?.stage === "model";
-  return processingStageOrder
+  const order =
+    state.text_connections.settings.mode === "conversation"
+      ? (["recognition", "cleanup", "vocabulary", "snippets", "model"] as const)
+      : processingStageOrder;
+  return order
     .filter((stage) => stage !== "model" || includeModel)
     .map((stage) => ({ stage, label: processingStageLabel(stage) }));
 }
@@ -1611,17 +1587,18 @@ function processingStatusText(): string {
   const event = state.text_processing;
   if (state.text_connections.processing.status === "fallback")
     return t("AI text processing was skipped; your text was kept.");
+  const revision = state.text_connections.settings.revision;
+  const activeRevisionRule =
+    !!revision?.enabled &&
+    (Object.values(revision.builtins).some(Boolean) ||
+      revision.custom_rules.some((rule) => rule.enabled));
   if (
     event?.stage === "model" &&
     event.status === "skipped" &&
-    state.text_connections.settings.instruction_mode === "linguistic" &&
-    !Object.values(state.text_connections.settings.linguistic_options).some(
-      Boolean,
-    )
+    state.text_connections.settings.mode === "single" &&
+    !activeRevisionRule
   )
-    return t(
-      "No model connection was called because all linguistic options are off.",
-    );
+    return t("AI revision is off or has no active rules.");
   if (!event) {
     return state.text_connections.processing.status === "processing"
       ? processingStageLabel("model")
@@ -1748,25 +1725,22 @@ function recordControl() {
     document
       .querySelector<HTMLButtonElement>("#record-unavailable-action")!
       .addEventListener("click", () => {
-        if (dirty) {
-          notice(
-            "Save or discard your changes before switching tabs or language.",
-          );
-          return;
-        }
-        if (state.recording_unavailable_reason === "model" && !overlay) {
-          openModelDialog(
-            document.querySelector<HTMLButtonElement>(
-              "#record-unavailable-action",
-            )!,
-          );
-          return;
-        }
-        tab =
-          state.recording_unavailable_reason === "permission"
-            ? "permissions"
-            : "recording";
-        render();
+        void (async () => {
+          if (!(await flushSettings())) return;
+          if (state.recording_unavailable_reason === "model" && !overlay) {
+            openModelDialog(
+              document.querySelector<HTMLButtonElement>(
+                "#record-unavailable-action",
+              )!,
+            );
+            return;
+          }
+          tab =
+            state.recording_unavailable_reason === "permission"
+              ? "permissions"
+              : "recording";
+          render();
+        })();
       });
   }
   const button = document.querySelector<HTMLButtonElement>("#record")!;
@@ -2263,7 +2237,8 @@ function render() {
     b.classList.toggle("selected", selected);
     b.setAttribute("aria-current", selected ? "page" : "false");
   });
-  syncPreferenceControls();
+  if (settingsSaveStatus !== "saving" && settingsSaveStatus !== "error")
+    syncPreferenceControls();
   syncAboutUpdates();
   renderWorkspace();
   if (tab === "dictation") return;
@@ -2283,11 +2258,24 @@ function render() {
           !state.native_shortcuts &&
           !state.shortcut_portal);
     });
-  if (dirty) {
-    contentKey = "";
+  const pageTitle = document.querySelector<HTMLElement>("#page-title");
+  if (pageTitle)
+    pageTitle.hidden = tab === "connections" && aiModelsSettings.editing;
+  if (settingsSaveStatus === "saving" || settingsSaveStatus === "error") {
     return;
   }
   if (pendingPreferences) return;
+  const focused = document.activeElement;
+  if (
+    renderedTab === tab &&
+    focused instanceof HTMLElement &&
+    focused.closest("#content") &&
+    (focused instanceof HTMLTextAreaElement ||
+      (focused instanceof HTMLInputElement && focused.type === "text"))
+  ) {
+    contentKey = "";
+    return;
+  }
   const nextKey = JSON.stringify(
     [
       tab,
@@ -2759,151 +2747,158 @@ function render() {
       .querySelector("#show-models")!
       .addEventListener("click", () => void command("show_models_folder"));
   } else if (tab === "text") {
-    if (!dirtyTextParts.has("vocabulary") || vocabularyDraft === undefined)
+    if (vocabularyDraft === undefined)
       vocabularyDraft = vocabularyEntries(p.vocabulary);
+    if (snippetDraft === undefined)
+      snippetDraft = p.snippets.map((snippet) => ({ ...snippet }));
     const textConnectionSettings = latestConnectionSettings();
-    const linguisticOptionLabels = [
-      ["punctuation_capitalization", "Punctuation and capitalization"],
-      ["grammar", "Grammar"],
-      ["remove_fillers", "Remove filler words"],
-      ["reduce_repetitions", "Reduce repetitions"],
-      ["improve_sentence_structure", "Smooth sentence structure"],
-    ] as const;
-    const linguisticOptionRows = linguisticOptionLabels
-      .map(
-        ([key, label]) =>
-          `<label class="row"><span>${esc(t(label))}</span><input class="switch" type="checkbox" data-linguistic-option="${key}" ${textConnectionSettings.linguistic_options[key] ? "checked" : ""}></label>`,
-      )
-      .join("");
-    const linguisticControls =
-      `<p>${esc(t("These options preserve the language, meaning, and facts. They do not summarize or perform tasks."))}</p>` +
-      `<p class="secondary">${esc(t("With all options off, no model connection is called for a single recording."))}</p>` +
-      `<div class="group linguistic-option-list">${linguisticOptionRows}</div>`;
-    const customControls =
-      `<div class="text-processing-body"><label>${esc(t("Custom instruction"))}<textarea id="text-custom-instruction" rows="4" maxlength="8192" aria-label="${esc(t("Custom instruction"))}">${esc(connectionInstructionDraft ?? textConnectionSettings.instruction)}</textarea></label>` +
-      `<p>${esc(t("The selected connection receives this instruction with your transcript. It stays saved when you switch to linguistic options."))}</p><div class="edit-actions"><button type="button" id="save-text-instruction">${esc(t("Save instruction"))}</button></div></div>`;
-    const aiProcessingOptions =
-      textConnectionSettings.mode === "conversation"
-        ? `<p>${esc(t("Conversation processing is configured in Connections."))}</p><button type="button" data-settings-view="connections">${esc(t("Manage connections"))}</button>`
-        : `<label class="connection-mode-label">${esc(t("Instruction style"))}<select id="instruction-mode"><option value="linguistic" ${textConnectionSettings.instruction_mode === "linguistic" ? "selected" : ""}>${esc(t("Linguistic options"))}</option><option value="custom" ${textConnectionSettings.instruction_mode === "custom" ? "selected" : ""}>${esc(t("Custom instruction"))}</option></select></label>${textConnectionSettings.instruction_mode === "linguistic" ? linguisticControls : customControls}` +
-          `<span id="text-processing-save-status" class="settings-save-status" role="status" aria-live="polite" ${connectionSaveFeedback ? "" : "hidden"}>${esc(connectionSaveFeedback ? t(connectionSaveFeedback === "saving" ? "Saving…" : "Saved") : "")}</span>`;
     content.innerHTML =
       `<section class="text-processing-card" id="settings-cleanup"><header class="text-processing-heading"><i class="text-processing-dot cleanup" aria-hidden="true"></i><div><h2>1. ${esc(t("Cleanup"))}</h2><p class="text-processing-description">${esc(t("Remove obvious recognition artifacts while preserving your words and meaning."))}</p></div></header><div class="text-processing-body">${toggle(t("Clean up recognized text"), "cleanup_enabled", p.cleanup_enabled)}</div></section>` +
       `<section class="text-processing-card" id="settings-vocabulary"><header class="text-processing-heading"><i class="text-processing-dot vocabulary" aria-hidden="true"></i><div><h2>2. ${esc(t("Vocabulary"))}</h2><p class="text-processing-description">${esc(t("Add names and technical terms as canonical spellings. Similar spellings are corrected after recognition with any model. Whisper models also receive these terms during recognition."))}</p></div></header><div class="text-processing-body"><div id="vocabulary-editor"></div></div></section>` +
-      `<form id="snippet-form"><section class="text-processing-card"><header class="text-processing-heading"><i class="text-processing-dot snippets" aria-hidden="true"></i><div><h2>3. ${esc(t("Snippets"))}</h2><p class="text-processing-description">${esc(t("Say a trigger word to insert its saved text. Matching ignores letter case, hyphens, and trailing punctuation."))}</p></div></header><div class="text-processing-body"><div id="snippets">${p.snippets.length ? p.snippets.map(snippetRow).join("") : `<p id="empty-snippets" class="secondary">${esc(t("No snippets yet. For example, say “my YouTube link” to insert a URL instead."))}</p>`}</div><div class="snippet-card-actions"><button type="button" id="add-snippet">${esc(t("Add snippet"))}</button><div class="edit-actions" id="snippet-actions" hidden><button type="submit">${esc(t("Save snippets"))}</button><button type="button" data-discard-snippets>${esc(t("Discard"))}</button></div></div></div></section></form>` +
-      `<section class="text-processing-card optional-model-card"><header class="text-processing-heading"><i class="text-processing-dot model" aria-hidden="true"></i><div><h2>4. ${esc(t("AI text processing"))}</h2><p class="text-processing-description">${esc(t("Choose linguistic corrections or an optional custom instruction for single recordings."))}</p></div></header><div class="optional-model-summary"><span>${esc(textConnectionSettings.connections.some((connection) => connection.enabled) ? t("Connection enabled") : t("Off by default"))}</span><button type="button" data-settings-view="connections">${esc(t("Manage connections"))}</button></div><div class="linguistic-settings">${aiProcessingOptions}</div></section>`;
+      (textConnectionSettings.mode === "conversation"
+        ? ""
+        : `<section id="settings-ai-revision">${aiRevisionMarkup(textConnectionSettings, state.text_connections.available)}</section>`) +
+      `<section class="text-processing-card" id="settings-snippets"><header class="text-processing-heading"><i class="text-processing-dot snippets" aria-hidden="true"></i><div><h2>${textConnectionSettings.mode === "conversation" ? "3" : "4"}. ${esc(t("Snippets"))}</h2><p class="text-processing-description">${esc(t("Say a trigger word to insert its saved text. Matching ignores letter case, hyphens, and trailing punctuation."))}</p></div></header><div class="text-processing-body"><div id="snippets">${snippetDraft.length ? snippetDraft.map(snippetRow).join("") : `<p id="empty-snippets" class="secondary">${esc(t("No snippets yet. For example, say “my YouTube link” to insert a URL instead."))}</p>`}</div><div class="snippet-card-actions"><button type="button" id="add-snippet">${esc(t("Add snippet"))}</button><p id="snippet-draft-error" role="status" hidden></p></div></div></section>` +
+      (textConnectionSettings.mode === "conversation"
+        ? `<section class="text-processing-card"><label class="text-processing-body"><strong>${esc(t("Conversation instruction"))}</strong><textarea id="conversation-instruction" rows="4" maxlength="8192">${esc(conversationInstructionDraft ?? textConnectionSettings.conversationInstruction)}</textarea></label></section>`
+        : "");
     renderVocabularyRows(
       content.querySelector<HTMLElement>("#vocabulary-editor")!,
       vocabularyDraft,
     );
-    content
-      .querySelector<HTMLSelectElement>("#instruction-mode")
-      ?.addEventListener("change", (event) => {
-        const select = event.currentTarget as HTMLSelectElement;
-        const latest = latestConnectionSettings();
-        const instruction_mode =
-          select.value as TextConnectionSettings["instruction_mode"];
-        void saveConnections({ ...latest, instruction_mode });
+    if (textConnectionSettings.mode !== "conversation")
+      bindAiRevision(content, {
+        settings: latestConnectionSettings,
+        save: saveConnections,
       });
     content
-      .querySelectorAll<HTMLInputElement>("[data-linguistic-option]")
-      .forEach((input) => {
-        input.addEventListener("change", () => {
-          const latest = latestConnectionSettings();
-          const key = input.dataset
-            .linguisticOption as keyof TextConnectionSettings["linguistic_options"];
-          void saveConnections({
-            ...latest,
-            linguistic_options: {
-              ...latest.linguistic_options,
-              [key]: input.checked,
-            },
-          });
-        });
-      });
-    content
-      .querySelector<HTMLTextAreaElement>("#text-custom-instruction")
+      .querySelector<HTMLTextAreaElement>("#conversation-instruction")
       ?.addEventListener("input", (event) => {
-        connectionInstructionDraft = (
+        conversationInstructionDraft = (
           event.currentTarget as HTMLTextAreaElement
         ).value;
-        if (connectionSaveFeedback === "saved") {
-          connectionSaveFeedback = undefined;
-          updateConnectionSaveFeedback();
-        }
-      });
-    content
-      .querySelector<HTMLButtonElement>("#save-text-instruction")
-      ?.addEventListener("click", () => {
         const latest = latestConnectionSettings();
-        const instruction = content.querySelector<HTMLTextAreaElement>(
-          "#text-custom-instruction",
-        )!.value;
-        connectionInstructionDraft = instruction;
-        void saveConnections({
-          ...latest,
-          instruction_mode: "custom",
-          instruction,
-        });
+        void saveConnections(
+          {
+            ...latest,
+            conversationInstruction: conversationInstructionDraft,
+          },
+          450,
+        );
       });
-    const mark = () => {
-      dirtyTextParts.add("snippets");
-      dirty = true;
-      content.querySelector<HTMLElement>("#snippet-actions")!.hidden = false;
-    };
-    const bindRemove = () =>
-      content.querySelectorAll<HTMLButtonElement>("[data-remove]").forEach(
-        (button) =>
-          (button.onclick = () => {
-            button.closest(".snippet-row")!.remove();
-            mark();
-          }),
+
+    const updateSnippetDraftError = () => {
+      const invalid = !!snippetDraft?.some(
+        (snippet) => !snippet.trigger.trim() || !snippet.expansion.trim(),
       );
-    bindRemove();
-    const form = content.querySelector<HTMLFormElement>("#snippet-form")!;
-    form.oninput = mark;
-    form
-      .querySelector<HTMLButtonElement>("[data-discard-snippets]")
-      ?.addEventListener("click", () => {
-        const snippets = content.querySelector<HTMLElement>("#snippets")!;
-        snippets.innerHTML = p.snippets.length
-          ? p.snippets.map(snippetRow).join("")
-          : `<p id="empty-snippets" class="secondary">${esc(t("No snippets yet. For example, say “my YouTube link” to insert a URL instead."))}</p>`;
-        bindRemove();
-        content.querySelector<HTMLElement>("#snippet-actions")!.hidden = true;
-        dirtyTextParts.delete("snippets");
-        dirty = dirtyTextParts.size > 0;
-        if (!dirty) render();
-      });
-    content.querySelector("#add-snippet")!.addEventListener("click", () => {
-      content.querySelector("#empty-snippets")?.remove();
-      content
-        .querySelector("#snippets")!
-        .insertAdjacentHTML("beforeend", snippetRow());
-      bindRemove();
-      mark();
-    });
-    form.onsubmit = async (event) => {
-      event.preventDefault();
-      const snippets = Array.from(
-        form.querySelectorAll<HTMLElement>(".snippet-row"),
-      ).map((snippet) => ({
-        id: snippet.dataset.id!,
-        trigger:
-          snippet.querySelector<HTMLInputElement>("[name=trigger]")!.value,
-        expansion:
-          snippet.querySelector<HTMLTextAreaElement>("[name=expansion]")!.value,
-        enabled:
-          snippet.querySelector<HTMLInputElement>("[name=enabled]")!.checked,
-      }));
-      if (await savePreferences({ snippets })) {
-        dirtyTextParts.delete("snippets");
-        dirty = dirtyTextParts.size > 0;
-        render();
+      const error = content.querySelector<HTMLElement>("#snippet-draft-error");
+      if (error) {
+        error.hidden = !invalid;
+        error.textContent = invalid
+          ? t("Not saved. Complete each snippet's trigger and text.")
+          : "";
       }
+      return invalid;
     };
+    const renderSnippetDraft = () => {
+      const target = content.querySelector<HTMLElement>("#snippets")!;
+      target.innerHTML = snippetDraft!.length
+        ? snippetDraft!.map(snippetRow).join("")
+        : `<p id="empty-snippets" class="secondary">${esc(t("No snippets yet. For example, say “my YouTube link” to insert a URL instead."))}</p>`;
+      updateSnippetDraftError();
+      target
+        .querySelectorAll<HTMLButtonElement>("[data-remove]")
+        .forEach((button) => {
+          button.onclick = () => {
+            snippetDraft!.splice(
+              Number(
+                button.closest<HTMLElement>(".snippet-row")?.dataset.index,
+              ),
+              1,
+            );
+            if (!snippetDraft!.length) snippetDraft = [];
+            renderSnippetDraft();
+            saveSnippetDraft(0);
+          };
+        });
+      target
+        .querySelectorAll<HTMLElement>(".snippet-row")
+        .forEach((row, index) => {
+          row.dataset.index = String(index);
+          row.querySelector<HTMLInputElement>("[name=enabled]")!.onchange = (
+            inputEvent,
+          ) => {
+            snippetDraft![index]!.enabled = (
+              inputEvent.currentTarget as HTMLInputElement
+            ).checked;
+            saveSnippetDraft(0);
+          };
+          row.querySelector<HTMLInputElement>("[name=trigger]")!.oninput = (
+            inputEvent,
+          ) => {
+            snippetDraft![index]!.trigger = (
+              inputEvent.currentTarget as HTMLInputElement
+            ).value;
+            updateSnippetDraftError();
+            saveSnippetDraft(450);
+          };
+          row.querySelector<HTMLTextAreaElement>("[name=expansion]")!.oninput =
+            (inputEvent) => {
+              snippetDraft![index]!.expansion = (
+                inputEvent.currentTarget as HTMLTextAreaElement
+              ).value;
+              updateSnippetDraftError();
+              saveSnippetDraft(450);
+            };
+        });
+    };
+    const saveSnippetDraft = (delayMs: number) => {
+      if (!snippetDraft) return;
+      const snapshot = snippetDraft.map((snippet) => ({ ...snippet }));
+      const revision = ++snippetRevision;
+      if (
+        snapshot.some(
+          (snippet) => !snippet.trigger.trim() || !snippet.expansion.trim(),
+        )
+      ) {
+        updateSnippetDraftError();
+        void settingsAutosave.save("snippets", async () => false, delayMs);
+        return;
+      }
+      updateSnippetDraftError();
+      void settingsAutosave
+        .save(
+          "snippets",
+          () => writePreferences({ snippets: snapshot }),
+          delayMs,
+        )
+        .then((saved) => {
+          if (saved && revision === snippetRevision) {
+            contentKey = "";
+            render();
+          }
+        });
+    };
+    content.querySelector("#add-snippet")!.addEventListener("click", () => {
+      snippetDraft ??= [];
+      snippetDraft.push({
+        id: crypto.randomUUID(),
+        trigger: "",
+        expansion: "",
+        enabled: true,
+      });
+      renderSnippetDraft();
+      saveSnippetDraft(0);
+      content
+        .querySelector<HTMLInputElement>(
+          ".snippet-row:last-child [name=trigger]",
+        )
+        ?.focus();
+    });
+    renderSnippetDraft();
   } else if (tab === "connections") {
-    renderConnectionsSettings(content);
+    aiModelsSettings.render(content);
+    if (!connectionScanStarted) void scanConnections();
   } else if (tab === "history") {
     const historyBytes = state.history.reduce(
       (bytes, text) => bytes + new TextEncoder().encode(text).byteLength,
@@ -3049,14 +3044,6 @@ function render() {
       }),
   );
   bindModelActions(content);
-  if (tab !== "text")
-    content.querySelectorAll("[data-discard]").forEach((b) =>
-      b.addEventListener("click", () => {
-        dirtyTextParts.clear();
-        dirty = false;
-        render();
-      }),
-    );
 }
 function nativePaste() {
   return !isMac() && !!state.native_paste && !state.paste_portal;
@@ -3260,13 +3247,14 @@ function vocabularyEntries(value: string): string[] {
 }
 
 function renderVocabularyRows(target: HTMLElement, entries: string[]): void {
-  target.innerHTML = `<table class="vocabulary-table"><thead><tr><th>${esc(t("Canonical spelling"))}</th><th>${esc(t("How it is used"))}</th><th><span class="visually-hidden">${esc(t("Actions"))}</span></th></tr></thead><tbody>${entries.length ? entries.map((entry, index) => `<tr><td><input data-vocabulary-entry="${index}" aria-label="${esc(t("Vocabulary spelling {number}", { number: String(index + 1) }))}" value="${esc(entry)}" maxlength="256"></td><td class="vocabulary-use">${esc(t("Similar spellings are matched after recognition."))}</td><td><button type="button" data-remove-vocabulary="${index}" aria-label="${esc(t("Remove vocabulary spelling {number}", { number: String(index + 1) }))}">×</button></td></tr>`).join("") : `<tr><td colspan="3" class="vocabulary-empty">${esc(t("No vocabulary terms yet."))}</td></tr>`}</tbody></table><div class="vocabulary-add-row"><input id="vocabulary-new-entry" maxlength="256" aria-label="${esc(t("Canonical spelling"))}" placeholder="${esc(t("Enter a spelling, such as a name"))}"><button type="button" id="add-vocabulary">${esc(t("Add spelling"))}</button></div><div class="vocabulary-editor-actions"><div class="edit-actions" id="vocabulary-actions" ${dirtyTextParts.has("vocabulary") ? "" : "hidden"}><button type="button" id="save-vocabulary">${esc(t("Save"))}</button><button type="button" data-discard-vocabulary>${esc(t("Discard"))}</button></div></div>`;
+  target.innerHTML = `<table class="vocabulary-table"><thead><tr><th>${esc(t("Canonical spelling"))}</th><th>${esc(t("How it is used"))}</th><th><span class="visually-hidden">${esc(t("Actions"))}</span></th></tr></thead><tbody>${entries.length ? entries.map((entry, index) => `<tr><td><input data-vocabulary-entry="${index}" aria-label="${esc(t("Vocabulary spelling {number}", { number: String(index + 1) }))}" value="${esc(entry)}" maxlength="256"></td><td class="vocabulary-use">${esc(t("Similar spellings are matched after recognition."))}</td><td><button type="button" data-remove-vocabulary="${index}" aria-label="${esc(t("Remove vocabulary spelling {number}", { number: String(index + 1) }))}">×</button></td></tr>`).join("") : `<tr><td colspan="3" class="vocabulary-empty">${esc(t("No vocabulary terms yet."))}</td></tr>`}</tbody></table><div class="vocabulary-add-row"><input id="vocabulary-new-entry" maxlength="256" aria-label="${esc(t("Canonical spelling"))}" placeholder="${esc(t("Enter a spelling, such as a name"))}"><button type="button" id="add-vocabulary">${esc(t("Add spelling"))}</button></div>`;
   target
     .querySelectorAll<HTMLInputElement>("[data-vocabulary-entry]")
     .forEach((input) => {
       input.oninput = () => {
         entries[Number(input.dataset.vocabularyEntry)] = input.value;
-        markVocabularyDirty(target);
+        vocabularyDraft = entries;
+        saveVocabularyDraft(450);
       };
     });
   target
@@ -3274,8 +3262,9 @@ function renderVocabularyRows(target: HTMLElement, entries: string[]): void {
     .forEach((button) => {
       button.onclick = () => {
         entries.splice(Number(button.dataset.removeVocabulary), 1);
-        markVocabularyDirty(target);
+        vocabularyDraft = entries;
         renderVocabularyRows(target, entries);
+        saveVocabularyDraft(0);
       };
     });
   target.querySelector<HTMLButtonElement>("#add-vocabulary")!.onclick = () => {
@@ -3288,9 +3277,10 @@ function renderVocabularyRows(target: HTMLElement, entries: string[]): void {
       return;
     }
     entries.push(value);
-    markVocabularyDirty(target);
+    vocabularyDraft = entries;
     renderVocabularyRows(target, entries);
     target.querySelector<HTMLInputElement>("#vocabulary-new-entry")?.focus();
+    saveVocabularyDraft(0);
   };
   target.querySelector<HTMLInputElement>("#vocabulary-new-entry")!.onkeydown = (
     event,
@@ -3300,429 +3290,48 @@ function renderVocabularyRows(target: HTMLElement, entries: string[]): void {
       target.querySelector<HTMLButtonElement>("#add-vocabulary")!.click();
     }
   };
-  target
-    .querySelector<HTMLButtonElement>("#save-vocabulary")
-    ?.addEventListener("click", () => {
-      void (async () => {
-        const value = entries
-          .map((entry) => entry.trim())
-          .filter(Boolean)
-          .join(", ");
-        if (await savePreferences({ vocabulary: value })) {
-          dirtyTextParts.delete("vocabulary");
-          vocabularyDraft = undefined;
-          dirty = dirtyTextParts.size > 0;
-          render();
-        }
-      })();
-    });
-  target
-    .querySelector<HTMLButtonElement>("[data-discard-vocabulary]")
-    ?.addEventListener("click", () => {
-      dirtyTextParts.delete("vocabulary");
-      vocabularyDraft = vocabularyEntries(state.preferences.vocabulary);
-      dirty = dirtyTextParts.size > 0;
-      renderVocabularyRows(target, vocabularyDraft);
-      if (!dirty) render();
-    });
 }
 
-function markVocabularyDirty(target: HTMLElement): void {
-  dirtyTextParts.add("vocabulary");
-  dirty = true;
-  target.querySelector<HTMLElement>("#vocabulary-actions")!.hidden = false;
-}
-
-function renderConnectionsSettings(content: HTMLElement) {
-  const { available, scanning } = state.text_connections;
-  const settings = latestConnectionSettings();
-  const availability = new Map(available.map((item) => [item.provider, item]));
-  const builtinNames: Record<BuiltinTextProvider, string> = {
-    ollama: "Ollama",
-    lm_studio: "LM Studio",
-    claude_code: "Claude Code",
-    codex: "Codex",
-  };
-  const reason = (value: string | null) => {
-    switch (value) {
-      case "not_running":
-        return t("Not running");
-      case "not_installed":
-        return t("Not detected");
-      case "no_models":
-        return t("No models found");
-      case "unsupported":
-        return t("Detected, but not available for text processing");
-      case "scan_failed":
-        return t("Could not check this connection");
-      default:
-        return t("Available");
-    }
-  };
-  const standardIndex = settings.connections.findIndex(
-    (connection) => connection.enabled,
-  );
-  const controlsDisabled =
-    scanning ||
-    state.status === "transcribing" ||
-    state.text_connections.processing.status === "processing";
-  content.innerHTML =
-    `<section class="connections-intro"><p>${esc(t("Find local Ollama or LM Studio servers and installed CLI tools. Connections start off."))}</p><button type="button" id="scan-connections" ${scanning ? "disabled" : ""}>${esc(scanning ? t("Scanning …") : t("Scan again"))}</button></section>` +
-    `<ol class="connection-list">${settings.connections
-      .map((connection, index) => {
-        const found = customConnectionsAwaitingScan.has(connection.provider)
-          ? undefined
-          : availability.get(connection.provider);
-        const local =
-          connection.provider === "ollama" ||
-          connection.provider === "lm_studio";
-        const custom = connection.provider.startsWith("custom:");
-        const usable = found?.usable ?? false;
-        const name = custom
-          ? (connection as CustomCliConnection).name
-          : builtinNames[connection.provider as BuiltinTextProvider];
-        const customNeedsPrompt =
-          custom &&
-          settings.mode === "conversation" &&
-          !(connection as CustomCliConnection).stdin.includes("{prompt}") &&
-          !(connection as CustomCliConnection).args.some((argument) =>
-            argument.includes("{prompt}"),
-          );
-        const selectedModel =
-          connection.provider === "ollama" ||
-          connection.provider === "lm_studio"
-            ? connection.model && found?.models.includes(connection.model)
-              ? connection.model
-              : (found?.models[0] ?? "")
-            : "";
-        const cliModels = found?.models ?? [];
-        const isClaude = connection.provider === "claude_code";
-        const cliOptions =
-          found?.model_options ??
-          cliModels.map((value) => ({
-            value,
-            display_name: formatModelId(value),
-            source: "cli" as const,
-          }));
-        const savedRecommendedClaude =
-          isClaude && connection.model === "default";
-        const selectableCliOptions = cliOptions
-          .filter((item) => !isClaude || item.value !== "default")
-          .map((item) => ({
-            ...item,
-            display_name:
-              item.display_name === item.value
-                ? formatModelId(item.value)
-                : item.display_name,
-          }));
-        const cliModelValues = selectableCliOptions.map((item) => item.value);
-        if (savedRecommendedClaude) cliModelValues.push("default");
-        const savedCliModel =
-          (connection.provider === "claude_code" ||
-            connection.provider === "codex") &&
-          connection.model &&
-          !cliModelValues.includes(connection.model)
-            ? connection.model
-            : "";
-        const model = local
-          ? `<label class="connection-model"><span class="visually-hidden">${esc(t("Model"))}</span><select data-connection-model="${esc(connection.provider)}" aria-label="${esc(t("{provider} model", { provider: name }))}" ${!usable ? "disabled" : ""}>${connection.model && !found?.models.includes(connection.model) ? option(connection.model, formatModelId(connection.model), selectedModel) : ""}${found?.models.length ? found.models.map((item) => option(item, formatModelId(item), selectedModel)).join("") : option("", t("No models found"), selectedModel)}</select></label>`
-          : connection.provider === "claude_code" ||
-              connection.provider === "codex"
-            ? `<label class="connection-model"><span class="visually-hidden">${esc(t("{provider} model", { provider: name }))}</span><select data-cli-model="${esc(connection.provider)}" aria-label="${esc(t("{provider} model", { provider: name }))}" ${controlsDisabled ? "disabled" : ""}>${option("", t("Use tool settings"), connection.model)}${selectableCliOptions.map((item) => option(item.value, item.display_name, connection.model)).join("")}${savedRecommendedClaude ? option("default", t("Recommended Claude model"), connection.model) : ""}${savedCliModel ? option(savedCliModel, formatModelId(savedCliModel), connection.model) : ""}</select></label>`
-            : `<div class="connection-cli-note"><p class="connection-model-note">${esc(custom ? (connection as CustomCliConnection).command : t("Uses the tool model"))}</p>${customNeedsPrompt ? `<p class="connection-state unavailable">${esc(t("Add {prompt} to the input template or an argument to use this connection in Conversation mode.", { prompt: "{prompt}" }))}</p>` : ""}</div>`;
-        const enabledDisabled =
-          (!usable || (local && !selectedModel) || customNeedsPrompt) &&
-          !connection.enabled;
-        const status = found ? reason(found.reason) : t("Scan to check");
-        return `<li class="connection-card connection-row" data-provider="${esc(connection.provider)}"><span class="connection-number">${index + 1}</span><div class="connection-identity"><strong>${esc(name)}${index === standardIndex ? `<span class="connection-default">${esc(t("Standard"))}</span>` : ""}</strong><span class="connection-state ${usable ? "available" : "unavailable"}">${esc(status)}</span></div><div class="connection-model-slot">${model}</div><label class="connection-toggle" title="${esc(t("Enabled"))}"><input class="switch connection-switch" type="checkbox" data-connection-enabled="${esc(connection.provider)}" ${connection.enabled ? "checked" : ""} ${enabledDisabled && !connection.enabled ? "disabled" : ""}><span class="visually-hidden">${esc(t("Enabled"))}</span></label><div class="connection-order"><button type="button" data-connection-move="up" data-provider="${esc(connection.provider)}" aria-label="${esc(t("Move {provider} up", { provider: name }))}" ${index === 0 ? "disabled" : ""}>↑</button><button type="button" data-connection-move="down" data-provider="${esc(connection.provider)}" aria-label="${esc(t("Move {provider} down", { provider: name }))}" ${index === settings.connections.length - 1 ? "disabled" : ""}>↓</button>${custom ? `<button type="button" data-connection-edit="${esc(connection.provider)}">${esc(t("Edit"))}</button><button type="button" data-connection-remove="${esc(connection.provider)}" aria-label="${esc(t("Remove {provider}", { provider: name }))}">×</button>` : ""}</div></li>`;
-      })
-      .join("")}</ol>` +
-    `<section class="custom-connection-actions"><button type="button" id="add-custom-connection" ${settings.connections.length >= 20 ? "disabled" : ""}>${esc(t("Add CLI connection"))}</button>${customConnectionDraft ? `<div class="custom-connection-editor"><h3>${esc(t(customConnectionDraftIsNew ? "New CLI connection" : "Edit CLI connection"))}</h3><label>${esc(t("Connection name"))}<input id="custom-name" maxlength="128" value="${esc(customConnectionDraft.name)}"></label><label>${esc(t("Executable or command"))}<input id="custom-command" maxlength="1024" value="${esc(customConnectionDraft.command)}"></label><label>${esc(t("Arguments (one per line)"))}<textarea id="custom-args" rows="3">${esc(customConnectionDraft.args.join("\n"))}</textarea></label><label>${esc(t("Input template"))}<input id="custom-stdin" maxlength="8192" value="${esc(customConnectionDraft.stdin)}"></label><label>${esc(t("Output format"))}<select id="custom-output"><option value="text" ${customConnectionDraft.output === "text" ? "selected" : ""}>${esc(t("Plain text"))}</option><option value="json" ${customConnectionDraft.output === "json" ? "selected" : ""}>JSON</option></select></label><label>${esc(t("JSON response field"))}<input id="custom-response-path" maxlength="512" value="${esc(customConnectionDraft.responsePath)}"></label><p>${esc(t("Commands run directly without a shell. Example: gemini with --output-format and json, input {prompt}, JSON field response."))}</p><div class="edit-actions"><button id="save-custom-connection" type="button">${esc(t("Save CLI connection"))}</button><button id="cancel-custom-connection" type="button">${esc(t("Cancel"))}</button></div></div>` : ""}</section>` +
-    `<p class="connection-privacy">${esc(t("Only the first enabled connection is used; it receives transcript text. Local servers do not prove local-only processing. CLI tools and custom commands may send text to cloud services or use their configured tools."))}</p>` +
-    `<section class="connection-instruction"><h2>${esc(t("AI text processing"))}</h2><label class="connection-mode-label">${esc(t("Processing mode"))}<select id="connection-mode"><option value="single" ${settings.mode === "single" ? "selected" : ""}>${esc(t("Single recording"))}</option><option value="conversation" ${settings.mode === "conversation" ? "selected" : ""}>${esc(t("Voice conversation"))}</option></select></label>${settings.mode === "conversation" ? `<label>${esc(t("Conversation instruction"))}<textarea id="conversation-instruction" rows="3" maxlength="8192">${esc(conversationInstructionDraft ?? settings.conversationInstruction)}</textarea></label>` : `<p>${esc(t("Linguistic options and custom instructions for single recordings are in Text processing settings."))}</p><button type="button" data-settings-view="text">${esc(t("Open text processing"))}</button>`}<div class="edit-actions"><button type="button" id="save-connections">${esc(t("Save connections"))}</button><span id="connection-save-status" role="status" aria-live="polite" ${connectionSaveFeedback ? "" : "hidden"}>${esc(connectionSaveFeedback ? t(connectionSaveFeedback === "saving" ? "Saving…" : "Saved") : "")}</span></div></section>`;
-  content
-    .querySelector<HTMLTextAreaElement>("#conversation-instruction")
-    ?.addEventListener("input", (event) => {
-      conversationInstructionDraft = (
-        event.currentTarget as HTMLTextAreaElement
-      ).value;
-      if (connectionSaveFeedback === "saved") {
-        connectionSaveFeedback = undefined;
-        updateConnectionSaveFeedback();
+function saveVocabularyDraft(delayMs: number): void {
+  if (!vocabularyDraft) return;
+  const revision = ++vocabularyRevision;
+  const value = vocabularyDraft
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .join(", ");
+  void settingsAutosave
+    .save("vocabulary", () => writePreferences({ vocabulary: value }), delayMs)
+    .then((saved) => {
+      if (saved && revision === vocabularyRevision) {
+        vocabularyDraft = undefined;
+        contentKey = "";
+        render();
       }
     });
-  const updateCustomDraft = () => {
-    if (!customConnectionDraft) return;
-    customConnectionDraft = {
-      ...customConnectionDraft,
-      name:
-        content.querySelector<HTMLInputElement>("#custom-name")?.value ??
-        customConnectionDraft.name,
-      command:
-        content.querySelector<HTMLInputElement>("#custom-command")?.value ??
-        customConnectionDraft.command,
-      args: (
-        content.querySelector<HTMLTextAreaElement>("#custom-args")?.value ??
-        customConnectionDraft.args.join("\n")
-      )
-        .split("\n")
-        .filter((line) => line.length > 0),
-      stdin:
-        content.querySelector<HTMLInputElement>("#custom-stdin")?.value ??
-        customConnectionDraft.stdin,
-      output: (content.querySelector<HTMLSelectElement>("#custom-output")
-        ?.value ?? customConnectionDraft.output) as "text" | "json",
-      responsePath:
-        content.querySelector<HTMLInputElement>("#custom-response-path")
-          ?.value ?? customConnectionDraft.responsePath,
-    };
-  };
-  content
-    .querySelectorAll<
-      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-    >(
-      ".custom-connection-editor input, .custom-connection-editor textarea, .custom-connection-editor select",
-    )
-    .forEach((field) => field.addEventListener("input", updateCustomDraft));
-  content
-    .querySelector<HTMLSelectElement>("#custom-output")
-    ?.addEventListener("change", updateCustomDraft);
-  content
-    .querySelector("#scan-connections")
-    ?.addEventListener("click", () => void scanConnections());
-  content
-    .querySelector("#save-connections")
-    ?.addEventListener(
-      "click",
-      () => void saveConnections(latestConnectionSettings()),
-    );
-  content
-    .querySelectorAll<HTMLInputElement>("[data-connection-enabled]")
-    .forEach((input) => {
-      input.onchange = () => {
-        const provider = input.dataset.connectionEnabled!;
-        const current = latestConnectionSettings();
-        const connections = current.connections.map((entry) => {
-          if (entry.provider !== provider) return entry;
-          if (
-            (entry.provider === "ollama" || entry.provider === "lm_studio") &&
-            input.checked
-          ) {
-            const selected =
-              content.querySelector<HTMLSelectElement>(
-                `[data-connection-model="${CSS.escape(provider)}"]`,
-              )?.value ?? "";
-            return { ...entry, model: selected, enabled: selected.length > 0 };
-          }
-          return {
-            ...entry,
-            enabled:
-              input.checked && !!availability.get(entry.provider)?.usable,
-          };
-        });
-        void saveConnections({ ...current, connections });
-      };
-    });
-  content
-    .querySelectorAll<HTMLSelectElement>("[data-cli-model]")
-    .forEach((select) => {
-      select.onchange = () => {
-        const provider = select.dataset.cliModel!;
-        const latest = latestConnectionSettings();
-        const current = latest.connections.find(
-          (entry) => entry.provider === provider,
-        );
-        if (
-          current &&
-          (current.provider === "claude_code" ||
-            current.provider === "codex") &&
-          current.model === select.value
-        )
-          return;
-        const connections = latest.connections.map((entry) =>
-          entry.provider === provider
-            ? { ...entry, model: select.value }
-            : entry,
-        );
-        void saveConnections({ ...latest, connections });
-      };
-    });
-  content
-    .querySelector<HTMLSelectElement>("#connection-mode")
-    ?.addEventListener("change", (event) => {
-      const select = event.currentTarget as HTMLSelectElement;
-      const latest = latestConnectionSettings();
-      const mode = select.value as TextConnectionSettings["mode"];
-      if (
-        mode === "conversation" &&
-        latest.connections.some(
-          (connection) =>
-            connection.enabled &&
-            connection.provider.startsWith("custom:") &&
-            !(connection as CustomCliConnection).stdin.includes("{prompt}") &&
-            !(connection as CustomCliConnection).args.some((argument) =>
-              argument.includes("{prompt}"),
-            ),
-        )
-      ) {
-        select.value = latest.mode;
-        notice(
-          t(
-            "Add {prompt} to the input template or an argument to use this connection in Conversation mode.",
-            { prompt: "{prompt}" },
-          ),
-        );
-        return;
-      }
-      void saveConnections({ ...latest, mode });
-    });
-  content
-    .querySelector<HTMLButtonElement>("#add-custom-connection")
-    ?.addEventListener("click", () => {
-      customConnectionDraftIsNew = true;
-      const provider = `custom:${crypto.randomUUID()}` as const;
-      customConnectionsAwaitingScan.add(provider);
-      customConnectionDraft = {
-        provider,
-        enabled: false,
-        name: "",
-        command: "",
-        args: [],
-        stdin: "{prompt}",
-        output: "text",
-        responsePath: "",
-      };
-      renderConnectionsSettings(content);
-    });
-  content
-    .querySelectorAll<HTMLButtonElement>("[data-connection-edit]")
-    .forEach((button) =>
-      button.addEventListener("click", () => {
-        const entry = latestConnectionSettings().connections.find(
-          (connection) => connection.provider === button.dataset.connectionEdit,
-        );
-        if (entry?.provider.startsWith("custom:")) {
-          customConnectionDraftIsNew = false;
-          customConnectionsAwaitingScan.add(entry.provider);
-          customConnectionDraft = {
-            ...(entry as CustomCliConnection),
-            enabled: false,
-            args: [...(entry as CustomCliConnection).args],
-          };
-          renderConnectionsSettings(content);
-        }
-      }),
-    );
-  content
-    .querySelectorAll<HTMLButtonElement>("[data-connection-remove]")
-    .forEach((button) =>
-      button.addEventListener("click", () => {
-        const latest = latestConnectionSettings();
-        const connections = latest.connections.filter(
-          (entry) => entry.provider !== button.dataset.connectionRemove,
-        );
-        void saveConnections({ ...latest, connections });
-      }),
-    );
-  content
-    .querySelector<HTMLButtonElement>("#cancel-custom-connection")
-    ?.addEventListener("click", () => {
-      customConnectionDraft = undefined;
-      renderConnectionsSettings(content);
-    });
-  content
-    .querySelector<HTMLButtonElement>("#save-custom-connection")
-    ?.addEventListener("click", () => {
-      const draft = customConnectionDraft;
-      if (!draft) return;
-      const parsed = customCliConnectionSchema.safeParse({
-        ...draft,
-        name:
-          content.querySelector<HTMLInputElement>("#custom-name")?.value ?? "",
-        command:
-          content.querySelector<HTMLInputElement>("#custom-command")?.value ??
-          "",
-        args: (
-          content.querySelector<HTMLTextAreaElement>("#custom-args")?.value ??
-          ""
-        )
-          .split("\n")
-          .filter((line) => line.length > 0),
-        stdin:
-          content.querySelector<HTMLInputElement>("#custom-stdin")?.value ?? "",
-        output:
-          content.querySelector<HTMLSelectElement>("#custom-output")?.value,
-        responsePath:
-          content.querySelector<HTMLInputElement>("#custom-response-path")
-            ?.value ?? "",
-      });
-      if (!parsed.success) {
-        notice(t("Check the CLI connection fields and try again."));
-        return;
-      }
-      const latest = latestConnectionSettings();
-      const connections = customConnectionDraftIsNew
-        ? [...latest.connections, parsed.data]
-        : latest.connections.map((entry) =>
-            entry.provider === parsed.data.provider
-              ? { ...parsed.data, enabled: false }
-              : entry,
-          );
-      customConnectionDraft = undefined;
-      void saveConnections({ ...latest, connections });
-      customConnectionDraftIsNew = false;
-    });
-  content
-    .querySelectorAll<HTMLSelectElement>("[data-connection-model]")
-    .forEach((select) => {
-      select.onchange = () => {
-        const latest = latestConnectionSettings();
-        const provider = select.dataset.connectionModel!;
-        const connections = latest.connections.map((entry) =>
-          entry.provider === provider &&
-          (entry.provider === "ollama" || entry.provider === "lm_studio")
-            ? { ...entry, model: select.value }
-            : entry,
-        );
-        void saveConnections({ ...latest, connections });
-      };
-    });
-  content
-    .querySelectorAll<HTMLButtonElement>("[data-connection-move]")
-    .forEach((button) => {
-      button.onclick = () => {
-        const latest = latestConnectionSettings();
-        const index = latest.connections.findIndex(
-          (entry) => entry.provider === button.dataset.provider,
-        );
-        const next = index + (button.dataset.connectionMove === "up" ? -1 : 1);
-        if (index < 0 || next < 0 || next >= latest.connections.length) return;
-        const connections = [...latest.connections];
-        [connections[index], connections[next]] = [
-          connections[next]!,
-          connections[index]!,
-        ];
-        void saveConnections({ ...latest, connections });
-      };
-    });
-  if (!connectionScanStarted) void scanConnections();
 }
 
 async function start() {
   try {
     let receivedStateEvent = false;
     await listen("navigate", (event) => {
-      if (
-        ["setup", "general", "models", "snippets", "history", "about"].includes(
-          event.payload,
-        )
-      ) {
-        tab = event.payload === "snippets" ? "text" : event.payload;
-        dirty = false;
-        dirtyTextParts.clear();
-        contentKey = "";
-        render();
-      }
+      void (async () => {
+        if (
+          [
+            "setup",
+            "general",
+            "models",
+            "snippets",
+            "history",
+            "about",
+          ].includes(event.payload)
+        ) {
+          if (!(await flushSettings())) return;
+          aiModelsSettings.cancelEdit();
+          tab = event.payload === "snippets" ? "text" : event.payload;
+          contentKey = "";
+          render();
+        }
+      })();
     });
     await listen("state", (event) => {
       receivedStateEvent = true;

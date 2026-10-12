@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { snippetSchema } from "./snippets.js";
 
 const sequence = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const samples = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -23,5 +24,8 @@ export const textProcessingStageEventSchema = z.strictObject({
 { message: "Invalid text processing stage event." }).readonly();
 export type TextProcessingStageEvent = z.infer<typeof textProcessingStageEventSchema>;
 
-const transcriptDeliveryMetadataSchema = z.strictObject({ rawText: z.string() }).readonly();
+export const transcriptDeliveryMetadataSchema = z.strictObject({
+  rawText: z.string().optional(),
+  snippets: z.array(snippetSchema).max(100).readonly().optional(),
+}).readonly();
 export type TranscriptDeliveryMetadata = z.infer<typeof transcriptDeliveryMetadataSchema>;

@@ -136,7 +136,7 @@ test("renderer keeps optional local processing out of the ordinary dictation wor
     "General",
     "Recording & shortcuts",
     "Text processing",
-    "Connections",
+    "AI models",
     "History",
     "Permissions",
     "About",

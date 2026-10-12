@@ -57,8 +57,9 @@ export interface CaptureBoundary<C extends CapturedHandle> {
 }
 export interface SpeechResult extends Ownership { readonly text: string; readonly rawText?: string }
 export interface SpeechBoundary {
-  /** Produce final processed text using a captured request, independently of optional LLMs:
-   * raw inference -> cleanup -> vocabulary correction -> snippets. Parakeet vocabulary
+  /** Produce the deterministic pre-revision text using a captured request:
+   * raw inference -> cleanup -> vocabulary correction. Main applies optional revision,
+   * then the same captured snippets before delivery. Parakeet vocabulary
    * is postprocessed; its native model does not accept a vocabulary prompt.
    * The adapter owns bounded inference windows, disposable workers and CPU/GPU retries. */
   transcribe(audio: PreparedAudio, request: RecordingRequest, context: WorkContext,
@@ -549,7 +550,8 @@ export class RecordingCoordinator<C extends CapturedHandle> {
         const identity: DeliveryIdentity = pending.token
           ? { kind: "recovery", token: pending.token.id }
           : { kind: "memory", generation: pending.generation };
-        const metadata = pending.rawText === undefined ? undefined : { rawText: pending.rawText };
+        const metadata = { ...(pending.rawText === undefined ? {} : { rawText: pending.rawText }),
+          snippets: pending.request.snippets };
         const receipt = await this.options.delivery.deliver(pending.text ?? "", context, identity, metadata);
         if (!owned(receipt, context)) throw new Error("Invalid delivery ownership.");
         pending.receipt = receipt;

@@ -6,7 +6,7 @@ import {
   type ConversationTurn, type TextConnectionAvailability, type TextConnectionSettings, type TextConversation, type TextProvider,
 } from "../../contracts/text/connections.js";
 import type { TextProcessingStageEvent } from "../../contracts/text/processing.js";
-import { compileLinguisticInstruction } from "../../core/text/linguistic-instruction.js";
+import { compileTextRevisionPrompt } from "../../core/text/text-revision-prompt.js";
 import { ensureTextProviderAvailability, safeAvailabilityFallback } from "./connections.js";
 
 type TextConnection = TextConnectionSettings["connections"][number];
@@ -103,9 +103,9 @@ export class OptionalTextProcessing {
       this.options.onChange?.();
       return text;
     }
-    const linguisticInstruction = !conversationMode && settings.instruction_mode === "linguistic"
-      ? compileLinguisticInstruction(settings.linguistic_options) : undefined;
-    if (!conversationMode && settings.instruction_mode === "linguistic" && linguisticInstruction === undefined) {
+    const revisionInstruction = !conversationMode && settings.revision
+      ? compileTextRevisionPrompt(settings.revision) : undefined;
+    if (!conversationMode && revisionInstruction === undefined) {
       this.active?.controller.abort();
       this.active = undefined;
       this.pendingConversationTurn = undefined;
@@ -123,6 +123,7 @@ export class OptionalTextProcessing {
     this.processing = { status: "processing", provider: selected.provider, reason: null };
     this.emitStage(owner, "progress");
     this.options.onChange?.();
+    const turns = conversationMode ? conversation?.turns ?? [] : undefined;
     let availability = this.availability.find((entry) => entry.provider === selected.provider);
     try {
       if (!availability?.usable) {
@@ -138,12 +139,10 @@ export class OptionalTextProcessing {
           (!selected.model || !availability.models.includes(selected.model))) {
         throw new TextProviderUnavailableError();
       }
-      const turns = conversationMode ? conversation?.turns ?? [] : undefined;
       if (turns && !this.fitsConversation(conversation, selected.provider, { user: text, assistant: "pending" })) {
         return this.fallback(text, owner, selected.provider, "context_full");
       }
-      const instruction = conversationMode ? settings.conversationInstruction
-        : settings.instruction_mode === "linguistic" ? linguisticInstruction! : settings.instruction;
+      const instruction = conversationMode ? settings.conversationInstruction : revisionInstruction!;
       const result = await this.options.runProvider(selected, instruction, text, signal, active.requestId, turns);
       if (this.parentCancelled(owner) || this.active !== active) return undefined;
       if (this.userCancelled(active)) return this.fallback(text, owner, selected.provider, "cancelled");
@@ -223,5 +222,10 @@ export class OptionalTextProcessing {
   private emitStage(owner: ProcessingOwner, status: "progress" | "completed" | "skipped", text?: string): void {
     this.options.onStage?.({ generation: owner.generation, attempt: owner.attempt, stage: "model", status,
       ...(text === undefined ? {} : { text }) });
+  }
+
+  reportSnippetsStage(owner: ProcessingOwner, text: string): void {
+    this.options.onStage?.({ generation: owner.generation, attempt: owner.attempt,
+      stage: "snippets", status: "completed", text });
   }
 }

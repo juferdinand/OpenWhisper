@@ -9,13 +9,14 @@ records the expanded scope agreed before implementation.
 
 ## Processing and selection
 
-Text processing runs in this order: recognition, optional deterministic cleanup,
-vocabulary correction, snippets, then an optional model. Cleanup removes recognized
-artifacts; it does not promise semantic punctuation or filler-word removal. Disabling
-cleanup preserves the recognition result for the following steps. Existing profiles
-retain cleanup enabled by default.
+Single-recording text processing runs in this order: recognition, optional deterministic
+cleanup, vocabulary correction, optional AI revision, then snippets. Snippets are applied
+after revision so their exact configured expansions remain intact. Cleanup removes
+recognized artifacts; it does not promise semantic punctuation or filler-word removal.
+Disabling cleanup preserves the recognition result for the following steps. Existing
+profiles retain cleanup enabled by default.
 
-Connections discovers running Ollama and LM Studio servers and installed CLI tools.
+AI models discovers running Ollama and LM Studio servers and installed CLI tools.
 Discovery reads model metadata, the Claude CLI version and Codex help capabilities.
 Short-lived CLI metadata sessions supply the Claude and Codex model dropdowns without
 starting a conversation or submitting text. Discovery never launches Ollama or LM Studio,
@@ -41,24 +42,28 @@ owns this context and replays it on each request; it does not resume native CLI 
 Changing the selected connection, its model/command or the conversation instruction
 starts a fresh context. Cancelled, skipped, failed or undelivered results add no turn.
 
-### Linguistic options
+### Optional AI revision
 
-In **Settings → Text processing**, single recordings can use five independent options:
-punctuation/capitalization, grammar, filler removal, repetition reduction and sentence
-structure. The host combines only enabled options into a fixed model instruction. It
-asks the model to preserve the original language, meaning, facts and details, without
-summarizing, translating, answering questions or taking actions. This is an instruction
-to the selected model, not a guarantee of its output quality.
+AI revision is a separate master switch and starts off. Its independent rules cover
+spelling and grammar, clear verbal corrections, paragraph breaks, and number/time
+formatting (HH:MM times and DD.MM.YYYY dates, preserving represented values). The first
+two are selected in new settings; the other two are off. Up to 32 additional user rules
+can be stored, each bounded to 8192 UTF-8 bytes and together bounded to 7000 UTF-8 bytes.
+Only enabled rules are compiled into the fixed revision instruction, which preserves language, meaning,
+facts, details and wording and prohibits summaries, translations, added facts, answers,
+or actions. These are instructions to the chosen model, not guarantees of output quality.
 
-New profiles select **Linguistic options**, with punctuation/capitalization and grammar
-enabled; the other options start disabled. Connections still start disabled. With all
-five options off, single recordings skip provider discovery and inference and retain
-the deterministic text from the preceding steps.
+With the master switch off, or no active rules, single recordings skip provider discovery
+and inference and retain the deterministic result. Existing saved custom instructions and
+legacy linguistic settings remain stored but are not used for single-recording revision;
+they are never silently substituted for the explicit rules. Conversation mode retains its
+separate instruction and context. Snippets are expanded before conversation processing,
+and after AI revision for ordinary single recordings.
 
-Existing profiles retain **Custom instruction** and their saved text. Switching between
-custom and linguistic modes preserves that text. Conversation mode continues to use
-its separate instruction and context; linguistic switches affect single recordings only.
-Changes save through the connection settings store, with pending and saved feedback.
+Settings save automatically: switches and selections immediately, text edits after
+450 ms. The header confirms successful persistence and retains a retry action on
+failure. Closing or changing settings pages flushes pending edits; unresolved failures
+keep the edited page open. Incomplete snippet rows must be completed or removed.
 
 ## Provider boundaries
 
@@ -97,7 +102,7 @@ Codex uses `-a never exec --sandbox read-only --skip-git-repo-check --ephemeral 
 does not remove agent tools, and configured CLI policy still applies. Only a completed
 successful turn's assistant answer is accepted; progress and commentary are excluded.
 
-Choose Claude Code and Codex models from the dropdowns in **Settings → Connections**.
+Choose Claude Code and Codex models from the dropdowns in **Settings → AI models**.
 **Use tool settings** omits `--model`, leaving model selection to the CLI's configuration
 and policy. This does not resume the model or chat from an unrelated CLI process.
 An explicit selection is passed as `--model` without changing global CLI settings.
@@ -137,6 +142,10 @@ program name found in the supported search paths). Enter arguments individually,
 including any flags needed for non-interactive operation. The configured command is
 never passed to a shell. Discovery resolves the executable without invoking its
 configured arguments. New connections remain disabled until explicitly enabled.
+
+The creation/editing subpage has an explicit Save/Cancel footer. New connections receive
+the complete app prompt through stdin; the input template is not an editable UI field.
+Editing an older connection preserves its existing template without rewriting it.
 
 The placeholders `{prompt}`, `{instruction}` and `{text}` can appear in arguments or
 the stdin template. `{prompt}` supplies the complete instruction and, in conversation

@@ -42,6 +42,11 @@ test("text connections default disabled and preserve explicit provider order", (
   });
   assert.deepEqual(defaults.connections.map(({ provider }) => provider), ["ollama", "lm_studio", "claude_code", "codex"]);
   assert.ok(defaults.connections.every(({ enabled }) => !enabled));
+  assert.deepEqual(defaults.revision, {
+    enabled: false,
+    builtins: { spelling_grammar: true, resolve_verbal_corrections: true, paragraphs: false, numbers_times: false },
+    custom_rules: [],
+  });
   assert.deepEqual(defaults.connections.filter((entry) => entry.provider === "claude_code" || entry.provider === "codex")
     .map((entry) => "model" in entry ? entry.model : undefined), ["", ""]);
   assert.ok(defaultTextConnectionAvailability().filter(({ provider }) => provider === "claude_code" || provider === "codex")
@@ -90,6 +95,7 @@ test("custom CLI entries are bounded argv data with safe output selectors and co
     reduce_repetitions: false, improve_sentence_structure: false,
   });
   assert.equal(legacy.instruction, defaults.instruction);
+  assert.equal(legacy.revision, undefined);
   assert.ok(legacy.conversationInstruction.trim().length > 0);
   const legacyCli = textConnectionSettingsSchema.parse({ ...defaults, connections: defaults.connections.map((entry) =>
     entry.provider === "claude_code" || entry.provider === "codex"
@@ -122,6 +128,27 @@ test("custom CLI entries are bounded argv data with safe output selectors and co
   assert.equal(complete.connections.length, 5);
   assert.equal(textConnectionSettingsSchema.safeParse({ ...complete,
     connections: [...complete.connections, complete.connections[4]] }).success, false);
+});
+
+test("AI revision rules preserve built-in defaults and validate bounded unique custom rule IDs", () => {
+  const defaults = defaultTextConnectionSettings();
+  assert.equal(textConnectionSettingsSchema.safeParse({ ...defaults, revision: {
+    enabled: true,
+    builtins: { spelling_grammar: true, resolve_verbal_corrections: true, paragraphs: false, numbers_times: false },
+    custom_rules: [{ id: "123e4567-e89b-42d3-a456-426614174000", text: "Keep product names.", enabled: true }],
+  } }).success, true);
+  const revision = defaults.revision;
+  assert.ok(revision);
+  for (const rules of [
+    [{ id: "123e4567-e89b-42d3-a456-426614174000", text: "Same", enabled: true },
+      { id: "123e4567-e89b-42d3-a456-426614174000", text: "Same ID", enabled: false }],
+    [{ id: "not-a-uuid", text: "Bad ID", enabled: true }],
+    [{ id: "123e4567-e89b-42d3-a456-426614174000", text: "🙂".repeat(2049), enabled: true }],
+    Array.from({ length: 33 }, (_, index) => ({ id: `123e4567-e89b-42d3-a456-426614174${String(index).padStart(3, "0")}`,
+      text: "Bounded rule", enabled: true })),
+  ]) assert.equal(textConnectionSettingsSchema.safeParse({ ...defaults,
+    revision: { ...revision, custom_rules: rules },
+  }).success, false);
 });
 
 test("saved offline providers can be disabled one at a time", () => {

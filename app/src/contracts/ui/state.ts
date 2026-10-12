@@ -6,6 +6,7 @@ import {
   textConnectionSettingsSchema, textConnectionsStateSchema,
 } from "../text/connections.js";
 import { textProcessingStageEventSchema } from "../text/processing.js";
+import { snippetSchema } from "../text/snippets.js";
 import {
   localProcessingProfileSchema, localProcessingProfilePatchSchema, localProcessingOutputSchema,
   previewLocalProcessingInputSchema, cancelLocalProcessingInputSchema,
@@ -46,14 +47,8 @@ const tabSchema = z.enum(["setup", "general", "models", "snippets", "history", "
 export type Tab = z.infer<typeof tabSchema>;
 const uiLanguageSchema = z.enum(["en", "de"]);
 
-export const snippetSchema = z.strictObject({
-  // Linux legacy snippets may have an empty generated ID; macOS persists empty drafts.
-  id: utf8(128),
-  trigger: utf8(128),
-  expansion: utf8(8192),
-  enabled: z.boolean(),
-});
-export type Snippet = z.infer<typeof snippetSchema>;
+export { snippetSchema };
+export type { Snippet } from "../text/snippets.js";
 // Native Linux's new-write policy is stricter than macOS's saved editable drafts.
 // Keep it separate so validating a snapshot/legacy Mac patch cannot hide the whole UI.
 export const nonEmptySnippetSchema = snippetSchema.refine(

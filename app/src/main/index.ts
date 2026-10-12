@@ -50,6 +50,7 @@ import { DEVELOPMENT_RECORDING_BUILD } from "./development-recording-build.js";
 import { developmentRecordingDescriptorSchema, selectDevelopmentRecordingDescriptor, type DevelopmentRecordingDescriptor } from "./development-recording-descriptor.js";
 import { DevelopmentRecordingHost, developmentPulseServer, formatSourceDiscoveryFailure } from "./development-recording-host.js";
 import { saveTranscript } from "../services/development/development-transcripts.js";
+import { expandSnippets } from "../core/text/snippet-expander.js";
 import { DevelopmentPlatformHost } from "./development-platform-host.js";
 import { createRecordingControlPort, recordingUnavailableReason } from "./recording-control.js";
 import { portalShortcutStateSchema } from "../platforms/linux/shared/portal-shortcuts.js";
@@ -434,6 +435,9 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         if (context.signal.aborted) return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
         if (metadata?.rawText !== undefined) rawTranscript = metadata.rawText;
         const settings = textConnectionStore.snapshot();
+        const snippets = metadata?.snippets ?? [];
+        const processingInput = settings.mode === "conversation" ? expandSnippets(text, snippets) : text;
+        if (settings.mode === "conversation") textProcessor.reportSnippetsStage(context, processingInput);
         let conversation: ReturnType<TextConversationStore["snapshot"]> | undefined;
         let conversationReady = true;
         if (settings.mode === "conversation") {
@@ -447,11 +451,13 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
             textProcessor.skipForStorageFailure(context);
           }
         }
-        const acceptedText = conversationReady ? await textProcessor.process(text, context, conversation) : text;
-        if (acceptedText === undefined || context.signal.aborted || shutdownInProgress) {
+        const processedText = conversationReady ? await textProcessor.process(processingInput, context, conversation) : processingInput;
+        if (processedText === undefined || context.signal.aborted || shutdownInProgress) {
           textProcessor.discardConversationTurn(context.generation, context.attempt);
           return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
         }
+        const acceptedText = settings.mode === "conversation" ? processedText : expandSnippets(processedText, snippets);
+        if (settings.mode !== "conversation") textProcessor.reportSnippetsStage(context, acceptedText);
         const oversized = Buffer.byteLength(acceptedText, "utf8") > MAX_USER_TEXT_BYTES;
         if (oversized && preferences.snapshot().keep_history) {
           try { await saveTranscript(profile, acceptedText); }

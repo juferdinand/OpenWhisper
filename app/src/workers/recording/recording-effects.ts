@@ -68,7 +68,7 @@ export class WorkerRecordingEffects {
     this.delivery = { deliver: async (text, context, identity, metadata) => {
       const reply = await this.run({ version: 1, epoch: this.epoch, id: randomUUID(),
         generation: context.generation, attempt: context.attempt, command: "deliver", text,
-        ...(metadata ? { rawText: metadata.rawText } : {}), identity }, context.signal);
+        ...(metadata ? { metadata } : {}), identity }, context.signal);
       if (reply.kind === "failed") throw new RecordingEffectError(reply.code);
       if (reply.kind !== "deliver") throw new RecordingEffectError("INVALID_REPLY");
       return reply.receipt;

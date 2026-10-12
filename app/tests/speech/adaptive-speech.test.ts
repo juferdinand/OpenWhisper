@@ -423,24 +423,23 @@ test("raw parts use Rust whitespace semantics and preserve multilingual text wit
   assert.ok(result === parts.join(" "));
 });
 
-test("text pipeline preserves raw recognition and reports actual cleanup, vocabulary, and snippet outputs", () => {
+test("speech processing preserves raw recognition and stops after vocabulary before revision and snippets", () => {
   const f = fixture(0);
   const request = { ...f.request, vocabulary: "Kubernetes", snippets: [{ id: "owned", trigger: "Kubernetes",
     expansion: "K8s", enabled: true }] };
   const stages: { stage: string; text: string; status?: string }[] = [];
   const result = processRawSpeechPartsDetailed([" [Music] Kubernetis "], request,
     (stage, text, status) => { stages.push({ stage, text, ...(status ? { status } : {}) }); });
-  assert.deepEqual(result, { rawText: "[Music] Kubernetis", text: "K8s" });
+  assert.deepEqual(result, { rawText: "[Music] Kubernetis", text: "Kubernetes" });
   assert.deepEqual(stages, [
     { stage: "recognition", text: "[Music] Kubernetis" },
     { stage: "cleanup", text: "Kubernetis", status: "completed" },
     { stage: "vocabulary", text: "Kubernetes" },
-    { stage: "snippets", text: "K8s" },
   ]);
   const cleanupOff: { stage: string; text: string; status?: string }[] = [];
   const preserved = processRawSpeechPartsDetailed([" [Music] Kubernetis "], { ...request, cleanup_enabled: false },
     (stage, text, status) => { cleanupOff.push({ stage, text, ...(status ? { status } : {}) }); });
-  assert.deepEqual(preserved, { rawText: "[Music] Kubernetis", text: "[Music] K8s" });
+  assert.deepEqual(preserved, { rawText: "[Music] Kubernetis", text: "[Music] Kubernetes" });
   assert.deepEqual(cleanupOff[1], { stage: "cleanup", text: "[Music] Kubernetis", status: "skipped" });
 });
 
@@ -456,7 +455,6 @@ test("adaptive stage events retain the live generation and attempt with measured
     { stage: "recognition", status: "completed", text: "text", completedSamples: undefined },
     { stage: "cleanup", status: "completed", text: "text", completedSamples: undefined },
     { stage: "vocabulary", status: "completed", text: "text", completedSamples: undefined },
-    { stage: "snippets", status: "completed", text: "text", completedSamples: undefined },
   ]);
   assert.ok(events.every((event) => event.generation === 1 && event.attempt === 1));
 });
@@ -482,14 +480,14 @@ test("initial recognition progress reaches the host before the first inference r
   assert.deepEqual(observed.slice(0, 4), ["progress:0", "stage:0", "progress:2", "stage:2"]);
 });
 
-test("cleanup then vocabulary then snippets runs once after joining raw chunk boundaries", async () => {
+test("cleanup and vocabulary run once after joining raw chunk boundaries", async () => {
   const f = fixture(480001);
   const request: RecordingRequest = recordingRequestSchema.parse({ ...f.request,
     snippets: [{ id: "owned", trigger: "Kubernetes", expansion: "$10\n日本語 👩‍💻", enabled: true }] });
   let call = 0;
   const effects: AdaptiveSpeechEffects = { ...f.effects, infer: { transcribeWindow: async () =>
     ++call === 1 ? "[BLANK_AUDIO]  Kubernetis" : "." } };
-  assert.equal((await new AdaptiveSpeechBoundary(effects).transcribe(f.audio, request, f.context)).text, "$10\n日本語 👩‍💻");
+  assert.equal((await new AdaptiveSpeechBoundary(effects).transcribe(f.audio, request, f.context)).text, "Kubernetes .");
   assert.equal(f.rawParts.length, 1);
   assert.deepEqual(f.rawParts[0], ["[BLANK_AUDIO]  Kubernetis", "."]);
   assert.equal(processRawSpeechParts(["Whisper", "Free"], { ...f.request, vocabulary: "WhisperFree" }), "WhisperFree");
@@ -509,9 +507,6 @@ test("runtime-validated shared processing fixtures pass through the utility proc
       { ...f.request, vocabulary: "" }), value.expected);
     for (const value of vectors.vocabulary.cases) assert.equal(processRawSpeechParts(value.input.split(" "),
       { ...f.request, vocabulary: vectors.vocabulary.terms }), value.expected);
-    const snippets = vectors.snippets.snippets.map((snippet, index) => ({ ...snippet, id: `owned-${index}` }));
-    for (const value of vectors.snippets.cases) assert.equal(processRawSpeechParts(value.input.split(" "),
-      { ...f.request, vocabulary: "", snippets }), value.expected);
   }
 });
 

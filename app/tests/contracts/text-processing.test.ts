@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { textProcessingStageEventSchema } from "../../src/contracts/text/processing.js";
+import { textProcessingStageEventSchema, transcriptDeliveryMetadataSchema } from "../../src/contracts/text/processing.js";
 import { recordingHostReplySchema } from "../../src/workers/recording/recording-host-protocol.js";
 
 const owner = { generation: 8, attempt: 2 };
@@ -24,4 +24,11 @@ test("full intermediate text is not truncated in the worker protocol", () => {
     kind: "text-stage", event });
   assert.equal(reply.kind, "text-stage");
   if (reply.kind === "text-stage") assert.strictEqual(reply.event.text, text);
+});
+
+test("delivery metadata preserves a bounded captured snippet snapshot", () => {
+  const snippets = [{ id: "owned", trigger: "Kubernetes", expansion: "K8s", enabled: true }];
+  assert.deepEqual(transcriptDeliveryMetadataSchema.parse({ rawText: "raw source", snippets }), { rawText: "raw source", snippets });
+  assert.deepEqual(transcriptDeliveryMetadataSchema.parse({ snippets }), { snippets });
+  assert.throws(() => transcriptDeliveryMetadataSchema.parse({ rawText: "raw source", snippets: Array.from({ length: 101 }, () => snippets[0]) }));
 });

@@ -137,7 +137,7 @@ try {
     "tests/owned-recording/probe.ts", "tests/owned-recording/contracts.ts", "tests/owned-recording.test.ts",
     "src/main/recording-effects.ts", "src/workers/recording/recording-effects.ts", "src/workers/recording/recording-effects-protocol.ts",
     "tests/fixtures/speech-bootstrap-channel.ts", "src/services/speech/speech-client.ts", "src/services/speech/adaptive-speech.ts", "src/services/recording/capture.ts",
-    "src/core/recording/recording.ts", "src/core/speech/windows.ts", "src/core/text/transcript-cleaner.ts", "src/core/text/vocabulary-corrector.ts", "src/core/text/snippet-expander.ts", "src/contracts/text/processing.ts",
+    "src/core/recording/recording.ts", "src/core/speech/windows.ts", "src/core/text/transcript-cleaner.ts", "src/core/text/vocabulary-corrector.ts", "src/core/text/snippet-expander.ts", "src/contracts/text/processing.ts", "src/contracts/text/snippets.ts",
     "src/workers/recording/native-capture.ts", "src/workers/recording/recovery.ts", "src/workers/speech/speech-gate.ts", "src/workers/speech-entry.ts", "src/workers/speech/speech-bootstrap.ts", "src/workers/speech/speech-control.ts",
     "src/workers/speech/speech-protocol.ts", "src/workers/speech/native-speech.ts", "native/whisper-source.json", "native/node-headers.json"]) {
     sources[path] = await sha(join(packageRoot, path));

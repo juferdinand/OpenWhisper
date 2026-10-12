@@ -1,0 +1,191 @@
+.settings-content .ai-models-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+.settings-content .ai-models-intro p,
+.settings-content .connection-privacy {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.settings-content .ai-models-intro p + p {
+  margin-top: 4px;
+}
+.settings-content .ai-models-scan-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.settings-content .ai-models-scan-dot.scanning {
+  background: var(--warning);
+  animation: ai-models-pulse 1s ease-in-out infinite alternate;
+}
+@keyframes ai-models-pulse {
+  to {
+    opacity: 0.35;
+  }
+}
+.settings-content .ai-models-list {
+  margin-top: 8px;
+}
+.settings-content .ai-models-list .connection-row {
+  grid-template-columns: 18px minmax(0, 1fr) 220px 38px 58px;
+  gap: 8px;
+}
+.settings-content .ai-models-list .connection-model > select {
+  min-height: 32px;
+}
+.settings-content .ai-models-add-row {
+  padding: 8px 12px;
+}
+.settings-content .ai-models-add-row button {
+  width: 100%;
+  min-height: 34px;
+}
+.settings-content .ai-models-command {
+  display: block;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-content .ai-models-editor {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.settings-dialog-scroll:has(.ai-models-editor) {
+  overflow: hidden;
+}
+.settings-dialog-scroll:has(.ai-models-editor) > .settings-content,
+.settings-dialog-scroll:has(.ai-models-editor) #content {
+  height: 100%;
+}
+.settings-content .ai-models-editor-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-content .ai-models-editor-header button {
+  flex: 0 0 auto;
+}
+.settings-content .ai-models-editor-header p,
+.settings-content .ai-models-editor-header h2 {
+  margin: 0;
+}
+.settings-content .ai-models-editor-header p {
+  color: var(--muted);
+  font-size: 11px;
+}
+.settings-content .ai-models-editor-header h2 {
+  margin-top: 3px;
+  font-size: 17px;
+}
+.settings-content .ai-models-editor-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 16px 2px;
+}
+.settings-content .ai-models-editor-body > label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.settings-content .ai-models-editor-body input,
+.settings-content .ai-models-editor-body select {
+  min-height: 36px;
+  padding: 6px 9px;
+}
+.settings-content .ai-models-editor-body textarea {
+  min-height: 104px;
+  margin: 0;
+}
+.settings-content .ai-models-wide {
+  grid-column: 1 / -1;
+}
+.settings-content .ai-models-editor-body small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.settings-content .ai-models-preview {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: 11px;
+}
+.settings-content .ai-models-preview code {
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+.settings-content .ai-models-editor-footer {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 0 2px;
+  border-top: 1px solid var(--border);
+  background: var(--group);
+}
+@media (max-width: 760px) {
+  .settings-content .ai-models-intro {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .settings-content .ai-models-editor-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-content .ai-models-wide {
+    grid-column: auto;
+  }
+}
+@media (max-width: 900px) {
+  .settings-content .ai-models-list .connection-row {
+    grid-template-columns: 18px minmax(0, 1fr) 38px 58px;
+  }
+  .settings-content .ai-models-list .connection-number {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .settings-content .ai-models-list .connection-identity {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 80px;
+  }
+  .settings-content .ai-models-list .connection-model {
+    grid-column: 2 / 5;
+    grid-row: 2;
+  }
+  .settings-content .ai-models-list .connection-toggle {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .settings-content .ai-models-list .connection-order {
+    grid-column: 4;
+    grid-row: 1;
+  }
+}

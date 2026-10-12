@@ -1165,6 +1165,44 @@ dialog#settings-dialog {
   font-size: 20px;
   font-weight: 600;
 }
+.settings-dialog-heading h1 {
+  flex: 1;
+}
+.settings-dialog-heading .settings-close,
+.model-drawer-heading-top .settings-close {
+  display: grid;
+  place-items: center;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--muted);
+  background: transparent;
+}
+.settings-close svg {
+  width: 16px;
+  height: 16px;
+}
+#settings-save-status {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  opacity: 1;
+  transition: opacity 300ms;
+}
+#settings-save-status[data-status="saving"] > span,
+#settings-save-status[data-status="error"] button {
+  color: var(--warning);
+}
+#settings-save-status[data-status="saved"] {
+  color: var(--ok);
+}
+#settings-save-status[data-status="idle"] {
+  opacity: 0;
+  pointer-events: none;
+}
 .settings-dialog-heading button {
   min-height: 0;
   height: auto;
