@@ -215,10 +215,26 @@ try {
     }).toBe(true);
     await expect(setupPage.locator("main.setup-main #setup-title")).toBeVisible();
     await expect(setupPage.locator("#dictation-workspace, #settings-dialog")).toHaveCount(0);
+    // This smoke does not grant microphone or Accessibility permission. Traverse the real
+    // Mac onboarding until the permission gate, verify it remains closed, then use the
+    // existing host command only to reach the already-owned workspace checks below.
+    await setupPage.locator('[data-ui-language="en"]').click();
+    await expect.poll(async () => (await state()).preferences.ui_language).toBe("en");
     await setupPage.locator("[data-setup-next]").click();
-    for (let step = 0; step < 6; step += 1) await setupPage.locator("[data-setup-next]").click();
-    await setupPage.locator('[data-command="complete_setup"]').click();
+    const setupTitle = setupPage.locator("main.setup-main #setup-title");
+    await expect(setupTitle).toHaveText("Download a speech model");
+    for (const title of ["Allow microphone access", "Choose a language", "Where should the text go?", "Allow Accessibility access"]) {
+      const next = setupPage.locator("[data-setup-next]");
+      await expect(next).toBeEnabled();
+      await next.click();
+      await expect(setupTitle).toHaveText(title);
+    }
+    assert.equal((await state()).paste_ready, false, "The owned smoke must not request Accessibility permission.");
+    await expect(setupPage.locator("[data-setup-next]")).toBeDisabled();
+    await expect(setupPage.locator(".setup-model-required")).toContainText("Allow Accessibility access to continue.");
+    await setupPage.evaluate(() => window.openwhisper!.invoke("complete_setup", {}));
     await expect.poll(async () => (await state()).preferences.setup_completed).toBe(true);
+    checks.push("Mac setup traverses model, microphone, language and output steps; Accessibility remains gated; existing completion command enables the remaining owned smoke without granting TCC");
   };
   if (packageMetadata.updateConfigured) {
     stage = "owned-update-preference";
@@ -451,7 +467,8 @@ try {
   assert.equal(initial.profile, stable ? undefined : "development"); assert.equal(initial.platform, "macos");
   assert.equal(initial.native_shortcuts, true, "The packaged normal main must enable Mac keyboard controls.");
   assert.equal(initial.macos?.shortcut_toggle_only, true, "The Mac recording descriptor must be active.");
-  assert.equal(initial.status, "idle"); assert.deepEqual(initial.installed, stable ? ["tiny"] : []); assert.equal(initial.microphones.length, 0);
+  assert.equal(initial.status, "idle"); assert.deepEqual(initial.installed, stable ? ["tiny"] : []);
+  assert.ok(initial.microphones.length <= 128); assert.equal(initial.microphone_labels?.length, initial.microphones.length);
   assert.equal(initial.preferences.macos_shortcut ?? null, null);
   if (!initial.preferences.setup_completed) {
     await expect(page.locator("main.setup-main #setup-title")).toBeVisible();
@@ -800,9 +817,7 @@ try {
     checks.push("Owned vocabulary edit survives normal stable restart; raw originals and completion stay unchanged; second original Quit exits 0");
   }
   await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", architecture: process.arch, packageFormat, applicationBuild: capturedBuild, identity, checks,
-    input: "CDP to owned window only; no OS global input injection", microphone: stable && packageFormat === "thin"
-      ? "No permission request, capture Start, recording stream or inference in this stable smoke"
-      : "No permission request, capture Start or microphone operation; pinned public inference fixture only",
+    input: "CDP to owned window only; no OS global input injection", microphone: "Read-only CoreAudio input-device metadata enumeration on the hosted Mac; no device names or UIDs in the receipt, no permission request, capture Start or recording stream",
     installation, nativeUtilityLoading, signatureAdmission, archiveAdmission, stableMigration, updateConfiguration, automaticUpdatePreferencePatch,
     tccAttribution: "Permission and real microphone behavior remain pending", exit, restartExit,
     scope: stable ? (packageFormat === "universal"
