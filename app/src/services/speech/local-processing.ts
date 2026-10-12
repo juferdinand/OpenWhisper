@@ -5,6 +5,8 @@ import {
   parseLocalProcessingEndpoint, parseLocalProcessingResponse, previewLocalProcessingInputSchema,
   type LocalProcessingProfile, type PreviewLocalProcessingInput,
 } from "../../contracts/speech/local-processing.js";
+import type { ConversationTurn } from "../../contracts/text/connections.js";
+import { conversationTurnsSchema } from "../../contracts/text/connections.js";
 
 const messages = Object.freeze({
   INVALID_REQUEST: "Invalid preview request",
@@ -27,18 +29,20 @@ export class LocalProcessingError extends Error {
   constructor(readonly code: LocalProcessingFailureCode) { super(messages[code]); this.name = "LocalProcessingError"; }
 }
 
-function requestBody(profile: LocalProcessingProfile, text: string): Buffer {
+function requestBody(profile: LocalProcessingProfile, text: string, context: readonly ConversationTurn[] = []): Buffer {
   const base = { model: profile.model, messages: [
-    { role: "system", content: profile.instruction }, { role: "user", content: text },
+    { role: "system", content: profile.instruction },
+    ...context.flatMap(({ user, assistant }) => [{ role: "user" as const, content: user }, { role: "assistant" as const, content: assistant }]),
+    { role: "user" as const, content: text },
   ], stream: false };
   return Buffer.from(JSON.stringify(profile.provider === "lm_studio"
     ? { ...base, temperature: 0, max_tokens: profile.max_tokens }
     : { ...base, options: { temperature: 0, num_predict: profile.max_tokens } }), "utf8");
 }
 
-function send(profile: LocalProcessingProfile, text: string, signal: AbortSignal): Promise<string> {
+function send(profile: LocalProcessingProfile, text: string, signal: AbortSignal, context: readonly ConversationTurn[]): Promise<string> {
   const endpoint = parseLocalProcessingEndpoint(profile.provider, profile.endpoint);
-  const body = requestBody(profile, text);
+  const body = requestBody(profile, text, context);
   return new Promise<string>((accept, reject) => {
     // The global agent may inherit NODE_USE_ENV_PROXY. This request owns a proxy-free
     // agent and numeric socket destination; no cookies, credentials or redirects exist.
@@ -120,13 +124,15 @@ export class LocalProcessingService {
   private generation = 0;
   private closed = false;
 
-  async preview(input: unknown, profileInput: unknown, signal?: AbortSignal): Promise<string> {
+  async preview(input: unknown, profileInput: unknown, signal?: AbortSignal, context: readonly ConversationTurn[] = []): Promise<string> {
     let parsed: PreviewLocalProcessingInput;
     try { parsed = previewLocalProcessingInputSchema.parse(input); }
     catch { throw new LocalProcessingError("INVALID_REQUEST"); }
     let profile: LocalProcessingProfile;
     try { profile = decodeLocalProcessingProfile(profileInput); }
     catch { throw new LocalProcessingError("INVALID_PROFILE"); }
+    try { conversationTurnsSchema.parse(context); }
+    catch { throw new LocalProcessingError("INVALID_REQUEST"); }
     if (this.closed) throw new LocalProcessingError("CLOSED");
     if (this.active) throw new LocalProcessingError("BUSY");
     if (signal?.aborted) throw new LocalProcessingError("CANCELLED");
@@ -139,7 +145,7 @@ export class LocalProcessingService {
     const abort = (): void => { if (this.active === active) this.cancel(active.requestId); };
     signal?.addEventListener("abort", abort, { once: true });
     try {
-      const output = await send(profile, parsed.text, active.controller.signal);
+      const output = await send(profile, parsed.text, active.controller.signal, context);
       if (this.active !== active || active.generation !== this.generation || active.controller.signal.aborted || this.closed) {
         throw new LocalProcessingError("CANCELLED");
       }

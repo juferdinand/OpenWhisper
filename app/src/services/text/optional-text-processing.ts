@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   defaultTextConnectionAvailability, idleTextConnectionProcessing,
-  textConnectionAvailabilityListSchema, textConnectionsStateSchema,
-  type TextConnectionAvailability, type TextConnectionSettings, type TextProvider,
+  textConnectionAvailabilityListSchema, textConnectionsStateSchema, textConversationSchema,
+  type ConversationTurn, type TextConnectionAvailability, type TextConnectionSettings, type TextConversation, type TextProvider,
 } from "../../contracts/text/connections.js";
 import type { TextProcessingStageEvent } from "../../contracts/text/processing.js";
 import { ensureTextProviderAvailability, safeAvailabilityFallback } from "./connections.js";
@@ -20,9 +20,9 @@ type OptionalTextProcessingSnapshot = Pick<z.infer<typeof textConnectionsStateSc
 
 export interface OptionalTextProcessingOptions {
   readonly settings: () => TextConnectionSettings;
-  readonly scan: () => Promise<unknown>;
+  readonly scan: (settings: TextConnectionSettings) => Promise<unknown>;
   readonly runProvider: (connection: TextConnection, instruction: string, text: string, signal: AbortSignal,
-    requestId: string) => Promise<string>;
+    requestId: string, context?: readonly ConversationTurn[]) => Promise<string>;
   readonly isShuttingDown: () => boolean;
   readonly onChange?: () => void;
   readonly onStage?: (event: TextProcessingStageEvent | null) => void;
@@ -33,8 +33,10 @@ export class OptionalTextProcessing {
   private availability: TextConnectionAvailability[] = defaultTextConnectionAvailability();
   private scanning = false;
   private scanTask: Promise<void> | undefined;
+  private scanSettingsKey: string | undefined;
   private processing = idleTextConnectionProcessing();
   private active: ActiveProcessing | undefined;
+  private pendingConversationTurn: { readonly generation: number; readonly attempt: number; readonly turn: ConversationTurn } | undefined;
   private closed = false;
 
   constructor(private readonly options: OptionalTextProcessingOptions) {}
@@ -45,16 +47,24 @@ export class OptionalTextProcessing {
 
   get busy(): boolean { return this.active !== undefined; }
 
-  async scanConnections(): Promise<void> {
-    if (this.scanTask) return this.scanTask;
+  async scanConnections(settings = this.options.settings()): Promise<void> {
+    const key = JSON.stringify(settings.connections);
+    if (this.scanTask) {
+      const current = this.scanTask;
+      if (this.scanSettingsKey === key) return current;
+      await current;
+      return this.scanConnections(settings);
+    }
     this.scanning = true;
+    this.scanSettingsKey = key;
     const task = Promise.resolve().then(async () => {
       try {
-        this.availability = textConnectionAvailabilityListSchema.parse(await this.options.scan());
+        this.availability = textConnectionAvailabilityListSchema.parse(await this.options.scan(settings));
       } catch { this.availability = safeAvailabilityFallback(); }
       finally {
         this.scanning = false;
         this.scanTask = undefined;
+        this.scanSettingsKey = undefined;
         this.options.onChange?.();
       }
     });
@@ -66,12 +76,23 @@ export class OptionalTextProcessing {
   resetStatus(): void {
     this.active?.controller.abort();
     this.active = undefined;
+    this.pendingConversationTurn = undefined;
     this.processing = idleTextConnectionProcessing();
     this.options.onStage?.(null);
     this.options.onChange?.();
   }
 
-  async process(text: string, owner: ProcessingOwner): Promise<string | undefined> {
+  skipForStorageFailure(owner: ProcessingOwner): void {
+    this.pendingConversationTurn = undefined;
+    const selected = this.options.settings().connections.find((connection) => connection.enabled);
+    if (selected) {
+      this.processing = { status: "fallback", provider: selected.provider, reason: "failed" };
+      this.emitStage(owner, "skipped");
+    } else this.processing = idleTextConnectionProcessing();
+    this.options.onChange?.();
+  }
+
+  async process(text: string, owner: ProcessingOwner, conversation?: TextConversation): Promise<string | undefined> {
     if (this.closed || this.options.isShuttingDown() || owner.signal.aborted) return undefined;
     const settings = this.options.settings();
     const selected = settings.connections.find((connection) => connection.enabled);
@@ -82,6 +103,7 @@ export class OptionalTextProcessing {
     }
 
     this.active?.controller.abort();
+    this.pendingConversationTurn = undefined;
     const active: ActiveProcessing = { controller: new AbortController(), owner, requestId: randomUUID(), provider: selected.provider };
     this.active = active;
     const signal = AbortSignal.any([owner.signal, active.controller.signal]);
@@ -99,15 +121,22 @@ export class OptionalTextProcessing {
       }
       if (this.parentCancelled(owner) || this.active !== active) return undefined;
       if (this.userCancelled(active)) return this.fallback(text, owner, selected.provider, "cancelled");
-      if (!availability?.usable || selected.provider === "codex" ||
-          (selected.provider === "ollama" || selected.provider === "lm_studio") &&
-          (!selected.model || !availability.models.includes(selected.model))) {
+      if (!availability?.usable || "model" in selected && (!selected.model || !availability.models.includes(selected.model))) {
         throw new TextProviderUnavailableError();
       }
-      const result = await this.options.runProvider(selected, settings.instruction, text, signal, active.requestId);
+      const turns = settings.mode === "conversation" ? conversation?.turns ?? [] : undefined;
+      if (turns && !this.fitsConversation(conversation, selected.provider, { user: text, assistant: "pending" })) {
+        return this.fallback(text, owner, selected.provider, "context_full");
+      }
+      const instruction = settings.mode === "conversation" ? settings.conversationInstruction : settings.instruction;
+      const result = await this.options.runProvider(selected, instruction, text, signal, active.requestId, turns);
       if (this.parentCancelled(owner) || this.active !== active) return undefined;
       if (this.userCancelled(active)) return this.fallback(text, owner, selected.provider, "cancelled");
+      if (turns && !this.fitsConversation(conversation, selected.provider, { user: text, assistant: result })) {
+        return this.fallback(text, owner, selected.provider, "context_full");
+      }
       this.processing = { status: "complete", provider: selected.provider, reason: null };
+      if (turns) this.pendingConversationTurn = { generation: owner.generation, attempt: owner.attempt, turn: { user: text, assistant: result } };
       this.emitStage(owner, "completed", result);
       return result;
     } catch (error: unknown) {
@@ -152,8 +181,25 @@ export class OptionalTextProcessing {
     return active.controller.signal.aborted || this.active !== active;
   }
 
+  takeAcceptedConversationTurn(generation: number, attempt: number): ConversationTurn | undefined {
+    const pending = this.pendingConversationTurn;
+    if (!pending || pending.generation !== generation || pending.attempt !== attempt) return undefined;
+    this.pendingConversationTurn = undefined;
+    return pending.turn;
+  }
+
+  discardConversationTurn(generation: number, attempt: number): void {
+    if (this.pendingConversationTurn?.generation === generation && this.pendingConversationTurn.attempt === attempt) {
+      this.pendingConversationTurn = undefined;
+    }
+  }
+
+  private fitsConversation(conversation: TextConversation | undefined, provider: TextProvider, turn: ConversationTurn): boolean {
+    return textConversationSchema.safeParse({ id: conversation?.id ?? "", provider, turns: [...(conversation?.turns ?? []), turn] }).success;
+  }
+
   private fallback(text: string | undefined, owner: ProcessingOwner, provider: TextProvider,
-    reason: "cancelled"): string | undefined {
+    reason: "cancelled" | "context_full"): string | undefined {
     this.processing = { status: "fallback", provider, reason };
     this.emitStage(owner, "skipped");
     return text;

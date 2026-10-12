@@ -2,7 +2,7 @@ import { z } from "zod";
 import { updateDownloadProgressSchema } from "../update/update-download-progress.js";
 import { speechLanguageSchema } from "../speech/speech.js";
 import {
-  defaultTextConnectionAvailability, defaultTextConnectionSettings, idleTextConnectionProcessing,
+  defaultTextConnectionAvailability, defaultTextConnectionSettings, emptyTextConversation, idleTextConnectionProcessing,
   textConnectionSettingsSchema, textConnectionsStateSchema,
 } from "../text/connections.js";
 import { textProcessingStageEventSchema } from "../text/processing.js";
@@ -213,7 +213,7 @@ export const appStateSchema = z.strictObject({
   local_processing_invalid_profile: z.boolean().optional(),
   text_connections: textConnectionsStateSchema.default(() => ({ settings: defaultTextConnectionSettings(),
     available: defaultTextConnectionAvailability(), scanning: false,
-    processing: idleTextConnectionProcessing() })),
+    processing: idleTextConnectionProcessing(), conversation: emptyTextConversation() })),
   text_processing: textProcessingStageEventSchema.nullable().default(null),
 }).refine(
   (state) => state.platform !== "macos" || state.macos !== undefined,
@@ -280,6 +280,7 @@ export const commandInputSchemas = {
   cancel_local_processing: cancelLocalProcessingInputSchema,
   scan_connections: noArgs,
   save_connections: z.strictObject({ settings: textConnectionSettingsSchema }),
+  new_conversation: noArgs,
   cancel_text_processing: noArgs,
   toggle_recording: noArgs,
   cancel_recording: noArgs,
@@ -322,6 +323,7 @@ export const commandOutputSchemas = {
   cancel_local_processing: actionResult,
   scan_connections: appStateSchema,
   save_connections: appStateSchema,
+  new_conversation: appStateSchema,
   cancel_text_processing: actionResult,
   toggle_recording: actionResult,
   cancel_recording: actionResult,

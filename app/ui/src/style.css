@@ -1624,7 +1624,7 @@ dialog#settings-dialog {
 .settings-content .connection-card {
   min-width: 0;
   display: grid;
-  grid-template-columns: 22px minmax(110px, 1fr) minmax(100px, 1.2fr) 32px 60px;
+  grid-template-columns: 22px minmax(110px, 1fr) minmax(100px, 1.2fr) 32px auto;
   align-items: center;
   gap: 10px;
   padding: 7px 11px;
@@ -1674,6 +1674,7 @@ dialog#settings-dialog {
 .settings-content .connection-order {
   justify-content: flex-end;
   gap: 4px;
+  flex-wrap: wrap;
 }
 .settings-content .connection-order button {
   width: 26px;
@@ -1728,6 +1729,130 @@ dialog#settings-dialog {
 .settings-content .connection-instruction {
   min-width: 0;
   margin-top: 10px;
+}
+.settings-content .connection-mode-label,
+.settings-content .connection-instruction > label,
+.settings-content .custom-connection-editor > label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.settings-content .connection-mode-label select,
+.settings-content .custom-connection-editor input,
+.settings-content .custom-connection-editor select {
+  min-height: 34px;
+  padding: 5px 9px;
+}
+.settings-content .custom-connection-actions {
+  display: grid;
+  gap: 8px;
+}
+.settings-content .custom-connection-actions > button {
+  justify-self: start;
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.settings-content .custom-connection-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--sunken);
+}
+.settings-content .custom-connection-editor h3,
+.settings-content .custom-connection-editor > p,
+.settings-content .custom-connection-editor .edit-actions {
+  grid-column: 1 / -1;
+}
+.settings-content .custom-connection-editor h3 {
+  margin: 0;
+  font-size: 13px;
+}
+.settings-content .custom-connection-editor textarea {
+  min-height: 70px;
+  margin: 0;
+}
+.settings-content .custom-connection-editor > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.conversation-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.workspace-mode-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.workspace-mode-select select {
+  width: auto;
+  min-width: 124px;
+  min-height: 30px;
+  padding: 3px 7px;
+  font-size: 11px;
+}
+.connection-cli-note {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.conversation-bar > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.conversation-bar span,
+.conversation-turn h3,
+.conversation-pending h3 {
+  color: var(--muted);
+  font-size: 12px;
+}
+.conversation-actions {
+  display: flex;
+  gap: 7px;
+  flex: 0 0 auto;
+}
+.conversation-actions button,
+.context-full-notice button {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.conversation-turn,
+.conversation-pending {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.conversation-turn h3,
+.conversation-pending h3 {
+  margin: 8px 0 4px;
+}
+.conversation-turn h3:first-child,
+.conversation-pending h3:first-child {
+  margin-top: 0;
+}
+.context-full-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 .settings-content .connection-instruction textarea {
   min-height: 78px;
@@ -3655,6 +3780,14 @@ html.setup-mode #record-control {
   }
   html.setup-mode .setup-navigation {
     padding: 12px 16px;
+  }
+  .settings-content .custom-connection-editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-content .custom-connection-editor h3,
+  .settings-content .custom-connection-editor > p,
+  .settings-content .custom-connection-editor .edit-actions {
+    grid-column: auto;
   }
 }
 .permission-status {

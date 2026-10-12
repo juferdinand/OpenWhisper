@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { MenuItemConstructorOptions } from "electron";
 import { z } from "zod";
-import { defaultTextConnectionAvailability, defaultTextConnectionSettings, idleTextConnectionProcessing } from "../../../src/contracts/text/connections.js";
+import { defaultTextConnectionAvailability, defaultTextConnectionSettings, emptyTextConversation, idleTextConnectionProcessing } from "../../../src/contracts/text/connections.js";
 import type { AppState } from "../../../src/contracts/ui/state.js";
 import { buildTrayMenu, type TrayMenuActions } from "../../../src/main/tray-menu.js";
 
@@ -17,7 +17,7 @@ function state(changes: Partial<AppState> = {}): AppState {
     shortcut_portal: false, paste_portal: false, shortcut: null, paste_ready: false, gpu_available: false,
     download: null, progress: 0, elapsed: 0, model_directory: "", recording_available: true, recovery_available: false,
     text_connections: { settings: defaultTextConnectionSettings(), available: defaultTextConnectionAvailability(), scanning: false,
-      processing: idleTextConnectionProcessing() },
+      processing: idleTextConnectionProcessing(), conversation: emptyTextConversation() },
     text_processing: null,
     ...changes,
   };

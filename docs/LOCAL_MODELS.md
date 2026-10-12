@@ -4,45 +4,8 @@ Start with [README.md](../README.md) for released behavior. This branch implemen
 [Connections (#11)](https://github.com/juferdinand/OpenWhisper/issues/11); it is not part
 of release 0.4.2. Ordinary recording remains independent of these optional integrations.
 
-## Expanded implementation plan for #11
-
-The increment is not ready for acceptance until these requirements are implemented:
-
-1. Enable Codex non-interactive processing with the installed CLI login, explicit
-   read-only sandbox and no approval prompts. Parse completed JSON events; reject
-   failed or incomplete turns. Keep Claude Code and the two local providers working.
-2. Add custom CLI connections with a name, executable, separate argument list,
-   stdin template and plain-text or selected JSON-field output. Templates substitute
-   text into data arguments or stdin, never into shell code. Users can configure
-   Gemini, ZAI or their own wrapper without another built-in adapter. Discovery
-   checks the executable without running the configured command.
-3. Provide independent **Single recording** and **Conversation** modes. Conversation
-   mode retains successful user/assistant turns across recordings and application
-   restarts in the private active profile. **New chat** clears that context.
-   OpenWhisper supplies the conversation explicitly to each request: local APIs
-   receive role-separated messages and CLI tools receive a serialized conversation.
-   This does not resume or import unrelated chats from the user's CLI tools.
-4. Give conversation mode its own instruction. Changing the selected connection,
-   its model/command, or that instruction starts a fresh context; reordering other
-   connections does not. Failed, skipped, cancelled or stale requests add no turns.
-   A conversation becomes durable only after its output is accepted. Exceeding the
-   supported context bound preserves the input and asks for a new chat, without
-   silently dropping older turns or shortening recordings.
-5. Extend the synchronized German/English interface with custom connection editing,
-   mode selection, visible conversation turns and **New chat**. Typed messages are
-   an optional clarification; voice conversation does not depend on that answer.
-6. Validate CLI invocation and cancellation with owned fake executables, local chat
-   payloads with synthetic servers, persistence/ownership with integration tests,
-   and the rendered controls with browser and isolated Electron checks. Run the
-   common checks once for the completed increment and obtain independent review.
-
-The contract remains authoritative in `app/src/contracts/text/connections.ts`.
-Existing four-provider profiles decode with single-recording defaults. Custom
-connections have stable `custom:<uuid>` identifiers; the four built-in identifiers
-remain unchanged. The connection registry supports at most 20 entries. Conversation
-history is app-owned context rather than provider session IDs, avoiding accidental
-reuse of other CLI chats and keeping cancelled provider calls out of later context.
-No TTS, Obsidian, arbitrary model-generated command execution or release is included.
+The [implementation plan](https://github.com/juferdinand/OpenWhisper/blob/dcbf89e/docs/LOCAL_MODELS.md#expanded-implementation-plan-for-11)
+records the expanded scope agreed before implementation.
 
 ## Processing and selection
 
@@ -53,14 +16,14 @@ cleanup preserves the recognition result for the following steps. Existing profi
 retain cleanup enabled by default.
 
 Connections discovers running Ollama and LM Studio servers and installed CLI tools.
-Discovery reads model metadata and the Claude CLI version; it never starts a server,
+Discovery reads model metadata, the Claude CLI version and Codex help capabilities; it never starts a server,
 downloads a model, reads authentication files, or submits text. Use **Scan again** after
 changing a server or installation. Enabled saved connections are checked before their
 first processing request after launch.
 
 All connections start disabled. Choose a local model before enabling its connection.
 The ordered list defines priority: only the first enabled connection receives text,
-using the shared instruction. A failed or unavailable connection never silently selects
+using the instruction for the selected mode. A failed or unavailable connection never silently selects
 another provider. Its deterministic input remains the result. Skipping model processing
 also keeps that input; cancelling the recording or quitting abandons delivery.
 
@@ -69,6 +32,13 @@ audio samples; other stages do not invent percentages. Recognized source and fin
 remain reviewable for the current recording, subject to display bounds. History still
 stores the final result; durable source history, TTS and Obsidian are later increments.
 
+**Single recording** processes each recording independently. **Conversation** uses a
+separate instruction and includes successful earlier user/assistant turns. The app
+owns this context and replays it on each request; it does not resume native CLI sessions.
+**New chat** clears the active context. Recording history remains a separate setting.
+Changing the selected connection, its model/command or the conversation instruction
+starts a fresh context. Cancelled, skipped, failed or undelivered results add no turn.
+
 ## Provider boundaries
 
 | Provider | Discovery | Processing |
@@ -76,7 +46,8 @@ stores the final result; durable source history, TTS and Obsidian are later incr
 | Ollama | `127.0.0.1:11434/api/tags` | `POST /api/chat` |
 | LM Studio 0.4+ | `127.0.0.1:1234/api/v1/models` | `POST /v1/chat/completions` |
 | Claude Code | Installed executable and supported version | Fixed print-mode invocation using the existing CLI login |
-| Codex | Installed executable | Unavailable until a complete model-tool boundary is verified |
+| Codex | Installed executable and required help capabilities | Non-interactive JSONL invocation with the existing CLI login/model |
+| Custom CLI | Configured executable only | User-configured arguments and stdin; text or selected JSON-field response |
 
 LM Studio discovery uses typed native metadata to exclude embedding and decision models.
 Local requests originate in the Electron host, with separate system/user messages,
@@ -88,8 +59,9 @@ environment proxy, redirects, cookies or implicit credentials.
 
 A loopback address does not prove that the server/model executes locally: the server
 can forward text elsewhere. Check its configuration before enabling a connection.
-Claude Code can use cloud models and its existing account. No API-key form or arbitrary
-shell command is provided. Model replies are plain text, never executed as HTML or actions.
+CLI tools can use cloud models and their existing accounts. Model replies are plain
+text, never executed by OpenWhisper as HTML or actions. Custom CLI connections run
+the program selected by the user with that program's own tool and permission policy.
 
 Claude Code must support `--safe-mode` (version 2.1.259 or later). The adapter uses
 print mode, an empty tool list, safe mode, no session persistence and no permission
@@ -99,8 +71,32 @@ a claim that the installed CLI executes no code. Input goes through stdin, with 
 from a private empty working directory. Output and total time are bounded; cancellation
 terminates the owned process group. Authentication files are not read or copied by the app.
 
-Codex read-only mode alone does not disable agent tools. Current public configuration
-does not establish a complete empty tool registry, so discovery does not enable execution.
+Codex uses `-a never exec --sandbox read-only --skip-git-repo-check --ephemeral --json
+--color never -`. It retains the CLI's configured model and login. Read-only mode
+does not remove agent tools, and configured CLI policy still applies. Only a completed
+successful turn's assistant answer is accepted; progress and commentary are excluded.
+
+## Custom CLI configuration
+
+Add a connection and supply its display name and executable (an absolute path or a
+program name found in the supported search paths). Enter arguments individually,
+including any flags needed for non-interactive operation. The configured command is
+never passed to a shell. Discovery resolves the executable without invoking its
+configured arguments. New connections remain disabled until explicitly enabled.
+
+The placeholders `{prompt}`, `{instruction}` and `{text}` can appear in arguments or
+the stdin template. `{prompt}` supplies the complete instruction and, in conversation
+mode, previous turns plus the current message. `{text}` supplies only the current
+message. Replacements remain one argument or stdin data, even when they contain shell
+syntax. For conversation context, include `{prompt}` in the configured input.
+
+Choose plain text when the tool writes its answer to stdout, or JSON with a response
+field such as `response` or `message.content`. Nested paths use dots; prototype paths
+are rejected. For Gemini CLI, a configuration example is executable `gemini`, arguments
+`["--output-format", "json"]`, stdin `{prompt}`, output JSON and response field `response`.
+Non-TTY stdin activates its headless mode. Other CLI tools and local wrappers can use
+the same configuration without a new built-in adapter. Their exact authentication and
+command flags belong to the installed tool; OpenWhisper does not copy credentials.
 
 ## Limits and storage
 
@@ -110,16 +106,21 @@ does not establish a complete empty tool registry, so discovery does not enable 
 | Shared instruction | Nonblank; 8192 UTF-8 bytes |
 | Model input / accepted reply | Nonblank; 65536 UTF-8 bytes each |
 | Local output token budget / deadline | 1024 tokens / 30 seconds |
-| Claude total deadline | 120 seconds |
+| CLI total deadline | 120 seconds |
 | HTTP response / CLI stdout | 1048576 bytes |
+| Active conversation | 128 turns; 262144 UTF-8 bytes of serialized turns |
+| Connection registry | Four built-ins plus up to 16 custom entries |
 
 Oversized model input is rejected rather than shortened, preserving the deterministic
-result. These bounds do not limit recording duration or truncate audio. Local replies
+result. A full conversation asks for a new chat rather than silently dropping earlier
+turns. These bounds do not limit recording duration or truncate audio. Local replies
 must be completed assistant text; truncated answers, tool calls, refusals and unexpected
 control characters are rejected. Only a successful Claude result envelope is accepted.
 Diagnostics expose fixed failure categories, never submitted text or response bodies.
 
 The connection registry lives in the active profile's `config/settings/text-connections.json`.
+Conversation mode persists its active context in `text-conversation.json` beside it,
+independently of the recording-history switch. Stable and Dev profiles stay separate.
 Its canonical schema is `app/src/contracts/text/connections.ts`; storage uses the existing
 private state store. The older optional `local-processing.json` profile remains intact.
 Local adapter contracts live in `app/src/contracts/speech/local-processing.ts`, with
@@ -139,4 +140,5 @@ Primary references: [LM Studio Chat Completions](https://lmstudio.ai/docs/develo
 [Ollama chat](https://docs.ollama.com/api/chat), [Ollama model list](https://docs.ollama.com/api/tags),
 [Claude Code CLI](https://code.claude.com/docs/en/cli-usage),
 [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode),
-and [Codex configuration](https://learn.chatgpt.com/docs/config-file/config-reference).
+and [Codex configuration](https://learn.chatgpt.com/docs/config-file/config-reference),
+plus [Gemini CLI headless mode](https://geminicli.com/docs/cli/headless/).

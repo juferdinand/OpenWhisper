@@ -7,9 +7,10 @@ import { delimiter, join } from "node:path";
 import { homedir } from "node:os";
 import { z } from "zod";
 import {
-  defaultTextConnectionAvailability, textConnectionAvailabilityListSchema, textConnectionAvailabilitySchema,
-  type TextConnectionAvailability, type TextConnectionSettings, type TextProvider,
+  defaultTextConnectionAvailability, defaultTextConnectionSettings, textConnectionAvailabilityListSchema, textConnectionAvailabilitySchema,
+  type CustomCliConnection, type TextConnectionAvailability, type TextConnectionSettings, type TextProvider,
 } from "../../contracts/text/connections.js";
+import { checkCodexTextCapabilities } from "./codex.js";
 
 const MAX_DISCOVERY_BYTES = 1024 * 1024;
 const DISCOVERY_TIMEOUT_MS = 1800;
@@ -28,16 +29,10 @@ export function validateTextConnectionChanges(previous: TextConnectionSettings, 
   for (const connection of next.connections) {
     if (!connection.enabled) continue;
     const old = previous.connections.find((entry) => entry.provider === connection.provider);
-    if (connection.provider === "codex") {
-      if (!old?.enabled) throw new Error("Codex text processing is not available yet.");
-      continue;
-    }
-    const oldModel = old && "model" in old ? old.model : undefined;
-    const modelChanged = "model" in connection && connection.model !== oldModel;
-    if (old?.enabled && !modelChanged) continue;
+    if (old?.enabled && JSON.stringify(old) === JSON.stringify(connection)) continue;
     const current = availability.find((entry) => entry.provider === connection.provider);
-    if (!current?.usable || "model" in connection &&
-        (!connection.model || !current.models.includes(connection.model))) {
+    if (!current?.usable) throw new Error("Scan connections and choose an available provider before enabling it.");
+    if ("model" in connection && (!connection.model || !current.models.includes(connection.model))) {
       throw new Error("Scan connections and choose an available model before enabling it.");
     }
   }
@@ -103,6 +98,10 @@ function readLocalModels(provider: "ollama" | "lm_studio", endpoint = localServe
 
 export async function resolveTextCliExecutable(name: "claude" | "codex", pathValue = process.env["PATH"] ?? "",
                                                home = process.env["HOME"] ?? homedir()): Promise<string | undefined> {
+  return resolveCliExecutable(name, pathValue, home);
+}
+
+async function resolveCliExecutable(name: string, pathValue: string, home: string): Promise<string | undefined> {
   const directories = [...pathValue.split(delimiter).filter((item) => item.length > 0 && item.startsWith("/")),
     join(home, ".local/bin"), join(home, ".claude/local"), join(home, ".npm-global/bin"),
     "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
@@ -116,6 +115,20 @@ export async function resolveTextCliExecutable(name: "claude" | "codex", pathVal
     } catch { /* Continue through PATH; do not invoke shell lookup. */ }
   }
   return undefined;
+}
+
+/** Resolve a configured executable without running it or interpreting a shell command. */
+export async function resolveCustomTextCliExecutable(connection: Pick<CustomCliConnection, "command">,
+  pathValue = process.env["PATH"] ?? "", home = process.env["HOME"] ?? homedir()): Promise<string | undefined> {
+  if (connection.command.startsWith("/")) {
+    try {
+      await access(connection.command, constants.X_OK);
+      const resolved = await realpath(connection.command);
+      const metadata = await stat(resolved);
+      return metadata.isFile() && (metadata.mode & 0o111) !== 0 ? resolved : undefined;
+    } catch { return undefined; }
+  }
+  return resolveCliExecutable(connection.command, pathValue, home);
 }
 
 function supportedClaudeVersion(executable: string, environment: NodeJS.ProcessEnv): Promise<boolean> {
@@ -159,16 +172,19 @@ export class LocalTextConnectionScanner {
   constructor(private readonly environment: NodeJS.ProcessEnv = process.env,
               private readonly ports: Partial<Record<"ollama" | "lm_studio", number>> = {}) {}
 
-  async scan(): Promise<TextConnectionAvailability[]> {
+  async scan(settings: TextConnectionSettings = defaultTextConnectionSettings()): Promise<TextConnectionAvailability[]> {
     const ollamaEndpoint = { ...localServer.ollama, ...(this.ports.ollama === undefined ? {} : { port: this.ports.ollama }) };
     const lmStudioEndpoint = { ...localServer.lm_studio, ...(this.ports.lm_studio === undefined ? {} : { port: this.ports.lm_studio }) };
-    const [ollama, lmStudio, claude, codex] = await Promise.all([
+    const [ollama, lmStudio, claude, codex, ...customExecutables] = await Promise.all([
       readLocalModels("ollama", ollamaEndpoint),
       readLocalModels("lm_studio", lmStudioEndpoint),
       resolveTextCliExecutable("claude", this.environment["PATH"], this.environment["HOME"]),
       resolveTextCliExecutable("codex", this.environment["PATH"], this.environment["HOME"]),
+      ...settings.connections.filter((connection): connection is CustomCliConnection => "command" in connection)
+        .map((connection) => resolveCustomTextCliExecutable(connection, this.environment["PATH"], this.environment["HOME"])),
     ]);
     const claudeSupported = claude !== undefined && await supportedClaudeVersion(claude, this.environment);
+    const codexSupported = codex !== undefined && await checkCodexTextCapabilities(codex);
     const result: TextConnectionAvailability[] = [
       { provider: "ollama", detected: ollama.detected, usable: ollama.models.length > 0, models: [...ollama.models],
         reason: ollama.failed ? "scan_failed" : ollama.models.length > 0 ? null : ollama.detected ? "no_models" : "not_running" },
@@ -176,8 +192,12 @@ export class LocalTextConnectionScanner {
         reason: lmStudio.failed ? "scan_failed" : lmStudio.models.length > 0 ? null : lmStudio.detected ? "no_models" : "not_running" },
       { provider: "claude_code", detected: claude !== undefined, usable: claudeSupported, models: [],
         reason: claude === undefined ? "not_installed" : claudeSupported ? null : "unsupported" },
-      { provider: "codex", detected: codex !== undefined, usable: false, models: [],
-        reason: codex !== undefined ? "unsupported" : "not_installed" },
+      { provider: "codex", detected: codex !== undefined, usable: codexSupported, models: [],
+        reason: codex === undefined ? "not_installed" : codexSupported ? null : "unsupported" },
+      ...settings.connections.filter((connection): connection is CustomCliConnection => "command" in connection)
+        .map((connection, index): TextConnectionAvailability => ({ provider: connection.provider,
+          detected: customExecutables[index] !== undefined, usable: customExecutables[index] !== undefined, models: [],
+          reason: customExecutables[index] !== undefined ? null : "not_installed" })),
     ];
     return result.map((entry) => textConnectionAvailabilitySchema.parse(entry));
   }

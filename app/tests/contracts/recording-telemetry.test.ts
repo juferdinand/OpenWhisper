@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { defaultTextConnectionAvailability, defaultTextConnectionSettings, idleTextConnectionProcessing } from "../../src/contracts/text/connections.js";
+import { defaultTextConnectionAvailability, defaultTextConnectionSettings, emptyTextConversation, idleTextConnectionProcessing } from "../../src/contracts/text/connections.js";
 import {
   appStateSchema,
   isCurrentRecordingTelemetry,
@@ -55,7 +55,7 @@ const idleState: AppState = {
   model_directory: "",
   recording_generation: 7,
   text_connections: { settings: defaultTextConnectionSettings(), available: defaultTextConnectionAvailability(), scanning: false,
-    processing: idleTextConnectionProcessing() },
+    processing: idleTextConnectionProcessing(), conversation: emptyTextConversation() },
   text_processing: null,
 };
 

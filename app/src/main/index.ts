@@ -14,7 +14,7 @@ import {
   type AppState, type EventName, type EventPayload, type UpdateState,
 } from "../contracts/ui/state.js";
 import {
-  defaultTextConnectionSettings, textConnectionSettingsSchema,
+  defaultTextConnectionSettings, emptyTextConversation, textConnectionSettingsSchema,
 } from "../contracts/text/connections.js";
 import { textProcessingStageEventSchema, type TextProcessingStageEvent } from "../contracts/text/processing.js";
 import { PreferenceStore } from "../services/settings/preferences.js";
@@ -28,10 +28,13 @@ import { verifyMacApplicationBundle, macosMigrationContext } from "./macos-stabl
 import { StableMigrationError } from "../contracts/migration/stable-migration.js";
 import { PrivateStateStore } from "../services/settings/private-state.js";
 import { LocalProcessingService, LocalProcessingError } from "../services/speech/local-processing.js";
-import { LocalTextConnectionScanner, resolveTextCliExecutable, validateTextConnectionChanges } from "../services/text/connections.js";
+import { LocalTextConnectionScanner, resolveCustomTextCliExecutable, resolveTextCliExecutable, validateTextConnectionChanges } from "../services/text/connections.js";
 import { runClaudeCodeText } from "../services/text/claude-code.js";
+import { runCodexText } from "../services/text/codex.js";
+import { runCustomCliText } from "../services/text/custom-cli.js";
 import { boundedTextPreview } from "../services/text/text-preview.js";
 import { OptionalTextProcessing, TextProviderUnavailableError } from "../services/text/optional-text-processing.js";
+import { TextConversationStore } from "../services/text/conversation.js";
 import {
   localProcessingProfileSchema, defaultLocalProcessingProfile, applyLocalProcessingProfilePatch,
 } from "../contracts/speech/local-processing.js";
@@ -206,6 +209,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     join(profile.paths.settings, "text-connections.json"), textConnectionSettingsSchema, defaultTextConnectionSettings(),
     1024 * 1024, { invalidContent: "preserve-and-default" },
   );
+  const conversationStore = await TextConversationStore.open(
+    join(profile.paths.settings, "text-conversation.json"), textConnectionStore.snapshot());
   const textConnectionScanner = new LocalTextConnectionScanner();
   let textProcessing: TextProcessingStageEvent | null = null;
   let textProcessingOwner: { readonly generation: number; readonly attempt: number } | undefined;
@@ -258,7 +263,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let notify = (): void => {};
   const textProcessor = new OptionalTextProcessing({
     settings: () => textConnectionStore.snapshot(),
-    scan: () => textConnectionScanner.scan(),
+    scan: (settings) => textConnectionScanner.scan(settings),
     isShuttingDown: () => shutdownInProgress,
     onChange: () => notify(),
     onStage: (event) => {
@@ -270,18 +275,29 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       textProcessingOwner = { generation: event.generation, attempt: event.attempt };
       textProcessing = event;
     },
-    runProvider: async (selected, instruction, text, signal, requestId) => {
+    runProvider: async (selected, instruction, text, signal, requestId, context) => {
       if (selected.provider === "ollama" || selected.provider === "lm_studio") {
         return processing.preview({ requestId, text }, {
           enabled: true, provider: selected.provider,
           endpoint: selected.provider === "ollama" ? "http://127.0.0.1:11434" : "http://127.0.0.1:1234/v1",
           model: selected.model, instruction, max_tokens: 1024, timeout_seconds: 30,
-        }, signal);
+        }, signal, context);
       }
       if (selected.provider === "claude_code") {
         const executable = await resolveTextCliExecutable("claude");
         if (!executable) throw new TextProviderUnavailableError();
-        return runClaudeCodeText({ executable, instruction, text, signal });
+        return runClaudeCodeText({ executable, instruction, text, signal, ...(context === undefined ? {} : { context }) });
+      }
+      if (selected.provider === "codex") {
+        const executable = await resolveTextCliExecutable("codex");
+        if (!executable) throw new TextProviderUnavailableError();
+        return runCodexText({ executable, instruction, text, signal, ...(context === undefined ? {} : { context }) });
+      }
+      if ("command" in selected) {
+        const executable = await resolveCustomTextCliExecutable(selected);
+        if (!executable) throw new TextProviderUnavailableError();
+        return runCustomCliText({ executable, connection: selected, instruction, text, signal,
+          ...(context === undefined ? {} : { context }) });
       }
       throw new TextProviderUnavailableError();
     },
@@ -415,8 +431,23 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       delivery: { deliver: async (text, context, _identity, metadata) => {
         if (context.signal.aborted) return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
         if (metadata?.rawText !== undefined) rawTranscript = metadata.rawText;
-        const acceptedText = await textProcessor.process(text, context);
+        const settings = textConnectionStore.snapshot();
+        let conversation: ReturnType<TextConversationStore["snapshot"]> | undefined;
+        let conversationReady = true;
+        if (settings.mode === "conversation") {
+          try {
+            await conversationStore.syncSettings(settings);
+            conversation = conversationStore.snapshotFor(settings);
+            if (!conversation) throw new Error("Conversation context does not match current settings.");
+          } catch {
+            conversationReady = false;
+            message = "Conversation context could not be saved; model processing was skipped.";
+            textProcessor.skipForStorageFailure(context);
+          }
+        }
+        const acceptedText = conversationReady ? await textProcessor.process(text, context, conversation) : text;
         if (acceptedText === undefined || context.signal.aborted || shutdownInProgress) {
+          textProcessor.discardConversationTurn(context.generation, context.attempt);
           return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
         }
         const oversized = Buffer.byteLength(acceptedText, "utf8") > MAX_USER_TEXT_BYTES;
@@ -434,7 +465,15 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
             }
             catch { pasteState = { ...pasteState, ready: false, available: false, result: "FAILED" }; notify(); return false; }
           } } : {}) });
-        if (!delivered.clipboardConfirmed) return delivered;
+        if (!delivered.clipboardConfirmed) {
+          textProcessor.discardConversationTurn(context.generation, context.attempt);
+          return delivered;
+        }
+        const acceptedTurn = textProcessor.takeAcceptedConversationTurn(context.generation, context.attempt);
+        if (acceptedTurn) {
+          try { await conversationStore.commit(acceptedTurn, settings); }
+          catch { message = "Text copied; this conversation turn could not be saved."; }
+        }
         if (wantsPaste && delivered.outcome === "clipboard") deliveryNotice = "Text copied; automatic paste is unavailable. Paste it from the clipboard.";
         if (!oversized && preferences.snapshot().keep_history) {
           // History is secondary to the already confirmed clipboard commit.
@@ -539,7 +578,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       ...(unavailable ? { recording_unavailable_reason: unavailable } : {}),
       local_processing: processingProfile.snapshot(),
       local_processing_invalid_profile: processingProfile.invalidContent,
-      text_connections: { settings: textConnectionStore.snapshot(), ...textProcessor.snapshot() },
+      text_connections: { settings: textConnectionStore.snapshot(), ...textProcessor.snapshot(),
+        conversation: conversationStore.snapshotFor(textConnectionStore.snapshot()) ?? emptyTextConversation() },
     });
   };
   let latestSnapshot: AppState | undefined;
@@ -1131,8 +1171,18 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           throw new Error("Finish the current recording before changing text connections.");
         }
         const checked = textConnectionSettingsSchema.parse(settings);
+        await textProcessor.scanConnections(checked);
         validateTextConnectionChanges(textConnectionStore.snapshot(), checked, textProcessor.snapshot().available);
         await textConnectionStore.update(() => checked);
+        // Fingerprint-gated reads keep old context private if the second write fails.
+        await conversationStore.syncSettings(checked);
+        return state();
+      }),
+      new_conversation: () => withRecordingControl(async () => {
+        if (recording.busy || recording.recoveryAvailable || textProcessor.busy) {
+          throw new Error("Finish the current recording before starting a new conversation.");
+        }
+        await conversationStore.newConversation(textConnectionStore.snapshot());
         return state();
       }),
       cancel_text_processing: () => {

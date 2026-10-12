@@ -184,6 +184,7 @@ export function createUiDispatcher(options: {
     cancel_local_processing: route("cancel_local_processing", handlers.cancel_local_processing),
     scan_connections: route("scan_connections", handlers.scan_connections),
     save_connections: route("save_connections", handlers.save_connections),
+    new_conversation: route("new_conversation", handlers.new_conversation),
     cancel_text_processing: route("cancel_text_processing", handlers.cancel_text_processing),
     toggle_recording: route("toggle_recording", handlers.toggle_recording),
     cancel_recording: route("cancel_recording", handlers.cancel_recording),

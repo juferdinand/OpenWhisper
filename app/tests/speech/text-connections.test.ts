@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import {
-  defaultTextConnectionAvailability, defaultTextConnectionSettings, textConnectionSettingsSchema, textConnectionsStateSchema,
+  customCliConnectionSchema, defaultTextConnectionAvailability, defaultTextConnectionSettings,
+  textConnectionSettingsSchema, textConnectionsStateSchema,
 } from "../../src/contracts/text/connections.js";
 import { validateCommandInput, appStateSchema } from "../../src/contracts/ui/state.js";
 import { ensureTextProviderAvailability, LocalTextConnectionScanner, resolveTextCliExecutable,
@@ -45,6 +46,33 @@ test("text connections default disabled and preserve explicit provider order", (
     connections: [defaults.connections[0], defaults.connections[0], ...defaults.connections.slice(2)] }));
 });
 
+test("custom CLI entries are bounded argv data with safe output selectors and compatible legacy defaults", () => {
+  const defaults = defaultTextConnectionSettings();
+  const legacy = textConnectionSettingsSchema.parse({ connections: defaults.connections, instruction: defaults.instruction });
+  assert.equal(legacy.mode, "single");
+  assert.ok(legacy.conversationInstruction.trim().length > 0);
+  const custom = customCliConnectionSchema.parse({ provider: "custom:123e4567-e89b-42d3-a456-426614174000",
+    enabled: false, name: "Owned wrapper", command: "owned-wrapper", args: ["--prompt", "{prompt}"] });
+  assert.equal(custom.stdin, "{prompt}");
+  assert.equal(custom.output, "text");
+  assert.equal(custom.responsePath, "");
+  for (const bad of [
+    { ...custom, command: "owned-wrapper && touch /tmp/marker" },
+    { ...custom, output: "json", responsePath: "answer.__proto__.value" },
+    { ...custom, output: "json", responsePath: "" },
+    { ...custom, args: ["--no-prompt"] , stdin: "" },
+  ]) assert.equal(customCliConnectionSchema.safeParse(bad).success, false);
+  assert.equal(textConnectionSettingsSchema.safeParse({ ...defaults, mode: "conversation", connections: [
+    ...defaults.connections, { ...custom, enabled: true, args: ["--mode", "dialog"], stdin: "{text}" },
+  ] }).success, false);
+  const complete = textConnectionSettingsSchema.parse({ ...defaults, mode: "conversation", connections: [
+    ...defaults.connections, { ...custom, enabled: true },
+  ] });
+  assert.equal(complete.connections.length, 5);
+  assert.equal(textConnectionSettingsSchema.safeParse({ ...complete,
+    connections: [...complete.connections, complete.connections[4]] }).success, false);
+});
+
 test("saved offline providers can be disabled one at a time", () => {
   const defaults = defaultTextConnectionSettings();
   const bothEnabled = { ...defaults, connections: defaults.connections.map((entry) => ({
@@ -58,7 +86,7 @@ test("saved offline providers can be disabled one at a time", () => {
   validateTextConnectionChanges(ollamaDisabled, allDisabled, defaultTextConnectionAvailability());
 });
 
-test("newly enabled unavailable, model-less, or Codex providers are rejected at any priority", () => {
+test("newly enabled unavailable providers and model-less local connections are rejected", () => {
   const defaults = defaultTextConnectionSettings();
   const previous = { ...defaults, connections: defaults.connections.map((entry) => ({
     ...entry, enabled: entry.provider === "ollama",
@@ -68,17 +96,19 @@ test("newly enabled unavailable, model-less, or Codex providers are rejected at 
       ? { ...entry, enabled: true, ...(entry.provider === "lm_studio" ? { model } : {}) } : entry),
   });
   assert.throws(() => validateTextConnectionChanges(previous, enable("lm_studio", "qwen"),
-    defaultTextConnectionAvailability()), /available model/u);
+    defaultTextConnectionAvailability()), /available provider/u);
   const changeEnabledModel = { ...previous, connections: previous.connections.map((entry) => entry.provider === "ollama"
     ? { ...entry, model: "qwen" } : entry) };
-  assert.throws(() => validateTextConnectionChanges(previous, changeEnabledModel, defaultTextConnectionAvailability()), /available model/u);
+  assert.throws(() => validateTextConnectionChanges(previous, changeEnabledModel, defaultTextConnectionAvailability()), /available provider/u);
   const availableOllama = defaultTextConnectionAvailability().map((entry) => entry.provider === "ollama"
     ? { ...entry, usable: true, detected: true, models: ["qwen"], reason: null } : entry);
   assert.doesNotThrow(() => validateTextConnectionChanges(previous, changeEnabledModel, availableOllama));
   const availableWithoutSelection = defaultTextConnectionAvailability().map((entry) => entry.provider === "lm_studio"
     ? { ...entry, usable: true, detected: true, models: ["qwen"], reason: null } : entry);
   assert.throws(() => validateTextConnectionChanges(previous, enable("lm_studio"), availableWithoutSelection), /available model/u);
-  assert.throws(() => validateTextConnectionChanges(previous, enable("codex"), availableWithoutSelection), /not available/u);
+  const codexAvailable = defaultTextConnectionAvailability().map((entry) => entry.provider === "codex"
+    ? { ...entry, detected: true, usable: true, reason: null } : entry);
+  assert.doesNotThrow(() => validateTextConnectionChanges(previous, enable("codex"), codexAvailable));
 });
 
 test("bounded transcript previews preserve UTF-8 boundaries and report omitted text", () => {
@@ -117,6 +147,7 @@ test("optional processor snapshot matches the strict AppState text-connection wi
   assert.deepEqual(textConnectionsStateSchema.parse({ settings, ...snapshot }), {
     settings, available: defaultTextConnectionAvailability(), scanning: false,
     processing: { status: "idle", provider: null, reason: null },
+    conversation: { id: "", provider: null, turns: [] },
   });
 });
 
@@ -139,8 +170,8 @@ test("local discovery uses only fixed loopback routes and reports bounded model 
   });
   const codex = available.find(({ provider }) => provider === "codex");
   assert.ok(codex);
-  assert.equal(codex.usable, false);
-  assert.ok(codex.reason === "not_installed" || codex.reason === "unsupported");
+  assert.equal(codex.usable, codex.reason === null);
+  assert.ok(codex.reason === "not_installed" || codex.reason === "unsupported" || codex.reason === null);
 });
 
 test("an enabled provider refreshes stale startup availability before first use", async () => {

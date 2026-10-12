@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   defaultTextConnectionAvailability, defaultTextConnectionSettings, type TextConnectionAvailability,
+  type TextConnectionSettings, type TextConversation,
 } from "../../src/contracts/text/connections.js";
 import type { TextProcessingStageEvent } from "../../src/contracts/text/processing.js";
 import { OptionalTextProcessing } from "../../src/services/text/optional-text-processing.js";
@@ -57,6 +58,18 @@ test("only the highest enabled provider is attempted", async () => {
   const { instance, calls } = processor({ enabled: ["ollama", "lm_studio"] });
   assert.equal(await instance.process("recognized text", owner()), "processed text");
   assert.deepEqual(calls, ["ollama"]);
+});
+
+test("conversation storage failure replaces stale completion and clears pending turn", async () => {
+  const { instance } = processor({ enabled: ["ollama"] });
+  const conversation: TextConversation = { id: "conversation-1", provider: "ollama", turns: [] };
+  assert.equal(await instance.process("question", owner(), conversation), "processed text");
+  assert.deepEqual(instance.snapshot().processing, { status: "complete", provider: "ollama", reason: null });
+
+  instance.skipForStorageFailure(owner());
+
+  assert.deepEqual(instance.snapshot().processing, { status: "fallback", provider: "ollama", reason: "failed" });
+  assert.equal(instance.takeAcceptedConversationTurn(8, 2), undefined);
 });
 
 test("provider failure keeps deterministic text and never falls through to the next provider", async () => {
@@ -169,4 +182,77 @@ test("saved enabled provider refreshes unavailable startup state before its firs
   assert.equal(await instance.process("recognized text", owner()), "processed text");
   assert.equal(scans, 1);
   assert.deepEqual(calls, ["ollama"]);
+});
+
+test("conversation calls replay explicit prior turns and become eligible for commit only on success", async () => {
+  const settings = { ...configured(["ollama"]), mode: "conversation" as const };
+  let observedInstruction = "", observedContext: readonly { user: string; assistant: string }[] | undefined;
+  const instance = new OptionalTextProcessing({
+    settings: () => settings,
+    scan: async () => available("qwen-local"),
+    isShuttingDown: () => false,
+    runProvider: async (_connection, instruction, _text, _signal, _requestId, context) => {
+      observedInstruction = instruction;
+      observedContext = context;
+      return "assistant answer";
+    },
+  });
+  const conversation: TextConversation = { id: "chat-id", provider: "ollama", turns: [{ user: "old question", assistant: "old answer" }] };
+  assert.equal(await instance.process("new question", owner(), conversation), "assistant answer");
+  assert.equal(observedInstruction, settings.conversationInstruction);
+  assert.deepEqual(observedContext, conversation.turns);
+  assert.deepEqual(instance.takeAcceptedConversationTurn(8, 2), { user: "new question", assistant: "assistant answer" });
+  assert.equal(instance.takeAcceptedConversationTurn(8, 2), undefined);
+});
+
+test("conversation overflow keeps deterministic input and adds no turn", async () => {
+  const settings: TextConnectionSettings = { ...configured(["ollama"]), mode: "conversation" };
+  let requests = 0;
+  const instance = new OptionalTextProcessing({ settings: () => settings,
+    scan: async () => available("qwen-local"), isShuttingDown: () => false,
+    runProvider: async () => { requests += 1; return "answer"; } });
+  const conversation: TextConversation = { id: "chat-id", provider: "ollama", turns: [
+    ...Array.from({ length: 3 }, () => ({ user: "u".repeat(43_650), assistant: "a".repeat(43_650) })),
+  ] };
+  const input = "q".repeat(1000);
+  assert.equal(await instance.process(input, owner(), conversation), input);
+  assert.equal(requests, 0);
+  assert.deepEqual(instance.snapshot().processing, { status: "fallback", provider: "ollama", reason: "context_full" });
+  assert.equal(instance.takeAcceptedConversationTurn(8, 2), undefined);
+});
+
+test("a completed answer that would exceed the context bound falls back without a turn", async () => {
+  const settings: TextConnectionSettings = { ...configured(["ollama"]), mode: "conversation" };
+  const instance = new OptionalTextProcessing({ settings: () => settings,
+    scan: async () => available("qwen-local"), isShuttingDown: () => false,
+    runProvider: async () => "a".repeat(64_000) });
+  const conversation: TextConversation = { id: "chat-id", provider: "ollama", turns: [
+    { user: "u".repeat(50_000), assistant: "a".repeat(50_000) },
+    { user: "u".repeat(50_000), assistant: "a".repeat(50_000) },
+  ] };
+  const input = "q".repeat(64_000);
+  assert.equal(await instance.process(input, owner(), conversation), input);
+  assert.equal(instance.takeAcceptedConversationTurn(8, 2), undefined);
+});
+
+test("changed custom command scans do not reuse an in-flight availability snapshot", async () => {
+  const base = defaultTextConnectionSettings();
+  const make = (command: string): TextConnectionSettings => ({ ...base, connections: [...base.connections,
+    { provider: "custom:123e4567-e89b-42d3-a456-426614174000", enabled: false, name: "test", command,
+      args: ["{prompt}"], stdin: "", output: "text", responsePath: "" }] });
+  const first = make("old-command"), second = make("new-command");
+  let release!: () => void;
+  const started = new Promise<void>((resolve) => { release = resolve; });
+  const scanned: string[] = [];
+  const instance = new OptionalTextProcessing({ settings: () => first, scan: async (settings) => {
+    scanned.push(settings.connections[4] && "command" in settings.connections[4] ? settings.connections[4].command : "missing");
+    if (scanned.length === 1) await started;
+    return available("qwen-local");
+  }, isShuttingDown: () => false, runProvider: async (_connection, _instruction, text) => text });
+  const oldScan = instance.scanConnections(first);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const newScan = instance.scanConnections(second);
+  release();
+  await Promise.all([oldScan, newScan]);
+  assert.deepEqual(scanned, ["old-command", "new-command"]);
 });

@@ -17,9 +17,11 @@ import {
   type Snippet,
 } from "../../src/contracts/ui/state.js";
 import type {
+  BuiltinTextProvider,
+  CustomCliConnection,
   TextConnectionSettings,
-  TextProvider,
 } from "../../src/contracts/text/connections.js";
+import { customCliConnectionSchema } from "../../src/contracts/text/connections.js";
 
 let state: State;
 type View = Tab | "dictation" | "recording" | "text" | "connections" | "permissions";
@@ -63,6 +65,10 @@ const expandedModelFamilies = new Set<string>();
 let preferenceQueue = Promise.resolve();
 let pendingPreferences = 0;
 let connectionInstructionDraft: string | undefined;
+let conversationInstructionDraft: string | undefined;
+let customConnectionDraft: CustomCliConnection | undefined;
+let customConnectionDraftIsNew = false;
+const customConnectionsAwaitingScan = new Set<string>();
 let connectionScanStarted = false;
 let mouseTriggerCandidate: number | undefined;
 const app = document.querySelector<HTMLDivElement>("#app")!;
@@ -916,23 +922,35 @@ async function savePreferences(
 async function preference(name: string, value: unknown) {
   return savePreferences(preferencePatchSchema.parse({ [name]: value }));
 }
-async function saveConnections(settings: TextConnectionSettings) {
+async function saveConnections(
+  settings: TextConnectionSettings,
+): Promise<boolean> {
   try {
     state = await invoke("save_connections", {
       settings: {
         ...settings,
         instruction: connectionInstructionDraft ?? settings.instruction,
+        conversationInstruction:
+          conversationInstructionDraft ?? settings.conversationInstruction,
       },
     });
     connectionInstructionDraft = undefined;
+    conversationInstructionDraft = undefined;
     contentKey = "";
     render();
+    return true;
   } catch (error) {
     notice(String(error));
+    return false;
   }
 }
 async function scanConnections() {
   connectionScanStarted = true;
+  const scannedCustomProviders = new Set(
+    state.text_connections.settings.connections
+      .filter((connection) => connection.provider.startsWith("custom:"))
+      .map((connection) => connection.provider),
+  );
   const button = document.querySelector<HTMLButtonElement>("#scan-connections");
   if (button) {
     button.disabled = true;
@@ -940,6 +958,8 @@ async function scanConnections() {
   }
   try {
     state = await invoke("scan_connections", {});
+    for (const provider of scannedCustomProviders)
+      customConnectionsAwaitingScan.delete(provider);
     contentKey = "";
     render();
   } catch (error) {
@@ -948,6 +968,22 @@ async function scanConnections() {
       button.disabled = false;
       button.textContent = t("Scan again");
     }
+    notice(String(error));
+  }
+}
+async function startNewConversation() {
+  if (
+    state.status === "recording" ||
+    state.status === "transcribing" ||
+    state.text_connections.processing.status === "processing"
+  )
+    return;
+  try {
+    state = await invoke("new_conversation", {});
+    workspaceKey = "";
+    renderWorkspace();
+    render();
+  } catch (error) {
     notice(String(error));
   }
 }
@@ -1818,6 +1854,9 @@ function renderWorkspace() {
     state.raw_transcript_preview_omitted,
     state.text_processing,
     state.text_connections.processing,
+    state.text_connections.settings.mode,
+    state.text_connections.settings.connections,
+    state.text_connections.conversation,
     state.transcript_preview_omitted,
     state.gpu_supported,
     state.gpu_checked,
@@ -1846,10 +1885,16 @@ function renderWorkspace() {
   const currentTranscriptDismissed = dismissedTranscriptValue !== undefined;
   const transcriptAvailable =
     selectedHistoryText !== undefined ||
+    (state.text_connections.settings.mode === "conversation" &&
+      state.text_connections.conversation.turns.length > 0) ||
     (!currentTranscriptDismissed &&
       (!!state.transcript || state.transcript_preview_omitted));
-  const transcriptMarkup =
-    selectedHistoryText !== undefined
+  const conversationMode =
+    state.text_connections.settings.mode === "conversation";
+  const conversationTurns = state.text_connections.conversation.turns;
+  const transcriptMarkup = conversationMode
+    ? `${conversationTurns.map((turn) => `<article class="conversation-turn"><h3>${esc(t("You"))}</h3><p class="transcript">${esc(turn.user)}</p><h3>${esc(t("Assistant"))}</h3><p class="transcript">${esc(turn.assistant)}</p></article>`).join("")}${state.status === "transcribing" && (state.text_processing?.text || state.raw_transcript) ? `<article class="conversation-pending"><h3>${esc(t("Current recording"))}</h3><p class="transcript">${esc(state.text_processing?.text ?? state.raw_transcript ?? "")}</p></article>` : ""}${state.status !== "transcribing" && state.transcript && conversationTurns.at(-1)?.assistant !== state.transcript ? `<article class="conversation-pending"><h3>${esc(t("Latest recording"))}</h3><p class="transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</p></article>` : ""}${state.raw_transcript && state.status !== "transcribing" ? `<details class="raw-transcript"><summary>${esc(t("Raw recognition"))}</summary><p class="transcript">${esc(state.raw_transcript_preview_omitted ? t("The raw transcript is too large to preview.") : state.raw_transcript)}</p></details>` : ""}${conversationTurns.length === 0 && !state.transcript && state.status !== "transcribing" ? `<div class="dictation-empty"><p>${esc(t("Record a message to start this conversation."))}</p></div>` : ""}`
+    : selectedHistoryText !== undefined
       ? `<p class="transcript">${esc(selectedHistoryText)}</p>`
       : state.status === "transcribing" && state.text_processing?.text
         ? `<p class="transcript">${esc(state.text_processing_preview_omitted ? t("The current text preview is too large.") : state.text_processing.text)}</p>`
@@ -1866,6 +1911,35 @@ function renderWorkspace() {
     state.status !== "transcribing" &&
     state.text_connections.processing.status === "fallback"
       ? `<p class="processing-fallback-notice" role="status">${esc(t("Optional model was not applied; deterministic text was kept."))}</p>`
+      : "";
+  const selectedConnection = state.text_connections.settings.connections.find(
+    (item) => item.enabled,
+  );
+  const selectedConnectionName = selectedConnection
+    ? selectedConnection.provider.startsWith("custom:")
+      ? (selectedConnection as CustomCliConnection).name
+      : (
+          {
+            ollama: "Ollama",
+            lm_studio: "LM Studio",
+            claude_code: "Claude Code",
+            codex: "Codex",
+          } as Record<BuiltinTextProvider, string>
+        )[selectedConnection.provider as BuiltinTextProvider]
+    : undefined;
+  const selectedConnectionUsable = selectedConnection
+    ? state.text_connections.available.find(
+        (item) => item.provider === selectedConnection.provider,
+      )?.usable === true
+    : false;
+  const conversationNotice = conversationMode
+    ? `<section class="conversation-bar"><div><strong>${esc(t("Voice conversation"))}</strong><span>${esc(selectedConnectionName && selectedConnectionUsable ? t("Using {provider}", { provider: selectedConnectionName }) : selectedConnectionName ? t("Selected connection is unavailable; recording still works without assistant replies.") : t("Recording still works without assistant replies."))}</span></div><div class="conversation-actions"><button id="new-chat" type="button" ${state.status === "recording" || state.status === "transcribing" || state.text_connections.processing.status === "processing" ? "disabled" : ""}>${esc(t("New chat"))}</button>${selectedConnectionUsable ? "" : `<button id="manage-connections" type="button">${esc(t("Choose connection"))}</button>`}</div></section>`
+    : "";
+  const contextFullNotice =
+    conversationMode &&
+    state.text_connections.processing.status === "fallback" &&
+    state.text_connections.processing.reason === "context_full"
+      ? `<p class="processing-fallback-notice context-full-notice" role="status">${esc(t("Conversation context is full. Start a new chat to continue with a fresh context."))} <button type="button" data-new-chat>${esc(t("New chat"))}</button></p>`
       : "";
   const processingEvent = state.text_processing;
   const hasSampleProgress =
@@ -1907,7 +1981,7 @@ function renderWorkspace() {
     : t("History is not saved.");
   const retainedWaveformCanvas = mainWaveform?.canvas;
   retainedWaveformCanvas?.remove();
-  main.innerHTML = `${permissionBanner()}<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true"><canvas class="live-waveform" data-waveform="main" aria-hidden="true"></canvas></div></section>${processingMarkup}<section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}${processingFallbackNotice}</div></section><section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
+  main.innerHTML = `${permissionBanner()}<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><label class="workspace-mode-select">${esc(t("Processing mode"))}<select id="workspace-mode" aria-label="${esc(t("Processing mode"))}" ${state.status === "recording" || state.status === "transcribing" ? "disabled" : ""}><option value="single" ${!conversationMode ? "selected" : ""}>${esc(t("Single recording"))}</option><option value="conversation" ${conversationMode ? "selected" : ""}>${esc(t("Voice conversation"))}</option></select></label><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true"><canvas class="live-waveform" data-waveform="main" aria-hidden="true"></canvas></div></section>${processingMarkup}${conversationNotice}<section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(conversationMode ? t("Conversation") : t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}${processingFallbackNotice}${contextFullNotice}</div></section><section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
   if (retainedWaveformCanvas)
     main
       .querySelector<HTMLElement>(".dictation-waveform")
@@ -1919,6 +1993,53 @@ function renderWorkspace() {
       if (selectedHistoryIndex !== null) {
         void command("copy_history", { index: selectedHistoryIndex });
       } else void command("copy_transcript");
+    });
+  main
+    .querySelector<HTMLSelectElement>("#workspace-mode")
+    ?.addEventListener("change", (event) => {
+      const select = event.currentTarget as HTMLSelectElement;
+      const nextMode = select.value as TextConnectionSettings["mode"];
+      if (
+        nextMode === "conversation" &&
+        state.text_connections.settings.connections.some(
+          (connection) =>
+            connection.enabled &&
+            connection.provider.startsWith("custom:") &&
+            !(connection as CustomCliConnection).stdin.includes("{prompt}") &&
+            !(connection as CustomCliConnection).args.some((argument) =>
+              argument.includes("{prompt}"),
+            ),
+        )
+      ) {
+        select.value = state.text_connections.settings.mode;
+        notice(
+          t(
+            "Add {prompt} to the input template or an argument to use this connection in Conversation mode.",
+            { prompt: "{prompt}" },
+          ),
+        );
+        return;
+      }
+      void saveConnections({
+        ...state.text_connections.settings,
+        mode: nextMode,
+      });
+    });
+  main
+    .querySelector<HTMLButtonElement>("#new-chat")
+    ?.addEventListener("click", () => void startNewConversation());
+  main
+    .querySelector<HTMLButtonElement>("[data-new-chat]")
+    ?.addEventListener("click", () => void startNewConversation());
+  main
+    .querySelector<HTMLButtonElement>("#manage-connections")
+    ?.addEventListener("click", () => {
+      tab = "general";
+      contentKey = "";
+      render();
+      document
+        .querySelector<HTMLButtonElement>('[data-settings-view="connections"]')
+        ?.click();
     });
   main
     .querySelector<HTMLButtonElement>('[data-command="allow_microphone"]')
@@ -2971,7 +3092,7 @@ function markVocabularyDirty(target: HTMLElement): void {
 function renderConnectionsSettings(content: HTMLElement) {
   const { settings, available, scanning } = state.text_connections;
   const availability = new Map(available.map((item) => [item.provider, item]));
-  const names: Record<TextProvider, string> = {
+  const builtinNames: Record<BuiltinTextProvider, string> = {
     ollama: "Ollama",
     lm_studio: "LM Studio",
     claude_code: "Claude Code",
@@ -2997,38 +3118,96 @@ function renderConnectionsSettings(content: HTMLElement) {
     (connection) => connection.enabled,
   );
   content.innerHTML =
-    `<section class="connections-intro"><p>${esc(t("Find local Ollama or LM Studio servers and installed Claude Code or Codex tools. Connections start off."))}</p><button type="button" id="scan-connections" ${scanning ? "disabled" : ""}>${esc(scanning ? t("Scanning …") : t("Scan again"))}</button></section>` +
+    `<section class="connections-intro"><p>${esc(t("Find local Ollama or LM Studio servers and installed CLI tools. Connections start off."))}</p><button type="button" id="scan-connections" ${scanning ? "disabled" : ""}>${esc(scanning ? t("Scanning …") : t("Scan again"))}</button></section>` +
     `<ol class="connection-list">${settings.connections
       .map((connection, index) => {
-        const found = availability.get(connection.provider)!;
+        const found = customConnectionsAwaitingScan.has(connection.provider)
+          ? undefined
+          : availability.get(connection.provider);
         const local =
           connection.provider === "ollama" ||
           connection.provider === "lm_studio";
-        const usable = found.usable;
-        const name = names[connection.provider];
+        const custom = connection.provider.startsWith("custom:");
+        const usable = found?.usable ?? false;
+        const name = custom
+          ? (connection as CustomCliConnection).name
+          : builtinNames[connection.provider as BuiltinTextProvider];
+        const customNeedsPrompt =
+          custom &&
+          settings.mode === "conversation" &&
+          !(connection as CustomCliConnection).stdin.includes("{prompt}") &&
+          !(connection as CustomCliConnection).args.some((argument) =>
+            argument.includes("{prompt}"),
+          );
         const selectedModel =
           connection.provider === "ollama" ||
           connection.provider === "lm_studio"
-            ? connection.model && found.models.includes(connection.model)
+            ? connection.model && found?.models.includes(connection.model)
               ? connection.model
-              : (found.models[0] ?? "")
+              : (found?.models[0] ?? "")
             : "";
         const model = local
-          ? `<label class="connection-model"><span class="visually-hidden">${esc(t("Model"))}</span><select data-connection-model="${index}" aria-label="${esc(t("{provider} model", { provider: name }))}" ${!usable ? "disabled" : ""}>${connection.model && !found.models.includes(connection.model) ? option(connection.model, connection.model, selectedModel) : ""}${found.models.length ? found.models.map((item) => option(item, item, selectedModel)).join("") : option("", t("No models found"), selectedModel)}</select></label>`
-          : `<p class="connection-model-note">${esc(t("Uses the tool model"))}</p>`;
+          ? `<label class="connection-model"><span class="visually-hidden">${esc(t("Model"))}</span><select data-connection-model="${index}" aria-label="${esc(t("{provider} model", { provider: name }))}" ${!usable ? "disabled" : ""}>${connection.model && !found?.models.includes(connection.model) ? option(connection.model, connection.model, selectedModel) : ""}${found?.models.length ? found.models.map((item) => option(item, item, selectedModel)).join("") : option("", t("No models found"), selectedModel)}</select></label>`
+          : `<div class="connection-cli-note"><p class="connection-model-note">${esc(custom ? (connection as CustomCliConnection).command : t("Uses the tool model"))}</p>${customNeedsPrompt ? `<p class="connection-state unavailable">${esc(t("Add {prompt} to the input template or an argument to use this connection in Conversation mode.", { prompt: "{prompt}" }))}</p>` : ""}</div>`;
         const enabledDisabled =
-          (!usable || (local && !selectedModel)) && !connection.enabled;
-        return `<li class="connection-card connection-row" data-provider="${connection.provider}"><span class="connection-number">${index + 1}</span><div class="connection-identity"><strong>${esc(name)}${index === standardIndex ? `<span class="connection-default">${esc(t("Standard"))}</span>` : ""}</strong><span class="connection-state ${usable ? "available" : "unavailable"}">${esc(reason(found.reason))}</span></div><div class="connection-model-slot">${model}</div><label class="connection-toggle" title="${esc(t("Enabled"))}"><input class="switch connection-switch" type="checkbox" data-connection-enabled="${index}" ${connection.enabled ? "checked" : ""} ${enabledDisabled && !connection.enabled ? "disabled" : ""}><span class="visually-hidden">${esc(t("Enabled"))}</span></label><div class="connection-order"><button type="button" data-connection-move="up" data-index="${index}" aria-label="${esc(t("Move {provider} up", { provider: name }))}" ${index === 0 ? "disabled" : ""}>↑</button><button type="button" data-connection-move="down" data-index="${index}" aria-label="${esc(t("Move {provider} down", { provider: name }))}" ${index === settings.connections.length - 1 ? "disabled" : ""}>↓</button></div></li>`;
+          (!usable || (local && !selectedModel) || customNeedsPrompt) &&
+          !connection.enabled;
+        const status = found ? reason(found.reason) : t("Scan to check");
+        return `<li class="connection-card connection-row" data-provider="${esc(connection.provider)}"><span class="connection-number">${index + 1}</span><div class="connection-identity"><strong>${esc(name)}${index === standardIndex ? `<span class="connection-default">${esc(t("Standard"))}</span>` : ""}</strong><span class="connection-state ${usable ? "available" : "unavailable"}">${esc(status)}</span></div><div class="connection-model-slot">${model}</div><label class="connection-toggle" title="${esc(t("Enabled"))}"><input class="switch connection-switch" type="checkbox" data-connection-enabled="${index}" ${connection.enabled ? "checked" : ""} ${enabledDisabled && !connection.enabled ? "disabled" : ""}><span class="visually-hidden">${esc(t("Enabled"))}</span></label><div class="connection-order"><button type="button" data-connection-move="up" data-index="${index}" aria-label="${esc(t("Move {provider} up", { provider: name }))}" ${index === 0 ? "disabled" : ""}>↑</button><button type="button" data-connection-move="down" data-index="${index}" aria-label="${esc(t("Move {provider} down", { provider: name }))}" ${index === settings.connections.length - 1 ? "disabled" : ""}>↓</button>${custom ? `<button type="button" data-connection-edit="${index}">${esc(t("Edit"))}</button><button type="button" data-connection-remove="${index}" aria-label="${esc(t("Remove {provider}", { provider: name }))}">×</button>` : ""}</div></li>`;
       })
       .join("")}</ol>` +
-    `<p class="connection-privacy">${esc(t("Only the first enabled connection is used; it receives transcript text. A local server does not prove local-only processing. Claude Code may send text to its configured cloud service. Model-requested tools are disabled; managed CLI policy still applies."))}</p>` +
-    `<section class="connection-instruction"><h2>${esc(t("Shared instruction"))}</h2><textarea id="connection-instruction" rows="3" maxlength="8192" aria-label="${esc(t("Shared instruction"))}">${esc(connectionInstructionDraft ?? settings.instruction)}</textarea><div class="edit-actions"><button type="button" id="save-connections">${esc(t("Save connections"))}</button></div></section>`;
-  const instruction = content.querySelector<HTMLTextAreaElement>(
-    "#connection-instruction",
-  )!;
-  instruction.oninput = () => {
-    connectionInstructionDraft = instruction.value;
+    `<section class="custom-connection-actions"><button type="button" id="add-custom-connection" ${settings.connections.length >= 20 ? "disabled" : ""}>${esc(t("Add CLI connection"))}</button>${customConnectionDraft ? `<div class="custom-connection-editor"><h3>${esc(t(customConnectionDraftIsNew ? "New CLI connection" : "Edit CLI connection"))}</h3><label>${esc(t("Connection name"))}<input id="custom-name" maxlength="128" value="${esc(customConnectionDraft.name)}"></label><label>${esc(t("Executable or command"))}<input id="custom-command" maxlength="1024" value="${esc(customConnectionDraft.command)}"></label><label>${esc(t("Arguments (one per line)"))}<textarea id="custom-args" rows="3">${esc(customConnectionDraft.args.join("\n"))}</textarea></label><label>${esc(t("Input template"))}<input id="custom-stdin" maxlength="8192" value="${esc(customConnectionDraft.stdin)}"></label><label>${esc(t("Output format"))}<select id="custom-output"><option value="text" ${customConnectionDraft.output === "text" ? "selected" : ""}>${esc(t("Plain text"))}</option><option value="json" ${customConnectionDraft.output === "json" ? "selected" : ""}>JSON</option></select></label><label>${esc(t("JSON response field"))}<input id="custom-response-path" maxlength="512" value="${esc(customConnectionDraft.responsePath)}"></label><p>${esc(t("Commands run directly without a shell. Example: gemini with --output-format and json, input {prompt}, JSON field response."))}</p><div class="edit-actions"><button id="save-custom-connection" type="button">${esc(t("Save CLI connection"))}</button><button id="cancel-custom-connection" type="button">${esc(t("Cancel"))}</button></div></div>` : ""}</section>` +
+    `<p class="connection-privacy">${esc(t("Only the first enabled connection is used; it receives transcript text. Local servers do not prove local-only processing. CLI tools and custom commands may send text to cloud services or use their configured tools."))}</p>` +
+    `<section class="connection-instruction"><h2>${esc(t("How to use connections"))}</h2><label class="connection-mode-label">${esc(t("Processing mode"))}<select id="connection-mode"><option value="single" ${settings.mode === "single" ? "selected" : ""}>${esc(t("Single recording"))}</option><option value="conversation" ${settings.mode === "conversation" ? "selected" : ""}>${esc(t("Voice conversation"))}</option></select></label>${settings.mode === "conversation" ? `<label>${esc(t("Conversation instruction"))}<textarea id="conversation-instruction" rows="3" maxlength="8192">${esc(conversationInstructionDraft ?? settings.conversationInstruction)}</textarea></label>` : `<label>${esc(t("Recording instruction"))}<textarea id="connection-instruction" rows="3" maxlength="8192" aria-label="${esc(t("Recording instruction"))}">${esc(connectionInstructionDraft ?? settings.instruction)}</textarea></label>`}<div class="edit-actions"><button type="button" id="save-connections">${esc(t("Save connections"))}</button></div></section>`;
+  content
+    .querySelector<HTMLTextAreaElement>("#connection-instruction")
+    ?.addEventListener("input", (event) => {
+      connectionInstructionDraft = (event.currentTarget as HTMLTextAreaElement)
+        .value;
+    });
+  content
+    .querySelector<HTMLTextAreaElement>("#conversation-instruction")
+    ?.addEventListener("input", (event) => {
+      conversationInstructionDraft = (
+        event.currentTarget as HTMLTextAreaElement
+      ).value;
+    });
+  const updateCustomDraft = () => {
+    if (!customConnectionDraft) return;
+    customConnectionDraft = {
+      ...customConnectionDraft,
+      name:
+        content.querySelector<HTMLInputElement>("#custom-name")?.value ??
+        customConnectionDraft.name,
+      command:
+        content.querySelector<HTMLInputElement>("#custom-command")?.value ??
+        customConnectionDraft.command,
+      args: (
+        content.querySelector<HTMLTextAreaElement>("#custom-args")?.value ??
+        customConnectionDraft.args.join("\n")
+      )
+        .split("\n")
+        .filter((line) => line.length > 0),
+      stdin:
+        content.querySelector<HTMLInputElement>("#custom-stdin")?.value ??
+        customConnectionDraft.stdin,
+      output: (content.querySelector<HTMLSelectElement>("#custom-output")
+        ?.value ?? customConnectionDraft.output) as "text" | "json",
+      responsePath:
+        content.querySelector<HTMLInputElement>("#custom-response-path")
+          ?.value ?? customConnectionDraft.responsePath,
+    };
   };
+  content
+    .querySelectorAll<
+      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+    >(
+      ".custom-connection-editor input, .custom-connection-editor textarea, .custom-connection-editor select",
+    )
+    .forEach((field) => field.addEventListener("input", updateCustomDraft));
+  content
+    .querySelector<HTMLSelectElement>("#custom-output")
+    ?.addEventListener("change", updateCustomDraft);
   content
     .querySelector("#scan-connections")
     ?.addEventListener("click", () => void scanConnections());
@@ -3052,10 +3231,134 @@ function renderConnectionsSettings(content: HTMLElement) {
               )?.value ?? "";
             return { ...entry, model: selected, enabled: selected.length > 0 };
           }
-          return { ...entry, enabled: input.checked };
+          return {
+            ...entry,
+            enabled:
+              input.checked && !!availability.get(entry.provider)?.usable,
+          };
         });
         void saveConnections({ ...settings, connections });
       };
+    });
+  content
+    .querySelector<HTMLSelectElement>("#connection-mode")
+    ?.addEventListener("change", (event) => {
+      const select = event.currentTarget as HTMLSelectElement;
+      const mode = select.value as TextConnectionSettings["mode"];
+      if (
+        mode === "conversation" &&
+        settings.connections.some(
+          (connection) =>
+            connection.enabled &&
+            connection.provider.startsWith("custom:") &&
+            !(connection as CustomCliConnection).stdin.includes("{prompt}") &&
+            !(connection as CustomCliConnection).args.some((argument) =>
+              argument.includes("{prompt}"),
+            ),
+        )
+      ) {
+        select.value = settings.mode;
+        notice(
+          t(
+            "Add {prompt} to the input template or an argument to use this connection in Conversation mode.",
+            { prompt: "{prompt}" },
+          ),
+        );
+        return;
+      }
+      void saveConnections({ ...settings, mode });
+    });
+  content
+    .querySelector<HTMLButtonElement>("#add-custom-connection")
+    ?.addEventListener("click", () => {
+      customConnectionDraftIsNew = true;
+      const provider = `custom:${crypto.randomUUID()}` as const;
+      customConnectionsAwaitingScan.add(provider);
+      customConnectionDraft = {
+        provider,
+        enabled: false,
+        name: "",
+        command: "",
+        args: [],
+        stdin: "{prompt}",
+        output: "text",
+        responsePath: "",
+      };
+      renderConnectionsSettings(content);
+    });
+  content
+    .querySelectorAll<HTMLButtonElement>("[data-connection-edit]")
+    .forEach((button) =>
+      button.addEventListener("click", () => {
+        const entry =
+          settings.connections[Number(button.dataset.connectionEdit)];
+        if (entry?.provider.startsWith("custom:")) {
+          customConnectionDraftIsNew = false;
+          customConnectionsAwaitingScan.add(entry.provider);
+          customConnectionDraft = {
+            ...(entry as CustomCliConnection),
+            enabled: false,
+            args: [...(entry as CustomCliConnection).args],
+          };
+          renderConnectionsSettings(content);
+        }
+      }),
+    );
+  content
+    .querySelectorAll<HTMLButtonElement>("[data-connection-remove]")
+    .forEach((button) =>
+      button.addEventListener("click", () => {
+        const index = Number(button.dataset.connectionRemove);
+        const connections = settings.connections.filter((_, i) => i !== index);
+        void saveConnections({ ...settings, connections });
+      }),
+    );
+  content
+    .querySelector<HTMLButtonElement>("#cancel-custom-connection")
+    ?.addEventListener("click", () => {
+      customConnectionDraft = undefined;
+      renderConnectionsSettings(content);
+    });
+  content
+    .querySelector<HTMLButtonElement>("#save-custom-connection")
+    ?.addEventListener("click", () => {
+      const draft = customConnectionDraft;
+      if (!draft) return;
+      const parsed = customCliConnectionSchema.safeParse({
+        ...draft,
+        name:
+          content.querySelector<HTMLInputElement>("#custom-name")?.value ?? "",
+        command:
+          content.querySelector<HTMLInputElement>("#custom-command")?.value ??
+          "",
+        args: (
+          content.querySelector<HTMLTextAreaElement>("#custom-args")?.value ??
+          ""
+        )
+          .split("\n")
+          .filter((line) => line.length > 0),
+        stdin:
+          content.querySelector<HTMLInputElement>("#custom-stdin")?.value ?? "",
+        output:
+          content.querySelector<HTMLSelectElement>("#custom-output")?.value,
+        responsePath:
+          content.querySelector<HTMLInputElement>("#custom-response-path")
+            ?.value ?? "",
+      });
+      if (!parsed.success) {
+        notice(t("Check the CLI connection fields and try again."));
+        return;
+      }
+      const connections = customConnectionDraftIsNew
+        ? [...settings.connections, parsed.data]
+        : settings.connections.map((entry) =>
+            entry.provider === parsed.data.provider
+              ? { ...parsed.data, enabled: false }
+              : entry,
+          );
+      customConnectionDraft = undefined;
+      void saveConnections({ ...settings, connections });
+      customConnectionDraftIsNew = false;
     });
   content
     .querySelectorAll<HTMLSelectElement>("[data-connection-model]")

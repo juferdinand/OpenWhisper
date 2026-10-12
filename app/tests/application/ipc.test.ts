@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { test } from "node:test";
-import { defaultTextConnectionAvailability, defaultTextConnectionSettings, idleTextConnectionProcessing } from "../../src/contracts/text/connections.js";
+import { defaultTextConnectionAvailability, defaultTextConnectionSettings, emptyTextConversation, idleTextConnectionProcessing } from "../../src/contracts/text/connections.js";
 import { MAX_USER_TEXT_BYTES } from "../../src/contracts/ui/state.js";
 import type { AppState, PreferencePatch } from "../../src/contracts/ui/state.js";
 import {
@@ -34,7 +34,7 @@ function state(): AppState {
     paste_ready: false, gpu_available: false, download: null, progress: 0, elapsed: 0,
     model_directory: "/fixture/models",
     text_connections: { settings: defaultTextConnectionSettings(), available: defaultTextConnectionAvailability(), scanning: false,
-      processing: idleTextConnectionProcessing() },
+      processing: idleTextConnectionProcessing(), conversation: emptyTextConversation() },
     text_processing: null,
   };
 }
