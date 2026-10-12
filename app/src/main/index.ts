@@ -286,12 +286,14 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       if (selected.provider === "claude_code") {
         const executable = await resolveTextCliExecutable("claude");
         if (!executable) throw new TextProviderUnavailableError();
-        return runClaudeCodeText({ executable, instruction, text, signal, ...(context === undefined ? {} : { context }) });
+        return runClaudeCodeText({ executable, instruction, text, model: selected.model, signal,
+          ...(context === undefined ? {} : { context }) });
       }
       if (selected.provider === "codex") {
         const executable = await resolveTextCliExecutable("codex");
         if (!executable) throw new TextProviderUnavailableError();
-        return runCodexText({ executable, instruction, text, signal, ...(context === undefined ? {} : { context }) });
+        return runCodexText({ executable, instruction, text, model: selected.model, signal,
+          ...(context === undefined ? {} : { context }) });
       }
       if ("command" in selected) {
         const executable = await resolveCustomTextCliExecutable(selected);

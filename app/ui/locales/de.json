@@ -605,6 +605,9 @@
   "Detected, but not available for text processing": "Erkannt, aber für die Textverarbeitung nicht verfügbar",
   "Could not check this connection": "Verbindung konnte nicht geprüft werden",
   "Model": "Modell",
+  "{provider} model": "{provider}-Modell",
+  "CLI default": "CLI-Standard",
+  "Model ID or alias; leave empty to use CLI default.": "Modell-ID oder Alias; leer lassen, um den CLI-Standard zu verwenden.",
   "Uses the tool model": "Verwendet das Modell des Werkzeugs",
   "Enabled": "Aktiv",
   "Priority {number}": "Priorität {number}",
@@ -672,7 +675,6 @@
   "Text copied; this conversation turn could not be saved.": "Text kopiert; dieser Konversationsbeitrag konnte nicht gespeichert werden.",
   "Finish the current recording before starting a new conversation.": "Beende die aktuelle Aufnahme, bevor du eine neue Konversation startest.",
   "Latest recording": "Letzte Aufnahme",
-  "Der Konversationskontext konnte nicht gespeichert werden; die Modellverarbeitung wurde übersprungen.": "Der Konversationskontext konnte nicht gespeichert werden; die Modellverarbeitung wurde übersprungen.",
   "Conversation context could not be saved; model processing was skipped.": "Der Konversationskontext konnte nicht gespeichert werden; die Modellverarbeitung wurde übersprungen.",
   "Selected connection is unavailable; recording still works without assistant replies.": "Die ausgewählte Verbindung ist nicht verfügbar; Aufnahmen funktionieren weiterhin ohne Assistentenantworten."
 }

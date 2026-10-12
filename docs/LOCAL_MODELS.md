@@ -46,7 +46,7 @@ starts a fresh context. Cancelled, skipped, failed or undelivered results add no
 | Ollama | `127.0.0.1:11434/api/tags` | `POST /api/chat` |
 | LM Studio 0.4+ | `127.0.0.1:1234/api/v1/models` | `POST /v1/chat/completions` |
 | Claude Code | Installed executable and supported version | Fixed print-mode invocation using the existing CLI login |
-| Codex | Installed executable and required help capabilities | Non-interactive JSONL invocation with the existing CLI login/model |
+| Codex | Installed executable and required help capabilities | Non-interactive JSONL invocation using the existing CLI login |
 | Custom CLI | Configured executable only | User-configured arguments and stdin; text or selected JSON-field response |
 
 LM Studio discovery uses typed native metadata to exclude embedding and decision models.
@@ -72,9 +72,16 @@ from a private empty working directory. Output and total time are bounded; cance
 terminates the owned process group. Authentication files are not read or copied by the app.
 
 Codex uses `-a never exec --sandbox read-only --skip-git-repo-check --ephemeral --json
---color never -`. It retains the CLI's configured model and login. Read-only mode
+--color never -`. It retains the CLI's configured login. Read-only mode
 does not remove agent tools, and configured CLI policy still applies. Only a completed
 successful turn's assistant answer is accepted; progress and commentary are excluded.
+
+For Claude Code and Codex, enter a model identifier in **Settings → Connections**.
+An empty field uses the CLI's configured default; an explicit identifier is passed as
+`--model` without changing global CLI settings. Claude also offers alias suggestions.
+These fields do not list account entitlements: the installed CLI determines which
+models are available. The selection persists in the active profile, and changing the
+selected connection's model starts a fresh conversation.
 
 ## Custom CLI configuration
 

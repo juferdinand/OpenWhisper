@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, realpath, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -67,6 +68,22 @@ test("conversation fingerprint resets only when the selected connection or instr
   const changedInstruction = { ...changedCommand, conversationInstruction: "Answer briefly." };
   await store.syncSettings(changedInstruction);
   assert.deepEqual(store.snapshot().turns, []);
+});
+
+test("CLI model selection is part of the conversation identity", () => {
+  const defaults = defaultTextConnectionSettings();
+  const base = { ...defaults, connections: defaults.connections.map((entry) => entry.provider === "codex"
+    ? { ...entry, enabled: true } : entry) };
+  const legacy = { ...base, connections: base.connections.map((entry) => entry.provider === "codex"
+    ? { provider: entry.provider, enabled: entry.enabled } : entry) };
+  const selected = { ...base, connections: base.connections.map((entry) => entry.provider === "codex"
+    ? { ...entry, model: "gpt-5.4-codex" } : entry) };
+  assert.equal(textConversationFingerprint(legacy), textConversationFingerprint(base));
+  const historicalFingerprint = createHash("sha256").update(JSON.stringify({
+    selected: { provider: "codex" }, instruction: defaults.conversationInstruction,
+  })).digest("hex");
+  assert.equal(textConversationFingerprint(base), historicalFingerprint);
+  assert.notEqual(textConversationFingerprint(selected), textConversationFingerprint(base));
 });
 
 test("context overflow rejects the new turn without dropping or shortening earlier turns", async () => {

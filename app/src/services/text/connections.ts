@@ -32,7 +32,8 @@ export function validateTextConnectionChanges(previous: TextConnectionSettings, 
     if (old?.enabled && JSON.stringify(old) === JSON.stringify(connection)) continue;
     const current = availability.find((entry) => entry.provider === connection.provider);
     if (!current?.usable) throw new Error("Scan connections and choose an available provider before enabling it.");
-    if ("model" in connection && (!connection.model || !current.models.includes(connection.model))) {
+    if ((connection.provider === "ollama" || connection.provider === "lm_studio") &&
+        (!connection.model || !current.models.includes(connection.model))) {
       throw new Error("Scan connections and choose an available model before enabling it.");
     }
   }

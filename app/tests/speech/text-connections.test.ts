@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import {
-  customCliConnectionSchema, defaultTextConnectionAvailability, defaultTextConnectionSettings,
+  cliTextModelSchema, customCliConnectionSchema, defaultTextConnectionAvailability, defaultTextConnectionSettings,
   textConnectionSettingsSchema, textConnectionsStateSchema,
 } from "../../src/contracts/text/connections.js";
 import { validateCommandInput, appStateSchema } from "../../src/contracts/ui/state.js";
@@ -37,6 +37,8 @@ test("text connections default disabled and preserve explicit provider order", (
   const defaults = defaultTextConnectionSettings();
   assert.deepEqual(defaults.connections.map(({ provider }) => provider), ["ollama", "lm_studio", "claude_code", "codex"]);
   assert.ok(defaults.connections.every(({ enabled }) => !enabled));
+  assert.deepEqual(defaults.connections.filter((entry) => entry.provider === "claude_code" || entry.provider === "codex")
+    .map((entry) => "model" in entry ? entry.model : undefined), ["", ""]);
   assert.ok(defaultTextConnectionAvailability().filter(({ provider }) => provider === "claude_code" || provider === "codex")
     .every((entry) => !entry.detected && entry.reason === "not_installed"));
   const reordered = { ...defaults, connections: [...defaults.connections].reverse() };
@@ -51,6 +53,17 @@ test("custom CLI entries are bounded argv data with safe output selectors and co
   const legacy = textConnectionSettingsSchema.parse({ connections: defaults.connections, instruction: defaults.instruction });
   assert.equal(legacy.mode, "single");
   assert.ok(legacy.conversationInstruction.trim().length > 0);
+  const legacyCli = textConnectionSettingsSchema.parse({ ...defaults, connections: defaults.connections.map((entry) =>
+    entry.provider === "claude_code" || entry.provider === "codex"
+      ? { provider: entry.provider, enabled: entry.enabled } : entry) });
+  assert.deepEqual(legacyCli.connections.filter((entry) => entry.provider === "claude_code" || entry.provider === "codex")
+    .map((entry) => "model" in entry ? entry.model : undefined), ["", ""]);
+  const codexModel = legacyCli.connections.find((entry) => entry.provider === "codex");
+  assert.ok(codexModel && "model" in codexModel);
+  assert.equal(cliTextModelSchema.safeParse("--sandbox=workspace-write").success, false);
+  assert.equal(cliTextModelSchema.safeParse("gpt-5.4-codex").success, true);
+  assert.equal(textConnectionSettingsSchema.safeParse({ ...legacyCli, connections: legacyCli.connections.map((entry) =>
+    entry.provider === "codex" ? { ...entry, model: " gpt-5.4 " } : entry) }).success, false);
   const custom = customCliConnectionSchema.parse({ provider: "custom:123e4567-e89b-42d3-a456-426614174000",
     enabled: false, name: "Owned wrapper", command: "owned-wrapper", args: ["--prompt", "{prompt}"] });
   assert.equal(custom.stdin, "{prompt}");
@@ -93,7 +106,7 @@ test("newly enabled unavailable providers and model-less local connections are r
   })) };
   const enable = (provider: "lm_studio" | "codex", model = "") => ({ ...previous,
     connections: previous.connections.map((entry) => entry.provider === provider
-      ? { ...entry, enabled: true, ...(entry.provider === "lm_studio" ? { model } : {}) } : entry),
+      ? { ...entry, enabled: true, model } : entry),
   });
   assert.throws(() => validateTextConnectionChanges(previous, enable("lm_studio", "qwen"),
     defaultTextConnectionAvailability()), /available provider/u);
@@ -109,6 +122,7 @@ test("newly enabled unavailable providers and model-less local connections are r
   const codexAvailable = defaultTextConnectionAvailability().map((entry) => entry.provider === "codex"
     ? { ...entry, detected: true, usable: true, reason: null } : entry);
   assert.doesNotThrow(() => validateTextConnectionChanges(previous, enable("codex"), codexAvailable));
+  assert.doesNotThrow(() => validateTextConnectionChanges(previous, enable("codex", "gpt-5.4-codex"), codexAvailable));
 });
 
 test("bounded transcript previews preserve UTF-8 boundaries and report omitted text", () => {

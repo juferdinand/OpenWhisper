@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 import { checkCodexTextCapabilities, CodexTextError, parseCodexJsonl, runCodexText } from "../../src/services/text/codex.js";
 
@@ -19,7 +19,8 @@ async function fixtureExecutable(source: string): Promise<string> {
 
 test("Codex invocation is read-only, noninteractive and receives bounded conversation context via stdin", async () => {
   const expectedText = "current message with metacharacters ; $(do-not-run)";
-  const expectedArgv = ["-a", "never", "exec", "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral", "--json", "--color", "never", "-"];
+  const expectedArgv = ["-a", "never", "exec", "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral", "--json", "--color", "never",
+    "--model", "gpt-5.4-codex", "-"];
   const executable = await fixtureExecutable(`
     let input = ''; process.stdin.setEncoding('utf8'); process.stdin.on('data', chunk => input += chunk);
     process.stdin.on('end', () => {
@@ -44,7 +45,7 @@ test("Codex invocation is read-only, noninteractive and receives bounded convers
   process.env["LD_PRELOAD"] = "/synthetic-injection.so";
   try {
     assert.equal(await runCodexText({ executable, instruction: "Answer conversationally.", text: expectedText,
-      context: [{ user: "previous user question", assistant: "previous assistant answer" }], signal: controller.signal }), "codex answer");
+      context: [{ user: "previous user question", assistant: "previous assistant answer" }], model: "gpt-5.4-codex", signal: controller.signal }), "codex answer");
   } finally {
     if (priorCodexHome === undefined) delete process.env["CODEX_HOME"]; else process.env["CODEX_HOME"] = priorCodexHome;
     if (priorKey === undefined) delete process.env["OPENAI_API_KEY"]; else process.env["OPENAI_API_KEY"] = priorKey;
@@ -75,7 +76,7 @@ test("Codex capability scan requires the fixed safe invocation flags", async () 
   const executable = await fixtureExecutable(`
     const args = process.argv.slice(2);
     if (args[0] === '--help') process.stdout.write('Usage: codex [-a <policy>] <command>\\n');
-    else process.stdout.write('Usage: codex exec [--json] [--sandbox <MODE>] [--skip-git-repo-check] [--ephemeral] [--color <WHEN>]\\n');
+    else process.stdout.write('Usage: codex exec [--json] [--sandbox <MODE>] [--skip-git-repo-check] [--ephemeral] [--model <MODEL>] [--color <WHEN>]\\n');
   `);
   assert.equal(await checkCodexTextCapabilities(executable), true);
   const unsupported = await fixtureExecutable(`process.stdout.write('Usage: codex exec [--json] [--sandbox <MODE>]');`);
@@ -88,4 +89,15 @@ test("Codex cancellation retires the owned process group", async () => {
   const pending = runCodexText({ executable, instruction: "answer", text: "synthetic text", signal: controller.signal });
   setTimeout(() => controller.abort(), 120);
   await assert.rejects(pending, (error: unknown) => error instanceof CodexTextError && error.code === "CANCELLED");
+});
+
+test("Codex adapter rejects invalid direct model values before spawning", async () => {
+  const executable = await fixtureExecutable(`require('node:fs').writeFileSync(require('node:path').join(__dirname, 'spawned'), 'spawned');`);
+  const marker = join(dirname(executable), "spawned");
+  for (const model of ["bad\nmodel", "--sandbox=workspace-write"]) {
+    await assert.rejects(runCodexText({ executable, instruction: "instruction", text: "synthetic text", model,
+      signal: new AbortController().signal }),
+    (error: unknown) => error instanceof CodexTextError && error.code === "INVALID_RESPONSE");
+  }
+  await assert.rejects(access(marker));
 });

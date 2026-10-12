@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { access, chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 import { ClaudeTextError, runClaudeCodeText } from "../../src/services/text/claude-code.js";
 
@@ -21,7 +21,7 @@ test("Claude adapter disables model tools, uses a private cwd and stdin, and fil
   const executable = await fixtureExecutable(`
     let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', chunk => input += chunk);
     process.stdin.on('end', () => {
-      const expected = ['--print','--safe-mode','--tools','','--no-session-persistence','--input-format','text','--output-format','json','--permission-prompts','none'];
+      const expected = ['--print','--model','claude-sonnet-4-5','--safe-mode','--tools','','--no-session-persistence','--input-format','text','--output-format','json','--permission-prompts','none'];
       const safe = JSON.stringify(process.argv.slice(2)) === JSON.stringify(expected)
         && process.env.ANTHROPIC_API_KEY === undefined && process.env.OPENAI_API_KEY === undefined
         && process.cwd().includes('openwhisper-text-') && input.includes('synthetic transcript')
@@ -34,7 +34,8 @@ test("Claude adapter disables model tools, uses a private cwd and stdin, and fil
   process.env["ANTHROPIC_API_KEY"] = "synthetic-test-secret";
   const controller = new AbortController();
   try {
-    assert.equal(await runClaudeCodeText({ executable, instruction: "Summarize this memo into a short action-item list.", text: "synthetic transcript", signal: controller.signal }),
+    assert.equal(await runClaudeCodeText({ executable, instruction: "Summarize this memo into a short action-item list.", text: "synthetic transcript",
+      model: "claude-sonnet-4-5", signal: controller.signal }),
       "revised transcript");
   } finally {
     if (prior === undefined) delete process.env["ANTHROPIC_API_KEY"];
@@ -90,6 +91,17 @@ test("Claude adapter rejects malformed envelopes and oversized transcripts befor
     (error: unknown) => error instanceof ClaudeTextError && error.code === "INVALID_RESPONSE");
   await assert.rejects(runClaudeCodeText({ executable, instruction: "instruction", text: "x".repeat(65_537), signal: controller.signal }),
     (error: unknown) => error instanceof ClaudeTextError && error.code === "INVALID_RESPONSE");
+});
+
+test("Claude adapter rejects invalid direct model values before spawning", async () => {
+  const executable = await fixtureExecutable(`require('node:fs').writeFileSync(require('node:path').join(__dirname, 'spawned'), 'spawned');`);
+  const marker = join(dirname(executable), "spawned");
+  for (const model of ["bad\nmodel", "--sandbox=workspace-write"]) {
+    await assert.rejects(runClaudeCodeText({ executable, instruction: "instruction", text: "synthetic text", model,
+      signal: new AbortController().signal }),
+    (error: unknown) => error instanceof ClaudeTextError && error.code === "INVALID_RESPONSE");
+  }
+  await assert.rejects(access(marker));
 });
 
 test("Claude adapter requires a successful result and ignores additional metadata", async () => {

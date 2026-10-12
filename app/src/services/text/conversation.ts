@@ -11,7 +11,8 @@ export function textConversationFingerprint(input: unknown): string {
   const settings = textConnectionSettingsSchema.parse(input);
   const selected = settings.connections.find((connection) => connection.enabled);
   const identity = selected === undefined ? null : Object.fromEntries(Object.entries(selected)
-    .filter(([key]) => key !== "name" && key !== "enabled"));
+    .filter(([key, value]) => key !== "name" && key !== "enabled" &&
+      !(key === "model" && value === "" && (selected.provider === "claude_code" || selected.provider === "codex"))));
   return createHash("sha256").update(JSON.stringify({ selected: identity,
     instruction: settings.conversationInstruction })).digest("hex");
 }
