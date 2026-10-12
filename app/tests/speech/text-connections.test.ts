@@ -59,6 +59,9 @@ test("optional CLI model options are bounded typed display metadata", () => {
     model_options: [{ value: "--unsafe", display_name: "Bad model", source: "catalog" }],
   }).success, false);
   assert.equal(textConnectionAvailabilitySchema.safeParse({ ...claude,
+    model_options: [{ value: "", display_name: "Empty", source: "cli" }],
+  }).success, false);
+  assert.equal(textConnectionAvailabilitySchema.safeParse({ ...claude,
     model_options: [{ value: "sonnet", display_name: "Bad\nmodel", source: "cli" }],
   }).success, false);
   assert.equal(textConnectionAvailabilitySchema.safeParse({ ...claude,
@@ -291,7 +294,9 @@ process.stdin.on('end', () => process.exit(0));
     { ollama: emptyPort, lm_studio: emptyPort }).scan();
   const claude = availability.find(({ provider }) => provider === "claude_code");
   assert.deepEqual(claude?.models, ["sonnet", "claude-sonnet-5-5"]);
-  assert.equal(claude?.model_options?.find(({ value }) => value === "sonnet")?.source, "cli");
+  assert.deepEqual(claude?.model_options?.find(({ value }) => value === "sonnet"), {
+    value: "sonnet", display_name: "Sonnet", source: "cli",
+  });
   assert.equal(claude?.model_options?.find(({ value }) => value === "claude-sonnet-5")?.source, "catalog");
   const codex = availability.find(({ provider }) => provider === "codex");
   assert.deepEqual(codex, { provider: "codex", detected: true, usable: true, models: ["gpt-5.4-codex"], reason: null });

@@ -3185,12 +3185,6 @@ function renderConnectionsSettings(content: HTMLElement) {
                 source: "cli" as const,
               })))
             : [];
-        const claudeCliOptions = claudeOptions.filter(
-          (item) => item.source === "cli",
-        );
-        const claudeCatalogOptions = claudeOptions.filter(
-          (item) => item.source === "catalog",
-        );
         const cliModelValues =
           connection.provider === "claude_code"
             ? claudeOptions.map((item) => item.value)
@@ -3206,7 +3200,7 @@ function renderConnectionsSettings(content: HTMLElement) {
           ? `<label class="connection-model"><span class="visually-hidden">${esc(t("Model"))}</span><select data-connection-model="${esc(connection.provider)}" aria-label="${esc(t("{provider} model", { provider: name }))}" ${!usable ? "disabled" : ""}>${connection.model && !found?.models.includes(connection.model) ? option(connection.model, connection.model, selectedModel) : ""}${found?.models.length ? found.models.map((item) => option(item, item, selectedModel)).join("") : option("", t("No models found"), selectedModel)}</select></label>`
           : connection.provider === "claude_code" ||
               connection.provider === "codex"
-            ? `<div class="connection-cli-model"><label class="connection-model"><span class="visually-hidden">${esc(t("{provider} model", { provider: name }))}</span><select data-cli-model="${esc(connection.provider)}" aria-label="${esc(t("{provider} model", { provider: name }))}" ${controlsDisabled ? "disabled" : ""}>${option("", t("CLI default"), connection.model)}${connection.provider === "claude_code" ? `${claudeCliOptions.length ? `<optgroup label="${esc(t("From Claude CLI"))}">${claudeCliOptions.map((item) => option(item.value, item.display_name, connection.model)).join("")}</optgroup>` : ""}${claudeCatalogOptions.length ? `<optgroup label="${esc(t("Other Claude versions"))}">${claudeCatalogOptions.map((item) => option(item.value, item.display_name, connection.model)).join("")}</optgroup>` : ""}` : cliModels.map((item) => option(item, item, connection.model)).join("")}${savedCliModel ? option(savedCliModel, `${savedCliModel} (${t("Saved, not discovered")})`, connection.model) : ""}</select></label>${connection.provider === "claude_code" && claudeCatalogOptions.length ? `<p class="connection-model-note">${esc(t("Access to other versions is checked by Claude when used."))}</p>` : ""}</div>`
+            ? `<label class="connection-model"><span class="visually-hidden">${esc(t("{provider} model", { provider: name }))}</span><select data-cli-model="${esc(connection.provider)}" aria-label="${esc(t("{provider} model", { provider: name }))}" ${controlsDisabled ? "disabled" : ""}>${option("", t("CLI default"), connection.model)}${connection.provider === "claude_code" ? claudeOptions.map((item) => option(item.value, item.display_name, connection.model)).join("") : cliModels.map((item) => option(item, item, connection.model)).join("")}${savedCliModel ? option(savedCliModel, savedCliModel, connection.model) : ""}</select></label>`
             : `<div class="connection-cli-note"><p class="connection-model-note">${esc(custom ? (connection as CustomCliConnection).command : t("Uses the tool model"))}</p>${customNeedsPrompt ? `<p class="connection-state unavailable">${esc(t("Add {prompt} to the input template or an argument to use this connection in Conversation mode.", { prompt: "{prompt}" }))}</p>` : ""}</div>`;
         const enabledDisabled =
           (!usable || (local && !selectedModel) || customNeedsPrompt) &&

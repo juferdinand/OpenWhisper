@@ -90,6 +90,7 @@ test("Claude metadata discovery preserves aliases and resolved IDs and adds boun
             message.request_id !== 'openwhisper-model-catalog') process.exit(41);
         process.stdout.write(JSON.stringify({ type: 'control_response', response: { request_id: message.request_id,
           subtype: 'success', response: { account: { private: 'not returned' }, models: [
+            { value: 'default', resolvedModel: 'claude-opus-5-5', displayName: 'Default (recommended)' },
             { value: 'opus', resolvedModel: 'claude-opus-5-5', displayName: 'Opus' },
             { value: 'claude-fable-5-1[1m]', resolvedModel: 'claude-fable-5-1', displayName: 'Fable' },
             { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet' },
@@ -103,18 +104,21 @@ test("Claude metadata discovery preserves aliases and resolved IDs and adds boun
     process.stdin.on('end', () => process.exit(0));
   `);
   const discovery = await discoverClaudeModels(executable);
-  assert.deepEqual(discovery.models, ["opus", "claude-opus-5-5", "claude-fable-5-1[1m]", "claude-fable-5-1",
+  assert.deepEqual(discovery.models, ["default", "claude-opus-5-5", "opus", "claude-fable-5-1[1m]", "claude-fable-5-1",
     "sonnet", "claude-sonnet-5", "custom-haiku", "vendor-haiku-latest"]);
   const option = (value: string) => discovery.model_options.find((candidate) => candidate.value === value);
-  assert.deepEqual(option("opus"), { value: "opus", display_name: "Opus (alias → claude-opus-5-5)", source: "cli" });
+  assert.deepEqual(option("default"), { value: "default", display_name: "Default", source: "cli" });
+  assert.deepEqual(option("opus"), { value: "opus", display_name: "Opus", source: "cli" });
   assert.deepEqual(option("claude-opus-5-5"), { value: "claude-opus-5-5", display_name: "Opus 5.5", source: "cli" });
   assert.deepEqual(option("claude-fable-5-1[1m]"), {
-    value: "claude-fable-5-1[1m]", display_name: "Fable (claude-fable-5-1[1m])", source: "cli",
+    value: "claude-fable-5-1[1m]", display_name: "Fable 5.1 1M", source: "cli",
   });
+  assert.deepEqual(option("sonnet"), { value: "sonnet", display_name: "Sonnet", source: "cli" });
   assert.equal(option("claude-fable-5")?.source, "catalog");
   assert.equal(option("claude-sonnet-5-5"), undefined, "versions newer than the resolved Sonnet model are not suggested");
   assert.equal(option("claude-sonnet-4-6")?.source, "catalog");
   assert.equal(option("vendor-haiku-latest")?.source, "cli");
+  assert.equal(option("vendor-haiku-latest")?.display_name, "vendor-haiku-latest");
   assert.equal(option("claude-haiku-5-5"), undefined, "provider-specific IDs do not seed first-party family suggestions");
   assert.ok(discovery.model_options.every(({ value }) => !value.includes("mythos")));
 });

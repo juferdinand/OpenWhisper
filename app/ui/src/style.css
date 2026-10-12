@@ -1722,13 +1722,6 @@ dialog#settings-dialog {
   margin: 0;
   line-height: 1.35;
 }
-.settings-content .connection-cli-model {
-  min-width: 0;
-  width: 100%;
-}
-.settings-content .connection-cli-model .connection-model-note {
-  margin-top: 3px;
-}
 .settings-content .connection-instruction h2 {
   margin: 0 0 6px;
   font-size: 13px;

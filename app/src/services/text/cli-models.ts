@@ -102,10 +102,23 @@ function discoverClaudeOptions(metadata: readonly z.infer<typeof claudeModelsSch
   const models = new Set<string>();
   const options = new Map<string, TextModelOption>();
   const validId = (value: string): string | undefined => {
+    if (value.length === 0) return undefined;
     const parsed = cliTextModelSchema.safeParse(value);
     return parsed.success ? parsed.data : undefined;
   };
   const catalogLabel = (value: string): string | undefined => activeClaudeModels.find((model) => model.value === value)?.displayName;
+  const aliases = new Set(["default", "opus", "sonnet", "haiku", "fable"]);
+  const modelLabel = (value: string, resolvedModel: string | undefined, displayName: string): string => {
+    if (aliases.has(value)) {
+      const label = displayName.trim().replace(/\s*\(recommended\)$/iu, "");
+      return label || "Default";
+    }
+    const versioned = catalogLabel(value);
+    if (versioned) return versioned;
+    const contextualVersion = resolvedModel === undefined ? undefined : catalogLabel(resolvedModel);
+    if (contextualVersion && value === `${resolvedModel}[1m]`) return `${contextualVersion} 1M`;
+    return value || displayName.trim();
+  };
   const addOption = (value: string, displayName: string, source: TextModelOption["source"]): void => {
     const parsedValue = validId(value);
     if (!parsedValue) return;
@@ -122,10 +135,7 @@ function discoverClaudeOptions(metadata: readonly z.infer<typeof claudeModelsSch
     const value = validId(entry.value);
     if (!value) continue;
     const resolvedModel = entry.resolvedModel === undefined ? undefined : validId(entry.resolvedModel);
-    const baseLabel = entry.displayName.trim();
-    const label = resolvedModel && value !== resolvedModel
-      ? value.startsWith("claude-") ? `${baseLabel} (${value})` : `${baseLabel} (alias → ${resolvedModel})`
-      : catalogLabel(value) ?? baseLabel;
+    const label = modelLabel(value, resolvedModel, entry.displayName);
     addOption(value, label, "cli");
     if (!resolvedModel) continue;
     addOption(resolvedModel, catalogLabel(resolvedModel) ?? resolvedModel, "cli");

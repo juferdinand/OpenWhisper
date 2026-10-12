@@ -97,7 +97,7 @@ const textConnectionAvailabilityReasonSchema = z.enum([
   "not_running", "not_installed", "no_models", "unsupported", "scan_failed",
 ]);
 export const textModelOptionSchema = z.strictObject({
-  value: cliTextModelSchema,
+  value: cliTextModelSchema.refine((value) => value.length > 0),
   display_name: utf8(256).min(1).refine((value) => value.trim() === value &&
     !/[\u0000-\u001f\u007f-\u009f]/u.test(value)),
   source: z.enum(["cli", "catalog"]),

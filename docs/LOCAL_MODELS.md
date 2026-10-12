@@ -86,12 +86,12 @@ sessions use private pipes and the existing owned process boundary, then close; 
 model turn is started. OpenWhisper does not read or copy CLI credentials.
 
 Claude's initialization response lists its picker entries, which can be aliases rather
-than every model version. The dropdown preserves each entry and its resolved model ID,
-so the current alias and its specific version are distinct choices. Values such as
-Fable's `[1m]` suffix remain unchanged when selected.
+than every model version. The dropdown shows plain model names, including the current
+family choice and specific versions. It preserves the selected CLI value; values such
+as Fable's `[1m]` suffix remain unchanged when selected.
 
-**Other Claude versions** contains separately labeled suggestions from a small catalog
-of active Anthropic model IDs, verified against the official model lifecycle reference
+Additional versions come from a small catalog of active Anthropic model IDs, verified
+against the official model lifecycle reference
 on October 12, 2026. Suggestions are limited to observed canonical model families and
 versions no newer than the resolved CLI model. Custom provider IDs do not imply support
 for Anthropic's canonical IDs. This catalog is maintained with the application; scanning
@@ -100,9 +100,9 @@ does not download it or discover every version enabled for the account.
 Neither the CLI list nor the additional catalog verifies account entitlements. Claude
 checks access and applies its configured model restrictions when a request runs. If
 metadata discovery fails, CLI default and any saved model remain selectable. Saved
-models absent from the refreshed choices are labeled accordingly. The selection
-persists in the active profile, and changing the selected connection's model starts a
-fresh conversation.
+models absent from the refreshed choices remain selectable. The selection persists in
+the active profile, and changing the selected connection's model starts a fresh
+conversation.
 
 ## Custom CLI configuration
 
