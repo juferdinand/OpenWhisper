@@ -1041,6 +1041,7 @@ async function waveformPixels(page: Page, selector: string) {
       peakStrength,
       peakDistance,
       signature,
+      strongColumns: columns.filter((value) => value > 0).length,
     };
   });
 }
@@ -1355,6 +1356,52 @@ test("recording canvas moves accepted historical peaks left without changing the
   expect(
     await page.evaluate(() => (window as any).__syntheticMicrophoneRequests),
   ).toBe(0);
+});
+
+test("a hidden waveform draws the missed recording time when it becomes visible again", async ({
+  page,
+}) => {
+  const fixedTime = new Date("2026-10-11T12:00:00.000Z");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.clock.install({ time: fixedTime });
+  await page.clock.pauseAt(fixedTime);
+  await blockMicrophoneInput(page);
+  await page.setViewportSize({ width: 476, height: 68 });
+  await start(page, "macos", true, false, false, null);
+  const selector = '.audio-mark canvas.live-waveform[data-waveform="overlay"]';
+  const setHidden = (hidden: boolean) =>
+    page.evaluate((value) => {
+      Object.defineProperty(document, "hidden", {
+        configurable: true,
+        get: () => value,
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+    }, hidden);
+  const pulse = (elapsed: number) =>
+    page.evaluate((elapsed) => {
+      Object.assign(window.testState, {
+        status: "recording",
+        recording_generation: 7,
+        elapsed,
+        level: 0,
+      });
+      window.publishState();
+      window.publishTelemetry({ generation: 7, elapsed, level: 0.9 });
+    }, elapsed);
+  await pulse(0);
+  await page.clock.runFor(200);
+  // The overlay is hidden while another window is in front; telemetry keeps arriving.
+  await setHidden(true);
+  for (let step = 1; step <= 10; step++) {
+    await pulse(step);
+    await page.clock.runFor(150);
+  }
+  await setHidden(false);
+  await page.clock.runFor(50);
+  const pixels = await waveformPixels(page, selector);
+  const strong = pixels.strongColumns;
+  // About 1.5 s of hidden recording scrolls roughly 96 CSS pixels of loud bars into view.
+  expect(strong / pixels.pixelRatio).toBeGreaterThan(60);
 });
 
 test("main and overlay waveforms share telemetry timing and level mapping", async ({

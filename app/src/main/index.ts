@@ -576,9 +576,12 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       updateTray(snapshot);
       syncOverlayVisibility(snapshot);
       // macOS reports a background or covered window as hidden and pauses its animation frames,
-      // which left gaps in the live waveform. Keep the window unthrottled only while recording.
+      // which left gaps in the live waveform. Keep the main window and the recording overlay
+      // unthrottled only while recording.
       const throttle = snapshot.status !== "recording";
-      if (!contents.isDestroyed() && contents.getBackgroundThrottling() !== throttle) contents.setBackgroundThrottling(throttle);
+      for (const target of [contents, overlay && !overlay.isDestroyed() ? overlay.webContents : undefined]) {
+        if (target && !target.isDestroyed() && target.getBackgroundThrottling() !== throttle) target.setBackgroundThrottling(throttle);
+      }
     }
     catch { console.error("OpenWhisper Dev could not publish its UI state."); }
   };
