@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rename, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -10,7 +10,9 @@ const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
 
 async function privatePath(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "openwhisper-text-conversation-"));
+  // macOS exposes /var through a symlink to /private/var; PrivateStateStore
+  // intentionally rejects symlinked ancestors, so own the fixture under its canonical path.
+  const root = await mkdtemp(join(await realpath(tmpdir()), "openwhisper-text-conversation-"));
   roots.push(root);
   const directory = join(root, "settings");
   await mkdir(directory, { mode: 0o700 });
