@@ -189,8 +189,8 @@ export class LocalTextConnectionScanner {
       claude === undefined ? false : supportedClaudeVersion(claude, this.environment),
       codex === undefined ? false : checkCodexTextCapabilities(codex),
     ]);
-    const [claudeModels, codexModels] = await Promise.all([
-      claudeSupported && claude !== undefined ? discoverClaudeModels(claude) : [],
+    const [claudeDiscovery, codexModels] = await Promise.all([
+      claudeSupported && claude !== undefined ? discoverClaudeModels(claude) : { models: [], model_options: [] },
       codexSupported && codex !== undefined ? discoverCodexModels(codex) : [],
     ]);
     const result: TextConnectionAvailability[] = [
@@ -198,7 +198,8 @@ export class LocalTextConnectionScanner {
         reason: ollama.failed ? "scan_failed" : ollama.models.length > 0 ? null : ollama.detected ? "no_models" : "not_running" },
       { provider: "lm_studio", detected: lmStudio.detected, usable: lmStudio.models.length > 0, models: [...lmStudio.models],
         reason: lmStudio.failed ? "scan_failed" : lmStudio.models.length > 0 ? null : lmStudio.detected ? "no_models" : "not_running" },
-      { provider: "claude_code", detected: claude !== undefined, usable: claudeSupported, models: claudeModels,
+      { provider: "claude_code", detected: claude !== undefined, usable: claudeSupported, models: [...claudeDiscovery.models],
+        ...(claudeDiscovery.model_options.length > 0 ? { model_options: [...claudeDiscovery.model_options] } : {}),
         reason: claude === undefined ? "not_installed" : claudeSupported ? null : "unsupported" },
       { provider: "codex", detected: codex !== undefined, usable: codexSupported, models: codexModels,
         reason: codex === undefined ? "not_installed" : codexSupported ? null : "unsupported" },

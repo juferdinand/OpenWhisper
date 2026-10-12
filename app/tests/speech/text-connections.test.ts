@@ -6,7 +6,7 @@ import { delimiter, dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 import {
   cliTextModelSchema, customCliConnectionSchema, defaultTextConnectionAvailability, defaultTextConnectionSettings,
-  textConnectionSettingsSchema, textConnectionsStateSchema,
+  textConnectionAvailabilitySchema, textConnectionSettingsSchema, textConnectionsStateSchema,
 } from "../../src/contracts/text/connections.js";
 import { validateCommandInput, appStateSchema } from "../../src/contracts/ui/state.js";
 import { ensureTextProviderAvailability, LocalTextConnectionScanner, resolveTextCliExecutable,
@@ -46,6 +46,30 @@ test("text connections default disabled and preserve explicit provider order", (
     ["codex", "claude_code", "lm_studio", "ollama"]);
   assert.throws(() => textConnectionSettingsSchema.parse({ ...defaults,
     connections: [defaults.connections[0], defaults.connections[0], ...defaults.connections.slice(2)] }));
+});
+
+test("optional CLI model options are bounded typed display metadata", () => {
+  const defaults = defaultTextConnectionAvailability();
+  const claude = defaults.find(({ provider }) => provider === "claude_code");
+  assert.ok(claude);
+  assert.equal(textConnectionAvailabilitySchema.safeParse({ ...claude,
+    model_options: [{ value: "claude-sonnet-5-5", display_name: "Sonnet 5.5", source: "catalog" }],
+  }).success, true);
+  assert.equal(textConnectionAvailabilitySchema.safeParse({ ...claude,
+    model_options: [{ value: "--unsafe", display_name: "Bad model", source: "catalog" }],
+  }).success, false);
+  assert.equal(textConnectionAvailabilitySchema.safeParse({ ...claude,
+    model_options: [{ value: "sonnet", display_name: "Bad\nmodel", source: "cli" }],
+  }).success, false);
+  assert.equal(textConnectionAvailabilitySchema.safeParse({ ...claude,
+    model_options: [{ value: "sonnet", display_name: "Sonnet", source: "guess" }],
+  }).success, false);
+  assert.equal(textConnectionAvailabilitySchema.safeParse({ ...claude,
+    model_options: [{ value: "sonnet", display_name: "🙂".repeat(65), source: "catalog" }],
+  }).success, false);
+  assert.equal(textConnectionAvailabilitySchema.safeParse({ ...claude,
+    model_options: Array.from({ length: 129 }, () => ({ value: "sonnet", display_name: "Sonnet", source: "catalog" })),
+  }).success, false);
 });
 
 test("custom CLI entries are bounded argv data with safe output selectors and compatible legacy defaults", () => {
@@ -227,7 +251,7 @@ process.stdin.on('data', chunk => { pending += chunk; for (const line of pending
   const request = JSON.parse(line);
   if (request.type !== 'control_request' || request.request?.subtype !== 'initialize') process.exit(41);
   process.stdout.write(JSON.stringify({ type: 'control_response', response: { request_id: request.request_id,
-    subtype: 'success', response: { models: [{ value: 'claude-sonnet', displayName: 'Sonnet' }] } } }) + '\\n');
+    subtype: 'success', response: { models: [{ value: 'sonnet', resolvedModel: 'claude-sonnet-5-5', displayName: 'Sonnet' }] } } }) + '\\n');
 } });
 process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o700 });
@@ -265,9 +289,10 @@ process.stdin.on('end', () => process.exit(0));
   const fixturePath = [directory, dirname(process.execPath), "/usr/bin", "/bin"].join(delimiter);
   const availability = await new LocalTextConnectionScanner({ PATH: fixturePath, HOME: directory },
     { ollama: emptyPort, lm_studio: emptyPort }).scan();
-  assert.deepEqual(availability.find(({ provider }) => provider === "claude_code"), {
-    provider: "claude_code", detected: true, usable: true, models: ["claude-sonnet"], reason: null,
-  });
+  const claude = availability.find(({ provider }) => provider === "claude_code");
+  assert.deepEqual(claude?.models, ["sonnet", "claude-sonnet-5-5"]);
+  assert.equal(claude?.model_options?.find(({ value }) => value === "sonnet")?.source, "cli");
+  assert.equal(claude?.model_options?.find(({ value }) => value === "claude-sonnet-5")?.source, "catalog");
   const codex = availability.find(({ provider }) => provider === "codex");
   assert.deepEqual(codex, { provider: "codex", detected: true, usable: true, models: ["gpt-5.4-codex"], reason: null });
 });

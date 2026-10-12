@@ -96,11 +96,19 @@ export const emptyTextConversation = (): TextConversation => ({ id: "", provider
 const textConnectionAvailabilityReasonSchema = z.enum([
   "not_running", "not_installed", "no_models", "unsupported", "scan_failed",
 ]);
+export const textModelOptionSchema = z.strictObject({
+  value: cliTextModelSchema,
+  display_name: utf8(256).min(1).refine((value) => value.trim() === value &&
+    !/[\u0000-\u001f\u007f-\u009f]/u.test(value)),
+  source: z.enum(["cli", "catalog"]),
+});
+export type TextModelOption = z.infer<typeof textModelOptionSchema>;
 export const textConnectionAvailabilitySchema = z.strictObject({
   provider: textProviderSchema,
   detected: z.boolean(),
   usable: z.boolean(),
   models: z.array(utf8(256).min(1)).max(128),
+  model_options: z.array(textModelOptionSchema).max(128).optional(),
   reason: textConnectionAvailabilityReasonSchema.nullable(),
 });
 export type TextConnectionAvailability = z.infer<typeof textConnectionAvailabilitySchema>;

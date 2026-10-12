@@ -80,16 +80,29 @@ successful turn's assistant answer is accepted; progress and commentary are excl
 
 Choose Claude Code and Codex models from the dropdowns in **Settings → Connections**.
 **CLI default** uses the CLI's configured model; an explicit selection is passed as
-`--model` without changing global CLI settings. Catalogs come from the installed CLI:
+`--model` without changing global CLI settings. Discovered choices come from the installed CLI:
 Codex's app-server `model/list` and Claude's initialization control response. Metadata
 sessions use private pipes and the existing owned process boundary, then close; no
 model turn is started. OpenWhisper does not read or copy CLI credentials.
 
-A catalog is not an account-entitlement check: the CLI determines access when a model
-request runs. If metadata discovery fails, CLI default and any saved model remain
-selectable. Saved models absent from a refreshed catalog are labeled accordingly.
-The selection persists in the active profile, and changing the selected connection's
-model starts a fresh conversation.
+Claude's initialization response lists its picker entries, which can be aliases rather
+than every model version. The dropdown preserves each entry and its resolved model ID,
+so the current alias and its specific version are distinct choices. Values such as
+Fable's `[1m]` suffix remain unchanged when selected.
+
+**Other Claude versions** contains separately labeled suggestions from a small catalog
+of active Anthropic model IDs, verified against the official model lifecycle reference
+on October 12, 2026. Suggestions are limited to observed canonical model families and
+versions no newer than the resolved CLI model. Custom provider IDs do not imply support
+for Anthropic's canonical IDs. This catalog is maintained with the application; scanning
+does not download it or discover every version enabled for the account.
+
+Neither the CLI list nor the additional catalog verifies account entitlements. Claude
+checks access and applies its configured model restrictions when a request runs. If
+metadata discovery fails, CLI default and any saved model remain selectable. Saved
+models absent from the refreshed choices are labeled accordingly. The selection
+persists in the active profile, and changing the selected connection's model starts a
+fresh conversation.
 
 ## Custom CLI configuration
 
@@ -155,6 +168,8 @@ Primary references: [LM Studio Chat Completions](https://lmstudio.ai/docs/develo
 [Ollama chat](https://docs.ollama.com/api/chat), [Ollama model list](https://docs.ollama.com/api/tags),
 [Claude Code CLI](https://code.claude.com/docs/en/cli-usage),
 [Claude SDK model metadata](https://code.claude.com/docs/en/agent-sdk/typescript#query-object),
+[Claude model configuration](https://code.claude.com/docs/en/model-config),
+[Claude model lifecycle](https://platform.claude.com/docs/en/about-claude/model-deprecations),
 [Codex app-server model catalog](https://learn.chatgpt.com/docs/app-server#list-models-modellist),
 [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode),
 and [Codex configuration](https://learn.chatgpt.com/docs/config-file/config-reference),

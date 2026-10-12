@@ -206,10 +206,21 @@ test("built-in CLI model catalogs refresh and save by provider identity", async 
   const claudeModel = page.locator('[data-cli-model="claude_code"]');
   await expect(claudeModel.locator("option")).toHaveText([
     "CLI default",
-    "sonnet",
-    "opus",
+    "sonnet · Current Sonnet",
+    "opus · Current Opus",
+    "claude-opus-5 · Opus 5",
+    "claude-opus-5-5 · Opus 5.5",
   ]);
-  await claudeModel.selectOption("opus");
+  await expect(
+    claudeModel.locator('optgroup[label="From Claude CLI"] option'),
+  ).toHaveText(["sonnet · Current Sonnet", "opus · Current Opus"]);
+  await expect(
+    claudeModel.locator('optgroup[label="Other Claude versions"] option'),
+  ).toHaveText(["claude-opus-5 · Opus 5", "claude-opus-5-5 · Opus 5.5"]);
+  await expect(
+    page.getByText("Access to other versions is checked by Claude when used."),
+  ).toBeVisible();
+  await claudeModel.selectOption("claude-opus-5");
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -218,11 +229,23 @@ test("built-in CLI model catalogs refresh and save by provider identity", async 
         ),
       ),
     )
-    .toMatchObject({ provider: "claude_code", model: "opus" });
+    .toMatchObject({ provider: "claude_code", model: "claude-opus-5" });
 
   await page.evaluate(() => {
     (window as any).cliModelCatalog = {
       claude_code: ["sonnet"],
+      claude_model_options: [
+        {
+          value: "sonnet",
+          display_name: "Sonnet · Current Sonnet",
+          source: "cli",
+        },
+        {
+          value: "claude-sonnet-5-5",
+          display_name: "Sonnet 5.5",
+          source: "catalog",
+        },
+      ],
       codex: ["codex-fast"],
     };
   });
@@ -230,10 +253,14 @@ test("built-in CLI model catalogs refresh and save by provider identity", async 
   await expect(page.getByRole("button", { name: "Scan again" })).toBeEnabled();
   await expect(claudeModel.locator("option")).toHaveText([
     "CLI default",
-    "sonnet",
-    "opus (saved, not discovered)",
+    "Sonnet · Current Sonnet",
+    "Sonnet 5.5",
+    "claude-opus-5 (saved, not discovered)",
   ]);
-  await expect(claudeModel).toHaveValue("opus");
+  await expect(claudeModel).toHaveValue("claude-opus-5");
+  await expect(
+    page.getByText("Access to other versions is checked by Claude when used."),
+  ).toBeVisible();
 
   await claudeModel.selectOption("");
   await expect
@@ -251,6 +278,14 @@ test("built-in CLI model catalogs refresh and save by provider identity", async 
     window.testState.preferences.ui_language = "de";
     window.publishState();
   });
+  await expect(
+    page.getByText(
+      "Claude prüft beim Verwenden, ob weitere Versionen verfügbar sind.",
+    ),
+  ).toBeVisible();
+  await expect(
+    claudeModel.locator('optgroup[label="Weitere Claude-Versionen"]'),
+  ).toHaveCount(1);
   await expect(
     page.locator('[data-cli-model="claude_code"] option').first(),
   ).toHaveText("CLI-Standard");
@@ -1547,6 +1582,28 @@ async function start(
               detected: true,
               usable: true,
               models: host.cliModelCatalog?.claude_code ?? ["sonnet", "opus"],
+              model_options: host.cliModelCatalog?.claude_model_options ?? [
+                {
+                  value: "sonnet",
+                  display_name: "sonnet · Current Sonnet",
+                  source: "cli",
+                },
+                {
+                  value: "opus",
+                  display_name: "opus · Current Opus",
+                  source: "cli",
+                },
+                {
+                  value: "claude-opus-5",
+                  display_name: "claude-opus-5 · Opus 5",
+                  source: "catalog",
+                },
+                {
+                  value: "claude-opus-5-5",
+                  display_name: "claude-opus-5-5 · Opus 5.5",
+                  source: "catalog",
+                },
+              ],
               reason: null,
             },
             {

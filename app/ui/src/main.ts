@@ -3176,18 +3176,37 @@ function renderConnectionsSettings(content: HTMLElement) {
               : (found?.models[0] ?? "")
             : "";
         const cliModels = found?.models ?? [];
+        const claudeOptions =
+          connection.provider === "claude_code"
+            ? (found?.model_options ??
+              cliModels.map((value) => ({
+                value,
+                display_name: value,
+                source: "cli" as const,
+              })))
+            : [];
+        const claudeCliOptions = claudeOptions.filter(
+          (item) => item.source === "cli",
+        );
+        const claudeCatalogOptions = claudeOptions.filter(
+          (item) => item.source === "catalog",
+        );
+        const cliModelValues =
+          connection.provider === "claude_code"
+            ? claudeOptions.map((item) => item.value)
+            : cliModels;
         const savedCliModel =
           (connection.provider === "claude_code" ||
             connection.provider === "codex") &&
           connection.model &&
-          !cliModels.includes(connection.model)
+          !cliModelValues.includes(connection.model)
             ? connection.model
             : "";
         const model = local
           ? `<label class="connection-model"><span class="visually-hidden">${esc(t("Model"))}</span><select data-connection-model="${esc(connection.provider)}" aria-label="${esc(t("{provider} model", { provider: name }))}" ${!usable ? "disabled" : ""}>${connection.model && !found?.models.includes(connection.model) ? option(connection.model, connection.model, selectedModel) : ""}${found?.models.length ? found.models.map((item) => option(item, item, selectedModel)).join("") : option("", t("No models found"), selectedModel)}</select></label>`
           : connection.provider === "claude_code" ||
               connection.provider === "codex"
-            ? `<label class="connection-model"><span class="visually-hidden">${esc(t("{provider} model", { provider: name }))}</span><select data-cli-model="${esc(connection.provider)}" aria-label="${esc(t("{provider} model", { provider: name }))}" ${controlsDisabled ? "disabled" : ""}>${option("", t("CLI default"), connection.model)}${cliModels.map((item) => option(item, item, connection.model)).join("")}${savedCliModel ? option(savedCliModel, `${savedCliModel} (${t("Saved, not discovered")})`, connection.model) : ""}</select></label>`
+            ? `<div class="connection-cli-model"><label class="connection-model"><span class="visually-hidden">${esc(t("{provider} model", { provider: name }))}</span><select data-cli-model="${esc(connection.provider)}" aria-label="${esc(t("{provider} model", { provider: name }))}" ${controlsDisabled ? "disabled" : ""}>${option("", t("CLI default"), connection.model)}${connection.provider === "claude_code" ? `${claudeCliOptions.length ? `<optgroup label="${esc(t("From Claude CLI"))}">${claudeCliOptions.map((item) => option(item.value, item.display_name, connection.model)).join("")}</optgroup>` : ""}${claudeCatalogOptions.length ? `<optgroup label="${esc(t("Other Claude versions"))}">${claudeCatalogOptions.map((item) => option(item.value, item.display_name, connection.model)).join("")}</optgroup>` : ""}` : cliModels.map((item) => option(item, item, connection.model)).join("")}${savedCliModel ? option(savedCliModel, `${savedCliModel} (${t("Saved, not discovered")})`, connection.model) : ""}</select></label>${connection.provider === "claude_code" && claudeCatalogOptions.length ? `<p class="connection-model-note">${esc(t("Access to other versions is checked by Claude when used."))}</p>` : ""}</div>`
             : `<div class="connection-cli-note"><p class="connection-model-note">${esc(custom ? (connection as CustomCliConnection).command : t("Uses the tool model"))}</p>${customNeedsPrompt ? `<p class="connection-state unavailable">${esc(t("Add {prompt} to the input template or an argument to use this connection in Conversation mode.", { prompt: "{prompt}" }))}</p>` : ""}</div>`;
         const enabledDisabled =
           (!usable || (local && !selectedModel) || customNeedsPrompt) &&

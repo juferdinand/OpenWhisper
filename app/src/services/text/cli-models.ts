@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { cliTextModelSchema } from "../../contracts/text/connections.js";
+import { cliTextModelSchema, textModelOptionSchema, type TextModelOption } from "../../contracts/text/connections.js";
 import { runTextCliProcess } from "./text-cli-process.js";
 
 const MODEL_LIMIT = 128;
@@ -11,16 +11,32 @@ const codexPageSchema = z.object({
   data: z.array(z.object({ id: z.string().max(1024), hidden: z.boolean() })).max(MODEL_LIMIT),
   nextCursor: z.string().max(1024).nullable().optional(),
 });
-const claudeModelsSchema = z.array(z.object({ value: z.string().max(1024), displayName: z.string().max(1024) })).max(MODEL_LIMIT);
+const claudeModelsSchema = z.array(z.object({ value: z.string().max(1024), resolvedModel: z.string().max(1024).optional(),
+  displayName: z.string().max(1024) })).max(MODEL_LIMIT);
 
-function modelIds(values: readonly string[]): string[] {
-  const result = new Set<string>();
-  for (const value of values) {
-    const parsed = cliTextModelSchema.safeParse(value);
-    if (parsed.success) result.add(parsed.data);
-    if (result.size >= MODEL_LIMIT) break;
-  }
-  return [...result];
+interface ClaudeCatalogModel { readonly value: string; readonly displayName: string; readonly family: string }
+
+// Active first-party Anthropic IDs checked 2026-10-12 against https://platform.claude.com/docs/en/about-claude/model-deprecations.
+// Suggestions are not entitlement claims.
+const activeClaudeModels: readonly ClaudeCatalogModel[] = [
+  { value: "claude-opus-5-5", displayName: "Opus 5.5", family: "opus" },
+  { value: "claude-opus-5", displayName: "Opus 5", family: "opus" },
+  { value: "claude-opus-4-8", displayName: "Opus 4.8", family: "opus" },
+  { value: "claude-opus-4-7", displayName: "Opus 4.7", family: "opus" },
+  { value: "claude-opus-4-6", displayName: "Opus 4.6", family: "opus" },
+  { value: "claude-opus-4-5-20251101", displayName: "Opus 4.5", family: "opus" },
+  { value: "claude-fable-5-1", displayName: "Fable 5.1", family: "fable" },
+  { value: "claude-fable-5", displayName: "Fable 5", family: "fable" },
+  { value: "claude-sonnet-5-5", displayName: "Sonnet 5.5", family: "sonnet" },
+  { value: "claude-sonnet-5", displayName: "Sonnet 5", family: "sonnet" },
+  { value: "claude-sonnet-4-6", displayName: "Sonnet 4.6", family: "sonnet" },
+  { value: "claude-haiku-5-5", displayName: "Haiku 5.5", family: "haiku" },
+  { value: "claude-haiku-4-5-20251001", displayName: "Haiku 4.5", family: "haiku" },
+];
+
+export interface ClaudeModelDiscovery {
+  readonly models: readonly string[];
+  readonly model_options: readonly TextModelOption[];
 }
 
 function lineJson(line: string): Record<string, unknown> {
@@ -82,9 +98,52 @@ export async function discoverCodexModels(executable: string): Promise<string[]>
   } catch { return []; }
 }
 
+function discoverClaudeOptions(metadata: readonly z.infer<typeof claudeModelsSchema>[number][]): ClaudeModelDiscovery {
+  const models = new Set<string>();
+  const options = new Map<string, TextModelOption>();
+  const validId = (value: string): string | undefined => {
+    const parsed = cliTextModelSchema.safeParse(value);
+    return parsed.success ? parsed.data : undefined;
+  };
+  const catalogLabel = (value: string): string | undefined => activeClaudeModels.find((model) => model.value === value)?.displayName;
+  const addOption = (value: string, displayName: string, source: TextModelOption["source"]): void => {
+    const parsedValue = validId(value);
+    if (!parsedValue) return;
+    if (source === "cli") models.add(parsedValue);
+    const label = displayName.length > 0 && new TextEncoder().encode(displayName).byteLength <= 256 &&
+      displayName.trim() === displayName && !/[\u0000-\u001f\u007f-\u009f]/u.test(displayName) ? displayName : parsedValue;
+    const parsed = textModelOptionSchema.safeParse({ value: parsedValue, display_name: label, source });
+    if (!parsed.success) return;
+    const existing = options.get(parsedValue);
+    if (!existing || existing.source === "catalog" && source === "cli") options.set(parsedValue, parsed.data);
+  };
+
+  for (const entry of metadata) {
+    const value = validId(entry.value);
+    if (!value) continue;
+    const resolvedModel = entry.resolvedModel === undefined ? undefined : validId(entry.resolvedModel);
+    const baseLabel = entry.displayName.trim();
+    const label = resolvedModel && value !== resolvedModel
+      ? value.startsWith("claude-") ? `${baseLabel} (${value})` : `${baseLabel} (alias → ${resolvedModel})`
+      : catalogLabel(value) ?? baseLabel;
+    addOption(value, label, "cli");
+    if (!resolvedModel) continue;
+    addOption(resolvedModel, catalogLabel(resolvedModel) ?? resolvedModel, "cli");
+
+    const latestIndex = activeClaudeModels.findIndex((model) => model.value === resolvedModel);
+    if (latestIndex < 0) continue;
+    const family = activeClaudeModels[latestIndex]!.family;
+    for (const model of activeClaudeModels.slice(latestIndex).filter((candidate) => candidate.family === family)) {
+      addOption(model.value, model.displayName, "catalog");
+    }
+  }
+
+  return { models: [...models].slice(0, MODEL_LIMIT), model_options: [...options.values()].slice(0, MODEL_LIMIT) };
+}
+
 /** Read the installed Claude CLI's initialize metadata only; no user prompt or turn is sent. */
-export async function discoverClaudeModels(executable: string): Promise<string[]> {
-  let models: string[] | undefined;
+export async function discoverClaudeModels(executable: string): Promise<ClaudeModelDiscovery> {
+  let discovery: ClaudeModelDiscovery | undefined;
   let completed = false;
   const requestId = "openwhisper-model-catalog";
   const initial = JSON.stringify({ type: "control_request", request_id: requestId,
@@ -105,13 +164,13 @@ export async function discoverClaudeModels(executable: string): Promise<string[]
         if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("Invalid Claude metadata payload.");
         const parsed = claudeModelsSchema.safeParse((payload as Record<string, unknown>)["models"]);
         if (!parsed.success) throw new Error("Invalid Claude model catalog.");
-        models = modelIds(parsed.data.map(({ value }) => value));
+        discovery = discoverClaudeOptions(parsed.data);
         completed = true;
         return { end: true };
       },
     });
-    return completed ? models ?? [] : [];
+    return completed ? discovery ?? { models: [], model_options: [] } : { models: [], model_options: [] };
   } catch {
-    return [];
+    return { models: [], model_options: [] };
   }
 }

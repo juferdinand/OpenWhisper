@@ -76,7 +76,7 @@ test("Codex metadata errors and repeated cursors fail closed without returning p
   assert.deepEqual(await discoverCodexModels(cursorExecutable), []);
 });
 
-test("Claude metadata discovery sends only initialize and extracts bounded unique model values", async () => {
+test("Claude metadata discovery preserves aliases and resolved IDs and adds bounded active-version suggestions", async () => {
   const executable = await fixtureExecutable(`
     let pending = '';
     process.stdin.setEncoding('utf8');
@@ -90,15 +90,33 @@ test("Claude metadata discovery sends only initialize and extracts bounded uniqu
             message.request_id !== 'openwhisper-model-catalog') process.exit(41);
         process.stdout.write(JSON.stringify({ type: 'control_response', response: { request_id: message.request_id,
           subtype: 'success', response: { account: { private: 'not returned' }, models: [
-            { value: 'claude-sonnet', displayName: 'Sonnet' }, { value: 'claude-opus', displayName: 'Opus' },
-            { value: 'claude-sonnet', displayName: 'Duplicate' }, { value: '--invalid', displayName: 'Invalid' },
+            { value: 'opus', resolvedModel: 'claude-opus-5-5', displayName: 'Opus' },
+            { value: 'claude-fable-5-1[1m]', resolvedModel: 'claude-fable-5-1', displayName: 'Fable' },
+            { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet' },
+            { value: 'custom-haiku', resolvedModel: 'vendor-haiku-latest', displayName: 'Gateway Haiku' },
+            { value: 'opus', resolvedModel: 'claude-opus-5-5', displayName: 'Duplicate' },
+            { value: '--invalid', displayName: 'Invalid' },
             { value: 'bad\\nmodel', displayName: 'Invalid control' },
           ] } } }) + '\\n');
       }
     });
     process.stdin.on('end', () => process.exit(0));
   `);
-  assert.deepEqual(await discoverClaudeModels(executable), ["claude-sonnet", "claude-opus"]);
+  const discovery = await discoverClaudeModels(executable);
+  assert.deepEqual(discovery.models, ["opus", "claude-opus-5-5", "claude-fable-5-1[1m]", "claude-fable-5-1",
+    "sonnet", "claude-sonnet-5", "custom-haiku", "vendor-haiku-latest"]);
+  const option = (value: string) => discovery.model_options.find((candidate) => candidate.value === value);
+  assert.deepEqual(option("opus"), { value: "opus", display_name: "Opus (alias → claude-opus-5-5)", source: "cli" });
+  assert.deepEqual(option("claude-opus-5-5"), { value: "claude-opus-5-5", display_name: "Opus 5.5", source: "cli" });
+  assert.deepEqual(option("claude-fable-5-1[1m]"), {
+    value: "claude-fable-5-1[1m]", display_name: "Fable (claude-fable-5-1[1m])", source: "cli",
+  });
+  assert.equal(option("claude-fable-5")?.source, "catalog");
+  assert.equal(option("claude-sonnet-5-5"), undefined, "versions newer than the resolved Sonnet model are not suggested");
+  assert.equal(option("claude-sonnet-4-6")?.source, "catalog");
+  assert.equal(option("vendor-haiku-latest")?.source, "cli");
+  assert.equal(option("claude-haiku-5-5"), undefined, "provider-specific IDs do not seed first-party family suggestions");
+  assert.ok(discovery.model_options.every(({ value }) => !value.includes("mythos")));
 });
 
 test("Claude malformed or mismatched initialize responses return an empty catalog", async () => {
@@ -107,5 +125,5 @@ test("Claude malformed or mismatched initialize responses return an empty catalo
       request_id: 'not-openwhisper-request', subtype: 'success', response: { models: [{ value: 'wrong', displayName: 'Wrong' }] },
     } }) + '\\n'));
   `);
-  assert.deepEqual(await discoverClaudeModels(executable), []);
+  assert.deepEqual(await discoverClaudeModels(executable), { models: [], model_options: [] });
 });
