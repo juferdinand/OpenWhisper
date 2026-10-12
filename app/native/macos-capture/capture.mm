@@ -69,6 +69,8 @@ struct Session {
     std::vector<std::vector<float>> prepared, reference;
     AVAudioEngine * __strong engine = nil;
     id __strong observer = nil;
+    AVAudioNodeTapBlock __strong tap = nil;
+    uint32_t restarts = 0; // Configuration-change restarts in this recording, bounded below.
     std::atomic<uint32_t> engine_allocations{0}, input_operations{0}, permission_queries{0};
     dispatch_queue_t control = dispatch_queue_create("io.github.whisperfree.dev.capture", DISPATCH_QUEUE_SERIAL);
     Shared backend_owner; // A callback can never become the last owner of a live engine.
@@ -210,6 +212,21 @@ void append(const Shared & s, AVAudioPCMBuffer * buffer) noexcept {
         s->active--; s->condition.notify_all();
     }
 }
+constexpr uint32_t maximum_restarts = 3;
+void restart_engine(const Shared & s) noexcept {
+    {
+        std::lock_guard<std::mutex> lock(s->mutex);
+        if (!s->running || s->closed || s->cancelled || s->released || !s->engine || !s->tap) return;
+        if (++s->restarts > maximum_restarts) { s->fail("interrupted"); return; }
+    }
+    @autoreleasepool {
+        s->input_operations++;
+        const bool restarted = stop_engine(s->engine)
+            && (s->device.empty() || select_input_device(s->engine, s->device))
+            && open_engine(s->engine, s->tap);
+        if (!restarted) { std::lock_guard<std::mutex> lock(s->mutex); s->fail("interrupted"); }
+    }
+}
 void start(const Shared & s) {
     if (s->closed || s->released || s->running || s->cancelled) throw std::runtime_error("CAPTURE_FAILED");
     if (s->synthetic) { std::lock_guard<std::mutex> lock(s->mutex); s->accepting = true; s->running = true; return; }
@@ -222,19 +239,22 @@ void start(const Shared & s) {
             s->engine_allocations++; s->engine = [[AVAudioEngine alloc] init];
             if (!s->engine) throw std::bad_alloc();
             std::weak_ptr<Session> weak = s;
+            // Bluetooth headsets switch profile and sample rate when their microphone opens, and
+            // macOS stops the engine with a configuration change. Restart on the serial control
+            // queue (after Start completes) with the new format instead of ending the recording.
             s->observer = [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioEngineConfigurationChangeNotification object:s->engine queue:nil usingBlock:^(NSNotification * __unused notification) {
-                if (const auto current = weak.lock()) {
-                    std::lock_guard<std::mutex> lock(current->mutex);
-                    if (current->running && !current->closed) current->fail("interrupted");
-                }
+                if (const auto current = weak.lock()) dispatch_async(current->control, ^{
+                    if (const auto session = weak.lock()) restart_engine(session);
+                });
             }];
             s->input_operations++;
             if (!s->device.empty() && !select_input_device(s->engine, s->device)) throw std::runtime_error("CAPTURE_FAILED");
             { std::lock_guard<std::mutex> lock(s->mutex); s->accepting = true; }
             if (s->cancelled) throw std::runtime_error("CAPTURE_FAILED");
-            const bool started = open_engine(s->engine, ^(AVAudioPCMBuffer * buffer, AVAudioTime * __unused time) {
+            s->tap = ^(AVAudioPCMBuffer * buffer, AVAudioTime * __unused time) {
                 if (const auto current = weak.lock()) append(current, buffer);
-            });
+            };
+            const bool started = open_engine(s->engine, s->tap);
             if (s->cancelled || !started) throw std::runtime_error("CAPTURE_FAILED");
             s->running = true;
         } @catch (NSException * __unused exception) { throw std::runtime_error("CAPTURE_FAILED"); }
