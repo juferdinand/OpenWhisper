@@ -21,11 +21,27 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <stdexcept>
 
 namespace {
 constexpr napi_type_tag tag{0x1470b2f58ba847efULL, 0xa61e94598de70c35ULL};
+// Capture and speech workers each own one boundary at the same time, and a restarted
+// worker may be admitted while its predecessor is still being retired. A process is
+// never observed by two owners at once.
+constexpr unsigned maximumOwners = 4;
 std::atomic<unsigned> reserved{0};
+std::mutex reservationMutex;
+std::set<pid_t> reservedProcesses;
+bool reserveOwner(pid_t pid) {
+  std::lock_guard<std::mutex> lock(reservationMutex);
+  if (reservedProcesses.size() >= maximumOwners || !reservedProcesses.insert(pid).second) return false;
+  reserved.fetch_add(1); return true;
+}
+void releaseOwner(pid_t pid) {
+  std::lock_guard<std::mutex> lock(reservationMutex);
+  if (reservedProcesses.erase(pid) == 1) reserved.fetch_sub(1);
+}
 std::atomic<unsigned> environmentCleanups{0}, suppressedCompletions{0}, totalDisposals{0};
 std::atomic<unsigned> queryCompletions{0}, completionsBeforeCleanup{0};
 enum class Kind { Record, Absent, Failure };
@@ -289,7 +305,7 @@ void completeClose(napi_env env, napi_status status, void* data) {
   }
   value.cleanup = nullptr;
   delete value.cleanupOwner; value.cleanupOwner = nullptr;
-  reserved.fetch_sub(1);
+  releaseOwner(value.pid);
   totalDisposals.fetch_add(1);
   // During teardown hook removal may permit environment destruction. No more
   // env/JS calls follow it in that branch. Normal explicit close still has JS.
@@ -317,8 +333,7 @@ napi_value createOwner(napi_env env, pid_t pid, uid_t uid, pid_t parent, bool sy
   std::shared_ptr<Owner> value;
   bool acquired = false;
   try {
-    unsigned empty = 0;
-    if (!reserved.compare_exchange_strong(empty, 1)) throw std::runtime_error("NATIVE_FAILED");
+    if (!reserveOwner(pid)) throw std::runtime_error("NATIVE_FAILED");
     acquired = true;
     value = std::make_shared<Owner>(env, pid, uid, parent, synthetic);
     check(napi_create_async_work(env, nullptr, text(env, "owned-retirement-close"), executeClose, completeClose, value.get(), &value->closeWork));
@@ -334,7 +349,7 @@ napi_value createOwner(napi_env env, pid_t pid, uid_t uid, pid_t parent, bool sy
     else {
       if (value && value->closeWork) napi_delete_async_work(env, value->closeWork);
       if (value) delete value->cleanupOwner;
-      if (acquired) reserved.fetch_sub(1);
+      if (acquired) releaseOwner(pid);
     }
     return fail(env);
   }
