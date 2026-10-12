@@ -71,6 +71,7 @@ export async function runTextCliProcess(options: TextCliProcessOptions): Promise
     return await new Promise<Buffer>((resolveResult, reject) => {
       let settled = false, stdoutBytes = 0, stdinBytes = Buffer.byteLength(options.input, "utf8"), stdinEnded = false;
       let exitError: TextCliProcessError | undefined, killTimer: NodeJS.Timeout | undefined;
+      let terminationRequested = false, childClosed = false;
       const stdout: Buffer[] = [];
       let lineBuffer = Buffer.alloc(0);
       const child = spawn(options.executable, [...options.args], {
@@ -86,10 +87,14 @@ export async function runTextCliProcess(options: TextCliProcessOptions): Promise
         }
       };
       const terminate = (): void => {
+        if (!terminationRequested) { terminationRequested = true; clearTimeout(timer); }
         signalGroup("SIGTERM");
         if (killTimer) return;
-        killTimer = setTimeout(() => signalGroup("SIGKILL"), 1500);
-        killTimer.unref();
+        killTimer = setTimeout(() => {
+          killTimer = undefined;
+          signalGroup("SIGKILL");
+          if (childClosed && exitError) finish(exitError);
+        }, 1500);
       };
       const finish = (error?: TextCliProcessError, value?: Buffer): void => {
         if (settled) return;
@@ -99,8 +104,8 @@ export async function runTextCliProcess(options: TextCliProcessOptions): Promise
         options.signal.removeEventListener("abort", abort);
         if (error) reject(error); else resolveResult(value ?? Buffer.alloc(0));
       };
-      const abort = (): void => { exitError = new TextCliProcessError("CANCELLED"); terminate(); };
-      const failProtocol = (): void => { exitError = new TextCliProcessError("INVALID_RESPONSE"); terminate(); };
+      const abort = (): void => { exitError ??= new TextCliProcessError("CANCELLED"); terminate(); };
+      const failProtocol = (): void => { exitError ??= new TextCliProcessError("INVALID_RESPONSE"); terminate(); };
       const dispatchLine = (line: Buffer): void => {
         if (!options.onLine || exitError) return;
         if (line.byteLength > MAX_TEXT_CLI_LINE_BYTES) { failProtocol(); return; }
@@ -129,12 +134,12 @@ export async function runTextCliProcess(options: TextCliProcessOptions): Promise
           newline = lineBuffer.indexOf(0x0a);
         }
       };
-      const timer = setTimeout(() => { exitError = new TextCliProcessError("TIMEOUT"); terminate(); }, options.timeoutMs);
+      const timer = setTimeout(() => { exitError ??= new TextCliProcessError("TIMEOUT"); terminate(); }, options.timeoutMs);
       child.stdout.on("data", (chunk: Buffer) => {
         if (exitError) return;
         stdoutBytes += chunk.byteLength;
         if (stdoutBytes > (options.maxStdoutBytes ?? MAX_TEXT_CLI_STDOUT_BYTES)) {
-          exitError = new TextCliProcessError("INVALID_RESPONSE"); terminate(); return;
+          exitError ??= new TextCliProcessError("INVALID_RESPONSE"); terminate(); return;
         }
         stdout.push(chunk);
         collectLines(chunk);
@@ -142,8 +147,12 @@ export async function runTextCliProcess(options: TextCliProcessOptions): Promise
       child.stderr.on("data", () => {});
       child.on("error", () => finish(new TextCliProcessError("UNAVAILABLE")));
       child.on("close", (code) => {
+        childClosed = true;
         if (!exitError && options.onLine && lineBuffer.byteLength > 0) exitError = new TextCliProcessError("INVALID_RESPONSE");
-        if (exitError) { finish(exitError); return; }
+        if (exitError) {
+          if (terminationRequested && killTimer) return;
+          finish(exitError); return;
+        }
         if (code !== 0) { finish(new TextCliProcessError("FAILED")); return; }
         finish(undefined, Buffer.concat(stdout, stdoutBytes));
       });
