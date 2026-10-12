@@ -623,7 +623,7 @@ try {
         const captureControl = { async call(command: "configure" | "close") {
           const id = crypto.randomUUID();
           const request = recording.macRecordingHostRequestSchema.parse({ version: 1, channel: "recording-host", epoch, id, command,
-            ...(command === "configure" ? { capture: descriptor.capture, request: {
+            ...(command === "configure" ? { capture: descriptor.capture, source: "", request: {
               model: { path: path.join(app.getPath("userData"), "unused-native-loading-model.bin"), family: "whisper", gpu: false },
               language: "auto", vocabulary: "", snippets: [] } } : {}) });
           captureOwner.child.postMessage(request);

@@ -273,7 +273,8 @@ export class DevelopmentRecordingHost {
     const owner = await this.allocate(input);
     try {
       const reply = await this.request(owner, { command: "configure", capture: this.descriptor.capture, request: input.request,
-        ...(this.descriptor.platform === "linux" ? { server: input.server, source: input.source, recoveryPath: this.options.recoveryPath } : {}) });
+        ...(this.descriptor.platform === "linux" ? { server: input.server, source: input.source, recoveryPath: this.options.recoveryPath }
+          : { source: input.source ?? "" }) });
       if (reply.kind !== "control" || !reply.reply.ok) throw fail();
     } catch (error: unknown) { await this.retire(owner); throw error; }
   }

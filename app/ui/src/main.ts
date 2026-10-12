@@ -1911,7 +1911,7 @@ function render() {
         ),
         content: isMac()
           ? state.macos?.microphone_allowed
-            ? `<p class="success">${esc(t("Microphone access allowed"))}</p><p class="secondary">${esc(t("OpenWhisper records from the system default microphone. Change it in System Settings → Sound → Input."))}</p>`
+            ? `<p class="success">${esc(t("Microphone access allowed"))}</p>${microphoneControl()}`
             : `<button data-command="allow_microphone">${esc(t("Allow"))}</button>`
           : microphoneControl(),
       },
@@ -2102,7 +2102,7 @@ function render() {
       ? row(
           t("Microphone access"),
           `${macPermissionStatus(state.macos?.microphone_allowed === true)}<button data-command="allow_microphone">${esc(t("System Settings"))}</button>`,
-        )
+        ) + row(t("Microphone"), microphoneControl())
       : row(t("Microphone"), microphoneControl());
     const permissions =
       row(

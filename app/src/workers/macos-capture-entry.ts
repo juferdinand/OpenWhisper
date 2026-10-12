@@ -10,7 +10,7 @@ import { loadNativeMacCapture } from "./recording/native-macos-capture.js";
 import { developmentCaptureDescriptorSchema } from "./recording/recording-host-protocol.js";
 import { WorkerRecordingEffects } from "./recording/recording-effects.js";
 
-// The trusted main supplies only the epoch. Native paths and hardware selection are fixed here.
+// The trusted main supplies only the epoch. Native paths are fixed here; the input device arrives in configure.
 const epoch = (() => { try { return z.tuple([z.uuid()]).parse(process.argv.slice(2))[0]; }
   catch { throw new Error("Recording owner unavailable."); } })();
 const uid = process.getuid?.();
@@ -41,9 +41,10 @@ let cleanup: Promise<void> | undefined;
 const runtime = new MacCaptureRuntime({ epoch, pid: process.pid, send: (reply) => { post(reply); }, effects: {
   async prepare(configuration) {
     const native = await load(configuration.capture);
-    const capture = NativeCaptureBoundary.fromSessionFactory((generation) => native.create(generation, { mode: "avfoundation" }));
+    const capture = NativeCaptureBoundary.fromSessionFactory((generation) => native.create(generation, { mode: "avfoundation", device: configuration.source }));
     // Allocation belongs only to an explicit Start. Native Start checks existing permission;
-    // this entry never requests TCC permission, enumerates devices or writes recovery audio.
+    // this entry never requests TCC permission, enumerates devices or writes recovery audio. The
+    // configured CoreAudio UID is resolved only at Start; a missing device fails that Start.
     return { create(callbacks) {
       const session = capture.create(callbacks);
       const owned: OwnedCaptureSession = { start: (signal) => session.start(signal),

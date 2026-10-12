@@ -50,6 +50,7 @@ import { WaylandRecordingOverlay } from "./wayland-recording-overlay.js";
 import type { SurfaceUnavailableReason } from "../contracts/platforms/wayland-surface.js";
 import { MacosShortcut } from "./macos-shortcut.js";
 import { MacosMouseTrigger } from "./macos-mouse-trigger.js";
+import { macosAudioInputSources } from "./macos-audio-devices.js";
 import { MacosPaste } from "./macos-paste.js";
 import { MacosAutostart } from "./macos-autostart.js";
 import { APPLICATION_MACOS_UPDATE_BUILD } from "./macos-update-build.js";
@@ -373,6 +374,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         return delivered;
       } },
     });
+    // macOS lists CoreAudio inputs in main; only device UIDs and display names are read.
+    if (descriptor.platform === "darwin") sources = macosAudioInputSources();
     if (descriptor.platform === "linux") {
       try { audioServer = await checkedAudioServer(); sources = await host.enumerate(audioServer); }
       catch { message = "A local audio server is not available."; }
@@ -602,7 +605,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       gpu: selected.gpu && gpuSelection.supported },
       language: selected.language, vocabulary: selected.vocabulary, snippets: selected.snippets });
     await host.configure({ id: model.model.id, request,
-      ...(macRecording ? {} : { server: audioServer ?? `unix:${join(process.env.XDG_RUNTIME_DIR ?? profile.paths.locks, "pulse/native")}`,
+      ...(macRecording ? { source: selected.microphone } : { server: audioServer ?? `unix:${join(process.env.XDG_RUNTIME_DIR ?? profile.paths.locks, "pulse/native")}`,
         source: selected.microphone }) }); configured = true;
   };
   const toggleRecording = (): Promise<void> => recordingAction(async () => {
@@ -1048,7 +1051,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       retry_transcription: () => recordingAction(async () => { await configureRecording(); if (cancelRequested) return; inferenceProgress = 0; await host?.command("retry"); }),
       discard_recovery: () => recordingAction(async () => { await configureRecording(); if (!cancelRequested) await host?.command("discard"); }),
       refresh_microphones: () => recordingAction(async () => { if (!host) throw new Error("Recording unavailable.");
-        if (macRecording) { microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted"; return; }
+        if (macRecording) { microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted"; sources = macosAudioInputSources(); return; }
         audioServer = await checkedAudioServer(); sources = await host.enumerate(audioServer); }),
       allow_microphone: () => action(async () => {
         if (!macRecording) throw new Error("Microphone permission is unavailable.");
@@ -1146,6 +1149,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   window.on("restore", syncOverlayAfterWindowEvent);
   if (macRecording) window.on("focus", () => {
     microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted";
+    sources = macosAudioInputSources();
     accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(false); notify();
   });
   if (autostart) window.on("focus", () => { void refreshLogin().then(notify); });

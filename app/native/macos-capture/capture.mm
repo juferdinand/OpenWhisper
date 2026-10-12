@@ -1,5 +1,7 @@
 // macOS framework edge only. Lifecycle, recovery policy and IPC remain TypeScript.
 #import <AVFoundation/AVFoundation.h>
+#include <AudioToolbox/AudioToolbox.h>
+#include <CoreAudio/CoreAudio.h>
 #include <node_api.h>
 #include <algorithm>
 #include <atomic>
@@ -52,6 +54,7 @@ using Shared = std::shared_ptr<Session>;
 struct Session {
     const double generation;
     const bool synthetic;
+    const std::string device; // CoreAudio device UID; empty keeps the system default input.
     std::atomic<bool> busy{false}, running{false}, closed{false}, failed{false}, released{false}, cancelled{false};
     std::atomic<bool> fail_next_queue{false};
     std::atomic<uint64_t> frames{0}, sequence{0};
@@ -69,7 +72,7 @@ struct Session {
     std::atomic<uint32_t> engine_allocations{0}, input_operations{0}, permission_queries{0};
     dispatch_queue_t control = dispatch_queue_create("io.github.whisperfree.dev.capture", DISPATCH_QUEUE_SERIAL);
     Shared backend_owner; // A callback can never become the last owner of a live engine.
-    Session(double g, bool s, uint32_t r, uint32_t c) : generation(g), synthetic(s), rate(r), channels(c) {
+    Session(double g, bool s, uint32_t r, uint32_t c, std::string d) : generation(g), synthetic(s), device(std::move(d)), rate(r), channels(c) {
         if (!control) throw std::bad_alloc();
     }
     void fail(const char * code) noexcept {
@@ -91,6 +94,24 @@ bool stop_engine(id engine) noexcept {
     @try { [[engine inputNode] removeTapOnBus:0]; } @catch (NSException * __unused exception) { stopped = false; }
     @try { [engine stop]; } @catch (NSException * __unused exception) { stopped = false; }
     return stopped;
+}
+// Points the engine's input unit at one CoreAudio device before its format is read. A UID
+// that no longer resolves fails this Start instead of silently recording another device.
+bool select_input_device(AVAudioEngine * engine, const std::string & uid) noexcept {
+    @try {
+        CFStringRef text = CFStringCreateWithBytes(kCFAllocatorDefault, reinterpret_cast<const UInt8 *>(uid.data()),
+            CFIndex(uid.size()), kCFStringEncodingUTF8, false);
+        if (!text) return false;
+        AudioObjectID device = kAudioObjectUnknown; UInt32 size = sizeof(device);
+        const AudioObjectPropertyAddress address = { kAudioHardwarePropertyTranslateUIDToDevice,
+            kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain };
+        const OSStatus status = AudioObjectGetPropertyData(kAudioObjectSystemObject, &address, sizeof(text), &text, &size, &device);
+        CFRelease(text);
+        if (status != noErr || device == kAudioObjectUnknown) return false;
+        AudioUnit unit = engine.inputNode.audioUnit;
+        return unit && AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
+            &device, sizeof(device)) == noErr;
+    } @catch (NSException * __unused exception) { return false; }
 }
 bool open_engine(id engine, AVAudioNodeTapBlock tap) noexcept {
     @try {
@@ -208,6 +229,7 @@ void start(const Shared & s) {
                 }
             }];
             s->input_operations++;
+            if (!s->device.empty() && !select_input_device(s->engine, s->device)) throw std::runtime_error("CAPTURE_FAILED");
             { std::lock_guard<std::mutex> lock(s->mutex); s->accepting = true; }
             if (s->cancelled) throw std::runtime_error("CAPTURE_FAILED");
             const bool started = open_engine(s->engine, ^(AVAudioPCMBuffer * buffer, AVAudioTime * __unused time) {
@@ -381,9 +403,12 @@ napi_value queue(napi_env env, Shared s, const char * operation, std::vector<flo
 }
 napi_value create(napi_env env, napi_callback_info info) {
     try {
-        const auto a = arguments(env, info, 4); bool synthetic; check(napi_get_value_bool(env, a[1], &synthetic));
+        const auto a = arguments(env, info, 5); bool synthetic; check(napi_get_value_bool(env, a[1], &synthetic));
+        char uid[256] = {}; size_t length = 0;
+        check(napi_get_value_string_utf8(env, a[4], uid, sizeof(uid), &length));
+        if (length >= sizeof(uid) - 1 || (synthetic && length)) throw std::runtime_error("CAPTURE_FAILED");
         auto s = std::make_shared<Session>(integer(env, a[0], 1, max_safe), synthetic,
-            uint32_t(integer(env, a[2], 8000, 192000)), uint32_t(integer(env, a[3], 1, 8)));
+            uint32_t(integer(env, a[2], 8000, 192000)), uint32_t(integer(env, a[3], 1, 8)), std::string(uid, length));
         napi_value value = object(env); auto holder = std::make_unique<Shared>(s);
         check(napi_wrap(env, value, holder.get(), [](napi_env, void * pointer, void *) { delete static_cast<Shared *>(pointer); }, nullptr, nullptr));
         holder.release(); check(napi_type_tag_object(env, value, &tag)); return value;

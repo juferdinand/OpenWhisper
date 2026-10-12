@@ -201,6 +201,9 @@ test("Mac settings show whether Accessibility and microphone access are allowed"
     window.publishState();
   });
   await expect(permissions.getByText("Allowed", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("combobox", { name: "Microphone", exact: true }),
+  ).toBeVisible();
 });
 
 test("Mac Insert opens Accessibility settings, then saves only after the user retries", async ({
@@ -4091,11 +4094,27 @@ for (const platform of ["linux", "macos"] as const) {
     if (platform === "macos") {
       await page.evaluate(() => {
         window.testState.macos!.microphone_allowed = true;
+        window.testState.microphones = ["AppleUSBAudioEngine:Synthetic Mic:1"];
+        window.testState.microphone_labels = [
+          {
+            id: "AppleUSBAudioEngine:Synthetic Mic:1",
+            name: "Synthetic USB microphone",
+          },
+        ];
         window.publishState();
       });
       await expect(
         page.getByText("Microphone access allowed", { exact: true }),
       ).toBeVisible();
+      const macMicrophone = page.getByRole("combobox", { name: "Microphone" });
+      await expect(macMicrophone).toBeVisible();
+      await macMicrophone.selectOption("AppleUSBAudioEngine:Synthetic Mic:1");
+      await expect
+        .poll(() =>
+          page.evaluate(() => window.testState.preferences.microphone),
+        )
+        .toBe("AppleUSBAudioEngine:Synthetic Mic:1");
+      await macMicrophone.selectOption("");
       await expect(
         page.getByRole("button", { name: "Allow", exact: true }),
       ).toHaveCount(0);
