@@ -4,6 +4,46 @@ Start with [README.md](../README.md) for released behavior. This branch implemen
 [Connections (#11)](https://github.com/juferdinand/OpenWhisper/issues/11); it is not part
 of release 0.4.2. Ordinary recording remains independent of these optional integrations.
 
+## Expanded implementation plan for #11
+
+The increment is not ready for acceptance until these requirements are implemented:
+
+1. Enable Codex non-interactive processing with the installed CLI login, explicit
+   read-only sandbox and no approval prompts. Parse completed JSON events; reject
+   failed or incomplete turns. Keep Claude Code and the two local providers working.
+2. Add custom CLI connections with a name, executable, separate argument list,
+   stdin template and plain-text or selected JSON-field output. Templates substitute
+   text into data arguments or stdin, never into shell code. Users can configure
+   Gemini, ZAI or their own wrapper without another built-in adapter. Discovery
+   checks the executable without running the configured command.
+3. Provide independent **Single recording** and **Conversation** modes. Conversation
+   mode retains successful user/assistant turns across recordings and application
+   restarts in the private active profile. **New chat** clears that context.
+   OpenWhisper supplies the conversation explicitly to each request: local APIs
+   receive role-separated messages and CLI tools receive a serialized conversation.
+   This does not resume or import unrelated chats from the user's CLI tools.
+4. Give conversation mode its own instruction. Changing the selected connection,
+   its model/command, or that instruction starts a fresh context; reordering other
+   connections does not. Failed, skipped, cancelled or stale requests add no turns.
+   A conversation becomes durable only after its output is accepted. Exceeding the
+   supported context bound preserves the input and asks for a new chat, without
+   silently dropping older turns or shortening recordings.
+5. Extend the synchronized German/English interface with custom connection editing,
+   mode selection, visible conversation turns and **New chat**. Typed messages are
+   an optional clarification; voice conversation does not depend on that answer.
+6. Validate CLI invocation and cancellation with owned fake executables, local chat
+   payloads with synthetic servers, persistence/ownership with integration tests,
+   and the rendered controls with browser and isolated Electron checks. Run the
+   common checks once for the completed increment and obtain independent review.
+
+The contract remains authoritative in `app/src/contracts/text/connections.ts`.
+Existing four-provider profiles decode with single-recording defaults. Custom
+connections have stable `custom:<uuid>` identifiers; the four built-in identifiers
+remain unchanged. The connection registry supports at most 20 entries. Conversation
+history is app-owned context rather than provider session IDs, avoiding accidental
+reuse of other CLI chats and keeping cancelled provider calls out of later context.
+No TTS, Obsidian, arbitrary model-generated command execution or release is included.
+
 ## Processing and selection
 
 Text processing runs in this order: recognition, optional deterministic cleanup,
