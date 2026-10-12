@@ -367,6 +367,7 @@ svg {
   flex: 0 0 auto;
   min-width: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-start;
   gap: 16px;
@@ -379,6 +380,8 @@ svg {
   gap: 14px;
 }
 .dictation-title {
+  min-width: max-content;
+  flex: 0 0 auto;
   margin: 0;
   display: flex;
   align-items: center;
@@ -388,6 +391,8 @@ svg {
   display: none;
 }
 .dictation-title h1 {
+  flex: 0 0 auto;
+  white-space: nowrap;
   margin: 0;
   font-size: 20px;
   font-weight: 600;
@@ -557,116 +562,122 @@ svg {
 .dictation-empty-mark {
   display: none;
 }
+.dictation-processing-slot {
+  min-width: 0;
+  min-height: 48px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
 .dictation-processing-strip {
   min-width: 0;
-  flex: 0 0 auto;
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 8px;
-  margin-top: 12px;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--group);
+  gap: 7px;
 }
 .processing-progress-copy {
   min-width: 0;
   color: var(--secondary);
-  font-size: 12px;
-  font-weight: 550;
+  font-size: 13px;
+  font-weight: 500;
 }
-.processing-step-list,
-.overlay-processing-step-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.processing-step-list li,
-.overlay-processing-step-list li {
+.processing-progress-row {
   min-width: 0;
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.35;
+  gap: 10px;
 }
-.processing-step-indicator {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 7px;
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  background: transparent;
-}
-.processing-step-list li[data-step-state="current"],
-.overlay-processing-step-list li[data-step-state="current"] {
-  color: var(--text);
-  font-weight: 650;
-}
-.processing-step-list li[data-step-state="current"] .processing-step-indicator,
-.overlay-processing-step-list
-  li[data-step-state="current"]
-  .processing-step-indicator {
-  border-color: var(--accent);
-  background: var(--accent);
-}
-.processing-step-list
-  li[data-step-state="completed"]
-  .processing-step-indicator,
-.overlay-processing-step-list
-  li[data-step-state="completed"]
-  .processing-step-indicator {
-  border-color: var(--ok);
-  background: var(--ok);
-}
-.processing-step-list li[data-step-state="skipped"] .processing-step-indicator,
-.overlay-processing-step-list
-  li[data-step-state="skipped"]
-  .processing-step-indicator {
-  border-style: dashed;
-  border-color: var(--muted);
-}
-.dictation-processing-strip .indeterminate-progress {
-  width: 100%;
-}
-.indeterminate-progress {
+.processing-bar {
   min-width: 0;
   flex: 1 1 auto;
   position: relative;
-  height: 5px;
+  height: 18px;
   overflow: hidden;
-  border-radius: 4px;
+  border-radius: 9px;
   background: var(--border);
 }
-.indeterminate-progress > span {
+.processing-bar::before {
   position: absolute;
   inset: 0 auto 0 0;
-  width: 30%;
+  width: var(--processing-fill, 0%);
   border-radius: inherit;
-  background: var(--accent);
-  animation: processing-sweep 1.4s ease-in-out infinite alternate;
+  background: linear-gradient(90deg, var(--accent-strong), var(--accent));
+  content: "";
 }
-.indeterminate-progress.determinate > span {
+.processing-bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--processing-fill, 0%);
+  overflow: hidden;
+  border-radius: inherit;
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 9px,
+    rgb(180 156 255 / 22%) 9px 18px
+  );
+  animation: processing-stripes 1s linear infinite;
+}
+.processing-progress-row > button,
+.dictation-processing-error > button {
+  min-width: 34px;
+  min-height: 32px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+}
+.processing-progress-row > button {
+  width: 34px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 19px;
+  line-height: 1;
+}
+.dictation-processing-error {
+  position: relative;
+  min-width: 0;
   width: 100%;
-  transform: scaleX(var(--progress-fraction, 0));
-  transform-origin: left center;
-  animation: none;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  overflow: hidden;
+  padding: 0 8px 0 12px;
+  border: 1px solid rgb(240 138 138 / 35%);
+  border-radius: 20px;
+  background: linear-gradient(
+    90deg,
+    rgb(240 138 138 / 16%) 0 var(--processing-fill, 0%),
+    rgb(240 138 138 / 7%) var(--processing-fill, 0%)
+  );
+  color: var(--text);
+  font-size: 12px;
 }
-@keyframes processing-sweep {
-  from {
-    transform: translateX(-5%);
-  }
+.processing-error-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: #f08a8a;
+  box-shadow: 0 0 8px rgb(240 138 138 / 45%);
+}
+.processing-error-copy {
+  min-width: 0;
+  margin-right: auto;
+}
+.dictation-processing-error > button {
+  min-height: 30px;
+  border-radius: 15px;
+  background: var(--accent);
+  color: var(--button-text);
+}
+@keyframes processing-stripes {
   to {
-    transform: translateX(238%);
+    background-position: 18px 0;
   }
 }
-.dictation-processing-strip .indeterminate-progress {
-  width: auto;
+.dictation-processing-slot [hidden] {
+  display: none;
 }
 .raw-transcript {
   margin-top: 18px;
@@ -875,8 +886,7 @@ main.dictation-main section {
 main.dictation-main .dictation-activity {
   margin-top: 14px;
 }
-main.dictation-main .dictation-transcript,
-main.dictation-main .dictation-processing-strip {
+main.dictation-main .dictation-transcript {
   margin-top: 12px;
 }
 dialog#model-drawer,
@@ -3207,9 +3217,6 @@ dialog#update-dialog {
   .dictation-transcript {
     margin-top: 8px;
   }
-  .dictation-processing-strip {
-    margin-top: 8px;
-  }
   #record-control {
     height: 108px;
   }
@@ -3237,7 +3244,7 @@ html.overlay,
 .overlay #record-control {
   inset: 0;
   height: 100%;
-  padding: 8px;
+  padding: 0;
   display: flex;
   justify-content: center;
   background: transparent;
@@ -3270,6 +3277,51 @@ html.overlay,
   background: rgb(27 24 34 / 94%);
   box-shadow: none;
   overflow: hidden;
+}
+.overlay .record-actions::before,
+.overlay .record-actions::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+}
+.overlay .record-actions::before {
+  width: var(--processing-fill, 0%);
+  opacity: 0;
+  background: linear-gradient(
+    90deg,
+    rgb(143 108 255 / 20%),
+    rgb(180 156 255 / 20%)
+  );
+}
+.overlay .record-actions::after {
+  right: auto;
+  width: var(--processing-fill, 0%);
+  overflow: hidden;
+  opacity: 0;
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 10px,
+    rgb(180 156 255 / 18%) 10px 20px
+  );
+}
+.overlay .record-actions.processing-visible::after {
+  opacity: 1;
+  animation: processing-stripes 1s linear infinite;
+}
+.overlay .record-actions.processing-visible::before {
+  opacity: 1;
+}
+.overlay .record-actions.processing-error {
+  background: rgb(80 34 45 / 96%);
+}
+.overlay .record-actions.processing-error::before,
+.overlay .record-actions.processing-error::after {
+  display: none;
+}
+.overlay .record-actions > * {
+  position: relative;
+  z-index: 1;
 }
 .overlay .capsule {
   width: auto;
@@ -3373,63 +3425,38 @@ html.overlay,
   display: none;
 }
 .overlay #overlay-progress {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
   display: block;
-  width: 100%;
-  height: 3px;
-  margin-top: 4px;
+  border-radius: inherit;
+  pointer-events: none;
 }
 .overlay #overlay-progress[hidden] {
   display: none;
 }
-.overlay #overlay-processing-steps[hidden] {
+.overlay #record-control[data-status="transcribing"] .audio-mark,
+.overlay #record-control[data-status="transcribing"] #record-label,
+.overlay #record-control[data-status="transcribing"] #record {
   display: none;
 }
-.overlay #overlay-processing-steps {
-  max-width: 100%;
-  margin-top: 5px;
-  overflow: hidden;
+.overlay #record-control[data-status="transcribing"] .record-status {
+  min-width: 0;
+  flex: 1 1 auto;
 }
-.overlay-processing-step-list {
-  flex-wrap: nowrap;
-  gap: 4px 6px;
-  white-space: nowrap;
-}
-.overlay-processing-step-list li {
+.overlay #record-control[data-status="transcribing"] .record-copy {
+  min-width: 0;
+  width: 100%;
   display: block;
-  flex: 0 0 auto;
-  font-size: 0;
+  padding-left: 2px;
 }
-.overlay-processing-step-list .processing-step-index {
-  width: 17px;
-  height: 17px;
+.overlay #record-control[data-status="transcribing"] #status-title {
+  font-size: 13px;
+}
+.overlay #record-control[data-status="transcribing"] #cancel {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  color: var(--secondary);
-  font-size: 9px;
-  line-height: 1;
-}
-.overlay-processing-step-list
-  li[data-step-state="current"]
-  .processing-step-index {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--button-text);
-  font-weight: 700;
-}
-.overlay-processing-step-list
-  li[data-step-state="completed"]
-  .processing-step-index {
-  border-color: var(--ok);
-  background: var(--ok);
-  color: var(--button-text);
-}
-.overlay-processing-step-list
-  li[data-step-state="skipped"]
-  .processing-step-index {
-  border-style: dashed;
 }
 .overlay .audio-mark {
   display: flex;

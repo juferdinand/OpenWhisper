@@ -58,7 +58,7 @@ import { KdeKeyCapture } from "../platforms/linux/kde/key-capture.js";
 import { modifierOnly } from "../platforms/linux/kde/keyboard.js";
 import { recordingUnavailableTitle } from "../contracts/ui/recording-guidance.js";
 import { buildTrayMenu } from "./tray-menu.js";
-import { overlayWindowBounds, overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "./recording-overlay.js";
+import { overlayInputShape, overlayWindowBounds, overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "./recording-overlay.js";
 import { WaylandRecordingOverlay } from "./wayland-recording-overlay.js";
 import type { SurfaceUnavailableReason } from "../contracts/platforms/wayland-surface.js";
 import { MacosShortcut } from "./macos-shortcut.js";
@@ -672,6 +672,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         ...overlayWindowBounds(area),
         webPreferences: { ...options.webPreferences, webSecurity: true, devTools: false },
       });
+      if (process.platform === "linux" && !nativeWaylandOverlay) overlay.setShape(overlayInputShape());
       overlay.on("closed", () => {
         overlayReady = false; overlay = undefined;
         void waylandOverlay?.close().catch(() => {}); notify();

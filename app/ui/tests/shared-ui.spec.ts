@@ -781,172 +781,310 @@ test("Text processing settings keep the deterministic cleanup vocabulary snippet
   ).toBeChecked();
 });
 
-test("live processing uses host stage and sample progress in the main view and floating overlay", async ({
+test("processing progress is delayed, monotonic per attempt, and stays out of the transcript", async ({
   page,
 }) => {
   await start(page, "linux", false, false, false, null);
+  const fixedTime = new Date("2026-10-13T12:00:00.000Z");
+  await page.clock.install({ time: fixedTime });
+  await page.clock.pauseAt(fixedTime);
   await page.evaluate(() => {
-    window.testState.status = "transcribing";
-    window.testState.text_processing = null;
+    Object.assign(window.testState, {
+      status: "transcribing",
+      recording_generation: 7,
+      text_processing: null,
+    });
     window.publishState();
   });
-  await expect(page.locator(".processing-progress-copy")).toHaveText(
-    "Preparing recognition",
+  const slot = page.locator(".dictation-processing-slot");
+  const strip = page.locator(".dictation-processing-strip");
+  const bar = page.locator(".processing-bar");
+  await expect(slot).toBeVisible();
+  await expect(strip).toBeHidden();
+  const reservedHeight = await slot.evaluate(
+    (element) => element.getBoundingClientRect().height,
   );
-  await expect(
-    page.locator(".dictation-processing-strip .indeterminate-progress"),
-  ).toHaveCount(0);
-  await expect(
-    page.locator(".processing-step-list li[data-step-state='pending']"),
-  ).toHaveCount(4);
+  expect(reservedHeight).toBe(48);
+  expect(
+    await slot.evaluate((element) => element.closest(".dictation-transcript")),
+  ).toBeNull();
+  const transcriptBottom = await page
+    .locator(".dictation-transcript")
+    .evaluate((element) => element.getBoundingClientRect().bottom);
+  const slotTop = await slot.evaluate(
+    (element) => element.getBoundingClientRect().top,
+  );
+  expect(slotTop).toBeGreaterThanOrEqual(transcriptBottom);
 
+  await page.clock.runFor(180);
   await page.evaluate(() => {
     window.testState.text_processing = {
       generation: 7,
       attempt: 1,
       stage: "recognition",
       status: "progress",
-      completedSamples: 40,
+      completedSamples: 20,
       totalSamples: 100,
     };
-    window.testState.raw_transcript = "raw words";
     window.publishState();
   });
-  await expect(page.locator(".dictation-processing-strip")).toBeVisible();
-  await expect(
-    page.locator(".dictation-processing-strip .indeterminate-progress"),
-  ).toHaveAttribute("aria-valuenow", "40");
+  await page.clock.runFor(100);
+  await page.evaluate(() => {
+    window.testState.text_processing = {
+      generation: 7,
+      attempt: 1,
+      stage: "recognition",
+      status: "progress",
+      completedSamples: 35,
+      totalSamples: 100,
+    };
+    window.publishState();
+  });
+  await expect(strip).toBeHidden();
+  await page.clock.runFor(20);
+  await expect(strip).toBeVisible();
   await expect(page.locator(".processing-progress-copy")).toHaveText(
-    "Recognizing speech",
+    "Processing…",
   );
-  await expect(
-    page.locator(
-      ".processing-step-list li[data-processing-stage='recognition']",
-    ),
-  ).toHaveAttribute("data-step-state", "current");
+  const firstProgress = Number(await bar.getAttribute("aria-valuenow"));
+  expect(firstProgress).toBeGreaterThan(0);
+  expect(firstProgress).toBeLessThanOrEqual(97);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect
+    .poll(() =>
+      page
+        .locator(".processing-bar > span")
+        .evaluate((element) => getComputedStyle(element).animationDuration),
+    )
+    .toMatch(/^(0s|0\.01ms)$/);
+  await page.screenshot({
+    path: resolve(recordingPolishScreenshots, "processing-en.png"),
+  });
+  await page.setViewportSize({ width: 740, height: 640 });
   await page.evaluate(() => {
-    window.testState.preferences.cleanup_enabled = false;
+    window.testState.preferences.ui_language = "de";
     window.publishState();
   });
-  await expect(
-    page.locator(".processing-step-list li[data-processing-stage='cleanup']"),
-  ).toHaveAttribute("data-step-state", "skipped");
-  await page.evaluate(() => {
-    window.testState.preferences.cleanup_enabled = true;
-    window.publishState();
+  const toplineGeometry = await page.evaluate(() => {
+    const topline = document.querySelector<HTMLElement>(".dictation-topline")!;
+    const bounds = topline.getBoundingClientRect();
+    const selectors = [
+      ".dictation-title h1",
+      ".workspace-mode-select",
+      "#open-model-drawer",
+      ".dictation-status-pill",
+    ];
+    const items = selectors.flatMap((selector) => {
+      const element = topline.querySelector<HTMLElement>(selector);
+      if (!element) return [];
+      const style = getComputedStyle(element);
+      if (style.display === "none" || style.visibility === "hidden") return [];
+      const rect = element.getBoundingClientRect();
+      return [
+        {
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          bottom: rect.bottom,
+        },
+      ];
+    });
+    const withinTopline = items.every(
+      (item) =>
+        item.left >= bounds.left - 0.5 &&
+        item.right <= bounds.right + 0.5 &&
+        item.top >= bounds.top - 0.5 &&
+        item.bottom <= bounds.bottom + 0.5,
+    );
+    const overlaps = items.some((item, index) =>
+      items
+        .slice(index + 1)
+        .some(
+          (other) =>
+            Math.min(item.right, other.right) -
+              Math.max(item.left, other.left) >
+              0.5 &&
+            Math.min(item.bottom, other.bottom) -
+              Math.max(item.top, other.top) >
+              0.5,
+        ),
+    );
+    return { count: items.length, withinTopline, overlaps };
   });
+  expect(toplineGeometry).toEqual({
+    count: 4,
+    withinTopline: true,
+    overlaps: false,
+  });
+  await expect(page.locator(".processing-progress-copy")).toHaveText(
+    "Wird verarbeitet …",
+  );
+  await page.screenshot({
+    path: resolve(recordingPolishScreenshots, "processing-de.png"),
+  });
+
   await page.evaluate(() => {
     window.testState.text_processing = {
       generation: 7,
       attempt: 1,
       stage: "cleanup",
       status: "completed",
-      text: "intermediate words",
+      text: "intermediate text must stay hidden",
     };
     window.publishState();
   });
-  await expect(
-    page.locator(".dictation-processing-strip .indeterminate-progress"),
-  ).toHaveCount(0);
-  await expect(page.locator(".dictation-transcript-body")).toContainText(
-    "intermediate words",
+  const cleanupProgress = Number(await bar.getAttribute("aria-valuenow"));
+  expect(cleanupProgress).toBeGreaterThan(firstProgress);
+  await expect(page.locator(".dictation-transcript-body")).not.toContainText(
+    "intermediate text must stay hidden",
   );
   await page.evaluate(() => {
-    window.testState.text_connections.processing = {
-      status: "processing",
-      provider: "claude_code",
-      reason: null,
-    };
-    window.testState.text_connections.settings.connections[2].enabled = true;
-    window.publishState();
-  });
-  await expect(page.locator(".processing-progress-copy")).toHaveText(
-    "Processing text with AI",
-  );
-  await expect(
-    page.locator(".processing-step-list li[data-processing-stage='model']"),
-  ).toHaveAttribute("data-step-state", "current");
-  await expect(
-    page.locator(".dictation-processing-strip .indeterminate-progress"),
-  ).toHaveCount(0);
-  await page.evaluate(() => {
-    window.testState.text_connections.settings.revision = {
-      enabled: true,
-      builtins: {
-        spelling_grammar: false,
-        resolve_verbal_corrections: false,
-        paragraphs: false,
-        numbers_times: false,
-      },
-      custom_rules: [],
-    };
-    window.testState.text_connections.processing = {
-      status: "idle",
-      provider: null,
-      reason: null,
-    };
-    window.testState.text_processing = {
-      generation: 7,
-      attempt: 1,
-      stage: "model",
-      status: "skipped",
-    };
-    window.publishState();
-  });
-  await expect(page.locator(".processing-progress-copy")).toHaveText(
-    "AI revision is off or has no active rules.",
-  );
-  await page.evaluate(() => {
-    window.testState.status = "done";
-    window.testState.transcript = "Final reviewed words.";
-    window.testState.text_connections.processing = {
-      status: "fallback",
-      provider: "claude_code",
-      reason: "failed",
-    };
-    window.publishState();
-  });
-  await expect(page.locator(".processing-fallback-notice")).toContainText(
-    "AI text processing was skipped; your text was kept.",
-  );
-  await expect(page.locator(".dictation-transcript-body")).toContainText(
-    "Final reviewed words.",
-  );
-
-  const overlayPage = await page.context().newPage();
-  await overlayPage.setViewportSize({ width: 476, height: 68 });
-  await start(overlayPage, "linux", true, false, false, null);
-  await overlayPage.evaluate(() => {
-    window.testState.status = "transcribing";
     window.testState.text_processing = {
       generation: 7,
       attempt: 1,
       stage: "recognition",
       status: "progress",
-      completedSamples: 40,
+      completedSamples: 95,
       totalSamples: 100,
     };
     window.publishState();
   });
-  await expect(overlayPage.locator("#status-title")).toHaveText(
-    "Recognizing speech",
+  expect(Number(await bar.getAttribute("aria-valuenow"))).toBe(cleanupProgress);
+  await page.evaluate(() => {
+    window.testState.text_processing = {
+      generation: 7,
+      attempt: 1,
+      stage: "snippets",
+      status: "completed",
+    };
+    window.publishState();
+  });
+  await expect(bar).toHaveAttribute("aria-valuenow", "97");
+
+  await page.evaluate(() => {
+    window.testState.text_processing = {
+      generation: 7,
+      attempt: 2,
+      stage: "recognition",
+      status: "progress",
+      completedSamples: 1,
+      totalSamples: 100,
+    };
+    window.publishState();
+  });
+  await expect(strip).toBeHidden();
+  await page.clock.runFor(299);
+  await expect(strip).toBeHidden();
+  await page.clock.runFor(1);
+  await expect(strip).toBeVisible();
+  const retryProgress = Number(await bar.getAttribute("aria-valuenow"));
+  expect(retryProgress).toBeLessThan(cleanupProgress);
+
+  await page.evaluate(() => {
+    window.testState.recording_generation = 8;
+    window.testState.text_processing = {
+      generation: 8,
+      attempt: 1,
+      stage: "recognition",
+      status: "progress",
+      completedSamples: 2,
+      totalSamples: 100,
+    };
+    window.publishState();
+  });
+  await expect(strip).toBeHidden();
+  await page.clock.runFor(300);
+  await expect(strip).toBeVisible();
+  expect(Number(await bar.getAttribute("aria-valuenow"))).toBeLessThan(
+    cleanupProgress,
   );
-  await expect(overlayPage.locator("#overlay-processing-steps li")).toHaveCount(
-    4,
+
+  await page.locator("#cancel-processing").click();
+  await expect
+    .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+    .toBe("cancel_recording");
+});
+
+test("processing recovery offers retry and discard while the overlay fits its 460×52 surface", async ({
+  page,
+}) => {
+  await start(page, "linux", false, false, false, null);
+  await page.evaluate(() => {
+    Object.assign(window.testState, {
+      status: "error",
+      recovery_available: true,
+      recording_available: false,
+      recording_unavailable_reason: "audio",
+    });
+    window.publishState();
+  });
+  await expect(page.locator(".dictation-processing-error")).toBeVisible();
+  await expect(page.locator(".dictation-processing-error")).toHaveAttribute(
+    "role",
+    "alert",
   );
-  await expect(
-    overlayPage.locator(
-      "#overlay-processing-steps li[data-processing-stage='recognition']",
-    ),
-  ).toHaveAttribute("data-step-state", "current");
-  await expect(overlayPage.locator("#overlay-progress")).toHaveAttribute(
-    "aria-valuenow",
-    "40",
+  await expect(page.locator(".dictation-processing-error")).toHaveCSS(
+    "height",
+    "40px",
   );
+  await expect(page.locator(".dictation-processing-error")).toContainText(
+    "Processing failed",
+  );
+  await page.setViewportSize({ width: 740, height: 640 });
+  await page.screenshot({
+    path: resolve(recordingPolishScreenshots, "processing-error-en.png"),
+  });
+  await page.locator("#retry-processing").click();
+  await expect
+    .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+    .toBe("retry_transcription");
+  await page.getByRole("button", { name: "Discard saved recording" }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+    .toBe("discard_recovery");
+
+  const overlayPage = await page.context().newPage();
+  await overlayPage.setViewportSize({ width: 460, height: 52 });
+  await start(overlayPage, "linux", true, false, false, null);
+  const overlayTime = new Date("2026-10-13T12:00:00.000Z");
+  await overlayPage.clock.install({ time: overlayTime });
+  await overlayPage.clock.pauseAt(overlayTime);
+  await overlayPage.evaluate(() => {
+    Object.assign(window.testState, {
+      status: "transcribing",
+      recording_generation: 7,
+      text_processing: {
+        generation: 7,
+        attempt: 1,
+        stage: "recognition",
+        status: "progress",
+        completedSamples: 40,
+        totalSamples: 100,
+      },
+    });
+    window.publishState();
+  });
+  await overlayPage.clock.runFor(300);
+  await expect(overlayPage.locator("#status-title")).toHaveText("Processing…");
+  await expect(overlayPage.locator("#overlay-progress")).toBeVisible();
+  const overlayProgress = Number(
+    await overlayPage
+      .locator("#overlay-progress")
+      .getAttribute("aria-valuenow"),
+  );
+  expect(overlayProgress).toBeGreaterThan(0);
+  expect(overlayProgress).toBeLessThanOrEqual(97);
+  const geometry = await overlayPage
+    .locator(".record-actions")
+    .evaluate((bar) => {
+      const rect = bar.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    });
+  expect(geometry).toEqual({ x: 0, y: 0, width: 460, height: 52 });
   await mkdirSync(modelConnectionsScreenshots, { recursive: true });
-  const image = await overlayPage.screenshot({
+  const englishScreenshot = await overlayPage.screenshot({
     omitBackground: true,
-    path: resolve(modelConnectionsScreenshots, "overlay-alpha.png"),
+    path: resolve(modelConnectionsScreenshots, "overlay-processing-en.png"),
   });
   const alpha = await overlayPage.evaluate(async (base64) => {
     const image = new Image();
@@ -958,86 +1096,23 @@ test("live processing uses host stage and sample progress in the main view and f
     const context = canvas.getContext("2d")!;
     context.drawImage(image, 0, 0);
     return {
-      corner: context.getImageData(2, 34, 1, 1).data[3],
-      topMargin: context.getImageData(238, 2, 1, 1).data[3],
-      capsule: context.getImageData(238, 34, 1, 1).data[3],
+      corner: context.getImageData(2, 2, 1, 1).data[3],
+      capsule: context.getImageData(230, 26, 1, 1).data[3],
     };
-  }, image.toString("base64"));
+  }, englishScreenshot.toString("base64"));
   expect(alpha.corner).toBe(0);
-  expect(alpha.topMargin).toBe(0);
   expect(alpha.capsule).toBeGreaterThan(0);
   await overlayPage.evaluate(() => {
-    window.testState.text_connections.settings.connections[2].enabled = true;
-    window.testState.text_connections.processing = {
-      status: "processing",
-      provider: "claude_code",
-      reason: null,
-    };
-    window.publishState();
-  });
-  await expect(overlayPage.locator("#overlay-processing-steps li")).toHaveCount(
-    5,
-  );
-  await expect(overlayPage.locator("#status-title")).toHaveText(
-    "Processing text with AI",
-  );
-  const englishOverlayFit = await overlayPage.evaluate(() => {
-    const capsule = document.querySelector(".record-actions")!;
-    const steps = document.querySelector("#overlay-processing-steps")!;
-    const bounds = steps.getBoundingClientRect();
-    return {
-      capsuleWidth: capsule.getBoundingClientRect().width,
-      fits: steps.scrollWidth <= steps.clientWidth,
-      insideCapsule:
-        bounds.left >= capsule.getBoundingClientRect().left &&
-        bounds.right <= capsule.getBoundingClientRect().right,
-    };
-  });
-  expect(englishOverlayFit.capsuleWidth).toBe(460);
-  expect(englishOverlayFit.fits).toBe(true);
-  expect(englishOverlayFit.insideCapsule).toBe(true);
-  await overlayPage.evaluate(() => {
     window.testState.preferences.ui_language = "de";
     window.publishState();
   });
-  await expect(overlayPage.locator("#status-title")).toHaveText(
-    "KI verarbeitet Text",
-  );
-  await expect(
-    overlayPage.locator(
-      "#overlay-processing-steps li[data-processing-stage='model']",
-    ),
-  ).toHaveAttribute("aria-label", "KI verarbeitet Text: Aktiv");
-  const germanOverlayFits = await overlayPage.evaluate(() => {
-    const capsule = document.querySelector(".record-actions")!;
-    const steps = document.querySelector("#overlay-processing-steps")!;
-    const bounds = steps.getBoundingClientRect();
-    return (
-      steps.scrollWidth <= steps.clientWidth &&
-      bounds.left >= capsule.getBoundingClientRect().left &&
-      bounds.right <= capsule.getBoundingClientRect().right
-    );
+  const germanCopy = await overlayPage.locator("#status-title").textContent();
+  expect(germanCopy).not.toBe("Processing…");
+  await overlayPage.screenshot({
+    omitBackground: true,
+    path: resolve(modelConnectionsScreenshots, "overlay-processing-de.png"),
   });
-  expect(germanOverlayFits).toBe(true);
   await overlayPage.close();
-
-  await page.evaluate(() => {
-    window.testState.preferences.ui_language = "de";
-    window.testState.status = "transcribing";
-    window.testState.text_processing = null;
-    window.testState.text_connections.processing = {
-      status: "idle",
-      provider: null,
-      reason: null,
-    };
-    window.publishState();
-  });
-  await expect(page.locator(".processing-progress-copy")).toHaveText(
-    "Erkennung wird vorbereitet",
-  );
-  await expect(page.locator(".processing-step-list li").first()).toContainText(
-    "Sprache wird erkannt",
-  );
 });
 
 test("completed text processing keeps a fallback notice with raw and final text", async ({
@@ -2680,7 +2755,7 @@ test("main and overlay waveforms share telemetry timing and level mapping", asyn
   await blockMicrophoneInput(page);
   await blockMicrophoneInput(overlayPage);
   await page.setViewportSize({ width: 1280, height: 800 });
-  await overlayPage.setViewportSize({ width: 476, height: 68 });
+  await overlayPage.setViewportSize({ width: 460, height: 52 });
   await start(page, "linux", false, false, false, null);
   await start(overlayPage, "linux", true, false, false, null);
 
@@ -2731,6 +2806,22 @@ test("main and overlay waveforms share telemetry timing and level mapping", asyn
   await publishPulse(overlayPage, 1, 0.35);
   await advanceContext(200);
   const at400ms = await assertParity();
+  const overlayRecordingBounds = await overlayPage
+    .locator(".record-actions")
+    .evaluate((bar) => {
+      const rect = bar.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    });
+  expect(overlayRecordingBounds).toEqual({
+    x: 0,
+    y: 0,
+    width: 460,
+    height: 52,
+  });
+  await overlayPage.screenshot({
+    omitBackground: true,
+    path: resolve(modelConnectionsScreenshots, "overlay-recording-460x52.png"),
+  });
   await publishPulse(page, 2, 0.35);
   await publishPulse(overlayPage, 2, 0.35);
   await advanceContext(200);
@@ -3003,13 +3094,26 @@ for (const platform of ["linux", "macos"] as const) {
       window.publishState();
     });
     await expect(page.locator("#record")).toBeDisabled();
-    await expect(page.locator("#status-title")).toHaveText(
-      "Preparing recognition",
-    );
+    await expect(page.locator("#status-title")).toHaveText("Processing…");
     await expect(copy).toBeFocused();
+    await expect(page.locator(".dictation-transcript .transcript")).toHaveCount(
+      0,
+    );
+    await page.evaluate((transcript) => {
+      Object.assign(window.testState, {
+        status: "done",
+        recovery_available: false,
+        transcript,
+      });
+      window.publishState();
+    }, hostileTranscript);
     await expect(page.locator(".dictation-transcript .transcript")).toHaveText(
       hostileTranscript,
     );
+    await expect(page.locator(".dictation-transcript img")).toHaveCount(0);
+    expect(
+      await page.evaluate(() => (window as any).compromised),
+    ).toBeUndefined();
     await page.evaluate(() => {
       Object.assign(window.testState, {
         status: "recording",
@@ -3186,14 +3290,12 @@ for (const platform of ["linux", "macos"] as const) {
     const longTranscript = "Synthetic long transcript. ".repeat(900);
     await page.evaluate((transcript) => {
       Object.assign(window.testState, {
-        status: "error",
+        status: "done",
         transcript,
         transcript_preview_omitted: false,
-        recovery_available: true,
-        recording_available: false,
-        recording_unavailable_reason: "audio",
-        message:
-          "An unfinished recording is saved. Retry transcription or discard it.",
+        recovery_available: false,
+        recording_available: true,
+        message: "",
       });
       window.publishState();
     }, longTranscript);
@@ -3228,7 +3330,7 @@ for (const platform of ["linux", "macos"] as const) {
           });
         await expect(page.locator("#copy-dictation")).toBeInViewport();
         await expect(page.locator("#record")).toBeInViewport();
-        await expect(page.locator("#cancel")).toBeInViewport();
+        await expect(page.locator("#discard-result")).toBeInViewport();
         await expect(page.locator(".record-output")).toBeVisible();
         await expect(page.locator(".record-output [data-output]")).toHaveCount(
           2,
@@ -3257,8 +3359,8 @@ for (const platform of ["linux", "macos"] as const) {
           const recordButton = document
             .querySelector("#record")!
             .getBoundingClientRect();
-          const cancelButton = document
-            .querySelector("#cancel")!
+          const discardButton = document
+            .querySelector("#discard-result")!
             .getBoundingClientRect();
           const output = document
             .querySelector(".record-output")!
@@ -3286,7 +3388,7 @@ for (const platform of ["linux", "macos"] as const) {
                 (record.left + record.width / 2),
             ),
             recordAspect: recordButton.width / recordButton.height,
-            cancelLeftOfRecord: cancelButton.right <= recordButton.left,
+            discardLeftOfRecord: discardButton.right <= recordButton.left,
             outputLeft: output.left,
             recordButtonRight: recordButton.right,
             outputRightOfRecord: output.left >= recordButton.right,
@@ -3310,7 +3412,7 @@ for (const platform of ["linux", "macos"] as const) {
         expect(geometry.recordCenterOffset).toBeLessThanOrEqual(2);
         expect(geometry.recordAspect).toBeGreaterThanOrEqual(0.85);
         expect(geometry.recordAspect).toBeLessThanOrEqual(1.15);
-        expect(geometry.cancelLeftOfRecord).toBe(true);
+        expect(geometry.discardLeftOfRecord).toBe(true);
         expect(
           geometry.outputRightOfRecord,
           JSON.stringify({ platform, language, viewport, ...geometry }),
@@ -3357,12 +3459,73 @@ for (const platform of ["linux", "macos"] as const) {
         );
         await expect(page.locator("#copy-dictation")).toBeInViewport();
         await expect(page.locator("#record")).toBeInViewport();
-        await expect(page.locator("#cancel")).toBeInViewport();
+        await expect(page.locator("#discard-result")).toBeInViewport();
         await page.evaluate(() => {
           document.querySelector<HTMLElement>("#notice")!.hidden = true;
         });
       }
     }
+    await setWorkspaceLanguage(page, "en");
+    await page.setViewportSize({ width: 740, height: 560 });
+    await page.evaluate(() => {
+      Object.assign(window.testState, {
+        status: "error",
+        recovery_available: true,
+        recording_available: false,
+        recording_unavailable_reason: "audio",
+        message:
+          "An unfinished recording is saved. Retry transcription or discard it.",
+      });
+      window.publishState();
+    });
+    await expect(
+      page.locator(".dictation-processing-error[role='alert']"),
+    ).toBeVisible();
+    await expect(page.locator(".dictation-processing-error")).toContainText(
+      "Processing failed",
+    );
+    await expect(page.locator("#record-label")).toHaveText(
+      "Retry transcription",
+    );
+    await expect(
+      page.getByRole("button", { name: "Discard saved recording" }),
+    ).toBeInViewport();
+    await expect(page.locator("#cancel")).toBeInViewport();
+    await expect(page.locator("#copy-dictation")).toBeInViewport();
+    await expect(page.locator(".record-output [data-output]")).toHaveCount(
+      platform === "macos" ? 3 : 2,
+    );
+    for (const output of await page
+      .locator(".record-output [data-output]")
+      .all())
+      await expect(output).toBeInViewport();
+    await expect(page.locator(".dictation-transcript-body")).not.toContainText(
+      "Synthetic long transcript.",
+    );
+    const recoveryGeometry = await page.evaluate(() => {
+      const transcript = document
+        .querySelector(".dictation-transcript")!
+        .getBoundingClientRect();
+      const body = document
+        .querySelector(".dictation-transcript-body")!
+        .getBoundingClientRect();
+      const record = document
+        .querySelector("#record-control")!
+        .getBoundingClientRect();
+      return {
+        transcriptBottom: transcript.bottom,
+        bodyBottom: body.bottom,
+        recordTop: record.top,
+        recordBottom: record.bottom,
+      };
+    });
+    expect(recoveryGeometry.transcriptBottom).toBeLessThanOrEqual(
+      recoveryGeometry.recordTop + 1,
+    );
+    expect(recoveryGeometry.bodyBottom).toBeLessThanOrEqual(
+      recoveryGeometry.transcriptBottom + 1,
+    );
+    expect(recoveryGeometry.recordBottom).toBeLessThanOrEqual(560);
   });
 }
 
@@ -3522,7 +3685,7 @@ for (const platform of ["linux", "macos"] as const) {
         await expect(page.locator("#record")).toBeFocused();
       }
     }
-    await page.setViewportSize({ width: 476, height: 68 });
+    await page.setViewportSize({ width: 460, height: 52 });
     await page.evaluate(() => {
       window.publishTelemetry({
         generation: window.testState.recording_generation,

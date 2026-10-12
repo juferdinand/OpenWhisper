@@ -187,7 +187,7 @@ try {
       await target.locator("#vocabulary-new-entry").fill(entry);
       await target.locator("#add-vocabulary").click();
     }
-    await target.locator("#save-vocabulary").click();
+    await expect.poll(async () => (await state()).preferences.vocabulary).toBe(entries.join(", "));
   };
   const expectVocabularyInSettings = async (target: Page, entries: readonly string[]) => {
     await openSettingsTab(target, "text");
@@ -558,8 +558,9 @@ try {
     stage = "stable-migrated-ui";
     await finishSetupIfNeeded(page);
     await openSettingsTab(page, "text");
-    await expect(page.locator('#snippet-form [name="trigger"]')).toHaveValue(ownedSnippet.trigger);
-    await expect(page.locator('#snippet-form [name="expansion"]')).toHaveValue(ownedSnippet.expansion);
+    await expect(page.locator("#snippets .snippet-row")).toHaveCount(1);
+    await expect(page.locator('#snippets .snippet-row [name="trigger"]')).toHaveValue(ownedSnippet.trigger);
+    await expect(page.locator('#snippets .snippet-row [name="expansion"]')).toHaveValue(ownedSnippet.expansion);
     await page.locator("#close-settings").click();
     await page.locator("#open-model-drawer").click();
     await expect(page.locator('[data-delete="tiny"]')).toBeVisible();

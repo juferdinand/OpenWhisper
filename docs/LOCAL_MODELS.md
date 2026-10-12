@@ -30,10 +30,17 @@ using the instruction for the selected mode. A failed or unavailable connection 
 another provider. Its deterministic input remains the result. Skipping model processing
 also keeps that input; cancelling the recording or quitting abandons delivery.
 
-The app and floating bar show host-reported stages. Recognition progress uses processed
-audio samples; other stages do not invent percentages. Recognized source and final text
-remain reviewable for the current recording, subject to display bounds. History still
+The app and floating bar use one Processing indicator, below the transcript in the main
+window. Its estimated overall fill uses host-reported stage milestones and measured
+recognition samples; unknown-duration work stays animated without clock-based completion
+or a timeout. Intermediate text stays hidden until delivery finishes. Recognized source
+and final text remain reviewable for the current recording, subject to display bounds. History still
 stores the final result; durable source history, TTS and Obsidian are later increments.
+
+Stopped recordings retain their existing retry and discard actions. Recognition retry
+reuses the retained audio but starts a new recognition pass. Optional AI failure keeps
+the usable deterministic result and its fallback notice; retrying AI alone is a separate
+feature ([#70](https://github.com/juferdinand/OpenWhisper/issues/70)).
 
 **Single recording** processes each recording independently. **Conversation** uses a
 separate instruction and includes successful earlier user/assistant turns. The app

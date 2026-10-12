@@ -1492,23 +1492,6 @@ async function handleShellClick(event: MouseEvent) {
   render();
 }
 
-function processingStageLabel(stage = state.text_processing?.stage): string {
-  switch (stage) {
-    case "recognition":
-      return t("Recognizing speech");
-    case "cleanup":
-      return t("Cleaning up text");
-    case "vocabulary":
-      return t("Applying vocabulary");
-    case "snippets":
-      return t("Expanding snippets");
-    case "model":
-      return t("Processing text with AI");
-    default:
-      return t("Processing text");
-  }
-}
-
 const processingStageOrder = [
   "recognition",
   "cleanup",
@@ -1516,6 +1499,94 @@ const processingStageOrder = [
   "model",
   "snippets",
 ] as const;
+
+let processingGeneration: number | undefined;
+let processingAttempt: number | undefined;
+let processingVisible = false;
+let processingVisibilityTimer: ReturnType<typeof setTimeout> | undefined;
+let processingStartedAt = 0;
+let processingMaximum = 0;
+let processingWasBusy = false;
+
+function processingProgressView() {
+  const busy = state.status === "transcribing";
+  const recoverable = !!state.recovery_available && !busy;
+  if (!busy && !recoverable) {
+    if (processingVisibilityTimer) clearTimeout(processingVisibilityTimer);
+    processingVisibilityTimer = undefined;
+    processingGeneration = undefined;
+    processingAttempt = undefined;
+    processingVisible = false;
+    processingMaximum = 0;
+    processingWasBusy = false;
+    return { visible: false, recoverable: false, fraction: 0 };
+  }
+
+  const generation = state.recording_generation;
+  const eventAttempt = state.text_processing?.attempt;
+  const generationChanged = processingGeneration !== generation;
+  const attemptChanged =
+    eventAttempt !== undefined && eventAttempt !== processingAttempt;
+  if (busy && (!processingWasBusy || generationChanged || attemptChanged)) {
+    if (processingVisibilityTimer) clearTimeout(processingVisibilityTimer);
+    processingVisibilityTimer = undefined;
+    processingGeneration = generation;
+    if (eventAttempt !== undefined) processingAttempt = eventAttempt;
+    else processingAttempt ??= 1;
+    processingStartedAt = Date.now();
+    processingMaximum = 0;
+    processingVisible = false;
+  }
+  if (recoverable && generationChanged) processingGeneration = generation;
+  if (busy && eventAttempt !== undefined) processingAttempt = eventAttempt;
+  processingWasBusy = busy;
+
+  if (busy && !processingVisible && !processingVisibilityTimer) {
+    const remaining = Math.max(0, 300 - (Date.now() - processingStartedAt));
+    processingVisibilityTimer = setTimeout(() => {
+      processingVisibilityTimer = undefined;
+      if (state.status !== "transcribing") return;
+      processingVisible = true;
+      workspaceKey = "";
+      render();
+    }, remaining);
+  }
+
+  if (busy) {
+    const stages = visibleProcessingStages();
+    const event = state.text_processing;
+    let stage = event?.stage;
+    if (state.text_connections.processing.status === "processing")
+      stage = "model";
+    const index = stages.findIndex((item) => item === stage);
+    if (index >= 0) {
+      let withinStage = 0;
+      if (event && event.stage === stage) {
+        if (event.status === "completed" || event.status === "skipped") {
+          withinStage = 1;
+        } else if (
+          stage === "recognition" &&
+          event.completedSamples !== undefined &&
+          event.totalSamples !== undefined &&
+          event.totalSamples > 0
+        ) {
+          withinStage = Math.max(
+            0,
+            Math.min(1, event.completedSamples / event.totalSamples),
+          );
+        }
+      }
+      const fraction = (index + withinStage) / stages.length;
+      processingMaximum = Math.max(processingMaximum, Math.min(0.97, fraction));
+    }
+  }
+
+  return {
+    visible: recoverable || processingVisible,
+    recoverable,
+    fraction: processingMaximum,
+  };
+}
 
 function visibleProcessingStages() {
   const modelConfigured = state.text_connections.settings.connections.some(
@@ -1526,94 +1597,13 @@ function visibleProcessingStages() {
       (state.text_connections.settings.mode === "conversation" ||
         state.text_connections.settings.revision?.enabled)) ||
     state.text_connections.processing.provider !== null ||
-    state.text_processing?.stage === "model";
+    (state.text_processing?.stage === "model" &&
+      state.text_processing.status !== "skipped");
   const order =
     state.text_connections.settings.mode === "conversation"
       ? (["recognition", "cleanup", "vocabulary", "snippets", "model"] as const)
       : processingStageOrder;
-  return order
-    .filter((stage) => stage !== "model" || includeModel)
-    .map((stage) => ({ stage, label: processingStageLabel(stage) }));
-}
-
-function processingStepState(
-  stage: (typeof processingStageOrder)[number],
-): "current" | "completed" | "skipped" | "pending" {
-  const event = state.text_processing;
-  if (stage === "cleanup" && state.preferences.cleanup_enabled === false)
-    return "skipped";
-  if (
-    stage === "model" &&
-    state.text_connections.processing.status === "fallback"
-  )
-    return "skipped";
-  const currentStage =
-    state.text_connections.processing.status === "processing"
-      ? "model"
-      : event?.stage;
-  if (stage === currentStage) {
-    if (event?.stage === stage && event.status === "completed")
-      return "completed";
-    if (event?.stage === stage && event.status === "skipped") return "skipped";
-    return "current";
-  }
-  const stages = visibleProcessingStages();
-  const currentIndex = stages.findIndex((item) => item.stage === currentStage);
-  const stageIndex = stages.findIndex((item) => item.stage === stage);
-  if (currentIndex < 0 || stageIndex > currentIndex) return "pending";
-  return "completed";
-}
-
-function processingStepsMarkup(className: string, compact = false) {
-  return `<ol class="${className}" aria-label="${esc(t("Text processing stages"))}">${visibleProcessingStages()
-    .map(({ stage, label }, index) => {
-      const stepState = processingStepState(stage);
-      const stateLabel = t(
-        (
-          {
-            current: "Active",
-            completed: "Completed",
-            skipped: "Skipped",
-            pending: "Pending",
-          } as const
-        )[stepState],
-      );
-      return `<li data-processing-stage="${stage}" data-step-state="${stepState}" aria-label="${esc(`${label}: ${stateLabel}`)}" title="${esc(label)}" ${stepState === "current" ? 'aria-current="step"' : ""}>${compact ? `<span class="processing-step-index" aria-hidden="true">${index + 1}</span>` : `<span class="processing-step-indicator" aria-hidden="true"></span><span>${esc(label)}</span>`}</li>`;
-    })
-    .join("")}</ol>`;
-}
-
-function processingStatusText(): string {
-  const event = state.text_processing;
-  if (state.text_connections.processing.status === "fallback")
-    return t("AI text processing was skipped; your text was kept.");
-  const revision = state.text_connections.settings.revision;
-  const activeRevisionRule =
-    !!revision?.enabled &&
-    (Object.values(revision.builtins).some(Boolean) ||
-      revision.custom_rules.some((rule) => rule.enabled));
-  if (
-    event?.stage === "model" &&
-    event.status === "skipped" &&
-    state.text_connections.settings.mode === "single" &&
-    !activeRevisionRule
-  )
-    return t("AI revision is off or has no active rules.");
-  if (!event) {
-    return state.text_connections.processing.status === "processing"
-      ? processingStageLabel("model")
-      : t("Preparing recognition");
-  }
-  if (
-    state.text_connections.processing.status === "processing" &&
-    event.stage !== "model"
-  )
-    return processingStageLabel("model");
-  const label = processingStageLabel(event.stage);
-  if (event.status === "completed")
-    return t("{stage} complete", { stage: label });
-  if (event.status === "skipped") return t("{stage} skipped", { stage: label });
-  return label;
+  return order.filter((stage) => stage !== "model" || includeModel);
 }
 
 function recordingStatusTitle(): string {
@@ -1621,7 +1611,7 @@ function recordingStatusTitle(): string {
   const busy = state.status === "transcribing";
   const recovery = !!state.recovery_available && !recording && !busy;
   if (recording) return t("Listening to you");
-  if (busy) return processingStatusText();
+  if (busy) return processingVisible ? t("Processing…") : "";
   if (recovery || state.status === "error")
     return t("Something needs attention");
   if (state.recording_available === false) {
@@ -1645,12 +1635,15 @@ function recordControl() {
   const recording = state.status === "recording",
     busy = state.status === "transcribing",
     recovery = !!state.recovery_available && !recording && !busy;
+  const progressView = processingProgressView();
   const text = recording
     ? t("Recording · {time}", {
         time: `${Math.floor(state.elapsed / 60)}:${String(state.elapsed % 60).padStart(2, "0")}`,
       })
     : busy
-      ? processingStatusText()
+      ? processingVisible
+        ? t("Processing…")
+        : ""
       : recovery
         ? t("Retry transcription")
         : t("Start dictation");
@@ -1681,7 +1674,7 @@ function recordControl() {
     const outputControls = `<div class="record-output" role="group" aria-label="${esc(t("Output"))}"><span class="record-output-label">${esc(t("Output"))}</span>${outputModes.map(([value, label, fullLabel]) => `<button type="button" data-output="${value}" data-pref="output" aria-label="${esc(fullLabel)}" title="${esc(fullLabel)}" aria-pressed="${effectiveOutput() === value}" ${recording || recovery || busy || (value === "paste" && (!accessibilityPermissionGranted() || portalBusy || state.paste_configuring)) ? "disabled" : ""}>${esc(label)}</button>`).join("")}</div>`;
     const overlayBars = Array.from({ length: 5 }, () => "<i></i>").join("");
     controls.innerHTML = overlay
-      ? `<div class="record-actions"><div class="record-status"><div class="audio-mark" aria-hidden="true">${overlayBars}<canvas class="live-waveform" data-waveform="overlay" aria-hidden="true"></canvas></div><div class="record-copy"><strong id="status-title" aria-live="polite"></strong><span id="status" role="status"></span><div id="overlay-progress" class="indeterminate-progress" role="progressbar" aria-label="${esc(t("Text processing progress"))}" hidden><span aria-hidden="true"></span></div><div id="overlay-processing-steps" hidden>${processingStepsMarkup("overlay-processing-step-list", true)}</div></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div><span id="record-label"></span><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-action-label" class="record-action-label"></span></button></div>`
+      ? `<div class="record-actions"><div class="record-status"><div class="audio-mark" aria-hidden="true">${overlayBars}<canvas class="live-waveform" data-waveform="overlay" aria-hidden="true"></canvas></div><div class="record-copy"><strong id="status-title" aria-live="polite"></strong><span id="status" role="status"></span><div id="overlay-progress" role="progressbar" aria-label="${esc(t("Text processing progress"))}" hidden></div></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div><span id="record-label"></span><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-action-label" class="record-action-label"></span></button></div>`
       : `<div class="record-leading"><button id="discard-result" type="button" title="${esc(t("Clear current text; saved history is kept."))}" aria-label="${esc(t("Clear current text; saved history is kept."))}">${esc(t("Discard"))}</button><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><div class="record-status"><div class="audio-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div></div><div class="record-center"><button id="record" class="capsule"><span id="record-symbol"></span></button><span id="record-label"></span></div>${outputControls}`;
     document
       .querySelector("#record")!
@@ -1769,9 +1762,11 @@ function recordControl() {
     ? recording
       ? ""
       : busy
-        ? processingStatusText()
+        ? processingVisible
+          ? t("Processing…")
+          : ""
         : recovery
-          ? t("Retry transcription")
+          ? t(overlay ? "Processing failed" : "Retry transcription")
           : state.status === "error"
             ? t("Something needs attention")
             : unavailable
@@ -1789,12 +1784,37 @@ function recordControl() {
   }
   document.querySelector("#record-label")!.textContent = visibleText;
   const cancel = document.querySelector<HTMLButtonElement>("#cancel")!;
-  cancel.hidden = !recording && !recovery;
+  cancel.hidden = !recording && !recovery && !(overlay && busy);
   cancel.setAttribute(
     "aria-label",
-    t(recovery ? "Discard saved recording" : "Discard recording"),
+    t(
+      recovery
+        ? "Discard saved recording"
+        : busy
+          ? "Cancel processing"
+          : "Discard recording",
+    ),
   );
   cancel.textContent = t(recovery ? "Discard" : "Cancel");
+  if (overlay) {
+    button.hidden = busy;
+    const overlayActions =
+      document.querySelector<HTMLElement>(".record-actions");
+    if (overlayActions) {
+      overlayActions.style.setProperty(
+        "--processing-fill",
+        `${Math.round(progressView.fraction * 100)}%`,
+      );
+      overlayActions.classList.toggle(
+        "processing-visible",
+        busy && progressView.visible,
+      );
+      overlayActions.classList.toggle(
+        "processing-error",
+        progressView.recoverable,
+      );
+    }
+  }
   controls
     .querySelectorAll<HTMLButtonElement>("[data-output]")
     .forEach((output) => {
@@ -1832,44 +1852,16 @@ function recordControl() {
       ? recordingUnavailableMessage()
       : t(state.message);
   const overlayProgress =
-    document.querySelector<HTMLProgressElement>("#overlay-progress");
-  const overlaySteps = document.querySelector<HTMLElement>(
-    "#overlay-processing-steps",
-  );
-  if (overlaySteps) {
-    overlaySteps.hidden = !busy;
-    overlaySteps.innerHTML = processingStepsMarkup(
-      "overlay-processing-step-list",
-      true,
-    );
-  }
+    document.querySelector<HTMLElement>("#overlay-progress");
   if (overlayProgress) {
-    const event = state.text_processing;
-    overlayProgress.hidden = !busy;
-    overlayProgress.classList.remove("determinate");
-    overlayProgress.style.removeProperty("--progress-fraction");
-    overlayProgress.removeAttribute("aria-valuenow");
-    overlayProgress.removeAttribute("aria-valuemax");
-    if (
-      busy &&
-      event?.stage === "recognition" &&
-      event.completedSamples !== undefined &&
-      event.totalSamples !== undefined &&
-      event.totalSamples > 0
-    ) {
-      const completed = Math.min(event.completedSamples, event.totalSamples);
-      overlayProgress.classList.add("determinate");
-      overlayProgress.style.setProperty(
-        "--progress-fraction",
-        String(completed / event.totalSamples),
-      );
-      overlayProgress.setAttribute("aria-valuemax", String(event.totalSamples));
-      overlayProgress.setAttribute("aria-valuenow", String(completed));
-    }
+    overlayProgress.hidden = !busy || !progressView.visible;
+    overlayProgress.setAttribute("aria-valuemin", "0");
+    overlayProgress.setAttribute("aria-valuemax", "100");
     overlayProgress.setAttribute(
-      "aria-label",
-      processingStageLabel(event?.stage),
+      "aria-valuenow",
+      String(Math.round(progressView.fraction * 100)),
     );
+    overlayProgress.setAttribute("aria-valuetext", t("Processing…"));
   }
   syncDictationState();
 }
@@ -1983,6 +1975,8 @@ function renderWorkspace() {
     state.paste_ready,
     state.preferences.output,
     state.recovery_available,
+    state.status,
+    state.recording_generation,
     state.history,
     state.transcript,
     state.raw_transcript,
@@ -2010,6 +2004,16 @@ function renderWorkspace() {
     syncDictationState();
     return;
   }
+  const activeWorkspaceElement = document.activeElement;
+  const focusedWorkspaceControlId =
+    activeWorkspaceElement instanceof HTMLElement &&
+    main.contains(activeWorkspaceElement) &&
+    activeWorkspaceElement.id &&
+    activeWorkspaceElement.matches(
+      "button, input, select, textarea, [tabindex]",
+    )
+      ? activeWorkspaceElement.id
+      : undefined;
   workspaceKey = key;
   const model = state.models.find(
     (candidate) => candidate.id === state.preferences.model,
@@ -2029,18 +2033,14 @@ function renderWorkspace() {
     state.text_connections.settings.mode === "conversation";
   const conversationTurns = state.text_connections.conversation.turns;
   const transcriptMarkup = conversationMode
-    ? `${conversationTurns.map((turn) => `<article class="conversation-turn"><h3>${esc(t("You"))}</h3><p class="transcript">${esc(turn.user)}</p><h3>${esc(t("Assistant"))}</h3><p class="transcript">${esc(turn.assistant)}</p></article>`).join("")}${state.status === "transcribing" && (state.text_processing?.text || state.raw_transcript) ? `<article class="conversation-pending"><h3>${esc(t("Current recording"))}</h3><p class="transcript">${esc(state.text_processing?.text ?? state.raw_transcript ?? "")}</p></article>` : ""}${state.status !== "transcribing" && state.transcript && conversationTurns.at(-1)?.assistant !== state.transcript ? `<article class="conversation-pending"><h3>${esc(t("Latest recording"))}</h3><p class="transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</p></article>` : ""}${state.raw_transcript && state.status !== "transcribing" ? `<details class="raw-transcript"><summary>${esc(t("Raw recognition"))}</summary><p class="transcript">${esc(state.raw_transcript_preview_omitted ? t("The raw transcript is too large to preview.") : state.raw_transcript)}</p></details>` : ""}${conversationTurns.length === 0 && !state.transcript && state.status !== "transcribing" ? `<div class="dictation-empty"><p>${esc(t("Record a message to start this conversation."))}</p></div>` : ""}`
+    ? `${conversationTurns.map((turn) => `<article class="conversation-turn"><h3>${esc(t("You"))}</h3><p class="transcript">${esc(turn.user)}</p><h3>${esc(t("Assistant"))}</h3><p class="transcript">${esc(turn.assistant)}</p></article>`).join("")}${state.status !== "transcribing" && state.transcript && conversationTurns.at(-1)?.assistant !== state.transcript ? `<article class="conversation-pending"><h3>${esc(t("Latest recording"))}</h3><p class="transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</p></article>` : ""}${state.raw_transcript && state.status !== "transcribing" ? `<details class="raw-transcript"><summary>${esc(t("Raw recognition"))}</summary><p class="transcript">${esc(state.raw_transcript_preview_omitted ? t("The raw transcript is too large to preview.") : state.raw_transcript)}</p></details>` : ""}${conversationTurns.length === 0 && !state.transcript && state.status !== "transcribing" ? `<div class="dictation-empty"><p>${esc(t("Record a message to start this conversation."))}</p></div>` : ""}`
     : selectedHistoryText !== undefined
       ? `<p class="transcript">${esc(selectedHistoryText)}</p>`
-      : state.status === "transcribing" && state.text_processing?.text
-        ? `<p class="transcript">${esc(state.text_processing_preview_omitted ? t("The current text preview is too large.") : state.text_processing.text)}</p>`
-        : state.status === "transcribing" &&
-            (state.raw_transcript !== undefined ||
-              state.raw_transcript_preview_omitted)
-          ? `<p class="transcript">${esc(state.raw_transcript_preview_omitted ? t("The raw transcript is too large to preview.") : (state.raw_transcript ?? ""))}</p>`
-          : transcriptAvailable
-            ? `<p class="transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</p>${state.raw_transcript !== undefined || state.raw_transcript_preview_omitted ? `<details class="raw-transcript"><summary>${esc(t("Raw recognition"))}</summary><p class="transcript">${esc(state.raw_transcript_preview_omitted ? t("The raw transcript is too large to preview.") : (state.raw_transcript ?? ""))}</p></details>` : ""}`
-            : `<div class="dictation-empty"><p>${esc(t("Press Record or the shortcut. Your text will appear here."))}</p></div>`;
+      : state.status === "transcribing" || state.recovery_available
+        ? ""
+        : transcriptAvailable
+          ? `<p class="transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</p>${state.raw_transcript !== undefined || state.raw_transcript_preview_omitted ? `<details class="raw-transcript"><summary>${esc(t("Raw recognition"))}</summary><p class="transcript">${esc(state.raw_transcript_preview_omitted ? t("The raw transcript is too large to preview.") : (state.raw_transcript ?? ""))}</p></details>` : ""}`
+          : `<div class="dictation-empty"><p>${esc(t("Press Record or the shortcut. Your text will appear here."))}</p></div>`;
   const processingFallbackNotice =
     selectedHistoryText === undefined &&
     transcriptAvailable &&
@@ -2077,19 +2077,9 @@ function renderWorkspace() {
     state.text_connections.processing.reason === "context_full"
       ? `<p class="processing-fallback-notice context-full-notice" role="status">${esc(t("Conversation context is full. Start a new chat to continue with a fresh context."))} <button type="button" data-new-chat>${esc(t("New chat"))}</button></p>`
       : "";
-  const processingEvent = state.text_processing;
-  const hasSampleProgress =
-    processingEvent?.stage === "recognition" &&
-    processingEvent.completedSamples !== undefined &&
-    processingEvent.totalSamples !== undefined &&
-    processingEvent.totalSamples > 0;
-  const progressFraction = hasSampleProgress
-    ? Math.min(
-        processingEvent!.completedSamples!,
-        processingEvent!.totalSamples!,
-      ) / processingEvent!.totalSamples!
-    : undefined;
-  const processingMarkup = `<section class="dictation-processing-strip" aria-label="${esc(t("Text processing progress"))}" ${state.status !== "transcribing" ? "hidden" : ""}><span class="processing-progress-copy" role="status" aria-live="polite">${esc(processingStatusText())}</span>${hasSampleProgress ? `<div class="indeterminate-progress determinate" role="progressbar" aria-label="${esc(processingStageLabel("recognition"))}" aria-valuemin="0" aria-valuemax="${processingEvent!.totalSamples}" aria-valuenow="${processingEvent!.completedSamples}" style="--progress-fraction:${progressFraction}"><span aria-hidden="true"></span></div>` : ""}${processingStepsMarkup("processing-step-list")}</section>`;
+  const processingView = processingProgressView();
+  const progressValue = Math.round(processingView.fraction * 100);
+  const processingMarkup = `<div class="dictation-processing-slot"><section class="dictation-processing-strip" aria-label="${esc(t("Text processing progress"))}" ${state.status !== "transcribing" || !processingView.visible ? "hidden" : ""}><span class="processing-progress-copy" role="status" aria-live="polite">${esc(t("Processing…"))}</span><div class="processing-progress-row"><div class="processing-bar" role="progressbar" aria-label="${esc(t("Text processing progress"))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progressValue}" style="--processing-fill:${progressValue}%"><span aria-hidden="true"></span></div><button id="cancel-processing" type="button" aria-label="${esc(t("Cancel processing"))}">×</button></div></section><section class="dictation-processing-error" role="alert" style="--processing-fill:${progressValue}%" ${processingView.recoverable ? "" : "hidden"}><span class="processing-error-dot" aria-hidden="true"></span><span class="processing-error-copy">${esc(t("Processing failed"))}</span><button id="retry-processing" type="button">${esc(t("Retry transcription"))}</button></section></div>`;
   const mode = isMac()
     ? t("Native")
     : state.preferences.gpu && state.gpu_checked === false
@@ -2104,7 +2094,9 @@ function renderWorkspace() {
     state.status === "recording"
       ? t("Listening to you")
       : state.status === "transcribing"
-        ? processingStatusText()
+        ? processingVisible
+          ? t("Processing…")
+          : ""
         : state.recovery_available
           ? t("Something needs attention")
           : state.recording_available === false
@@ -2117,7 +2109,7 @@ function renderWorkspace() {
     : t("History is not saved.");
   const retainedWaveformCanvas = mainWaveform?.canvas;
   retainedWaveformCanvas?.remove();
-  main.innerHTML = `${permissionBanner()}<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><label class="workspace-mode-select">${esc(t("Processing mode"))}<select id="workspace-mode" aria-label="${esc(t("Processing mode"))}" ${state.status === "recording" || state.status === "transcribing" ? "disabled" : ""}><option value="single" ${!conversationMode ? "selected" : ""}>${esc(t("Single recording"))}</option><option value="conversation" ${conversationMode ? "selected" : ""}>${esc(t("Voice conversation"))}</option></select></label><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true"><canvas class="live-waveform" data-waveform="main" aria-hidden="true"></canvas></div></section>${conversationNotice}<section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(conversationMode ? t("Conversation") : t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}${processingFallbackNotice}${contextFullNotice}${processingMarkup}</div></section><section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
+  main.innerHTML = `${permissionBanner()}<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><label class="workspace-mode-select">${esc(t("Processing mode"))}<select id="workspace-mode" aria-label="${esc(t("Processing mode"))}" ${state.status === "recording" || state.status === "transcribing" ? "disabled" : ""}><option value="single" ${!conversationMode ? "selected" : ""}>${esc(t("Single recording"))}</option><option value="conversation" ${conversationMode ? "selected" : ""}>${esc(t("Voice conversation"))}</option></select></label><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true"><canvas class="live-waveform" data-waveform="main" aria-hidden="true"></canvas></div></section>${conversationNotice}<section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(conversationMode ? t("Conversation") : t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}${processingFallbackNotice}${contextFullNotice}</div></section>${processingMarkup}<section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
   if (retainedWaveformCanvas)
     main
       .querySelector<HTMLElement>(".dictation-waveform")
@@ -2130,6 +2122,12 @@ function renderWorkspace() {
         void command("copy_history", { index: selectedHistoryIndex });
       } else void command("copy_transcript");
     });
+  main
+    .querySelector<HTMLButtonElement>("#cancel-processing")
+    ?.addEventListener("click", () => void command("cancel_recording"));
+  main
+    .querySelector<HTMLButtonElement>("#retry-processing")
+    ?.addEventListener("click", () => void command("retry_transcription"));
   main
     .querySelector<HTMLSelectElement>("#workspace-mode")
     ?.addEventListener("change", (event) => {
@@ -2197,6 +2195,19 @@ function renderWorkspace() {
           ?.focus();
       }),
     );
+  if (focusedWorkspaceControlId && document.hasFocus()) {
+    const focusedReplacement = main.querySelector<HTMLElement>(
+      `#${CSS.escape(focusedWorkspaceControlId)}`,
+    );
+    if (
+      focusedReplacement &&
+      !focusedReplacement.hidden &&
+      !focusedReplacement.matches(":disabled") &&
+      focusedReplacement.getClientRects().length > 0
+    ) {
+      focusedReplacement.focus({ preventScroll: true });
+    }
+  }
   syncDictationState();
 }
 

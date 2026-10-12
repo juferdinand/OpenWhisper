@@ -9,6 +9,37 @@ reference material rather than application dependencies.
 
 ## Priority and scope
 
+### Processing and floating-control follow-up
+
+The `Status page redesign(4).zip` handoff supplies the next progress and error
+presentation. Preserve the accepted ElevenLabs-derived scrolling waveform in both
+windows; the prototype's simulated recording animation is not a replacement.
+
+1. Move processing feedback below the transcript into a reserved 48 px region.
+   Use one fixed Processing label, a continuous striped bar and an accessible cancel
+   control. Hide intermediate text for the current recording until processing finishes;
+   preserve completed conversation turns, raw/final review and full-text copying.
+2. Derive monotonic progress from generation/attempt-bound host events and measured
+   recognition samples. Internal stage weights are presentation estimates, not measured
+   end-to-end percentages. Unknown-duration work remains animated without invented
+   elapsed-time completion or timeouts; never show 100% before successful delivery.
+   Delay the indicator by 300 ms and honor reduced motion.
+3. Apply the same progress language to the floating control while retaining its live
+   waveform. Show compact recognition errors and the existing stopped-audio retry path.
+   Preserve useful text when optional AI fails; a failed AI call must not erase a
+   successful recording or claim that retrying only that stage already works.
+4. Remove unintended floating-window backgrounds/shadows and restrict transparent
+   margins to pass-through input using the supported host surface mechanisms. Verify
+   alpha, geometry and input-region behavior with owned synthetic evidence.
+
+Automatic provider failover remains [#68](https://github.com/juferdinand/OpenWhisper/issues/68).
+Retrying only a failed AI step is tracked in
+[#70](https://github.com/juferdinand/OpenWhisper/issues/70); verified insertion-target
+names also require additional host state. Preserve existing
+recording recovery, explicit cancellation and ordinary recording without integrations.
+Run focused renderer/host checks, then the complete renderer suite and common preflight,
+and obtain independent review before updating the isolated Dev app for owner acceptance.
+
 ### Current settings follow-up
 
 The supplied `Status page redesign(3).zip` handoff narrows the next increment to

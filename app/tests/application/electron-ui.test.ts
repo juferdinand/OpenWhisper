@@ -364,7 +364,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     const overlayPage = app.windows().find((candidate) => candidate.url().endsWith("?overlay=1"));
     assert.ok(overlayPage);
     await expect(overlayPage.locator(".window-titlebar")).toHaveCount(0);
-    assert.deepEqual(await overlayPage.evaluate(() => ({ width: innerWidth, height: innerHeight })), { width: 476, height: 68 });
+    assert.deepEqual(await overlayPage.evaluate(() => ({ width: innerWidth, height: innerHeight })), { width: 460, height: 52 });
     assert.equal(await overlayPage.evaluate(async () => {
       try { await window.openwhisper?.invoke("window_action", { action: "close" }); return false; }
       catch { return true; }
