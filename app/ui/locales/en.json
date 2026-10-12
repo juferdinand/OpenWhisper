@@ -550,5 +550,7 @@
   "Install and restart now": "Install and restart now",
   "Restart now": "Restart now",
   "Install the downloaded update and restart now, or choose Later.": "Install the downloaded update and restart now, or choose Later.",
-  "Release notes are shown in English.": "Release notes are shown in English."
+  "Release notes are shown in English.": "Release notes are shown in English.",
+  "Microphone access allowed": "Microphone access allowed",
+  "OpenWhisper records from the system default microphone. Change it in System Settings → Sound → Input.": "OpenWhisper records from the system default microphone. Change it in System Settings → Sound → Input."
 }

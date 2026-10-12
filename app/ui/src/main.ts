@@ -29,6 +29,8 @@ let contentKey = "";
 let workspaceKey = "";
 let shellKey = "";
 let renderedTab: View | undefined;
+// The setup card body scrolls; keep its position when the same step re-renders (for example on download progress).
+let renderedSetupStep: number | undefined;
 let historyRailOpen = true;
 let mainWaveform: LiveWaveform | undefined;
 let overlayWaveform: LiveWaveform | undefined;
@@ -45,8 +47,11 @@ let pendingSettingsSection = "";
 let modelDialogKey = "";
 let modelFocusRestorePending = false;
 let setupStep = -1;
-const SETUP_STEP_COUNT = 7;
-const SETUP_MODEL_STEP = 1;
+// macOS builds recognize on the CPU only (Apple Silicon has no separate GPU device to choose),
+// so the hardware step is shown on Linux only.
+const setupHasHardwareStep = () => state.platform !== "macos";
+const setupStepCount = () => (setupHasHardwareStep() ? 7 : 6);
+const setupModelStep = () => (setupHasHardwareStep() ? 1 : 0);
 let focusSetupTitle = false;
 const expandedModelFamilies = new Set<string>();
 let preferenceQueue = Promise.resolve();
@@ -742,8 +747,6 @@ const settingOutputs = () => {
   ];
   return `<fieldset class="settings-output-segment" aria-label="${esc(t("Output"))}">${modes.map(([value, label, fullLabel]) => `<label><input type="radio" name="settings-output" data-pref="output" value="${value}" aria-label="${esc(t(fullLabel))}" ${state.preferences.output === value ? "checked" : ""}><span>${esc(t(label))}</span></label>`).join("")}</fieldset>`;
 };
-const setupTriggerOutput = () =>
-  `<div class="setup-trigger-output"><span class="setup-trigger-output-label">${esc(t("Output"))}<small>${esc(t(isMac() ? "Insert uses Accessibility access; Copy uses the clipboard." : "Insert uses keyboard access; Copy uses the clipboard."))}</small></span>${settingOutputs()}</div>`;
 
 function notice(text: string) {
   const el = document.querySelector<HTMLDialogElement>("#settings-dialog")?.open
@@ -1876,13 +1879,17 @@ function render() {
   const p = state.preferences;
   if (tab === "setup") {
     const panels = [
-      {
-        title: t("Choose recognition hardware"),
-        detail: t(
-          "Choose CPU or GPU for recognition. The next step suggests models for your selection.",
-        ),
-        content: recognitionModeControl(true),
-      },
+      ...(setupHasHardwareStep()
+        ? [
+            {
+              title: t("Choose recognition hardware"),
+              detail: t(
+                "Choose CPU or GPU for recognition. The next step suggests models for your selection.",
+              ),
+              content: recognitionModeControl(true),
+            },
+          ]
+        : []),
       {
         title: t("Download a speech model"),
         detail: t(
@@ -1898,7 +1905,9 @@ function render() {
           "Microphone access is needed to record your voice. Everything stays on your computer.",
         ),
         content: isMac()
-          ? `<button data-command="allow_microphone">${esc(t("Allow"))}</button>`
+          ? state.macos?.microphone_allowed
+            ? `<p class="success">${esc(t("Microphone access allowed"))}</p><p class="secondary">${esc(t("OpenWhisper records from the system default microphone. Change it in System Settings → Sound → Input."))}</p>`
+            : `<button data-command="allow_microphone">${esc(t("Allow"))}</button>`
           : microphoneControl(),
       },
       {
@@ -1948,12 +1957,12 @@ function render() {
               : t(
                   "Choose a shortcut in your desktop’s dialog. Press it to start recording and press it again to stop.",
                 ),
-        content: `<div class="setup-trigger-panel">${shortcutButton()}${setupTriggerOutput()}</div>`,
+        content: `<div class="setup-trigger-panel">${shortcutButton()}</div>`,
       },
     ];
     const modelRequired =
       !hasInstalledSelectedModel() &&
-      (setupStep === SETUP_MODEL_STEP || setupStep === panels.length - 1);
+      (setupStep === setupModelStep() || setupStep === panels.length - 1);
     const navigation = (welcome: boolean) => {
       const permissionFlowActive =
         portalBusy ||
@@ -1975,12 +1984,20 @@ function render() {
       content.innerHTML = `<section class="setup-card" aria-labelledby="setup-title"><div class="setup-card-body setup-welcome"><img class="setup-logo" src="./branding/mark-on-dark.svg" width="72" height="72" alt="OpenWhisper"><h1 id="setup-title" tabindex="-1">${esc(t("Speak. OpenWhisper writes with you."))}</h1><p class="setup-intro">${esc(t("OpenWhisper turns speech into text directly on this computer. No account, cloud, or subscription. Your recordings never leave your computer."))}</p><p class="setup-language-label">${esc(t("Interface language"))}</p><div class="setup-language" role="group" aria-label="${esc(t("Interface language"))}"><button data-ui-language="de" aria-pressed="${state.preferences.ui_language === "de"}">Deutsch</button><button data-ui-language="en" aria-pressed="${state.preferences.ui_language === "en"}">${esc(t("English"))}</button></div></div>${navigation(true)}</section>`;
     } else {
       const panel = panels[setupStep]!;
+      const setupScrollTop =
+        renderedSetupStep === setupStep
+          ? (content.querySelector<HTMLElement>(".setup-card-body")
+              ?.scrollTop ?? 0)
+          : 0;
+      renderedSetupStep = setupStep;
       const progress = Array.from(
         { length: panels.length },
         (_, index) =>
           `<span${index === setupStep ? ' class="current"' : ""}></span>`,
       ).join("");
       content.innerHTML = `<section class="setup-card" aria-labelledby="setup-title"><div class="setup-card-body"><div class="setup-segments" aria-hidden="true">${progress}</div><div class="setup-progress" role="status">${esc(t("Step {step} of {total}", { step: setupStep + 1, total: panels.length }))}</div><h1 id="setup-title" tabindex="-1">${esc(panel.title)}</h1><p class="setup-intro">${esc(panel.detail)}</p><div class="setup-panel-content">${panel.content}</div>${modelRequired ? `<p class="setup-footnote setup-model-required" role="status">${esc(t("Download and select a model to continue."))}</p>` : ""}${setupStep === panels.length - 1 ? `<p class="setup-footnote">${esc(t("You can change permissions, shortcuts, and recording preferences in General at any time."))}</p>` : ""}</div>${navigation(false)}</section>`;
+      const setupBody = content.querySelector<HTMLElement>(".setup-card-body");
+      if (setupBody) setupBody.scrollTop = setupScrollTop;
     }
     if (focusSetupTitle) {
       content.querySelector<HTMLElement>("#setup-title")?.focus();
@@ -2385,12 +2402,12 @@ function render() {
   content
     .querySelector<HTMLButtonElement>("[data-setup-next]")
     ?.addEventListener("click", () => {
-      if (setupStep === SETUP_MODEL_STEP && !hasInstalledSelectedModel()) {
+      if (setupStep === setupModelStep() && !hasInstalledSelectedModel()) {
         notice("Download and select a model to continue.");
         return;
       }
       if (pendingPreferences > 0) return;
-      setupStep = Math.min(setupStep + 1, SETUP_STEP_COUNT - 1);
+      setupStep = Math.min(setupStep + 1, setupStepCount() - 1);
       focusSetupTitle = true;
       contentKey = "";
       render();

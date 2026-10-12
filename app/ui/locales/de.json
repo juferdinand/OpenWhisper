@@ -550,5 +550,7 @@
   "Install and restart now": "Jetzt installieren und neu starten",
   "Restart now": "Jetzt neu starten",
   "Install the downloaded update and restart now, or choose Later.": "Installiere das heruntergeladene Update jetzt und starte neu oder wähle Später.",
-  "Release notes are shown in English.": "Die Versionshinweise werden auf Englisch angezeigt."
+  "Release notes are shown in English.": "Die Versionshinweise werden auf Englisch angezeigt.",
+  "Microphone access allowed": "Mikrofonzugriff erlaubt",
+  "OpenWhisper records from the system default microphone. Change it in System Settings → Sound → Input.": "OpenWhisper nimmt über das Standardmikrofon des Systems auf. Ändern kannst du es unter Systemeinstellungen → Ton → Eingang."
 }
