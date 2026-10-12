@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  defaultTextConnectionAvailability, defaultTextConnectionSettings, type TextConnectionAvailability,
+  defaultTextConnectionAvailability, defaultTextConnectionSettings, textConnectionSettingsSchema, type TextConnectionAvailability,
   type TextConnectionSettings, type TextConversation,
 } from "../../src/contracts/text/connections.js";
 import type { TextProcessingStageEvent } from "../../src/contracts/text/processing.js";
@@ -52,12 +52,51 @@ function processor(options: {
 
 test("disabled connections preserve ordinary dictation without scanning or making a request", async () => {
   let scans = 0, requests = 0;
+  const stages: Array<TextProcessingStageEvent | null> = [];
   const { instance } = processor({ scan: async () => { scans += 1; return available("qwen-local"); },
+    stage: (event) => stages.push(event),
     run: async () => { requests += 1; return "unexpected"; } });
   assert.equal(await instance.process("recognized text", owner()), "recognized text");
   assert.equal(scans, 0);
   assert.equal(requests, 0);
   assert.equal(instance.snapshot().processing.status, "idle");
+  assert.deepEqual(stages, []);
+});
+
+test("linguistic all-off skips scanning and provider invocation with an explicit skipped stage", async () => {
+  let scans = 0, requests = 0;
+  const settings = { ...configured(["ollama"]), linguistic_options: {
+    punctuation_capitalization: false, grammar: false, remove_fillers: false,
+    reduce_repetitions: false, improve_sentence_structure: false,
+  } };
+  const stages: Array<TextProcessingStageEvent | null> = [];
+  const { instance } = processor({ settings, stage: (event) => stages.push(event),
+    scan: async () => { scans += 1; return available("qwen-local"); },
+    run: async () => { requests += 1; return "unexpected"; } });
+  assert.equal(await instance.process("recognized text", owner()), "recognized text");
+  assert.equal(scans, 0);
+  assert.equal(requests, 0);
+  assert.deepEqual(instance.snapshot().processing, { status: "idle", provider: null, reason: null });
+  assert.deepEqual(stages, [{ generation: 8, attempt: 2, stage: "model", status: "skipped" }]);
+});
+
+test("legacy custom instruction remains active when old profile fields are absent", async () => {
+  const defaults = defaultTextConnectionSettings();
+  const legacy = textConnectionSettingsSchema.parse({
+    connections: defaults.connections.map((entry) => entry.provider === "ollama"
+      ? { ...entry, enabled: true, model: "qwen-local" } : entry),
+    instruction: "Translate the transcript.",
+  });
+  let observed = "";
+  const observedProcessor = new OptionalTextProcessing({
+    settings: () => legacy,
+    scan: async () => available("qwen-local"),
+    isShuttingDown: () => false,
+    runProvider: async (_connection, instruction) => { observed = instruction; return "processed text"; },
+  });
+  assert.equal(await observedProcessor.process("recognized text", owner()), "processed text");
+  assert.equal(observed, legacy.instruction);
+  assert.equal(legacy.instruction, "Translate the transcript.");
 });
 
 test("only the highest enabled provider is attempted", async () => {
@@ -214,7 +253,10 @@ test("saved enabled provider refreshes unavailable startup state before its firs
 });
 
 test("conversation calls replay explicit prior turns and become eligible for commit only on success", async () => {
-  const settings = { ...configured(["ollama"]), mode: "conversation" as const };
+  const settings = { ...configured(["ollama"]), mode: "conversation" as const, linguistic_options: {
+    punctuation_capitalization: false, grammar: false, remove_fillers: false,
+    reduce_repetitions: false, improve_sentence_structure: false,
+  } };
   let observedInstruction = "", observedContext: readonly { user: string; assistant: string }[] | undefined;
   const instance = new OptionalTextProcessing({
     settings: () => settings,

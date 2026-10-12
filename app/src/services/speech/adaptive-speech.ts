@@ -248,6 +248,9 @@ export class AdaptiveSpeechBoundary implements SpeechBoundary {
         totalSamples: audio.sampleCount });
     };
     try {
+      // Publish real zero-of-total recognition progress before any window planning,
+      // reading, or first-inference warmup can leave the UI without a stage.
+      if (audio.sampleCount > 0) progress();
       while (start < audio.sampleCount) {
         current();
         const rangeReply = rangeReplySchema.safeParse(await awaitEffect(

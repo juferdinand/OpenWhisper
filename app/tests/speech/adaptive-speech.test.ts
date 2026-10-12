@@ -117,7 +117,7 @@ test("late failure retries only unfinished coverage and keeps its smaller maximu
   assert.equal(result.text, "part1 part3 part4 part5");
   assert.deepEqual(f.plans, [{ start: 0, maximum: 480000 }, { start: 480000, maximum: 480000 },
     { start: 480000, maximum: 240000 }, { start: 720000, maximum: 240000 }, { start: 960000, maximum: 240000 }]);
-  assert.deepEqual(f.progress.map((value) => value.completedSamples), [480000, 720000, 960000, 976000]);
+  assert.deepEqual(f.progress.map((value) => value.completedSamples), [0, 480000, 720000, 960000, 976000]);
   assert.equal(f.rawParts.length, 1);
   assert.deepEqual(f.rawParts[0], [" part1 ", " part3 ", " part4 ", " part5 "]);
   assert.ok(f.progress.every((value) => Object.isFrozen(value) && !value.gpuFallback));
@@ -149,6 +149,7 @@ test("61-minute memo survives bounded retry and cancellation through its final t
   const held = deferred<string>();
   const cancellation = new AbortController();
   const context = { generation: 1, attempt: 2, signal: cancellation.signal };
+  const completedProgressCount = f.progress.length;
   let inferenceStarted = false;
   const effects: AdaptiveSpeechEffects = { ...f.effects, infer: { transcribeWindow: async (_model, samples) => {
     assert.ok(samples.length <= MAX_WINDOW_SAMPLES);
@@ -162,7 +163,8 @@ test("61-minute memo survives bounded retry and cancellation through its final t
   await cancelled;
   held.resolve("late discarded inference");
   await nextTurn();
-  assert.equal(f.progress.at(-1)?.completedSamples, count);
+  assert.equal(f.progress.length, completedProgressCount + 1);
+  assert.equal(f.progress.at(-1)?.completedSamples, 0);
   assert.equal(f.audio.sampleCount, count);
   assert.equal(f.audio.chunks.at(-1)?.at(-1), 0.75);
 });
@@ -188,7 +190,10 @@ test("GPU exhaustion resets to CPU once at the unfinished index and never rewrit
     480000, 240000, 120000, 60000, 30000, 16000]);
   assert.deepEqual(f.inference.map((call) => call.gpu), [true, true, true, true, true, true, false, false, false, false, false, false]);
   assert.equal(f.request.model.gpu, true);
-  assert.deepEqual(f.progress, [{ generation: 1, attempt: 1, completedSamples: 0, gpuFallback: true }]);
+  assert.deepEqual(f.progress, [
+    { generation: 1, attempt: 1, completedSamples: 0, gpuFallback: false },
+    { generation: 1, attempt: 1, completedSamples: 0, gpuFallback: true },
+  ]);
 });
 
 test("GPU fallback after success preserves the completed prefix and produces one processed result", async () => {
@@ -203,8 +208,8 @@ test("GPU fallback after success preserves the completed prefix and produces one
   assert.equal(f.plans[0]?.start, 0);
   assert.ok(f.plans.slice(1, 8).every((plan) => plan.start === 480000));
   assert.equal(f.plans[7]?.maximum, 480000);
-  assert.deepEqual(f.progress.map((value) => value.completedSamples), [480000, 480000, 960000, 976000]);
-  assert.deepEqual(f.progress.map((value) => value.gpuFallback), [false, true, true, true]);
+  assert.deepEqual(f.progress.map((value) => value.completedSamples), [0, 480000, 480000, 960000, 976000]);
+  assert.deepEqual(f.progress.map((value) => value.gpuFallback), [false, false, true, true, true]);
   assert.equal(f.request.model.gpu, true);
   assert.equal(f.rawParts.length, 1);
 });
@@ -445,14 +450,36 @@ test("adaptive stage events retain the live generation and attempt with measured
     (event) => { events.push(event); });
   assert.equal(result.rawText, "text");
   assert.deepEqual(events[0], { generation: 1, attempt: 1, stage: "recognition", status: "progress",
-    completedSamples: 2, totalSamples: 2 });
-  assert.deepEqual(events.slice(1).map(({ stage, status, text }) => ({ stage, status, text })), [
-    { stage: "recognition", status: "completed", text: "text" },
-    { stage: "cleanup", status: "completed", text: "text" },
-    { stage: "vocabulary", status: "completed", text: "text" },
-    { stage: "snippets", status: "completed", text: "text" },
+    completedSamples: 0, totalSamples: 2 });
+  assert.deepEqual(events.slice(1).map(({ stage, status, text, completedSamples }) => ({ stage, status, text, completedSamples })), [
+    { stage: "recognition", status: "progress", text: undefined, completedSamples: 2 },
+    { stage: "recognition", status: "completed", text: "text", completedSamples: undefined },
+    { stage: "cleanup", status: "completed", text: "text", completedSamples: undefined },
+    { stage: "vocabulary", status: "completed", text: "text", completedSamples: undefined },
+    { stage: "snippets", status: "completed", text: "text", completedSamples: undefined },
   ]);
   assert.ok(events.every((event) => event.generation === 1 && event.attempt === 1));
+});
+
+test("initial recognition progress reaches the host before the first inference resolves", async () => {
+  const f = fixture(2);
+  const held = deferred<string>();
+  const observed: string[] = [];
+  let inferenceStarted = false;
+  const effects: AdaptiveSpeechEffects = { ...f.effects,
+    progress: (value) => {
+      observed.push(`progress:${value.completedSamples}`);
+      f.progress.push(value);
+    },
+    infer: { transcribeWindow: async () => { inferenceStarted = true; return await held.promise; } },
+  };
+  const pending = new AdaptiveSpeechBoundary(effects).transcribe(f.audio, f.request, f.context,
+    (event) => { observed.push(`stage:${event.completedSamples ?? event.stage}`); });
+  await reached(() => inferenceStarted);
+  assert.deepEqual(observed, ["progress:0", "stage:0"]);
+  held.resolve("text");
+  await pending;
+  assert.deepEqual(observed.slice(0, 4), ["progress:0", "stage:0", "progress:2", "stage:2"]);
 });
 
 test("cleanup then vocabulary then snippets runs once after joining raw chunk boundaries", async () => {
@@ -517,7 +544,7 @@ test("adaptive SpeechClient retry waits for confirmed prior-owner disposal befor
   await reached(() => f.plans.length === 2);
   await nextTurn();
   assert.equal(owners, 1);
-  assert.equal(f.progress.length, 0);
+  assert.deepEqual(f.progress.map((value) => value.completedSamples), [0]);
   disposed.resolve();
   assert.equal((await pending).text, "recovered");
   assert.equal(owners, 2);

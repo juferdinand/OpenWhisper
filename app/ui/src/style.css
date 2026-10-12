@@ -561,8 +561,9 @@ svg {
   min-width: 0;
   flex: 0 0 auto;
   display: flex;
-  align-items: center;
-  gap: 16px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   margin-top: 12px;
   padding: 10px 14px;
   border: 1px solid var(--border);
@@ -571,10 +572,67 @@ svg {
 }
 .processing-progress-copy {
   min-width: 0;
-  flex: 0 0 180px;
   color: var(--secondary);
   font-size: 12px;
   font-weight: 550;
+}
+.processing-step-list,
+.overlay-processing-step-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.processing-step-list li,
+.overlay-processing-step-list li {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.processing-step-indicator {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+}
+.processing-step-list li[data-step-state="current"],
+.overlay-processing-step-list li[data-step-state="current"] {
+  color: var(--text);
+  font-weight: 650;
+}
+.processing-step-list li[data-step-state="current"] .processing-step-indicator,
+.overlay-processing-step-list
+  li[data-step-state="current"]
+  .processing-step-indicator {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.processing-step-list
+  li[data-step-state="completed"]
+  .processing-step-indicator,
+.overlay-processing-step-list
+  li[data-step-state="completed"]
+  .processing-step-indicator {
+  border-color: var(--ok);
+  background: var(--ok);
+}
+.processing-step-list li[data-step-state="skipped"] .processing-step-indicator,
+.overlay-processing-step-list
+  li[data-step-state="skipped"]
+  .processing-step-indicator {
+  border-style: dashed;
+  border-color: var(--muted);
+}
+.dictation-processing-strip .indeterminate-progress {
+  width: 100%;
 }
 .indeterminate-progress {
   min-width: 0;
@@ -3075,9 +3133,6 @@ dialog#update-dialog {
   .dictation-transcript-body .dictation-empty p {
     font-size: 19px;
   }
-  .processing-progress-copy {
-    flex-basis: 140px;
-  }
   .record-output-label {
     display: none;
   }
@@ -3287,6 +3342,56 @@ html.overlay,
 }
 .overlay #overlay-progress[hidden] {
   display: none;
+}
+.overlay #overlay-processing-steps[hidden] {
+  display: none;
+}
+.overlay #overlay-processing-steps {
+  max-width: 100%;
+  margin-top: 5px;
+  overflow: hidden;
+}
+.overlay-processing-step-list {
+  flex-wrap: nowrap;
+  gap: 4px 6px;
+  white-space: nowrap;
+}
+.overlay-processing-step-list li {
+  display: block;
+  flex: 0 0 auto;
+  font-size: 0;
+}
+.overlay-processing-step-list .processing-step-index {
+  width: 17px;
+  height: 17px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--secondary);
+  font-size: 9px;
+  line-height: 1;
+}
+.overlay-processing-step-list
+  li[data-step-state="current"]
+  .processing-step-index {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--button-text);
+  font-weight: 700;
+}
+.overlay-processing-step-list
+  li[data-step-state="completed"]
+  .processing-step-index {
+  border-color: var(--ok);
+  background: var(--ok);
+  color: var(--button-text);
+}
+.overlay-processing-step-list
+  li[data-step-state="skipped"]
+  .processing-step-index {
+  border-style: dashed;
 }
 .overlay .audio-mark {
   display: flex;
@@ -3767,10 +3872,6 @@ html.setup-mode #record-control {
   .settings-content .connections-intro {
     align-items: flex-start;
     flex-direction: column;
-  }
-  .processing-progress-copy {
-    flex-basis: 112px;
-    font-size: 11px;
   }
   html.setup-mode main.setup-main {
     padding: 14px 14px 18px;

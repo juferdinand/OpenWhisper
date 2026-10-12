@@ -35,6 +35,11 @@ async function serve(handler: (path: string, response: import("node:http").Serve
 
 test("text connections default disabled and preserve explicit provider order", () => {
   const defaults = defaultTextConnectionSettings();
+  assert.equal(defaults.instruction_mode, "linguistic");
+  assert.deepEqual(defaults.linguistic_options, {
+    punctuation_capitalization: true, grammar: true, remove_fillers: false,
+    reduce_repetitions: false, improve_sentence_structure: false,
+  });
   assert.deepEqual(defaults.connections.map(({ provider }) => provider), ["ollama", "lm_studio", "claude_code", "codex"]);
   assert.ok(defaults.connections.every(({ enabled }) => !enabled));
   assert.deepEqual(defaults.connections.filter((entry) => entry.provider === "claude_code" || entry.provider === "codex")
@@ -79,6 +84,12 @@ test("custom CLI entries are bounded argv data with safe output selectors and co
   const defaults = defaultTextConnectionSettings();
   const legacy = textConnectionSettingsSchema.parse({ connections: defaults.connections, instruction: defaults.instruction });
   assert.equal(legacy.mode, "single");
+  assert.equal(legacy.instruction_mode, "custom");
+  assert.deepEqual(legacy.linguistic_options, {
+    punctuation_capitalization: false, grammar: false, remove_fillers: false,
+    reduce_repetitions: false, improve_sentence_structure: false,
+  });
+  assert.equal(legacy.instruction, defaults.instruction);
   assert.ok(legacy.conversationInstruction.trim().length > 0);
   const legacyCli = textConnectionSettingsSchema.parse({ ...defaults, connections: defaults.connections.map((entry) =>
     entry.provider === "claude_code" || entry.provider === "codex"

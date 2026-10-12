@@ -941,12 +941,16 @@ async function preference(name: string, value: unknown) {
   return savePreferences(preferencePatchSchema.parse({ [name]: value }));
 }
 function updateConnectionSaveFeedback() {
-  const status = document.querySelector<HTMLElement>("#connection-save-status");
-  if (!status) return;
-  status.textContent = connectionSaveFeedback
-    ? t(connectionSaveFeedback === "saving" ? "Saving…" : "Saved")
-    : "";
-  status.hidden = connectionSaveFeedback === undefined;
+  document
+    .querySelectorAll<HTMLElement>(
+      "#connection-save-status, #text-processing-save-status",
+    )
+    .forEach((status) => {
+      status.textContent = connectionSaveFeedback
+        ? t(connectionSaveFeedback === "saving" ? "Saving…" : "Saved")
+        : "";
+      status.hidden = connectionSaveFeedback === undefined;
+    });
 }
 async function saveConnections(
   settings: TextConnectionSettings,
@@ -1535,11 +1539,99 @@ function processingStageLabel(stage = state.text_processing?.stage): string {
   }
 }
 
+const processingStageOrder = [
+  "recognition",
+  "cleanup",
+  "vocabulary",
+  "snippets",
+  "model",
+] as const;
+
+function visibleProcessingStages() {
+  const modelConfigured = state.text_connections.settings.connections.some(
+    (connection) => connection.enabled,
+  );
+  const includeModel =
+    modelConfigured ||
+    state.text_connections.processing.provider !== null ||
+    state.text_processing?.stage === "model";
+  return processingStageOrder
+    .filter((stage) => stage !== "model" || includeModel)
+    .map((stage) => ({ stage, label: processingStageLabel(stage) }));
+}
+
+function processingStepState(
+  stage: (typeof processingStageOrder)[number],
+): "current" | "completed" | "skipped" | "pending" {
+  const event = state.text_processing;
+  if (stage === "cleanup" && state.preferences.cleanup_enabled === false)
+    return "skipped";
+  if (
+    stage === "model" &&
+    state.text_connections.processing.status === "fallback"
+  )
+    return "skipped";
+  const currentStage =
+    state.text_connections.processing.status === "processing"
+      ? "model"
+      : event?.stage;
+  if (stage === currentStage) {
+    if (event?.stage === stage && event.status === "completed")
+      return "completed";
+    if (event?.stage === stage && event.status === "skipped") return "skipped";
+    return "current";
+  }
+  const stages = visibleProcessingStages();
+  const currentIndex = stages.findIndex((item) => item.stage === currentStage);
+  const stageIndex = stages.findIndex((item) => item.stage === stage);
+  if (currentIndex < 0 || stageIndex > currentIndex) return "pending";
+  return "completed";
+}
+
+function processingStepsMarkup(className: string, compact = false) {
+  return `<ol class="${className}" aria-label="${esc(t("Text processing stages"))}">${visibleProcessingStages()
+    .map(({ stage, label }, index) => {
+      const stepState = processingStepState(stage);
+      const stateLabel = t(
+        (
+          {
+            current: "Active",
+            completed: "Completed",
+            skipped: "Skipped",
+            pending: "Pending",
+          } as const
+        )[stepState],
+      );
+      return `<li data-processing-stage="${stage}" data-step-state="${stepState}" aria-label="${esc(`${label}: ${stateLabel}`)}" title="${esc(label)}" ${stepState === "current" ? 'aria-current="step"' : ""}>${compact ? `<span class="processing-step-index" aria-hidden="true">${index + 1}</span>` : `<span class="processing-step-indicator" aria-hidden="true"></span><span>${esc(label)}</span>`}</li>`;
+    })
+    .join("")}</ol>`;
+}
+
 function processingStatusText(): string {
   const event = state.text_processing;
   if (state.text_connections.processing.status === "fallback")
     return t("AI text processing was skipped; your text was kept.");
-  if (!event) return t("Finding your words");
+  if (
+    event?.stage === "model" &&
+    event.status === "skipped" &&
+    state.text_connections.settings.instruction_mode === "linguistic" &&
+    !Object.values(state.text_connections.settings.linguistic_options).some(
+      Boolean,
+    )
+  )
+    return t(
+      "No model connection was called because all linguistic options are off.",
+    );
+  if (!event) {
+    return state.text_connections.processing.status === "processing"
+      ? processingStageLabel("model")
+      : t("Preparing recognition");
+  }
+  if (
+    state.text_connections.processing.status === "processing" &&
+    event.stage !== "model"
+  )
+    return processingStageLabel("model");
   const label = processingStageLabel(event.stage);
   if (event.status === "completed")
     return t("{stage} complete", { stage: label });
@@ -1612,7 +1704,7 @@ function recordControl() {
     const outputControls = `<div class="record-output" role="group" aria-label="${esc(t("Output"))}"><span class="record-output-label">${esc(t("Output"))}</span>${outputModes.map(([value, label, fullLabel]) => `<button type="button" data-output="${value}" data-pref="output" aria-label="${esc(fullLabel)}" title="${esc(fullLabel)}" aria-pressed="${effectiveOutput() === value}" ${recording || recovery || busy || (value === "paste" && (!accessibilityPermissionGranted() || portalBusy || state.paste_configuring)) ? "disabled" : ""}>${esc(label)}</button>`).join("")}</div>`;
     const overlayBars = Array.from({ length: 5 }, () => "<i></i>").join("");
     controls.innerHTML = overlay
-      ? `<div class="record-actions"><div class="record-status"><div class="audio-mark" aria-hidden="true">${overlayBars}<canvas class="live-waveform" data-waveform="overlay" aria-hidden="true"></canvas></div><div class="record-copy"><strong id="status-title" aria-live="polite"></strong><span id="status" role="status"></span><div id="overlay-progress" class="indeterminate-progress" role="progressbar" aria-label="${esc(t("Text processing progress"))}" hidden><span aria-hidden="true"></span></div></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div><span id="record-label"></span><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-action-label" class="record-action-label"></span></button></div>`
+      ? `<div class="record-actions"><div class="record-status"><div class="audio-mark" aria-hidden="true">${overlayBars}<canvas class="live-waveform" data-waveform="overlay" aria-hidden="true"></canvas></div><div class="record-copy"><strong id="status-title" aria-live="polite"></strong><span id="status" role="status"></span><div id="overlay-progress" class="indeterminate-progress" role="progressbar" aria-label="${esc(t("Text processing progress"))}" hidden><span aria-hidden="true"></span></div><div id="overlay-processing-steps" hidden>${processingStepsMarkup("overlay-processing-step-list", true)}</div></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div><span id="record-label"></span><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-action-label" class="record-action-label"></span></button></div>`
       : `<div class="record-leading"><button id="discard-result" type="button" title="${esc(t("Clear current text; saved history is kept."))}" aria-label="${esc(t("Clear current text; saved history is kept."))}">${esc(t("Discard"))}</button><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><div class="record-status"><div class="audio-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div></div><div class="record-center"><button id="record" class="capsule"><span id="record-symbol"></span></button><span id="record-label"></span></div>${outputControls}`;
     document
       .querySelector("#record")!
@@ -1767,6 +1859,16 @@ function recordControl() {
       : t(state.message);
   const overlayProgress =
     document.querySelector<HTMLProgressElement>("#overlay-progress");
+  const overlaySteps = document.querySelector<HTMLElement>(
+    "#overlay-processing-steps",
+  );
+  if (overlaySteps) {
+    overlaySteps.hidden = !busy;
+    overlaySteps.innerHTML = processingStepsMarkup(
+      "overlay-processing-step-list",
+      true,
+    );
+  }
   if (overlayProgress) {
     const event = state.text_processing;
     overlayProgress.hidden = !busy;
@@ -1924,6 +2026,7 @@ function renderWorkspace() {
     state.gpu_device,
     state.cpu_device,
     state.preferences.keep_history,
+    state.preferences.cleanup_enabled,
     tab === "history",
     historyRailOpen,
     selectedHistoryIndex,
@@ -2012,7 +2115,7 @@ function renderWorkspace() {
         processingEvent!.totalSamples!,
       ) / processingEvent!.totalSamples!
     : undefined;
-  const processingMarkup = `<section class="dictation-processing-strip" aria-label="${esc(t("Text processing progress"))}" ${state.status !== "transcribing" ? "hidden" : ""}><span class="processing-progress-copy" role="status" aria-live="polite">${esc(processingStatusText())}</span><div class="indeterminate-progress ${hasSampleProgress ? "determinate" : ""}" role="progressbar" aria-label="${esc(processingStageLabel(processingEvent?.stage))}" ${hasSampleProgress ? `aria-valuemin="0" aria-valuemax="${processingEvent!.totalSamples}" aria-valuenow="${processingEvent!.completedSamples}" style="--progress-fraction:${progressFraction}"` : ""}><span aria-hidden="true"></span></div></section>`;
+  const processingMarkup = `<section class="dictation-processing-strip" aria-label="${esc(t("Text processing progress"))}" ${state.status !== "transcribing" ? "hidden" : ""}><span class="processing-progress-copy" role="status" aria-live="polite">${esc(processingStatusText())}</span>${hasSampleProgress ? `<div class="indeterminate-progress determinate" role="progressbar" aria-label="${esc(processingStageLabel("recognition"))}" aria-valuemin="0" aria-valuemax="${processingEvent!.totalSamples}" aria-valuenow="${processingEvent!.completedSamples}" style="--progress-fraction:${progressFraction}"><span aria-hidden="true"></span></div>` : ""}${processingStepsMarkup("processing-step-list")}</section>`;
   const mode = isMac()
     ? t("Native")
     : state.preferences.gpu && state.gpu_checked === false
@@ -2040,7 +2143,7 @@ function renderWorkspace() {
     : t("History is not saved.");
   const retainedWaveformCanvas = mainWaveform?.canvas;
   retainedWaveformCanvas?.remove();
-  main.innerHTML = `${permissionBanner()}<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><label class="workspace-mode-select">${esc(t("Processing mode"))}<select id="workspace-mode" aria-label="${esc(t("Processing mode"))}" ${state.status === "recording" || state.status === "transcribing" ? "disabled" : ""}><option value="single" ${!conversationMode ? "selected" : ""}>${esc(t("Single recording"))}</option><option value="conversation" ${conversationMode ? "selected" : ""}>${esc(t("Voice conversation"))}</option></select></label><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true"><canvas class="live-waveform" data-waveform="main" aria-hidden="true"></canvas></div></section>${processingMarkup}${conversationNotice}<section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(conversationMode ? t("Conversation") : t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}${processingFallbackNotice}${contextFullNotice}</div></section><section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
+  main.innerHTML = `${permissionBanner()}<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><label class="workspace-mode-select">${esc(t("Processing mode"))}<select id="workspace-mode" aria-label="${esc(t("Processing mode"))}" ${state.status === "recording" || state.status === "transcribing" ? "disabled" : ""}><option value="single" ${!conversationMode ? "selected" : ""}>${esc(t("Single recording"))}</option><option value="conversation" ${conversationMode ? "selected" : ""}>${esc(t("Voice conversation"))}</option></select></label><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true"><canvas class="live-waveform" data-waveform="main" aria-hidden="true"></canvas></div></section>${conversationNotice}<section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(conversationMode ? t("Conversation") : t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}${processingFallbackNotice}${contextFullNotice}${processingMarkup}</div></section><section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
   if (retainedWaveformCanvas)
     main
       .querySelector<HTMLElement>(".dictation-waveform")
@@ -2210,12 +2313,17 @@ function render() {
                 settings: state.text_connections.settings,
                 available: state.text_connections.available,
               }
-            : tab === "about"
+            : tab === "text"
               ? {
-                  ui_language: state.preferences.ui_language,
-                  setup_completed: state.preferences.setup_completed,
+                  preferences: state.preferences,
+                  settings: state.text_connections.settings,
                 }
-              : state.preferences,
+              : tab === "about"
+                ? {
+                    ui_language: state.preferences.ui_language,
+                    setup_completed: state.preferences.setup_completed,
+                  }
+                : state.preferences,
       state.installed,
       state.microphones,
       state.microphone_labels,
@@ -2653,15 +2761,91 @@ function render() {
   } else if (tab === "text") {
     if (!dirtyTextParts.has("vocabulary") || vocabularyDraft === undefined)
       vocabularyDraft = vocabularyEntries(p.vocabulary);
+    const textConnectionSettings = latestConnectionSettings();
+    const linguisticOptionLabels = [
+      ["punctuation_capitalization", "Punctuation and capitalization"],
+      ["grammar", "Grammar"],
+      ["remove_fillers", "Remove filler words"],
+      ["reduce_repetitions", "Reduce repetitions"],
+      ["improve_sentence_structure", "Smooth sentence structure"],
+    ] as const;
+    const linguisticOptionRows = linguisticOptionLabels
+      .map(
+        ([key, label]) =>
+          `<label class="row"><span>${esc(t(label))}</span><input class="switch" type="checkbox" data-linguistic-option="${key}" ${textConnectionSettings.linguistic_options[key] ? "checked" : ""}></label>`,
+      )
+      .join("");
+    const linguisticControls =
+      `<p>${esc(t("These options preserve the language, meaning, and facts. They do not summarize or perform tasks."))}</p>` +
+      `<p class="secondary">${esc(t("With all options off, no model connection is called for a single recording."))}</p>` +
+      `<div class="group linguistic-option-list">${linguisticOptionRows}</div>`;
+    const customControls =
+      `<div class="text-processing-body"><label>${esc(t("Custom instruction"))}<textarea id="text-custom-instruction" rows="4" maxlength="8192" aria-label="${esc(t("Custom instruction"))}">${esc(connectionInstructionDraft ?? textConnectionSettings.instruction)}</textarea></label>` +
+      `<p>${esc(t("The selected connection receives this instruction with your transcript. It stays saved when you switch to linguistic options."))}</p><div class="edit-actions"><button type="button" id="save-text-instruction">${esc(t("Save instruction"))}</button></div></div>`;
+    const aiProcessingOptions =
+      textConnectionSettings.mode === "conversation"
+        ? `<p>${esc(t("Conversation processing is configured in Connections."))}</p><button type="button" data-settings-view="connections">${esc(t("Manage connections"))}</button>`
+        : `<label class="connection-mode-label">${esc(t("Instruction style"))}<select id="instruction-mode"><option value="linguistic" ${textConnectionSettings.instruction_mode === "linguistic" ? "selected" : ""}>${esc(t("Linguistic options"))}</option><option value="custom" ${textConnectionSettings.instruction_mode === "custom" ? "selected" : ""}>${esc(t("Custom instruction"))}</option></select></label>${textConnectionSettings.instruction_mode === "linguistic" ? linguisticControls : customControls}` +
+          `<span id="text-processing-save-status" class="settings-save-status" role="status" aria-live="polite" ${connectionSaveFeedback ? "" : "hidden"}>${esc(connectionSaveFeedback ? t(connectionSaveFeedback === "saving" ? "Saving…" : "Saved") : "")}</span>`;
     content.innerHTML =
       `<section class="text-processing-card" id="settings-cleanup"><header class="text-processing-heading"><i class="text-processing-dot cleanup" aria-hidden="true"></i><div><h2>1. ${esc(t("Cleanup"))}</h2><p class="text-processing-description">${esc(t("Remove obvious recognition artifacts while preserving your words and meaning."))}</p></div></header><div class="text-processing-body">${toggle(t("Clean up recognized text"), "cleanup_enabled", p.cleanup_enabled)}</div></section>` +
       `<section class="text-processing-card" id="settings-vocabulary"><header class="text-processing-heading"><i class="text-processing-dot vocabulary" aria-hidden="true"></i><div><h2>2. ${esc(t("Vocabulary"))}</h2><p class="text-processing-description">${esc(t("Add names and technical terms as canonical spellings. Similar spellings are corrected after recognition with any model. Whisper models also receive these terms during recognition."))}</p></div></header><div class="text-processing-body"><div id="vocabulary-editor"></div></div></section>` +
       `<form id="snippet-form"><section class="text-processing-card"><header class="text-processing-heading"><i class="text-processing-dot snippets" aria-hidden="true"></i><div><h2>3. ${esc(t("Snippets"))}</h2><p class="text-processing-description">${esc(t("Say a trigger word to insert its saved text. Matching ignores letter case, hyphens, and trailing punctuation."))}</p></div></header><div class="text-processing-body"><div id="snippets">${p.snippets.length ? p.snippets.map(snippetRow).join("") : `<p id="empty-snippets" class="secondary">${esc(t("No snippets yet. For example, say “my YouTube link” to insert a URL instead."))}</p>`}</div><div class="snippet-card-actions"><button type="button" id="add-snippet">${esc(t("Add snippet"))}</button><div class="edit-actions" id="snippet-actions" hidden><button type="submit">${esc(t("Save snippets"))}</button><button type="button" data-discard-snippets>${esc(t("Discard"))}</button></div></div></div></section></form>` +
-      `<section class="text-processing-card optional-model-card"><header class="text-processing-heading"><i class="text-processing-dot model" aria-hidden="true"></i><div><h2>4. ${esc(t("AI text processing"))}</h2><p class="text-processing-description">${esc(t("An enabled connection can apply your instruction to the text after cleanup, vocabulary, and snippets."))}</p></div></header><div class="optional-model-summary"><span>${esc(state.text_connections.settings.connections.some((connection) => connection.enabled) ? t("Connection enabled") : t("Off by default"))}</span><button type="button" data-settings-view="connections">${esc(t("Manage connections"))}</button></div></section>`;
+      `<section class="text-processing-card optional-model-card"><header class="text-processing-heading"><i class="text-processing-dot model" aria-hidden="true"></i><div><h2>4. ${esc(t("AI text processing"))}</h2><p class="text-processing-description">${esc(t("Choose linguistic corrections or an optional custom instruction for single recordings."))}</p></div></header><div class="optional-model-summary"><span>${esc(textConnectionSettings.connections.some((connection) => connection.enabled) ? t("Connection enabled") : t("Off by default"))}</span><button type="button" data-settings-view="connections">${esc(t("Manage connections"))}</button></div><div class="linguistic-settings">${aiProcessingOptions}</div></section>`;
     renderVocabularyRows(
       content.querySelector<HTMLElement>("#vocabulary-editor")!,
       vocabularyDraft,
     );
+    content
+      .querySelector<HTMLSelectElement>("#instruction-mode")
+      ?.addEventListener("change", (event) => {
+        const select = event.currentTarget as HTMLSelectElement;
+        const latest = latestConnectionSettings();
+        const instruction_mode =
+          select.value as TextConnectionSettings["instruction_mode"];
+        void saveConnections({ ...latest, instruction_mode });
+      });
+    content
+      .querySelectorAll<HTMLInputElement>("[data-linguistic-option]")
+      .forEach((input) => {
+        input.addEventListener("change", () => {
+          const latest = latestConnectionSettings();
+          const key = input.dataset
+            .linguisticOption as keyof TextConnectionSettings["linguistic_options"];
+          void saveConnections({
+            ...latest,
+            linguistic_options: {
+              ...latest.linguistic_options,
+              [key]: input.checked,
+            },
+          });
+        });
+      });
+    content
+      .querySelector<HTMLTextAreaElement>("#text-custom-instruction")
+      ?.addEventListener("input", (event) => {
+        connectionInstructionDraft = (
+          event.currentTarget as HTMLTextAreaElement
+        ).value;
+        if (connectionSaveFeedback === "saved") {
+          connectionSaveFeedback = undefined;
+          updateConnectionSaveFeedback();
+        }
+      });
+    content
+      .querySelector<HTMLButtonElement>("#save-text-instruction")
+      ?.addEventListener("click", () => {
+        const latest = latestConnectionSettings();
+        const instruction = content.querySelector<HTMLTextAreaElement>(
+          "#text-custom-instruction",
+        )!.value;
+        connectionInstructionDraft = instruction;
+        void saveConnections({
+          ...latest,
+          instruction_mode: "custom",
+          instruction,
+        });
+      });
     const mark = () => {
       dirtyTextParts.add("snippets");
       dirty = true;
@@ -3255,17 +3439,7 @@ function renderConnectionsSettings(content: HTMLElement) {
       .join("")}</ol>` +
     `<section class="custom-connection-actions"><button type="button" id="add-custom-connection" ${settings.connections.length >= 20 ? "disabled" : ""}>${esc(t("Add CLI connection"))}</button>${customConnectionDraft ? `<div class="custom-connection-editor"><h3>${esc(t(customConnectionDraftIsNew ? "New CLI connection" : "Edit CLI connection"))}</h3><label>${esc(t("Connection name"))}<input id="custom-name" maxlength="128" value="${esc(customConnectionDraft.name)}"></label><label>${esc(t("Executable or command"))}<input id="custom-command" maxlength="1024" value="${esc(customConnectionDraft.command)}"></label><label>${esc(t("Arguments (one per line)"))}<textarea id="custom-args" rows="3">${esc(customConnectionDraft.args.join("\n"))}</textarea></label><label>${esc(t("Input template"))}<input id="custom-stdin" maxlength="8192" value="${esc(customConnectionDraft.stdin)}"></label><label>${esc(t("Output format"))}<select id="custom-output"><option value="text" ${customConnectionDraft.output === "text" ? "selected" : ""}>${esc(t("Plain text"))}</option><option value="json" ${customConnectionDraft.output === "json" ? "selected" : ""}>JSON</option></select></label><label>${esc(t("JSON response field"))}<input id="custom-response-path" maxlength="512" value="${esc(customConnectionDraft.responsePath)}"></label><p>${esc(t("Commands run directly without a shell. Example: gemini with --output-format and json, input {prompt}, JSON field response."))}</p><div class="edit-actions"><button id="save-custom-connection" type="button">${esc(t("Save CLI connection"))}</button><button id="cancel-custom-connection" type="button">${esc(t("Cancel"))}</button></div></div>` : ""}</section>` +
     `<p class="connection-privacy">${esc(t("Only the first enabled connection is used; it receives transcript text. Local servers do not prove local-only processing. CLI tools and custom commands may send text to cloud services or use their configured tools."))}</p>` +
-    `<section class="connection-instruction"><h2>${esc(t("AI text processing"))}</h2><label class="connection-mode-label">${esc(t("Processing mode"))}<select id="connection-mode"><option value="single" ${settings.mode === "single" ? "selected" : ""}>${esc(t("Single recording"))}</option><option value="conversation" ${settings.mode === "conversation" ? "selected" : ""}>${esc(t("Voice conversation"))}</option></select></label>${settings.mode === "conversation" ? `<label>${esc(t("Conversation instruction"))}<textarea id="conversation-instruction" rows="3" maxlength="8192">${esc(conversationInstructionDraft ?? settings.conversationInstruction)}</textarea></label>` : `<label>${esc(t("Instruction"))}<textarea id="connection-instruction" rows="3" maxlength="8192" aria-label="${esc(t("Instruction"))}">${esc(connectionInstructionDraft ?? settings.instruction)}</textarea></label><p>${esc(t("What should the AI do with your recorded text?"))}</p>`}<div class="edit-actions"><button type="button" id="save-connections">${esc(t("Save connections"))}</button><span id="connection-save-status" role="status" aria-live="polite" ${connectionSaveFeedback ? "" : "hidden"}>${esc(connectionSaveFeedback ? t(connectionSaveFeedback === "saving" ? "Saving…" : "Saved") : "")}</span></div></section>`;
-  content
-    .querySelector<HTMLTextAreaElement>("#connection-instruction")
-    ?.addEventListener("input", (event) => {
-      connectionInstructionDraft = (event.currentTarget as HTMLTextAreaElement)
-        .value;
-      if (connectionSaveFeedback === "saved") {
-        connectionSaveFeedback = undefined;
-        updateConnectionSaveFeedback();
-      }
-    });
+    `<section class="connection-instruction"><h2>${esc(t("AI text processing"))}</h2><label class="connection-mode-label">${esc(t("Processing mode"))}<select id="connection-mode"><option value="single" ${settings.mode === "single" ? "selected" : ""}>${esc(t("Single recording"))}</option><option value="conversation" ${settings.mode === "conversation" ? "selected" : ""}>${esc(t("Voice conversation"))}</option></select></label>${settings.mode === "conversation" ? `<label>${esc(t("Conversation instruction"))}<textarea id="conversation-instruction" rows="3" maxlength="8192">${esc(conversationInstructionDraft ?? settings.conversationInstruction)}</textarea></label>` : `<p>${esc(t("Linguistic options and custom instructions for single recordings are in Text processing settings."))}</p><button type="button" data-settings-view="text">${esc(t("Open text processing"))}</button>`}<div class="edit-actions"><button type="button" id="save-connections">${esc(t("Save connections"))}</button><span id="connection-save-status" role="status" aria-live="polite" ${connectionSaveFeedback ? "" : "hidden"}>${esc(connectionSaveFeedback ? t(connectionSaveFeedback === "saving" ? "Saving…" : "Saved") : "")}</span></div></section>`;
   content
     .querySelector<HTMLTextAreaElement>("#conversation-instruction")
     ?.addEventListener("input", (event) => {

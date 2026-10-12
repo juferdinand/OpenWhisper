@@ -41,6 +41,25 @@ owns this context and replays it on each request; it does not resume native CLI 
 Changing the selected connection, its model/command or the conversation instruction
 starts a fresh context. Cancelled, skipped, failed or undelivered results add no turn.
 
+### Linguistic options
+
+In **Settings → Text processing**, single recordings can use five independent options:
+punctuation/capitalization, grammar, filler removal, repetition reduction and sentence
+structure. The host combines only enabled options into a fixed model instruction. It
+asks the model to preserve the original language, meaning, facts and details, without
+summarizing, translating, answering questions or taking actions. This is an instruction
+to the selected model, not a guarantee of its output quality.
+
+New profiles select **Linguistic options**, with punctuation/capitalization and grammar
+enabled; the other options start disabled. Connections still start disabled. With all
+five options off, single recordings skip provider discovery and inference and retain
+the deterministic text from the preceding steps.
+
+Existing profiles retain **Custom instruction** and their saved text. Switching between
+custom and linguistic modes preserves that text. Conversation mode continues to use
+its separate instruction and context; linguistic switches affect single recordings only.
+Changes save through the connection settings store, with pending and saved feedback.
+
 ## Provider boundaries
 
 | Provider | Discovery | Processing |
