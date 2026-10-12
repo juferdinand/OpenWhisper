@@ -555,6 +555,6 @@
   "Accessibility access allowed": "Bedienungshilfen-Zugriff erlaubt",
   "Allowed": "Erlaubt",
   "Not allowed": "Nicht erlaubt",
-  "Required: OpenWhisper needs Accessibility access to insert text and to react to mouse triggers while another app is in front.": "Erforderlich: OpenWhisper braucht Bedienungshilfen-Zugriff, um Text einzufügen und auf Maus-Auslöser zu reagieren, während eine andere App im Vordergrund ist.",
+  "Accessibility access is needed for automatic insertion and advanced triggers. Clipboard-only output remains available.": "Bedienungshilfen-Zugriff wird für automatisches Einfügen und erweiterte Auslöser benötigt. Die reine Zwischenablage-Ausgabe bleibt verfügbar.",
   "Allow Accessibility access to continue.": "Erlaube den Bedienungshilfen-Zugriff, um fortzufahren."
 }

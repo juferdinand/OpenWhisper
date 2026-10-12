@@ -1937,7 +1937,7 @@ function render() {
             : t("Allow keyboard access"),
         detail: isMac()
           ? t(
-              "Required: OpenWhisper needs Accessibility access to insert text and to react to mouse triggers while another app is in front.",
+              "Accessibility access is needed for automatic insertion and advanced triggers. Clipboard-only output remains available.",
             )
           : nativePaste()
             ? t(
@@ -1946,7 +1946,7 @@ function render() {
             : t(
                 "Optional permission for automatic pasting. Only keyboard access is requested; no screen capture.",
               ),
-        // macOS setup cannot continue without Accessibility access; see accessibilityRequired.
+        // Clipboard output remains usable without Accessibility access.
         accessibility: true,
         content: `${isMac() && state.paste_ready ? `<p class="success">${esc(t("Accessibility access allowed"))}</p>` : ""}${permissionButton()}${!pasteAvailable() ? `<p class="secondary">${esc(t("Your desktop does not expose this portal. Clipboard output remains available."))}</p>` : ""}`,
       },
@@ -1972,6 +1972,7 @@ function render() {
       (setupStep === setupModelStep() || setupStep === panels.length - 1);
     const accessibilityRequired =
       isMac() &&
+      state.preferences.output === "paste" &&
       state.paste_ready !== true &&
       setupStep >= 0 &&
       (panels[setupStep] as { accessibility?: boolean } | undefined)

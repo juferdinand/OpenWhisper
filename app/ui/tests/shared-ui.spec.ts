@@ -4240,9 +4240,10 @@ for (const platform of ["linux", "macos"] as const) {
       expect(
         await page.evaluate(() => window.calls.map((call) => call.command)),
       ).not.toContain("allow_microphone");
-      // Accessibility is mandatory on macOS: setup cannot continue until it is allowed.
+      // Insert requires Accessibility; clipboard output can finish without it.
       await page.evaluate(() => {
         window.testState.paste_ready = false;
+        window.testState.preferences.output = "paste";
         window.publishState();
       });
       await expect(
@@ -5894,3 +5895,49 @@ for (const platform of ["linux", "macos"] as const) {
     }
   });
 }
+
+test("macOS clipboard setup finishes without Accessibility access and keeps the permission action", async ({
+  page,
+}) => {
+  await start(page, "macos", false, true, false, null);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page.locator("#setup-title")).toHaveText(
+    "Download a speech model",
+  );
+  for (const title of [
+    "Allow microphone access",
+    "Choose a language",
+    "Where should the text go?",
+    "Allow Accessibility access",
+  ]) {
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(page.locator("#setup-title")).toHaveText(title);
+    if (title === "Where should the text go?")
+      await page.getByRole("radio", { name: "Copy to clipboard only" }).check();
+  }
+  await expect(page.locator(".setup-intro")).toContainText(
+    "Clipboard-only output remains available.",
+  );
+  await expect(page.locator('[data-portal="enable_paste"]')).toBeVisible();
+  await expect(page.locator('[data-portal="enable_paste"]')).toBeEnabled();
+  await expect
+    .poll(() => page.evaluate(() => window.testState.paste_ready))
+    .toBe(false);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page.locator("#setup-title")).toHaveText(
+    "How do you start the recording?",
+  );
+  await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.testState.preferences.setup_completed),
+    )
+    .toBe(true);
+  await expect
+    .poll(() => page.evaluate(() => window.testState.preferences.output))
+    .toBe("clipboard");
+  expect(
+    await page.evaluate(() => window.calls.map((call) => call.command)),
+  ).not.toContain("enable_paste");
+  expect(await page.evaluate(() => window.testState.paste_ready)).toBe(false);
+});

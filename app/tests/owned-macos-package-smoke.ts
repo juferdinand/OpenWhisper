@@ -216,9 +216,7 @@ try {
     }).toBe(true);
     await expect(setupPage.locator("main.setup-main #setup-title")).toBeVisible();
     await expect(setupPage.locator("#dictation-workspace, #settings-dialog")).toHaveCount(0);
-    // Never request microphone or Accessibility permission. Follow the real setup for
-    // the observed trust state; a denied gate stays closed before the existing host
-    // completion command permits the remaining owned workspace checks.
+    // Traverse clipboard setup without requesting microphone or Accessibility permission.
     stage = "setup-navigation";
     await setupPage.locator('[data-ui-language="en"]').click();
     await expect.poll(async () => (await state()).preferences.ui_language).toBe("en");
@@ -230,23 +228,21 @@ try {
       await expect(next).toBeEnabled();
       await next.click();
       await expect(setupTitle).toHaveText(title);
+      if (title === "Where should the text go?") {
+        await setupPage.locator('input[name="output"][value="clipboard"]').check();
+        await expect.poll(async () => (await state()).preferences.output).toBe("clipboard");
+      }
     }
     accessibilityPermissionObserved = (await state()).paste_ready === true;
-    if (accessibilityPermissionObserved) {
-      // Hosted runners may already have Accessibility trust. Observe it only; never grant or revoke it.
-      const next = setupPage.locator("[data-setup-next]");
-      await expect(next).toBeEnabled();
-      await next.click();
-      await expect(setupTitle).toHaveText("How do you start the recording?");
-      await expect(setupPage.locator('[data-command="complete_setup"]')).toBeEnabled();
-      await setupPage.locator('[data-command="complete_setup"]').click();
-      checks.push("Mac setup traverses the real trigger step with pre-existing Accessibility trust observed read-only; no permission command or capture");
-    } else {
-      await expect(setupPage.locator("[data-setup-next]")).toBeDisabled();
-      await expect(setupPage.locator(".setup-model-required")).toContainText("Allow Accessibility access to continue.");
-      await setupPage.evaluate(() => window.openwhisper!.invoke("complete_setup", {}));
-      checks.push("Mac setup verifies the Accessibility gate stays closed, then uses the existing completion command for remaining owned checks; no permission command or capture");
-    }
+    // Observe pre-existing trust only; clipboard setup follows the same UI path without it.
+    await expect(setupPage.locator('[data-portal="enable_paste"], [data-portal="disable_paste"]')).toBeVisible();
+    const next = setupPage.locator("[data-setup-next]");
+    await expect(next).toBeEnabled();
+    await next.click();
+    await expect(setupTitle).toHaveText("How do you start the recording?");
+    await expect(setupPage.locator('[data-command="complete_setup"]')).toBeEnabled();
+    await setupPage.locator('[data-command="complete_setup"]').click();
+    checks.push("Mac clipboard setup traverses the real permission and trigger steps without requesting Accessibility access or starting capture");
     await expect.poll(async () => (await state()).preferences.setup_completed).toBe(true);
   };
   if (packageMetadata.updateConfigured) {
@@ -833,7 +829,7 @@ try {
     input: "CDP to owned window only; no OS global input injection", microphone: "Read-only CoreAudio input-device metadata enumeration on the hosted Mac; no device names or UIDs in the receipt, no permission request, capture Start or recording stream",
     accessibilityPermission: accessibilityPermissionObserved === undefined ? "Setup was already complete; permission status is not reported separately"
       : accessibilityPermissionObserved ? "Pre-existing Accessibility trust observed read-only; no permission command was invoked"
-        : "Accessibility trust was absent at observation; UI gate verified; no permission command was invoked",
+        : "Accessibility trust was absent at observation; clipboard setup completed through the UI; no permission command was invoked",
     installation, nativeUtilityLoading, signatureAdmission, archiveAdmission, stableMigration, updateConfiguration, automaticUpdatePreferencePatch,
     tccAttribution: "Permission and real microphone behavior remain pending", exit, restartExit,
     scope: stable ? (packageFormat === "universal"
