@@ -22,23 +22,29 @@ function configured(enabled: readonly string[]) {
   })) };
 }
 
+function availableCli(provider: "claude_code" | "codex"): TextConnectionAvailability[] {
+  return defaultTextConnectionAvailability().map((entry) => entry.provider === provider
+    ? { ...entry, detected: true, usable: true, models: [], reason: null } : entry);
+}
+
 function processor(options: {
   enabled?: readonly string[];
+  settings?: TextConnectionSettings;
   availability?: TextConnectionAvailability[];
   scan?: () => Promise<unknown>;
-  run?: (provider: string, signal: AbortSignal) => Promise<string>;
+  run?: (provider: string, signal: AbortSignal, model?: string) => Promise<string>;
   shuttingDown?: () => boolean;
   stage?: (event: TextProcessingStageEvent | null) => void;
 } = {}) {
   const calls: string[] = [];
   const instance = new OptionalTextProcessing({
-    settings: () => configured(options.enabled ?? []),
+    settings: () => options.settings ?? configured(options.enabled ?? []),
     scan: options.scan ?? (async () => options.availability ?? available("qwen-local")),
     isShuttingDown: options.shuttingDown ?? (() => false),
     onStage: (event) => options.stage?.(event),
     runProvider: async (connection, _instruction, _text, signal) => {
       calls.push(connection.provider);
-      return options.run ? options.run(connection.provider, signal) : "processed text";
+      return options.run ? options.run(connection.provider, signal, "model" in connection ? connection.model : undefined) : "processed text";
     },
   });
   return { instance, calls };
@@ -58,6 +64,29 @@ test("only the highest enabled provider is attempted", async () => {
   const { instance, calls } = processor({ enabled: ["ollama", "lm_studio"] });
   assert.equal(await instance.process("recognized text", owner()), "processed text");
   assert.deepEqual(calls, ["ollama"]);
+});
+
+test("CLI providers run with empty model catalogs and forward blank or explicit model selections", async () => {
+  const defaults = defaultTextConnectionSettings();
+  for (const provider of ["claude_code", "codex"] as const) {
+    for (const model of ["", `${provider}-model`]) {
+      const settings: TextConnectionSettings = { ...defaults, connections: defaults.connections.map((entry) =>
+        entry.provider === provider ? { ...entry, enabled: true, model } : entry) };
+      const forwarded: Array<string | undefined> = [];
+      const { instance, calls } = processor({ settings, availability: availableCli(provider),
+        run: async (_selected, _signal, selectedModel) => { forwarded.push(selectedModel); return "processed text"; } });
+      assert.equal(await instance.process("recognized text", owner()), "processed text");
+      assert.deepEqual(calls, [provider]);
+      assert.deepEqual(forwarded, [model]);
+    }
+  }
+});
+
+test("local providers still refuse a selected model absent from the discovered catalog", async () => {
+  const { instance, calls } = processor({ enabled: ["ollama"], availability: available("other-model") });
+  assert.equal(await instance.process("recognized text", owner()), "recognized text");
+  assert.deepEqual(calls, []);
+  assert.deepEqual(instance.snapshot().processing, { status: "fallback", provider: "ollama", reason: "unavailable" });
 });
 
 test("conversation storage failure replaces stale completion and clears pending turn", async () => {

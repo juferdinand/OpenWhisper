@@ -121,7 +121,8 @@ export class OptionalTextProcessing {
       }
       if (this.parentCancelled(owner) || this.active !== active) return undefined;
       if (this.userCancelled(active)) return this.fallback(text, owner, selected.provider, "cancelled");
-      if (!availability?.usable || "model" in selected && (!selected.model || !availability.models.includes(selected.model))) {
+      if (!availability?.usable || (selected.provider === "ollama" || selected.provider === "lm_studio") &&
+          (!selected.model || !availability.models.includes(selected.model))) {
         throw new TextProviderUnavailableError();
       }
       const turns = settings.mode === "conversation" ? conversation?.turns ?? [] : undefined;
