@@ -5,7 +5,7 @@ import { chmod, lstat, mkdir, readFile, realpath, writeFile } from "node:fs/prom
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { _electron, expect, type ElectronApplication, type Page } from "@playwright/test";
-import { appStateSchema, preferencesSchema } from "../src/contracts/ui/state.js";
+import { appStateSchema, preferencesSchema, type VocabEntry } from "../src/contracts/ui/state.js";
 import { parseApplicationBuildModule } from "../src/contracts/application/build-identity.js";
 import { pinnedRuntimeEnvironment } from "../scripts/runtime.js";
 import { validateMacBundleMetadata } from "../src/main/build-selection.js";
@@ -124,11 +124,11 @@ try {
   assert.ok(selected.installed.includes("tiny")); assert.equal(selected.preferences.model, "tiny");
   await page.evaluate(() => window.openwhisper!.invoke("complete_setup", {}));
   await page.evaluate(() => window.openwhisper!.invoke("save_preferences", { changes: {
-    ui_language: "en", vocabulary: "OwnedMacUpdatePreservationFixture", auto_check_updates: false } }));
-  assert.equal((await state()).preferences.vocabulary, "OwnedMacUpdatePreservationFixture");
+    ui_language: "en", vocabulary: [{ spelling: "OwnedMacUpdatePreservationFixture", misheard: [] }], auto_check_updates: false } }));
+  assert.deepEqual((await state()).preferences.vocabulary, [{ spelling: "OwnedMacUpdatePreservationFixture", misheard: [] }]);
   const preferencesPath = join(ownedHome, "Library/Application Support/OpenWhisper/Config/electron/settings/preferences.json");
   const preferenceBytes = await readFile(preferencesPath); const preferences = preferencesSchema.parse(JSON.parse(preferenceBytes.toString("utf8")) as unknown);
-  assert.equal(preferences.setup_completed, true); assert.equal(preferences.vocabulary, "OwnedMacUpdatePreservationFixture");
+  assert.equal(preferences.setup_completed, true); assert.deepEqual(preferences.vocabulary, [{ spelling: "OwnedMacUpdatePreservationFixture", misheard: [] }]);
   const migrationPaths = [join(ownedHome, "Library/Application Support/OpenWhisper/Config/electron/migration.json"),
     join(ownedHome, "Library/Application Support/OpenWhisper/Config/electron/legacy/snippets.json"),
     join(ownedHome, "Library/Application Support/OpenWhisper/Config/electron/legacy/decoded.json"),
@@ -184,7 +184,7 @@ try {
   run("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], 30_000);
   assert.deepEqual(await readFile(preferencesPath), preferenceBytes);
   const retainedPreferences = preferencesSchema.parse(JSON.parse((await readFile(preferencesPath)).toString("utf8")) as unknown);
-  assert.equal(retainedPreferences.setup_completed, true); assert.equal(retainedPreferences.vocabulary, preferences.vocabulary);
+  assert.equal(retainedPreferences.setup_completed, true); assert.deepEqual(retainedPreferences.vocabulary, preferences.vocabulary);
   const migrationAfter = await Promise.all(migrationPaths.map(async (path) => createHash("sha256").update(await readFile(path)).digest("hex")));
   assert.deepEqual(migrationAfter, migrationBefore);
   const successorPids = await waitForProcessTree(successorPid);
@@ -199,7 +199,7 @@ try {
   assert.equal(observedSuccessor.appPath, join(bundle, "Contents/Resources/app")); assert.equal(observedSuccessor.version, successorVersion);
   assert.equal(observedSuccessor.sourceCommit, successorSource.commit);
   assert.equal(observedSuccessor.state.preferences.setup_completed, true);
-  assert.equal(observedSuccessor.state.preferences.vocabulary, preferences.vocabulary);
+  assert.deepEqual(observedSuccessor.state.preferences.vocabulary, preferences.vocabulary);
   assert.equal(observedSuccessor.state.updates.configured, true); assert.equal(observedSuccessor.state.version, successorVersion);
   await waitForPidExit(successorPid);
   const quit = z.object({ pid: z.int().positive(), exitCode: z.int(), nonce: z.string().uuid() })
@@ -212,7 +212,7 @@ try {
     modelFixture: "Private owned ggml-tiny.bin inventory placeholder only; speech weights and inference are not tested",
     originalMainPid: originalPid, originalOwnedPids, successorPid, successorOwnedPids: successorPids,
     originalProcessExit: exit, preferences: { setupCompleted: retainedPreferences.setup_completed,
-      vocabularySha256: createHash("sha256").update(retainedPreferences.vocabulary).digest("hex"), byteIdentical: true },
+      vocabularySha256: createHash("sha256").update(JSON.stringify(retainedPreferences.vocabulary)).digest("hex"), byteIdentical: true },
     migrationFilesByteIdentical: true, ordinarySuccessorQuit: "Electron app.quit() receipt exit code 0; all recorded PIDs absent",
     scope: `Actual persistent same-identity Universal ${currentVersion} predecessor to private arm64 ${successorVersion} successor install on an Apple Silicon runner through the normal main coordinator, real native-owner retirement, filesystem transaction and fixed-path relaunch; successor is arm64 thin only; 0.2.5 is publisher-continuity oracle only; offline fixture feed/download, no microphone, physical input, notarization, production HTTPS feed or release.` };
 } finally {
@@ -227,7 +227,7 @@ async function assertInspectorPortVacant(): Promise<void> {
 }
 async function waitForInspectorSuccessor(
   input: Readonly<{ executable: string; appPath: string; sourceCommit: string; version: string;
-    expectedPid: number; uid: number; quitReceipt: string; quitNonce: string; vocabulary: string }>,
+    expectedPid: number; uid: number; quitReceipt: string; quitNonce: string; vocabulary: VocabEntry[] }>,
   setStage: (stage: "normal-successor-identity" | "normal-successor-state" | "normal-successor-quit") => void,
 ): Promise<{ pid: number; uid: number; executable: string; argv: string[]; appPath: string; version: string;
   sourceCommit: string; state: ReturnType<typeof appStateSchema.parse> }> {
@@ -316,7 +316,7 @@ async function waitForInspectorSuccessor(
     if (observed.kind === "failure") throw new Error(`Owned successor ${observed.reason} check failed.`);
     if (!matchesIdentity(observed.identity)) throw new Error("Owned successor identity changed during readiness check.");
     const state = appStateSchema.safeParse(observed.state);
-    if (!state.success || !state.data.preferences.setup_completed || state.data.preferences.vocabulary !== input.vocabulary ||
+    if (!state.success || !state.data.preferences.setup_completed || JSON.stringify(state.data.preferences.vocabulary) !== JSON.stringify(input.vocabulary) ||
       !state.data.updates.configured || state.data.version !== input.version) throw new Error("Owned successor state validation failed.");
     const value = { ...observed.identity, state: state.data };
     setStage("normal-successor-quit");

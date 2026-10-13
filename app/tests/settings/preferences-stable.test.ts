@@ -26,9 +26,9 @@ for (const platform of ["linux", "darwin"] as const) test(`${platform} stable pa
   const legacy = profile.platform === "linux" ? profile.legacy.settings : profile.legacy.snippets;
   await mkdir(dirname(legacy), { recursive: true, mode: 0o700 }); await writeFile(legacy, "unchanged original source", { mode: 0o600 });
   const store = await PreferenceStore.open(profile);
-  await Promise.all([store.patch({ vocabulary: "Neue Wörter — 新語" }), store.patch({ ui_language: "en" })]);
+  await Promise.all([store.patch({ vocabulary: [{ spelling: "Neue Wörter — 新語", misheard: [] }] }), store.patch({ ui_language: "en" })]);
   const saved = (await PreferenceStore.open(profile)).snapshot();
-  assert.equal(saved.vocabulary, "Neue Wörter — 新語"); assert.equal(saved.ui_language, "en");
+  assert.deepEqual(saved.vocabulary, [{ spelling: "Neue Wörter — 新語", misheard: [] }]); assert.equal(saved.ui_language, "en");
   assert.equal(saved.launch_at_login, true); assert.equal(saved.auto_check_updates, true); assert.equal(saved.gpu, false);
   assert.equal(saved.play_sounds, true); assert.equal(saved.restore_clipboard, true); assert.equal(saved.output, "editor");
   assert.equal(saved.hold_to_record, true); assert.deepEqual(saved.native_trigger, migrated.native_trigger);
@@ -67,7 +67,7 @@ test("stable patch refuses a replaced parent while preserving both the original 
   await mkdir(target, { mode: 0o700 }); const selected = join(target, "preferences.json");
   await writeFile(selected, "unrelated user bytes", { mode: 0o600 });
   await rename(profile.paths.settings, retained); await symlink(target, profile.paths.settings);
-  await assert.rejects(store.patch({ vocabulary: "Must never be written" }));
+  await assert.rejects(store.patch({ vocabulary: [{ spelling: "Must never be written", misheard: [] }] }));
   assert.equal(await readFile(join(retained, "preferences.json"), "utf8"), original);
   assert.equal(await readFile(selected, "utf8"), "unrelated user bytes");
 }));

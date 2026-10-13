@@ -10,7 +10,7 @@ function state(): AppState {
     platform: "linux", version: "0.3.0", status: "idle", message: "", transcript: "", history: [],
     preferences: {
       ui_language: "en", setup_completed: true, model: "tiny", language: "auto", microphone: "",
-      vocabulary: "", snippets: [], output: "clipboard", hold_to_record: false, gpu: false, keep_history: true,
+      vocabulary: [], snippets: [], output: "clipboard", hold_to_record: false, gpu: false, keep_history: true,
       cleanup_enabled: true,
     },
     models: [], installed: [], microphones: [], session: "Wayland", desktop: "Owned fixture", clipboard_available: true,

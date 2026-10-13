@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   appStateSchema, commandInputSchemas, commandOutputSchemas, MAX_UI_STATE_BYTES,
   MAX_USER_TEXT_BYTES, nonEmptySnippetSchema, preferencesSchema, preferencePatchSchema, snippetSchema,
+  vocabularyEditAllowed, vocabularySchema,
   validateCommandInput, validateCommandName, validateCommandOutput, validateEvent,
   validateEventName, type AppState, type CommandInput, type CommandOutput,
 } from "../../src/contracts/ui/state.js";
@@ -17,7 +18,7 @@ function state(): AppState {
     platform: "linux", version: "0.2.5", status: "idle", message: "Ready", transcript: "", history: [],
     preferences: {
       ui_language: "en", setup_completed: false, model: "tiny", language: "auto", microphone: "",
-      vocabulary: "", snippets: [], output: "clipboard", hold_to_record: false, gpu: false, keep_history: true,
+      vocabulary: [], snippets: [], output: "clipboard", hold_to_record: false, gpu: false, keep_history: true,
       cleanup_enabled: true,
     },
     models: [{ id: "tiny", title: "Whisper Tiny", family: "whisper", size: "75 MB", note: "Fastest" }],
@@ -140,8 +141,10 @@ test("mouse trigger capture accepts only bounded supported buttons", () => {
 });
 
 test("validated preference patches preserve text and reject host-owned fields", () => {
-  const text = "  Deutsch 👩‍💻 العربية\u200f\n日本語  ";
-  const patch = { ui_language: "de", vocabulary: text, keep_history: false, output: "clipboard" };
+  const patch = { ui_language: "de", vocabulary: [
+    { spelling: "Deutsch 👩‍💻 العربية\u200f", misheard: [] },
+    { spelling: "日本語", misheard: [] },
+  ], keep_history: false, output: "clipboard" };
   assert.deepEqual(validateCommandInput("save_preferences", { changes: patch }), { changes: patch });
   assert.deepEqual(preferencePatchSchema.parse({}), {});
   for (const language of ["auto", "de", "zh", "ja", "ko", "ar", "cs", "uk", "yue"]) {
@@ -198,6 +201,46 @@ test("existing UTF-8 preference/snippet limits reject oversize without normaliza
   assert.equal(preferencesSchema.safeParse({ ...state().preferences, vocabulary: "é".repeat(4096) }).success, true);
   assert.equal(preferencesSchema.safeParse({ ...state().preferences, vocabulary: "é".repeat(4097) }).success, false);
   assert.equal(preferencesSchema.safeParse({ ...state().preferences, snippets: Array.from({ length: 101 }, () => snippet) }).success, false);
+});
+
+test("structured vocabulary migrates legacy terms and rejects duplicate or malformed entries", () => {
+  assert.deepEqual(vocabularySchema.parse(" Café, Kubernetes; 東京\n "), [
+    { spelling: "Café", misheard: [] },
+    { spelling: "Kubernetes", misheard: [] },
+    { spelling: "東京", misheard: [] },
+  ]);
+  const entries = [{ spelling: "OpenWhisper", misheard: ["Open Whispur"] }];
+  assert.deepEqual(vocabularySchema.parse(entries), entries);
+  assert.deepEqual(vocabularySchema.parse([
+    { spelling: "WhisperFree", misheard: ["Whisper Free", "Whisper-Free"] },
+  ]), [{ spelling: "WhisperFree", misheard: ["Whisper Free", "Whisper-Free"] }]);
+  const legacyDuplicates = vocabularySchema.parse("Jira,Jira,jira,Open\tWhisper");
+  assert.deepEqual(legacyDuplicates, [
+    { spelling: "Jira", misheard: [] },
+    { spelling: "Jira", misheard: [] },
+    { spelling: "jira", misheard: [] },
+    { spelling: "Open\tWhisper", misheard: [] },
+  ]);
+  assert.deepEqual(vocabularySchema.parse("\uFEFFJira\uFEFF"), [
+    { spelling: "Jira", misheard: [] },
+  ]);
+  assert.deepEqual(vocabularySchema.parse("\u0085Jira\u0085"), [
+    { spelling: "Jira", misheard: [] },
+  ]);
+  assert.equal(preferencesSchema.safeParse({ ...state().preferences, vocabulary: legacyDuplicates }).success, true);
+  assert.equal(preferencePatchSchema.safeParse({ vocabulary: legacyDuplicates }).success, true);
+  assert.equal(vocabularyEditAllowed([], legacyDuplicates), false);
+  assert.equal(vocabularyEditAllowed(legacyDuplicates, [...legacyDuplicates, { spelling: "Obsidian", misheard: [] }]), true);
+  assert.equal(vocabularyEditAllowed(legacyDuplicates, [...legacyDuplicates, { spelling: "Jira", misheard: [] }]), false);
+  for (const invalid of [
+    [{ spelling: "First spelling", misheard: ["Open-Whispur"] }, { spelling: "Second spelling", misheard: ["open whispur"] }],
+    [{ spelling: " OpenWhisper ", misheard: [] }],
+    [{ spelling: "Open\nWhisper", misheard: [] }],
+  ]) assert.equal(vocabularySchema.safeParse(invalid).success, false);
+  for (const invalid of [
+    [{ spelling: "First spelling", misheard: ["Open-Whispur"] }, { spelling: "Second spelling", misheard: ["open whispur"] }],
+    [{ spelling: "OpenWhisper", misheard: ["Open Whispur", "open whispur"] }],
+  ]) assert.equal(preferencePatchSchema.safeParse({ vocabulary: invalid }).success, false);
 });
 
 test("malformed states, nested extra fields and nonfinite/out-of-range numbers are rejected", () => {

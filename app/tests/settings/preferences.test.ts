@@ -14,10 +14,10 @@ test("concurrent development patches preserve each field and retain text across 
     const profile = resolveDevelopmentProfile({ home });
     prepareDevelopmentProfile(profile);
     const store = await DevelopmentPreferenceStore.open(profile);
-    const text = "Mehrsprachig: café, İstanbul, 東京";
-    await Promise.all([store.patch({ vocabulary: text }), store.patch({ ui_language: "de" })]);
+    const vocabulary = [{ spelling: "Mehrsprachig: café", misheard: [] }, { spelling: "İstanbul", misheard: [] }, { spelling: "東京", misheard: [] }];
+    await Promise.all([store.patch({ vocabulary }), store.patch({ ui_language: "de" })]);
     const reopened = await DevelopmentPreferenceStore.open(profile);
-    assert.equal(reopened.snapshot().vocabulary, text);
+    assert.deepEqual(reopened.snapshot().vocabulary, vocabulary);
     assert.equal(reopened.snapshot().ui_language, "de");
     assert.equal(reopened.snapshot().launch_at_login, false);
     await assert.rejects(reopened.patch({ launch_at_login: true }));
@@ -33,6 +33,36 @@ test("concurrent development patches preserve each field and retain text across 
     assert.deepEqual((await DevelopmentPreferenceStore.open(profile)).snapshot().x11_trigger, x11);
     await triggers.saveX11Trigger(null);
     assert.deepEqual((await DevelopmentPreferenceStore.open(profile)).snapshot().native_trigger, { kind: "mouse", button: 8 });
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test("legacy vocabulary duplicates and internal tabs survive preference startup and save", async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-legacy-vocabulary-")));
+  try {
+    const profile = resolveDevelopmentProfile({ home });
+    prepareDevelopmentProfile(profile);
+    const initial = await DevelopmentPreferenceStore.open(profile);
+    const path = join(profile.paths.settings, "preferences.json");
+    await writeFile(path, JSON.stringify({ ...initial.snapshot(), vocabulary: "Jira,Jira,jira,Open\tWhisper,\u0085Café\u0085" }), { mode: 0o600 });
+
+    const expected = [
+      { spelling: "Jira", misheard: [] },
+      { spelling: "Jira", misheard: [] },
+      { spelling: "jira", misheard: [] },
+      { spelling: "Open\tWhisper", misheard: [] },
+      { spelling: "Café", misheard: [] },
+    ];
+    const migrated = await DevelopmentPreferenceStore.open(profile);
+    assert.deepEqual(migrated.snapshot().vocabulary, expected);
+    await migrated.patch({ ui_language: "de" });
+    assert.deepEqual((await DevelopmentPreferenceStore.open(profile)).snapshot().vocabulary, expected);
+    const expanded = [...expected, { spelling: "Obsidian", misheard: ["Obsydian"] }];
+    await migrated.patch({ vocabulary: expanded });
+    await assert.rejects(
+      migrated.patch({ vocabulary: [...expanded, { spelling: "Jira", misheard: [] }] }),
+      /duplicate spellings/u,
+    );
+    assert.deepEqual((await DevelopmentPreferenceStore.open(profile)).snapshot().vocabulary, expanded);
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 

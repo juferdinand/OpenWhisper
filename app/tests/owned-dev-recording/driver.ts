@@ -1865,8 +1865,9 @@ async function main(): Promise<void> {
   checks.push("actual Discard removes retained private WAV and releases failed capture ownership");
   if (stablePackage) {
     await checkpoint("stable-edited-state-discard-restart");
-    await page.evaluate(() => window.openwhisper?.invoke("save_preferences", { changes: { vocabulary: "Owned edited stable setting" } }));
-    await until(async () => (await state()).preferences.vocabulary === "Owned edited stable setting");
+    const editedVocabulary = [{ spelling: "Owned edited stable setting", misheard: [] }];
+    await page.evaluate((vocabulary) => window.openwhisper?.invoke("save_preferences", { changes: { vocabulary } }), editedVocabulary);
+    await until(async () => JSON.stringify((await state()).preferences.vocabulary) === JSON.stringify(editedVocabulary));
     const historyBeforeRestart = (await state()).history;
     appOwners.at(-1)!.termination = "quit";
     if (appImage) {
@@ -1894,7 +1895,7 @@ async function main(): Promise<void> {
     }
     const reopened = await launchApplication(); application = reopened.application; page = reopened.page;
     await until(async () => !!(await state()).recording_available); const restarted = await state();
-    assert.equal(restarted.profile, undefined); assert.equal(restarted.preferences.vocabulary, "Owned edited stable setting");
+    assert.equal(restarted.profile, undefined); assert.deepEqual(restarted.preferences.vocabulary, editedVocabulary);
     assert.equal(restarted.preferences.gpu, true); assert.deepEqual(restarted.history, historyBeforeRestart);
     assert.equal(restarted.recovery_available, false); assert.deepEqual(await readdir(profile.paths.recovery), []);
     assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), ""); await assertStableOriginals(); await assertNoDevControl();

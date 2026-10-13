@@ -1,10 +1,10 @@
-const wordPattern = /[\p{L}\p{N}][\p{L}\p{N}'’\-]*/gu;
-const alphanumeric = /^[\p{Alphabetic}\p{Number}]$/u;
+import { vocabularyMatchKey, type VocabEntry } from "../../contracts/ui/state.js";
+
+const wordPattern = /[\p{L}\p{N}][\p{L}\p{N}'’]*/gu;
 
 /** Rust's deterministic NFKD/scalar-lowercase policy; compare keys only, never rewrite term text. */
 export function normalizeVocabularyKey(text: string): string {
-  return Array.from(text.normalize("NFKD").replace(/\p{Mark}/gu, ""))
-    .flatMap((scalar) => Array.from(scalar.toLowerCase())).filter((scalar) => alphanumeric.test(scalar)).join("");
+  return vocabularyMatchKey(text);
 }
 
 export function parseVocabulary(vocabulary: string): string[] {
@@ -38,29 +38,82 @@ export function vocabularySimilarity(left: string, right: string): number {
   return 1 - entry(previous, y.length) / Math.max(x.length, y.length);
 }
 
-interface Word { readonly text: string; readonly start: number; readonly end: number }
+interface Word { readonly key: readonly string[]; readonly start: number; readonly end: number }
 interface Match { readonly first: number; readonly last: number; readonly term: string; readonly score: number }
+interface ExplicitAlias { readonly key: readonly string[]; readonly term: string }
 
-export function correctVocabulary(text: string, terms: readonly string[]): string {
-  if (terms.length === 0) return text;
-  const words: Word[] = Array.from(text.matchAll(wordPattern), (match) => ({
-    text: match[0], start: match.index, end: match.index + match[0].length,
-  }));
-  if (words.length === 0) return text;
+function normalizeEntries(entries: readonly (string | VocabEntry)[]): VocabEntry[] {
+  return entries.map((entry) => typeof entry === "string"
+    ? { spelling: entry, misheard: [] }
+    : entry);
+}
+
+function explicitAliases(entries: readonly VocabEntry[]): ExplicitAlias[] {
+  const aliases: ExplicitAlias[] = [];
+  for (const { spelling, misheard } of entries) {
+    for (const alias of misheard) {
+      const key = Array.from(normalizeVocabularyKey(alias));
+      if (key.length === 0) continue;
+      aliases.push({ key, term: spelling });
+    }
+  }
+  return aliases;
+}
+
+function explicitMatches(words: readonly Word[], aliases: readonly ExplicitAlias[]): Match[] {
   const matches: Match[] = [];
-  for (const term of terms) {
+  for (const alias of aliases) {
+    for (let start = 0; start < words.length; start++) {
+      let keyIndex = 0;
+      const limit = Math.min(alias.key.length, words.length - start);
+      for (let length = 1; length <= limit; length++) {
+        let matchesPrefix = true;
+        for (const scalar of entry(words, start + length - 1).key) {
+          if (alias.key[keyIndex] !== scalar) {
+            matchesPrefix = false;
+            break;
+          }
+          keyIndex++;
+        }
+        if (!matchesPrefix || keyIndex > alias.key.length) break;
+        if (keyIndex === alias.key.length) {
+          matches.push({ first: start, last: start + length - 1, term: alias.term, score: 2 });
+          break;
+        }
+      }
+    }
+  }
+  return matches;
+}
+
+function similarMatches(words: readonly Word[], entries: readonly VocabEntry[]): Match[] {
+  const matches: Match[] = [];
+  for (const { spelling: term, misheard } of entries) {
+    if (misheard.length > 0) continue;
     const key = normalizeVocabularyKey(term);
     const threshold = vocabularyThreshold(Array.from(key).length);
     const termWordCount = Math.max(1, term.split(/[\p{White_Space}\-]+/u).filter(Boolean).length);
     const window = Math.min(3, termWordCount + 1);
     for (let start = 0; start < words.length; start++) {
       for (let length = 1; length <= Math.min(window, words.length - start); length++) {
-        const candidate = words.slice(start, start + length).map((word) => word.text).join("");
-        const score = vocabularySimilarity(normalizeVocabularyKey(candidate), key);
+        const candidate = words.slice(start, start + length).map((word) => word.key.join("")).join("");
+        const score = vocabularySimilarity(candidate, key);
         if (score >= threshold) matches.push({ first: start, last: start + length - 1, term, score });
       }
     }
   }
+  return matches;
+}
+
+export function correctVocabulary(text: string, input: readonly (string | VocabEntry)[]): string {
+  if (input.length === 0) return text;
+  const words: Word[] = Array.from(text.matchAll(wordPattern), (match) => ({
+    key: Array.from(normalizeVocabularyKey(match[0])),
+    start: match.index, end: match.index + match[0].length,
+  }));
+  if (words.length === 0) return text;
+  const entries = normalizeEntries(input);
+  const matches = [...explicitMatches(words, explicitAliases(entries)), ...similarMatches(words, entries)];
   // Stable sorting keeps the original term order when score and range length tie.
   matches.sort((left, right) => right.score - left.score ||
     (right.last - right.first) - (left.last - left.first));
@@ -79,4 +132,8 @@ export function correctVocabulary(text: string, terms: readonly string[]): strin
     result = result.slice(0, first.start) + match.term + result.slice(last.end);
   }
   return result;
+}
+
+export function vocabularyPrompt(entries: readonly VocabEntry[]): string {
+  return entries.map((entry) => entry.spelling).join(",");
 }

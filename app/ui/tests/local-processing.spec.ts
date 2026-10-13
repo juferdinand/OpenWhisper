@@ -38,7 +38,7 @@ class RendererFixture {
       model: "base",
       language: "en",
       microphone: "",
-      vocabulary: "Existing vocabulary",
+      vocabulary: [{ spelling: "Existing vocabulary", misheard: [] }],
       snippets: [],
       output: "clipboard",
       hold_to_record: false,

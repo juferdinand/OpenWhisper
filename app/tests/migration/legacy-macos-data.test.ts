@@ -21,7 +21,9 @@ test("saved Mac settings retain ordinary values and unsupported native/editor/de
   const input = { ...context, plist: structuredClone(plist), snippets: structuredClone(snippets) }, before = structuredClone(input);
   const converted = convertLegacyMacosData(input);
   assert.deepEqual(converted.preferences, {
-    ui_language: "de", setup_completed: true, model: plist.selectedModel, language: "ja", microphone: "", cleanup_enabled: true, vocabulary: plist.vocabulary,
+    ui_language: "de", setup_completed: true, model: plist.selectedModel, language: "ja", microphone: "",
+    vocabulary: ["café", "İstanbul", "東京"].map((spelling) => ({ spelling, misheard: [] })),
+    cleanup_enabled: true,
     snippets, output: "editor", hold_to_record: true, gpu: false, keep_history: true, restore_clipboard: false, play_sounds: false,
     show_idle_overlay: true, launch_at_login: true, auto_check_updates: false, macos_shortcut: null,
   });
@@ -29,14 +31,15 @@ test("saved Mac settings retain ordinary values and unsupported native/editor/de
   assert.deepEqual(converted.history, plist.history); assert.deepEqual(converted.preserved, { plist, snippets, history: plist.history });
   assert.deepEqual(converted.legacy, { editorAppPath: plist.editorAppPath, trigger: { present: true, value: trigger } });
   assert.deepEqual(converted.review, ["MAC_NATIVE_TRIGGER", "MAC_EDITOR_OUTPUT", "MAC_EDITOR_PATH", "MAC_HOLD_MODE", "MAC_UNMAPPED_PREFERENCES"]);
-  converted.preferences.vocabulary = "Changed converted copy"; converted.preserved.history.push("Changed preserved copy");
+  converted.preferences.vocabulary = [{ spelling: "Changed converted copy", misheard: [] }]; converted.preserved.history.push("Changed preserved copy");
   assert.deepEqual(input, before);
 });
 
 test("absent plist follows exact Prefs defaults with explicit hardware/model/login facts", () => {
   const converted = convertLegacyMacosData(context);
   assert.deepEqual(converted.preferences, {
-    ui_language: "en", setup_completed: false, model: "parakeet-v3-q8", language: "de", microphone: "", cleanup_enabled: true, vocabulary: "", snippets: [],
+    ui_language: "en", setup_completed: false, model: "parakeet-v3-q8", language: "de", microphone: "", vocabulary: [], snippets: [],
+    cleanup_enabled: true,
     output: "paste", hold_to_record: false, gpu: false, keep_history: true, restore_clipboard: true, play_sounds: true,
     show_idle_overlay: false, launch_at_login: true, auto_check_updates: true, macos_shortcut: null,
   });

@@ -40,9 +40,9 @@ try {
     const catalog: unknown = JSON.parse(await readFile(join(appRoot, "dist/resources/models.json"), "utf8"));
     const inventory = await ModelInventory.open(profile, catalog);
     assert.equal((await inventory.installed())[0]?.verification, "legacy-owned-file");
-    await store.patch({ vocabulary: "Edited private Mac state" });
+    await store.patch({ vocabulary: [{ spelling: "Edited private Mac state", misheard: [] }] });
     const repeated = await initializeStableMacosProfile({ home, platform: "darwin" }, undefined);
-    assert.equal((await PreferenceStore.open(repeated)).snapshot().vocabulary, "Edited private Mac state");
+    assert.deepEqual((await PreferenceStore.open(repeated)).snapshot().vocabulary, [{ spelling: "Edited private Mac state", misheard: [] }]);
     assert.equal(await (await PrivateAudioRecovery.open(profile.paths.recovery)).latest(), null);
     assert.equal(await readFile(join(models, "ggml-tiny.bin"), "utf8"), "Inert retained model");
     assert.equal((await readdir(profile.roots.config)).some((name) => name.startsWith(".electron-migration-")), false);
@@ -65,7 +65,7 @@ try {
   await writeFile(originalPath, originalAudio, { mode: 0o600 });
   const profile = await initializeStableLinuxProfile({ home, platform: "linux" });
   const store = await PreferenceStore.open(profile);
-  assert.equal(store.snapshot().vocabulary, "東京 café"); assert.equal(store.snapshot().launch_at_login, true);
+  assert.deepEqual(store.snapshot().vocabulary, [{ spelling: "東京 café", misheard: [] }]); assert.equal(store.snapshot().launch_at_login, true);
   const catalog: unknown = JSON.parse(await readFile(join(appRoot, "dist/resources/models.json"), "utf8"));
   const inventory = await ModelInventory.open(profile, catalog);
   assert.equal((await inventory.installed())[0]?.verification, "legacy-owned-file");
@@ -73,9 +73,9 @@ try {
   assert.equal(token?.id, id);
   const loaded = await saved.read({ id }, { generation: 1, attempt: 0, signal: new AbortController().signal });
   assert.equal(loaded.sampleCount, 2); assert.deepEqual(loaded.chunks.flatMap((chunk) => Array.from(chunk)), [0.25, -0.25]);
-  await store.patch({ vocabulary: "Edited new settings" });
+  await store.patch({ vocabulary: [{ spelling: "Edited new settings", misheard: [] }] });
   const repeated = await initializeStableLinuxProfile({ home, platform: "linux" });
-  assert.equal((await PreferenceStore.open(repeated)).snapshot().vocabulary, "Edited new settings");
+  assert.deepEqual((await PreferenceStore.open(repeated)).snapshot().vocabulary, [{ spelling: "Edited new settings", misheard: [] }]);
   await saved.remove({ id }, { generation: 1, attempt: 0, signal: new AbortController().signal });
   const discarded = await initializeStableLinuxProfile({ home, platform: "linux" });
   assert.equal(await (await PrivateAudioRecovery.open(discarded.paths.recovery)).latest(), null);

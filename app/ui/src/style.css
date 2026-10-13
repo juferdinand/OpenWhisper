@@ -1538,6 +1538,241 @@ dialog#settings-dialog {
   font-size: 12px;
   line-height: 1.4;
 }
+.settings-content .vocabulary-heading-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-content #vocabulary-save-status {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+.settings-content .vocabulary-example {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: var(--group);
+  color: var(--muted);
+  font-size: 12px;
+}
+.settings-content .vocabulary-example del {
+  color: var(--muted);
+}
+.settings-content .vocabulary-example strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+.settings-content .vocabulary-list {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.settings-content .vocabulary-table-head,
+.settings-content .vocabulary-row {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr) 28px;
+  gap: 12px;
+}
+.settings-content .vocabulary-table-head {
+  padding: 8px 12px;
+  background: var(--group);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+.settings-content .vocabulary-row {
+  min-width: 0;
+  align-items: start;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+.settings-content .vocabulary-spelling {
+  min-width: 0;
+  width: 100%;
+  height: 28px;
+  margin: -2px 0;
+  padding: 0 8px !important;
+  border: 1px solid transparent !important;
+  border-radius: 7px !important;
+  background: transparent !important;
+  color: var(--accent) !important;
+  font-size: 13px !important;
+  font-weight: 600;
+}
+.settings-content .vocabulary-spelling:hover {
+  border-color: var(--border) !important;
+}
+.settings-content .vocabulary-spelling:focus {
+  outline: none;
+  border-color: var(--accent) !important;
+  background: var(--sunken) !important;
+}
+.settings-content .vocabulary-chips {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.settings-content .vocabulary-chip {
+  min-width: 0;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px 0 9px;
+  border-radius: 7px;
+  background: var(--group);
+  color: var(--secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.settings-content .vocabulary-chip button,
+.settings-content .vocabulary-remove-entry {
+  min-width: 18px;
+  width: 18px;
+  min-height: 18px;
+  height: 18px;
+  padding: 0 !important;
+  border: 0;
+  background: transparent;
+  color: var(--secondary);
+  font-size: 16px !important;
+  line-height: 1;
+  opacity: 0.7;
+}
+.settings-content .vocabulary-chip button:hover,
+.settings-content .vocabulary-remove-entry:hover {
+  opacity: 1;
+}
+.settings-content .vocabulary-remove-entry {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  min-height: 22px;
+  margin-top: 1px;
+  font-size: 18px !important;
+}
+.settings-content .vocabulary-alias-input {
+  flex: 1 1 120px;
+  min-width: 120px;
+  width: auto !important;
+  height: 24px;
+  padding: 0 6px !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  color: var(--text) !important;
+  font-size: 12px !important;
+}
+.settings-content .vocabulary-alias-input:focus {
+  outline: 1px solid var(--accent);
+}
+.settings-content .vocabulary-add-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.settings-content .vocabulary-input {
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px !important;
+  border-radius: 8px !important;
+  background: var(--sunken) !important;
+  font-size: 12px !important;
+}
+.settings-content .vocabulary-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.settings-content .vocabulary-add-button {
+  min-width: 64px;
+  height: 32px;
+  padding: 0 14px !important;
+  border-radius: 8px !important;
+  font-size: 12px !important;
+}
+.settings-content .vocabulary-help {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.transcript-context-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 190px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--sunken);
+  box-shadow: 0 8px 28px #0008;
+}
+.transcript-context-menu[hidden] {
+  display: none;
+}
+.transcript-context-menu button {
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: 12px;
+}
+.transcript-context-menu button:hover,
+.transcript-context-menu button:focus-visible {
+  background: var(--group);
+}
+.vocabulary-correction-dialog {
+  width: min(380px, calc(100vw - 32px));
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--sunken);
+  color: var(--text);
+  box-shadow: 0 16px 60px #0009;
+}
+.vocabulary-correction-dialog::backdrop {
+  background: #0008;
+}
+.vocabulary-correction-dialog form {
+  display: grid;
+  gap: 12px;
+}
+.vocabulary-correction-dialog h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.vocabulary-correction-dialog label {
+  color: var(--secondary);
+  font-size: 12px;
+}
+.vocabulary-correction-dialog input {
+  height: 36px;
+  padding: 0 10px !important;
+  background: var(--field) !important;
+}
+.vocabulary-correction-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.vocabulary-correction-actions button {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 12px;
+}
 .settings-content .text-processing-body {
   min-width: 0;
   display: flex;
@@ -2141,9 +2376,6 @@ textarea::placeholder,
 input::placeholder {
   color: var(--secondary);
   opacity: 0.8;
-}
-#vocabulary {
-  margin: 10px 0 6px;
 }
 .radio-group {
   display: grid;

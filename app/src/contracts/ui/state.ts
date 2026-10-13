@@ -49,6 +49,94 @@ const uiLanguageSchema = z.enum(["en", "de"]);
 
 export { snippetSchema };
 export type { Snippet } from "../text/snippets.js";
+const vocabularyText = utf8(8192).refine(
+  (value) => value.length > 0 && value === value.trim() && !/\p{Cc}/u.test(value.replace(/\t/gu, "")),
+  { message: "Vocabulary entries must contain trimmed text" },
+);
+const vocabularyEntrySchema = z.strictObject({
+  spelling: vocabularyText,
+  misheard: z.array(vocabularyText).max(4096),
+});
+export type VocabEntry = z.infer<typeof vocabularyEntrySchema>;
+function refineVocabularyEntries(
+  entries: VocabEntry[],
+  context: z.RefinementCtx,
+  allowDuplicateSpellings: boolean,
+  allowDuplicateCorrections: boolean,
+): void {
+  const spellings = new Set<string>();
+  const aliasOwners = new Map<string, string>();
+  let textBytes = 0;
+  let promptBytes = 0;
+  for (const [index, entry] of entries.entries()) {
+    const spelling = vocabularyEntryKey(entry.spelling);
+    if (!allowDuplicateSpellings && spellings.has(spelling)) {
+      context.addIssue({ code: "custom", path: [index, "spelling"], message: "Duplicate spelling" });
+    }
+    spellings.add(spelling);
+    textBytes += encoder.encode(entry.spelling).byteLength;
+    promptBytes += encoder.encode(entry.spelling).byteLength + (index > 0 ? 1 : 0);
+    const aliases = new Set<string>();
+    for (const [aliasIndex, alias] of entry.misheard.entries()) {
+      const key = vocabularyEntryKey(alias);
+      if (!allowDuplicateCorrections && aliases.has(key)) {
+        context.addIssue({ code: "custom", path: [index, "misheard", aliasIndex], message: "Duplicate correction" });
+      }
+      aliases.add(key);
+      const matchKey = vocabularyMatchKey(alias);
+      const owner = aliasOwners.get(matchKey);
+      if (matchKey && owner !== undefined && owner !== spelling) {
+        context.addIssue({ code: "custom", path: [index, "misheard", aliasIndex], message: "Correction is assigned to another spelling" });
+      } else if (matchKey && owner === undefined) aliasOwners.set(matchKey, spelling);
+      textBytes += encoder.encode(alias).byteLength;
+    }
+  }
+  if (textBytes > 8192 || promptBytes > 8192) {
+    context.addIssue({ code: "custom", message: "Vocabulary exceeds the supported size" });
+  }
+}
+const vocabularyEntriesSchema = z.array(vocabularyEntrySchema).max(4096)
+  .superRefine((entries, context) => refineVocabularyEntries(entries, context, true, true));
+const editableVocabularyEntriesSchema = z.array(vocabularyEntrySchema).max(4096)
+  .superRefine((entries, context) => refineVocabularyEntries(entries, context, false, false));
+const preferenceVocabularyPatchSchema = z.array(vocabularyEntrySchema).max(4096)
+  .superRefine((entries, context) => refineVocabularyEntries(entries, context, true, false));
+function migrateVocabulary(input: unknown): unknown {
+  if (typeof input !== "string") return input;
+  return input.split(/[,;\n\r]/u)
+    .map((term) => term.replace(/^[\p{White_Space}\uFEFF]+|[\p{White_Space}\uFEFF]+$/gu, ""))
+    .filter(Boolean)
+    .map((spelling) => ({ spelling, misheard: [] }));
+}
+export const vocabularySchema = z.preprocess(migrateVocabulary, vocabularyEntriesSchema);
+export function vocabularyEditAllowed(current: readonly VocabEntry[], candidate: unknown): boolean {
+  const editable = editableVocabularyEntriesSchema.safeParse(candidate);
+  if (editable.success) return true;
+  if (editable.error.issues.some((issue) => issue.message !== "Duplicate spelling")) return false;
+  const parsed = vocabularyEntriesSchema.safeParse(candidate);
+  if (!parsed.success) return false;
+  const previousCounts = new Map<string, number>();
+  for (const entry of current) {
+    const key = vocabularyEntryKey(entry.spelling);
+    previousCounts.set(key, (previousCounts.get(key) ?? 0) + 1);
+  }
+  const candidateCounts = new Map<string, number>();
+  for (const entry of parsed.data) {
+    const key = vocabularyEntryKey(entry.spelling);
+    candidateCounts.set(key, (candidateCounts.get(key) ?? 0) + 1);
+  }
+  return Array.from(candidateCounts).every(([key, count]) =>
+    count <= 1 || count <= (previousCounts.get(key) ?? 0));
+}
+export function vocabularyMatchKey(value: string): string {
+  return Array.from(value.normalize("NFKD").replace(/\p{Mark}/gu, ""))
+    .flatMap((scalar) => Array.from(scalar.toLowerCase()))
+    .filter((scalar) => /^[\p{Alphabetic}\p{Number}]$/u.test(scalar))
+    .join("");
+}
+export function vocabularyEntryKey(value: string): string {
+  return value.normalize("NFC").toLowerCase();
+}
 // Native Linux's new-write policy is stricter than macOS's saved editable drafts.
 // Keep it separate so validating a snapshot/legacy Mac patch cannot hide the whole UI.
 export const nonEmptySnippetSchema = snippetSchema.refine(
@@ -79,8 +167,8 @@ export const preferencesSchema = z.strictObject({
   model: modelId,
   language: speechLanguageSchema,
   microphone: utf8(1024),
+  vocabulary: vocabularySchema,
   cleanup_enabled: z.boolean().default(true),
-  vocabulary: utf8(8192),
   snippets: z.array(snippetSchema).max(100),
   output: z.enum(["paste", "clipboard", "editor"]),
   hold_to_record: z.boolean(),
@@ -106,7 +194,10 @@ export const preferencePatchSchema = preferencesSchema.omit({
   native_trigger: true,
   x11_trigger: true,
   macos_shortcut: true,
-}).partial().extend({ cleanup_enabled: z.boolean().optional() }).refine(
+}).partial().extend({
+  cleanup_enabled: z.boolean().optional(),
+  vocabulary: preferenceVocabularyPatchSchema.optional(),
+}).refine(
   (patch) => Object.values(patch).every((value) => value !== undefined),
   { message: "Preference patch values must be defined" },
 );

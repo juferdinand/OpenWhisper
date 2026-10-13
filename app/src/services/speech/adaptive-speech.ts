@@ -144,7 +144,8 @@ export function processRawSpeechPartsDetailed(parts: readonly string[], request:
   const cleanupEnabled = validated.cleanup_enabled !== false;
   const cleaned = cleanupEnabled ? cleanTranscript(raw) : raw;
   onStage?.("cleanup", cleaned, cleanupEnabled ? "completed" : "skipped");
-  const corrected = correctVocabulary(cleaned, parseVocabulary(validated.vocabulary));
+  const vocabulary = validated.vocabulary_entries ?? parseVocabulary(validated.vocabulary);
+  const corrected = correctVocabulary(cleaned, vocabulary);
   onStage?.("vocabulary", corrected);
   return Object.freeze({ rawText: raw, text: corrected });
 }

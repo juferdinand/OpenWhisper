@@ -30,7 +30,7 @@ const idleState: AppState = {
     model: "tiny",
     language: "auto",
     microphone: "",
-    vocabulary: "",
+    vocabulary: [],
     snippets: [],
     output: "clipboard",
     hold_to_record: false,

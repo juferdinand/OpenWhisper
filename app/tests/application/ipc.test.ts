@@ -26,7 +26,7 @@ function state(): AppState {
     history: ["Public fixture text"],
     preferences: {
       ui_language: "en", setup_completed: false, model: "tiny", language: "auto",
-      microphone: "", vocabulary: "", snippets: [], output: "clipboard",
+      microphone: "", vocabulary: [], snippets: [], output: "clipboard",
       hold_to_record: false, gpu: false, keep_history: true, cleanup_enabled: true,
     },
     models: [], installed: [], microphones: [], session: "Owned fixture", desktop: "Owned fixture",

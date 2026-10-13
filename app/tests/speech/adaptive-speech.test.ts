@@ -491,6 +491,8 @@ test("cleanup and vocabulary run once after joining raw chunk boundaries", async
   assert.equal(f.rawParts.length, 1);
   assert.deepEqual(f.rawParts[0], ["[BLANK_AUDIO]  Kubernetis", "."]);
   assert.equal(processRawSpeechParts(["Whisper", "Free"], { ...f.request, vocabulary: "WhisperFree" }), "WhisperFree");
+  assert.equal(processRawSpeechParts(["Opsidian"], { ...f.request, vocabulary: "Obsidian",
+    vocabulary_entries: [{ spelling: "Obsidian", misheard: ["Opsidian"] }] }), "Obsidian");
 });
 
 test("runtime-validated shared processing fixtures pass through the utility processor for both families", async () => {

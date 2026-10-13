@@ -73,8 +73,10 @@ const configRoot = join(ownedHome, "Library/Application Support/OpenWhisper/Conf
 const cacheRoot = join(ownedHome, "Library/Caches/OpenWhisper/electron");
 const ownedSnippet = snippetSchema.parse({ id: "b445efb4-72bb-4b98-97a7-576866917ec5", trigger: "owned package",
   expansion: "OpenWhisper owned stable fixture 日本語", enabled: true });
-const vocabularyEntries = ["OwnedStableFixture", "日本語"] as const;
-const vocabulary = vocabularyEntries.join(", ");
+const vocabulary = [
+  { spelling: "OwnedStableFixture", misheard: ["Owned Stable Fixture"] },
+  { spelling: "日本語", misheard: [] },
+];
 const digest = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 async function frozenFile(path: string) {
   const metadata = await lstat(path, { bigint: true });
@@ -179,20 +181,6 @@ try {
     if (!(await dialog.evaluate((element) => (element as HTMLDialogElement).open))) await target.locator("#open-settings").click();
     await expect(dialog).toBeVisible();
     await target.locator(`.settings-dialog-nav [data-tab="${tab}"]`).click();
-  };
-  const replaceVocabularyInSettings = async (target: Page, entries: readonly string[]) => {
-    await openSettingsTab(target, "text");
-    while (await target.locator("[data-remove-vocabulary]").count()) await target.locator("[data-remove-vocabulary]").first().click();
-    for (const entry of entries) {
-      await target.locator("#vocabulary-new-entry").fill(entry);
-      await target.locator("#add-vocabulary").click();
-    }
-    await expect.poll(async () => (await state()).preferences.vocabulary).toBe(entries.join(", "));
-  };
-  const expectVocabularyInSettings = async (target: Page, entries: readonly string[]) => {
-    await openSettingsTab(target, "text");
-    await expect(target.locator("[data-vocabulary-entry]")).toHaveCount(entries.length);
-    for (const [index, entry] of entries.entries()) await expect(target.locator(`[data-vocabulary-entry="${index}"]`)).toHaveValue(entry);
   };
   const finishSetupIfNeeded = async (setupPage: Page) => {
     let current = await state();
@@ -798,8 +786,14 @@ try {
   checks.push("Typed clear-shortcut command unregisters the actual shortcut");
   if (stable) {
     stage = "stable-preference-edit";
-    await replaceVocabularyInSettings(page, vocabularyEntries);
-    await expect.poll(async () => (await state()).preferences.vocabulary, { timeout: 10_000 }).toBe(vocabulary);
+    await openSettingsTab(page, "text");
+    for (const entry of vocabulary) {
+      await page.locator("#new-vocabulary-spelling").fill(entry.spelling);
+      await page.locator("#new-vocabulary-misheard").fill(entry.misheard.join(", "));
+      await page.locator("#vocabulary-add-form").press("Enter");
+      await expect.poll(async () => (await state()).preferences.vocabulary, { timeout: 10_000 })
+        .toEqual(vocabulary.slice(0, vocabulary.indexOf(entry) + 1));
+    }
     await preserved();
   }
   stage = "close-to-background";
@@ -838,9 +832,11 @@ try {
     assert.equal(retained.macos?.updates_configured, packageMetadata.updateConfigured);
     if (packageMetadata.updateConfigured) assert.equal(retained.preferences.auto_check_updates, false);
     assert.equal(retained.profile, undefined); assert.equal(retained.status, "idle"); assert.deepEqual(retained.installed, ["tiny"]);
-    assert.equal(retained.preferences.vocabulary, vocabulary); assert.deepEqual(retained.preferences.snippets, [ownedSnippet]);
+    assert.deepEqual(retained.preferences.vocabulary, vocabulary); assert.deepEqual(retained.preferences.snippets, [ownedSnippet]);
     assert.equal(retained.preferences.macos_shortcut ?? null, null);
-    await expectVocabularyInSettings(page, vocabularyEntries);
+    await openSettingsTab(page, "text");
+    await expect(page.locator("[data-vocabulary-spelling]")).toHaveCount(vocabulary.length);
+    await expect(page.locator("[data-vocabulary-spelling]").nth(0)).toHaveValue(vocabulary[0]!.spelling);
     await preserved(); stage = "restarted-original-quit";
     await application.close(); restartExit = await restartedClosed; application = undefined;
     assert.equal(restartExit.code, 0); assert.equal(restartExit.signal, null); await preserved();

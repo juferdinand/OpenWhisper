@@ -18,13 +18,15 @@ const legacy = {
 test("legacy stable preferences retain ordinary values, both independent profiles and enabled service preferences", () => {
   const input = { settings: structuredClone(legacy), history: ["Ein vollständiger Satz.", "東京 café 👩‍💻"] };
   const before = structuredClone(input), converted = convertLegacyLinuxData(input);
-  assert.deepEqual(converted.preferences, { ...legacy, cleanup_enabled: true,
+  assert.deepEqual(converted.preferences, { ...legacy,
+    vocabulary: ["café", "İstanbul", "東京", "OpenWhisper"].map((spelling) => ({ spelling, misheard: [] })),
+    cleanup_enabled: true,
     snippets: [legacy.snippets[0], { ...legacy.snippets[1], id: "" }] });
   assert.equal(converted.preferences.auto_check_updates, true); assert.equal(converted.preferences.launch_at_login, true);
   assert.equal(converted.preferences.gpu, false); assert.equal(converted.preferences.hold_to_record, true);
   assert.deepEqual(preferencesSchema.parse(converted.preferences), converted.preferences);
   assert.deepEqual(converted.history, input.history); assert.deepEqual(converted.preserved, input); assert.deepEqual(converted.triggerReview, []);
-  converted.preferences.vocabulary = "Edited converted text"; converted.preserved.history.push("Later edited copy");
+  converted.preferences.vocabulary = [{ spelling: "Edited converted text", misheard: [] }]; converted.preserved.history.push("Later edited copy");
   assert.deepEqual(input, before);
 });
 
@@ -82,7 +84,8 @@ test("malformed optional X11 bindings preserve their source instead of resetting
   ]) {
     const settings = { ...legacy, x11_trigger: trigger }, converted = convertLegacyLinuxData({ settings });
     assert.equal(converted.preferences.x11_trigger, null); assert.deepEqual(converted.preferences.native_trigger, legacy.native_trigger);
-    assert.equal(converted.preferences.vocabulary, legacy.vocabulary); assert.equal(converted.preferences.ui_language, "de");
+    assert.deepEqual(converted.preferences.vocabulary, ["café", "İstanbul", "東京", "OpenWhisper"].map((spelling) => ({ spelling, misheard: [] })));
+    assert.equal(converted.preferences.ui_language, "de");
     assert.deepEqual(converted.preserved.settings?.["x11_trigger"], trigger); assert.deepEqual(converted.triggerReview, ["INVALID_X11_TRIGGER"]);
     assert.deepEqual(settings.x11_trigger, trigger);
   }

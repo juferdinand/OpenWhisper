@@ -15,6 +15,9 @@ import {
   type Tab,
   type Model,
   type Snippet,
+  type VocabEntry,
+  vocabularyEntryKey,
+  vocabularyMatchKey,
 } from "../../src/contracts/ui/state.js";
 import type {
   BuiltinTextProvider,
@@ -29,9 +32,7 @@ let state: State;
 type View =
   Tab | "dictation" | "recording" | "text" | "connections" | "permissions";
 let tab: View = "dictation";
-let vocabularyDraft: string[] | undefined;
 let snippetDraft: Snippet[] | undefined;
-let vocabularyRevision = 0;
 let snippetRevision = 0;
 let portalBusy = false;
 let pendingInsertOutput = false;
@@ -1165,8 +1166,6 @@ function syncPreferenceControls() {
         input.checked = input.value === String(value);
       else input.value = String(value ?? "");
     });
-  const vocabulary = document.querySelector<HTMLTextAreaElement>("#vocabulary");
-  if (vocabulary) vocabulary.value = state.preferences.vocabulary;
   const recognition = document.querySelector("#recognition-backend");
   if (recognition) {
     recognition.textContent =
@@ -2136,6 +2135,7 @@ function renderWorkspace() {
   const retainedWaveformCanvas = mainWaveform?.canvas;
   retainedWaveformCanvas?.remove();
   main.innerHTML = `${permissionBanner()}<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><label class="workspace-mode-select">${esc(t("Processing mode"))}<select id="workspace-mode" aria-label="${esc(t("Processing mode"))}" ${state.status === "recording" || state.status === "transcribing" ? "disabled" : ""}><option value="single" ${!conversationMode ? "selected" : ""}>${esc(t("Single recording"))}</option><option value="conversation" ${conversationMode ? "selected" : ""}>${esc(t("Voice conversation"))}</option></select></label><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true"><canvas class="live-waveform" data-waveform="main" aria-hidden="true"></canvas></div></section>${conversationNotice}<section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(conversationMode ? t("Conversation") : t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}${processingFallbackNotice}${contextFullNotice}</div></section>${processingMarkup}<section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
+  bindVocabularyContextActions(main);
   if (retainedWaveformCanvas)
     main
       .querySelector<HTMLElement>(".dictation-waveform")
@@ -2784,30 +2784,294 @@ function render() {
       .querySelector("#show-models")!
       .addEventListener("click", () => void command("show_models_folder"));
   } else if (tab === "text") {
-    if (vocabularyDraft === undefined)
-      vocabularyDraft = vocabularyEntries(p.vocabulary);
     if (snippetDraft === undefined)
       snippetDraft = p.snippets.map((snippet) => ({ ...snippet }));
     const textConnectionSettings = latestConnectionSettings();
     content.innerHTML =
-      `<section class="text-processing-card" id="settings-cleanup"><header class="text-processing-heading"><i class="text-processing-dot cleanup" aria-hidden="true"></i><div><h2>1. ${esc(t("Cleanup"))}</h2><p class="text-processing-description">${esc(t("Remove obvious recognition artifacts while preserving your words and meaning."))}</p></div></header><div class="text-processing-body">${toggle(t("Clean up recognized text"), "cleanup_enabled", p.cleanup_enabled)}</div></section>` +
-      `<section class="text-processing-card" id="settings-vocabulary"><header class="text-processing-heading"><i class="text-processing-dot vocabulary" aria-hidden="true"></i><div><h2>2. ${esc(t("Vocabulary"))}</h2><p class="text-processing-description">${esc(t("Add names and technical terms as canonical spellings. Similar spellings are corrected after recognition with any model. Whisper models also receive these terms during recognition."))}</p></div></header><div class="text-processing-body"><div id="vocabulary-editor"></div></div></section>` +
-      (textConnectionSettings.mode === "conversation"
-        ? ""
-        : `<section id="settings-ai-revision">${aiRevisionMarkup(textConnectionSettings, state.text_connections.available)}</section>`) +
-      `<section class="text-processing-card" id="settings-snippets"><header class="text-processing-heading"><i class="text-processing-dot snippets" aria-hidden="true"></i><div><h2>${textConnectionSettings.mode === "conversation" ? "3" : "4"}. ${esc(t("Snippets"))}</h2><p class="text-processing-description">${esc(t("Say a trigger word to insert its saved text. Matching ignores letter case, hyphens, and trailing punctuation."))}</p></div></header><div class="text-processing-body"><div id="snippets">${snippetDraft.length ? snippetDraft.map(snippetRow).join("") : `<p id="empty-snippets" class="secondary">${esc(t("No snippets yet. For example, say “my YouTube link” to insert a URL instead."))}</p>`}</div><div class="snippet-card-actions"><button type="button" id="add-snippet">${esc(t("Add snippet"))}</button><p id="snippet-draft-error" role="status" hidden></p></div></div></section>` +
-      (textConnectionSettings.mode === "conversation"
-        ? `<section class="text-processing-card"><label class="text-processing-body"><strong>${esc(t("Conversation instruction"))}</strong><textarea id="conversation-instruction" rows="4" maxlength="8192">${esc(conversationInstructionDraft ?? textConnectionSettings.conversationInstruction)}</textarea></label></section>`
-        : "");
-    renderVocabularyRows(
-      content.querySelector<HTMLElement>("#vocabulary-editor")!,
-      vocabularyDraft,
+      `<section class="text-processing-card" id="settings-vocabulary"><header class="text-processing-heading"><i class="text-processing-dot vocabulary" aria-hidden="true"></i><div><div class="vocabulary-heading-line"><h2>${esc(t("2 · Vocabulary"))}</h2><span id="vocabulary-save-status" role="status" aria-live="polite">${esc(t("Saved"))}</span></div><p class="text-processing-description">${esc(t("Add proper names and technical terms. Similar-sounding words are corrected to your spelling."))}</p></div></header><div class="text-processing-body"><div class="vocabulary-example"><span>${esc(t("You say “Obsidian”, recognized as"))}</span><del>Opsidian</del><span aria-hidden="true">→</span><strong>Obsidian</strong></div><div class="vocabulary-list" id="vocabulary-list"><div class="vocabulary-table-head"><span>${esc(t("Spelling"))}</span><span>${esc(t("Corrected from"))}</span><span aria-hidden="true"></span></div>${p.vocabulary.map((entry, index) => vocabularyRow(entry, index)).join("")}</div><form id="vocabulary-add-form" class="vocabulary-add-grid"><input id="new-vocabulary-spelling" class="vocabulary-input" data-vocab-focus="new-spelling" aria-label="${esc(t("Spelling"))}" placeholder="${esc(t("Spelling, e.g. Obsidian"))}" maxlength="8192"><input id="new-vocabulary-misheard" class="vocabulary-input" data-vocab-focus="new-misheard" aria-label="${esc(t("Often recognized as"))}" placeholder="${esc(t("Often recognized as … (comma-separated)"))}" maxlength="8192"><button type="submit" class="vocabulary-add-button">${esc(t("Add"))}</button></form><p class="vocabulary-help">${esc(t("Click a spelling to edit it. Add misheard forms with Enter; remove them with ×. Without entries, OpenWhisper still corrects similar-sounding words automatically."))}</p></div></section>` +
+      `<section class="text-processing-card" id="settings-snippets"><header class="text-processing-heading"><i class="text-processing-dot snippets" aria-hidden="true"></i><div><h2>${esc(t("Snippets"))}</h2><p class="text-processing-description">${esc(t("Say a trigger word to insert its saved text. Matching ignores letter case, hyphens, and trailing punctuation."))}</p></div></header><div class="text-processing-body"><div id="snippets">${p.snippets.length ? p.snippets.map(snippetRow).join("") : `<p id="empty-snippets" class="secondary">${esc(t("No snippets yet. For example, say “my YouTube link” to insert a URL instead."))}</p>`}</div><div class="snippet-card-actions"><button type="button" id="add-snippet">${esc(t("Add snippet"))}</button></div></div></section>`;
+    content.querySelector<HTMLElement>("#settings-snippets h2")!.textContent =
+      `${textConnectionSettings.mode === "conversation" ? "3." : "4."} ${t("Snippets")}`;
+    content
+      .querySelector<HTMLElement>("#settings-snippets")!
+      .insertAdjacentHTML(
+        "beforeend",
+        `<p id="snippet-draft-error" role="status" hidden></p>`,
+      );
+    content.insertAdjacentHTML(
+      "afterbegin",
+      `<section class="text-processing-card" id="settings-cleanup"><header class="text-processing-heading"><i class="text-processing-dot cleanup" aria-hidden="true"></i><div><h2>1. ${esc(t("Cleanup"))}</h2><p class="text-processing-description">${esc(t("Remove obvious recognition artifacts while preserving your words and meaning."))}</p></div></header><div class="text-processing-body">${toggle(t("Clean up recognized text"), "cleanup_enabled", p.cleanup_enabled)}</div></section>`,
     );
-    if (textConnectionSettings.mode !== "conversation")
+    if (textConnectionSettings.mode === "conversation") {
+      content.insertAdjacentHTML(
+        "beforeend",
+        `<section class="text-processing-card"><label class="text-processing-body"><strong>${esc(t("Conversation instruction"))}</strong><textarea id="conversation-instruction" rows="4" maxlength="8192">${esc(conversationInstructionDraft ?? textConnectionSettings.conversationInstruction)}</textarea></label></section>`,
+      );
+    } else {
+      content
+        .querySelector<HTMLElement>("#settings-vocabulary")!
+        .insertAdjacentHTML(
+          "afterend",
+          `<section id="settings-ai-revision">${aiRevisionMarkup(textConnectionSettings, state.text_connections.available)}</section>`,
+        );
       bindAiRevision(content, {
         settings: latestConnectionSettings,
         save: saveConnections,
       });
+    }
+    const vocabularyList =
+      content.querySelector<HTMLElement>("#vocabulary-list")!;
+    const vocabularyStatus = content.querySelector<HTMLElement>(
+      "#vocabulary-save-status",
+    )!;
+    const vocabularyDraft: VocabEntry[] = p.vocabulary.map((entry) => ({
+      ...entry,
+      misheard: [...entry.misheard],
+    }));
+    let vocabularyRevision = 0;
+    let restoreVocabularyFocus: string | undefined;
+    const setVocabularyStatus = (message: string) => {
+      vocabularyStatus.textContent = t(message);
+    };
+    const focusVocabulary = (focus: string | undefined) => {
+      if (!focus) return;
+      const input =
+        Array.from(
+          vocabularyList.querySelectorAll<HTMLInputElement>(
+            "input[data-vocab-focus]",
+          ),
+        ).find((candidate) => candidate.dataset.vocabFocus === focus) ??
+        Array.from(
+          content.querySelectorAll<HTMLInputElement>("input[data-vocab-focus]"),
+        ).find((candidate) => candidate.dataset.vocabFocus === focus);
+      input?.focus();
+      if (input && input.selectionStart !== null)
+        input.setSelectionRange(input.selectionStart, input.selectionStart);
+    };
+    const renderVocabularyRows = (focus?: string, aliasValue?: string) => {
+      vocabularyList
+        .querySelectorAll(".vocabulary-row")
+        .forEach((row) => row.remove());
+      vocabularyList.insertAdjacentHTML(
+        "beforeend",
+        vocabularyDraft
+          .map((entry, index) =>
+            vocabularyRow(
+              entry,
+              index,
+              focus === `alias-${index}` ? aliasValue : "",
+            ),
+          )
+          .join(""),
+      );
+      if (focus) focusVocabulary(focus);
+    };
+    const saveVocabularyDraft = async () => {
+      const revision = vocabularyRevision;
+      if (vocabularyEntriesHaveConflicts(vocabularyDraft)) {
+        setVocabularyStatus("A misheard form can belong to only one spelling.");
+        return false;
+      }
+      const active =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement.dataset.vocabFocus
+          : undefined;
+      const focus = restoreVocabularyFocus ?? active;
+      const ok = await writePreferences({
+        vocabulary: vocabularyDraft.map((entry) => ({
+          ...entry,
+          misheard: [...entry.misheard],
+        })),
+      });
+      if (!ok) {
+        setVocabularyStatus("Could not save vocabulary.");
+        return false;
+      }
+      if (revision === vocabularyRevision) {
+        setVocabularyStatus("Saved");
+        restoreVocabularyFocus = undefined;
+        focusVocabulary(focus);
+      }
+      return true;
+    };
+    const scheduleVocabularySave = (focus?: string, immediate = false) => {
+      vocabularyRevision++;
+      restoreVocabularyFocus = focus ?? restoreVocabularyFocus;
+      setVocabularyStatus("Saving …");
+      void settingsAutosave.save(
+        "vocabulary",
+        saveVocabularyDraft,
+        immediate ? 0 : 450,
+      );
+    };
+    vocabularyList.addEventListener("input", (event) => {
+      const input = event.target;
+      if (!(input instanceof HTMLInputElement)) return;
+      const row = input.closest<HTMLElement>(".vocabulary-row");
+      const index = Number(row?.dataset.vocabularyIndex);
+      if (!Number.isInteger(index) || !vocabularyDraft[index]) return;
+      if (input.matches("[data-vocabulary-spelling]")) {
+        const spelling = input.value.trim();
+        if (!spelling || input.value !== spelling) return;
+        const duplicate = vocabularyDraft.some(
+          (entry, entryIndex) =>
+            entryIndex !== index &&
+            vocabularyEntryKey(entry.spelling) === vocabularyEntryKey(spelling),
+        );
+        if (duplicate) {
+          return;
+        }
+        vocabularyDraft[index]!.spelling = spelling;
+        scheduleVocabularySave(input.dataset.vocabFocus);
+      } else if (
+        input.matches("[data-vocabulary-alias]") &&
+        input.value.includes(",")
+      ) {
+        const parts = input.value.split(",");
+        const remainder = parts.pop() ?? "";
+        const entry = vocabularyDraft[index]!;
+        for (const alias of parts.map((part) => part.trim()).filter(Boolean)) {
+          if (
+            !entry.misheard.some(
+              (value) =>
+                vocabularyEntryKey(value) === vocabularyEntryKey(alias),
+            )
+          )
+            entry.misheard.push(alias);
+        }
+        input.value = remainder;
+        renderVocabularyRows(input.dataset.vocabFocus, remainder);
+        scheduleVocabularySave(`alias-${index}`, true);
+      }
+    });
+    vocabularyList.addEventListener("focusout", (event) => {
+      const input = event.target;
+      if (
+        !(input instanceof HTMLInputElement) ||
+        !input.matches("[data-vocabulary-spelling]")
+      )
+        return;
+      const row = input.closest<HTMLElement>(".vocabulary-row");
+      const index = Number(row?.dataset.vocabularyIndex);
+      const entry = vocabularyDraft[index];
+      if (!entry) return;
+      const spelling = input.value.trim();
+      if (!spelling) {
+        renderVocabularyRows(`spelling-${index}`);
+        return;
+      }
+      const spellingChanged =
+        entry.spelling !== spelling || input.value !== spelling;
+      const duplicateIndex = vocabularyDraft.findIndex(
+        (candidate, candidateIndex) =>
+          candidateIndex !== index &&
+          vocabularyEntryKey(candidate.spelling) ===
+            vocabularyEntryKey(spelling),
+      );
+      if (duplicateIndex >= 0) {
+        const duplicate = vocabularyDraft[duplicateIndex]!;
+        for (const alias of entry.misheard) {
+          if (
+            !duplicate.misheard.some(
+              (value) =>
+                vocabularyEntryKey(value) === vocabularyEntryKey(alias),
+            )
+          ) {
+            duplicate.misheard.push(alias);
+          }
+        }
+        vocabularyDraft.splice(index, 1);
+        const targetIndex =
+          duplicateIndex > index ? duplicateIndex - 1 : duplicateIndex;
+        renderVocabularyRows(`spelling-${targetIndex}`);
+        scheduleVocabularySave(`spelling-${targetIndex}`, true);
+        return;
+      }
+      entry.spelling = spelling;
+      if (input.value !== spelling) renderVocabularyRows(`spelling-${index}`);
+      if (spellingChanged) scheduleVocabularySave(`spelling-${index}`, true);
+    });
+    vocabularyList.addEventListener("keydown", (event) => {
+      const input = event.target;
+      if (
+        !(input instanceof HTMLInputElement) ||
+        !input.matches("[data-vocabulary-alias]")
+      )
+        return;
+      if (event.key !== "Enter" && event.key !== ",") return;
+      event.preventDefault();
+      const index = Number(
+        input.closest<HTMLElement>(".vocabulary-row")?.dataset.vocabularyIndex,
+      );
+      const entry = vocabularyDraft[index];
+      if (!entry) return;
+      for (const alias of correctionParts(input.value)) {
+        if (
+          !entry.misheard.some(
+            (value) => vocabularyEntryKey(value) === vocabularyEntryKey(alias),
+          )
+        )
+          entry.misheard.push(alias);
+      }
+      renderVocabularyRows(`alias-${index}`, "");
+      scheduleVocabularySave(`alias-${index}`, true);
+    });
+    vocabularyList.addEventListener("click", (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
+        "[data-remove-vocabulary-alias], [data-remove-vocabulary-entry]",
+      );
+      if (!button) return;
+      const row = button.closest<HTMLElement>(".vocabulary-row");
+      const index = Number(row?.dataset.vocabularyIndex);
+      const entry = vocabularyDraft[index];
+      if (!entry) return;
+      if (button.hasAttribute("data-remove-vocabulary-entry"))
+        vocabularyDraft.splice(index, 1);
+      else
+        entry.misheard.splice(Number(button.dataset.removeVocabularyAlias), 1);
+      renderVocabularyRows(
+        `alias-${Math.max(0, Math.min(index, vocabularyDraft.length - 1))}`,
+        "",
+      );
+      scheduleVocabularySave(undefined, true);
+    });
+    const addForm = content.querySelector<HTMLFormElement>(
+      "#vocabulary-add-form",
+    )!;
+    const newSpelling = addForm.querySelector<HTMLInputElement>(
+      "#new-vocabulary-spelling",
+    )!;
+    const newMisheard = addForm.querySelector<HTMLInputElement>(
+      "#new-vocabulary-misheard",
+    )!;
+    addForm.onsubmit = (event) => {
+      event.preventDefault();
+      const spelling = newSpelling.value.trim();
+      if (!spelling) {
+        newSpelling.focus();
+        return;
+      }
+      const aliases = correctionParts(newMisheard.value);
+      const existing = vocabularyDraft.find(
+        (entry) =>
+          vocabularyEntryKey(entry.spelling) === vocabularyEntryKey(spelling),
+      );
+      if (existing) {
+        for (const alias of aliases) {
+          if (
+            !existing.misheard.some(
+              (value) =>
+                vocabularyEntryKey(value) === vocabularyEntryKey(alias),
+            )
+          )
+            existing.misheard.push(alias);
+        }
+      } else vocabularyDraft.push({ spelling, misheard: aliases });
+      newSpelling.value = "";
+      newMisheard.value = "";
+      renderVocabularyRows();
+      scheduleVocabularySave("new-spelling", true);
+    };
     content
       .querySelector<HTMLTextAreaElement>("#conversation-instruction")
       ?.addEventListener("input", (event) => {
@@ -3276,75 +3540,149 @@ function snippetRow(s?: Snippet) {
   return `<div class="snippet-row" data-id="${esc(s?.id ?? crypto.randomUUID())}"><input class="switch" type="checkbox" name="enabled" aria-label="${esc(t("Enable snippet"))}" ${!s || s.enabled ? "checked" : ""}><input name="trigger" aria-label="${esc(t("When I say"))}" placeholder="${esc(t("When I say …"))}" value="${esc(s?.trigger ?? "")}" maxlength="128"><span>→</span><textarea name="expansion" aria-label="${esc(t("Insert"))}" placeholder="${esc(t("… insert"))}" rows="2">${esc(s?.expansion ?? "")}</textarea><button type="button" data-remove aria-label="${esc(t("Remove snippet"))}">×</button></div>`;
 }
 
-function vocabularyEntries(value: string): string[] {
+function vocabularyRow(entry: VocabEntry, index: number, aliasDraft = "") {
+  const chips = entry.misheard
+    .map(
+      (alias, aliasIndex) =>
+        `<span class="vocabulary-chip">${esc(alias)}<button type="button" data-remove-vocabulary-alias="${aliasIndex}" data-vocab-focus="alias-${index}" aria-label="${esc(t("Remove correction {text}", { text: alias }))}">×</button></span>`,
+    )
+    .join("");
+  const placeholder = entry.misheard.length
+    ? t("+ more")
+    : t("Add a misheard form …");
+  return `<div class="vocabulary-row" data-vocabulary-index="${index}"><input class="vocabulary-spelling" data-vocabulary-spelling data-vocab-focus="spelling-${index}" aria-label="${esc(t("Spelling"))}" value="${esc(entry.spelling)}"><div class="vocabulary-chips">${chips}<input class="vocabulary-alias-input" data-vocabulary-alias data-vocab-focus="alias-${index}" aria-label="${esc(t("Add a misheard form"))}" placeholder="${esc(placeholder)}" value="${esc(aliasDraft)}"></div><button class="vocabulary-remove-entry" type="button" data-remove-vocabulary-entry aria-label="${esc(t("Remove vocabulary entry {text}", { text: entry.spelling }))}" title="${esc(t("Remove entry"))}">×</button></div>`;
+}
+
+function mergeVocabularyCorrection(
+  entries: readonly VocabEntry[],
+  spelling: string,
+  misheard: string,
+): VocabEntry[] {
+  const next = entries.map((entry) => ({
+    ...entry,
+    misheard: [...entry.misheard],
+  }));
+  const existing = next.find(
+    (entry) =>
+      vocabularyEntryKey(entry.spelling) === vocabularyEntryKey(spelling),
+  );
+  if (existing) {
+    if (
+      !existing.misheard.some(
+        (value) => vocabularyEntryKey(value) === vocabularyEntryKey(misheard),
+      )
+    ) {
+      existing.misheard.push(misheard);
+    }
+  } else next.push({ spelling, misheard: [misheard] });
+  return next;
+}
+
+function vocabularyEntriesHaveConflicts(
+  entries: readonly VocabEntry[],
+): boolean {
+  const aliasOwners = new Map<string, string>();
+  for (const entry of entries) {
+    const ownerSpelling = vocabularyEntryKey(entry.spelling);
+    for (const alias of entry.misheard) {
+      const key = vocabularyMatchKey(alias);
+      if (!key) continue;
+      const owner = aliasOwners.get(key);
+      if (owner !== undefined && owner !== ownerSpelling) return true;
+      if (owner === undefined) aliasOwners.set(key, ownerSpelling);
+    }
+  }
+  return false;
+}
+
+function correctionParts(value: string): string[] {
   return value
-    .split(/[,;\n\r]/u)
-    .map((entry) => entry.trim())
+    .split(",")
+    .map((part) => part.trim())
     .filter(Boolean);
 }
 
-function renderVocabularyRows(target: HTMLElement, entries: string[]): void {
-  target.innerHTML = `<table class="vocabulary-table"><thead><tr><th>${esc(t("Canonical spelling"))}</th><th>${esc(t("How it is used"))}</th><th><span class="visually-hidden">${esc(t("Actions"))}</span></th></tr></thead><tbody>${entries.length ? entries.map((entry, index) => `<tr><td><input data-vocabulary-entry="${index}" aria-label="${esc(t("Vocabulary spelling {number}", { number: String(index + 1) }))}" value="${esc(entry)}" maxlength="256"></td><td class="vocabulary-use">${esc(t("Similar spellings are matched after recognition."))}</td><td><button type="button" data-remove-vocabulary="${index}" aria-label="${esc(t("Remove vocabulary spelling {number}", { number: String(index + 1) }))}">×</button></td></tr>`).join("") : `<tr><td colspan="3" class="vocabulary-empty">${esc(t("No vocabulary terms yet."))}</td></tr>`}</tbody></table><div class="vocabulary-add-row"><input id="vocabulary-new-entry" maxlength="256" aria-label="${esc(t("Canonical spelling"))}" placeholder="${esc(t("Enter a spelling, such as a name"))}"><button type="button" id="add-vocabulary">${esc(t("Add spelling"))}</button></div>`;
-  target
-    .querySelectorAll<HTMLInputElement>("[data-vocabulary-entry]")
-    .forEach((input) => {
-      input.oninput = () => {
-        entries[Number(input.dataset.vocabularyEntry)] = input.value;
-        vocabularyDraft = entries;
-        saveVocabularyDraft(450);
-      };
-    });
-  target
-    .querySelectorAll<HTMLButtonElement>("[data-remove-vocabulary]")
-    .forEach((button) => {
-      button.onclick = () => {
-        entries.splice(Number(button.dataset.removeVocabulary), 1);
-        vocabularyDraft = entries;
-        renderVocabularyRows(target, entries);
-        saveVocabularyDraft(0);
-      };
-    });
-  target.querySelector<HTMLButtonElement>("#add-vocabulary")!.onclick = () => {
-    const input = target.querySelector<HTMLInputElement>(
-      "#vocabulary-new-entry",
-    )!;
-    const value = input.value.trim();
-    if (!value) {
-      input.focus();
+function bindVocabularyContextActions(main: HTMLElement) {
+  main.insertAdjacentHTML(
+    "beforeend",
+    `<div id="transcript-context-menu" class="transcript-context-menu" role="menu" hidden><button type="button" role="menuitem" id="add-transcript-correction">${esc(t("Add to vocabulary"))}</button></div><dialog id="vocabulary-correction-dialog" class="vocabulary-correction-dialog"><form><h2>${esc(t("Add a correction"))}</h2><label for="corrected-vocabulary-spelling">${esc(t("Corrected spelling"))}</label><input id="corrected-vocabulary-spelling" maxlength="8192" autocomplete="off" placeholder="${esc(t("Enter the correct spelling"))}"><div class="vocabulary-correction-actions"><button type="button" data-cancel-correction>${esc(t("Cancel"))}</button><button type="submit">${esc(t("Add correction"))}</button></div></form></dialog>`,
+  );
+  const menu = main.querySelector<HTMLElement>("#transcript-context-menu")!;
+  const menuButton = main.querySelector<HTMLButtonElement>(
+    "#add-transcript-correction",
+  )!;
+  const dialog = main.querySelector<HTMLDialogElement>(
+    "#vocabulary-correction-dialog",
+  )!;
+  const form = dialog.querySelector<HTMLFormElement>("form")!;
+  const spellingInput = dialog.querySelector<HTMLInputElement>(
+    "#corrected-vocabulary-spelling",
+  )!;
+  let selectedText = "";
+  const hideMenu = () => {
+    menu.hidden = true;
+  };
+  main.addEventListener("contextmenu", (event) => {
+    const target = event.target;
+    if (
+      !(target instanceof Element) ||
+      !target.closest(".dictation-transcript-body .transcript") ||
+      selectedHistoryIndex !== null
+    )
       return;
-    }
-    entries.push(value);
-    vocabularyDraft = entries;
-    renderVocabularyRows(target, entries);
-    target.querySelector<HTMLInputElement>("#vocabulary-new-entry")?.focus();
-    saveVocabularyDraft(0);
-  };
-  target.querySelector<HTMLInputElement>("#vocabulary-new-entry")!.onkeydown = (
-    event,
-  ) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      target.querySelector<HTMLButtonElement>("#add-vocabulary")!.click();
-    }
-  };
-}
-
-function saveVocabularyDraft(delayMs: number): void {
-  if (!vocabularyDraft) return;
-  const revision = ++vocabularyRevision;
-  const value = vocabularyDraft
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .join(", ");
-  void settingsAutosave
-    .save("vocabulary", () => writePreferences({ vocabulary: value }), delayMs)
-    .then((saved) => {
-      if (saved && revision === vocabularyRevision) {
-        vocabularyDraft = undefined;
-        contentKey = "";
-        render();
+    const selection = window.getSelection()?.toString().trim() ?? "";
+    if (!selection) return;
+    event.preventDefault();
+    selectedText = selection;
+    menu.hidden = false;
+    menu.style.left = `${event.clientX}px`;
+    menu.style.top = `${event.clientY}px`;
+    const bounds = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(event.clientX, window.innerWidth - bounds.width - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(event.clientY, window.innerHeight - bounds.height - 8))}px`;
+    menuButton.focus();
+  });
+  main.addEventListener("click", (event) => {
+    if (
+      !(event.target instanceof Element) ||
+      !event.target.closest("#transcript-context-menu")
+    )
+      hideMenu();
+  });
+  menuButton.addEventListener("click", () => {
+    hideMenu();
+    spellingInput.value = "";
+    dialog.showModal();
+    spellingInput.focus();
+  });
+  dialog
+    .querySelector<HTMLButtonElement>("[data-cancel-correction]")!
+    .addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void (async () => {
+      const spelling = spellingInput.value.trim();
+      if (!spelling || !selectedText) {
+        spellingInput.focus();
+        return;
       }
-    });
+      const vocabulary = mergeVocabularyCorrection(
+        state.preferences.vocabulary,
+        spelling,
+        selectedText,
+      );
+      dialog.close();
+      if (vocabularyEntriesHaveConflicts(vocabulary)) {
+        notice("A misheard form can belong to only one spelling.");
+        return;
+      }
+      if (await savePreferences({ vocabulary }))
+        notice("Added correction to vocabulary.");
+    })();
+  });
 }
 
 async function start() {
