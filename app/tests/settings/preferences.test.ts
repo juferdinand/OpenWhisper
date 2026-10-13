@@ -43,13 +43,14 @@ test("legacy vocabulary duplicates and internal tabs survive preference startup 
     prepareDevelopmentProfile(profile);
     const initial = await DevelopmentPreferenceStore.open(profile);
     const path = join(profile.paths.settings, "preferences.json");
-    await writeFile(path, JSON.stringify({ ...initial.snapshot(), vocabulary: "Jira,Jira,jira,Open\tWhisper" }), { mode: 0o600 });
+    await writeFile(path, JSON.stringify({ ...initial.snapshot(), vocabulary: "Jira,Jira,jira,Open\tWhisper,\u0085Café\u0085" }), { mode: 0o600 });
 
     const expected = [
       { spelling: "Jira", misheard: [] },
       { spelling: "Jira", misheard: [] },
       { spelling: "jira", misheard: [] },
       { spelling: "Open\tWhisper", misheard: [] },
+      { spelling: "Café", misheard: [] },
     ];
     const migrated = await DevelopmentPreferenceStore.open(profile);
     assert.deepEqual(migrated.snapshot().vocabulary, expected);

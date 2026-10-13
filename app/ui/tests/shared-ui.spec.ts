@@ -4387,6 +4387,12 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(page.locator("#vocabulary-save-status")).toHaveText(
       "A misheard form can belong to only one spelling.",
     );
+    await expect(page.locator("#settings-save-status")).toHaveAttribute(
+      "data-status",
+      "error",
+    );
+    await page.locator("#close-settings").click();
+    await expect(page.locator("#settings-dialog")).toBeVisible();
     await expect
       .poll(() => page.evaluate(() => window.testState.preferences.vocabulary))
       .toEqual(saved);

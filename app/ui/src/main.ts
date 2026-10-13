@@ -2870,7 +2870,7 @@ function render() {
       const revision = vocabularyRevision;
       if (vocabularyEntriesHaveConflicts(vocabularyDraft)) {
         setVocabularyStatus("A misheard form can belong to only one spelling.");
-        return true;
+        return false;
       }
       const active =
         document.activeElement instanceof HTMLElement
@@ -2898,11 +2898,11 @@ function render() {
       vocabularyRevision++;
       restoreVocabularyFocus = focus ?? restoreVocabularyFocus;
       setVocabularyStatus("Saving …");
-      void settingsAutosave
-        .save("vocabulary", saveVocabularyDraft, immediate ? 0 : 450)
-        .then((saved) => {
-          if (!saved) setVocabularyStatus("Could not save vocabulary.");
-        });
+      void settingsAutosave.save(
+        "vocabulary",
+        saveVocabularyDraft,
+        immediate ? 0 : 450,
+      );
     };
     vocabularyList.addEventListener("input", (event) => {
       const input = event.target;

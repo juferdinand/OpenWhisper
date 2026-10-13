@@ -224,6 +224,9 @@ test("structured vocabulary migrates legacy terms and rejects duplicate or malfo
   assert.deepEqual(vocabularySchema.parse("\uFEFFJira\uFEFF"), [
     { spelling: "Jira", misheard: [] },
   ]);
+  assert.deepEqual(vocabularySchema.parse("\u0085Jira\u0085"), [
+    { spelling: "Jira", misheard: [] },
+  ]);
   assert.equal(preferencesSchema.safeParse({ ...state().preferences, vocabulary: legacyDuplicates }).success, true);
   assert.equal(preferencePatchSchema.safeParse({ vocabulary: legacyDuplicates }).success, true);
   assert.equal(vocabularyEditAllowed([], legacyDuplicates), false);

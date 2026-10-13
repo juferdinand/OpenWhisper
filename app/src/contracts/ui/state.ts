@@ -104,7 +104,7 @@ const preferenceVocabularyPatchSchema = z.array(vocabularyEntrySchema).max(4096)
 function migrateVocabulary(input: unknown): unknown {
   if (typeof input !== "string") return input;
   return input.split(/[,;\n\r]/u)
-    .map((term) => term.trim())
+    .map((term) => term.replace(/^[\p{White_Space}\uFEFF]+|[\p{White_Space}\uFEFF]+$/gu, ""))
     .filter(Boolean)
     .map((spelling) => ({ spelling, misheard: [] }));
 }
