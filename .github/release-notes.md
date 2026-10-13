@@ -1,16 +1,16 @@
 <!-- Prepared for the gated release workflow; repository status lives in README.md. -->
 
-## What's new in OpenWhisper 0.4.2
+## What's new in OpenWhisper 0.5.0
 
-- Download updates with visible progress, then choose Restart now or Later.
-- Read update highlights in your selected interface language.
-- Discover updates automatically at startup, hourly, and after resuming.
+- Connect optional local model servers or command-line tools for text cleanup and AI revision; raw recognition remains available when processing is skipped or fails.
+- Continue a voice conversation across recordings and restarts, or start a fresh chat when you choose.
+- Check microphone and keyboard access, get guidance for permission problems, and keep using the clipboard when automatic insertion is unavailable.
 
-## Neu in OpenWhisper 0.4.2
+## Neu in OpenWhisper 0.5.0
 
-- Updates mit sichtbarem Fortschritt herunterladen und anschließend Jetzt neu starten oder Später wählen.
-- Die Neuerungen eines Updates in der gewählten Oberflächensprache lesen.
-- Updates automatisch beim Start, stündlich und nach dem Aufwachen erkennen.
+- Verbinde optionale lokale Modellserver oder Kommandozeilenwerkzeuge für Textbereinigung und KI-Überarbeitung; der erkannte Rohtext bleibt verfügbar, wenn die Verarbeitung übersprungen wird oder fehlschlägt.
+- Führe ein Sprachgespräch über mehrere Aufnahmen und Neustarts fort oder beginne bewusst einen neuen Chat.
+- Prüfe Mikrofon- und Tastaturzugriff, erhalte Hilfe bei Berechtigungsproblemen und nutze die Zwischenablage weiter, wenn automatisches Einfügen nicht verfügbar ist.
 
 Recognition runs locally. Exact package, desktop and test scope is recorded in
 [Electron status](https://github.com/juferdinand/OpenWhisper/blob/main/docs/ELECTRON-STATUS.md) and
