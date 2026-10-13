@@ -97,6 +97,19 @@ const lmStudioResponseSchema = z.object({
 });
 const ollamaResponseSchema = z.object({ done: z.literal(true), done_reason: z.literal("stop").optional(), message: messageSchema });
 
+/** LM Studio's native chat API returns reasoning and message items; only message text is used. */
+const lmStudioNativeResponseSchema = z.object({
+  output: z.array(z.object({ type: z.string().max(64), content: z.unknown().optional() })).min(1).max(256),
+});
+export function parseLmStudioNativeResponse(input: unknown): string {
+  const object = z.record(z.string(), z.unknown()).parse(input);
+  if (Object.hasOwn(object, "error")) throw new Error("Invalid model response.");
+  const parts = lmStudioNativeResponseSchema.parse(object).output.filter((item) => item.type === "message")
+    .map((item) => z.string().parse(item.content));
+  if (parts.length === 0) throw new Error("Invalid model response.");
+  return localProcessingOutputSchema.parse(parts.join(""));
+}
+
 /** Provider metadata may coexist with text; it never becomes executable instructions. */
 export function parseLocalProcessingResponse(provider: LocalProcessingProvider, input: unknown): string {
   const object = z.record(z.string(), z.unknown()).parse(input);

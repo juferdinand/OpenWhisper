@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 import { Agent, request, type ClientRequest, type IncomingMessage } from "node:http";
 import {
   decodeLocalProcessingProfile, MAX_LOCAL_PROCESSING_RESPONSE_BYTES,
-  parseLocalProcessingEndpoint, parseLocalProcessingResponse, previewLocalProcessingInputSchema,
+  parseLmStudioNativeResponse, parseLocalProcessingEndpoint, parseLocalProcessingResponse, previewLocalProcessingInputSchema,
   type LocalProcessingProfile, type PreviewLocalProcessingInput,
 } from "../../contracts/speech/local-processing.js";
 import type { ConversationTurn } from "../../contracts/text/connections.js";
@@ -22,6 +22,7 @@ const messages = Object.freeze({
   RESPONSE_TOO_LARGE: "The model response exceeded the preview limit",
   RESPONSE_READ_FAILED: "Could not read the model response",
   INVALID_RESPONSE: "The model returned an invalid or incomplete text response",
+  REASONING_UNSUPPORTED: "The model does not accept the reasoning setting",
 });
 export type LocalProcessingFailureCode = keyof typeof messages;
 /** Error messages are fixed: never include submitted text, server bodies or transport exceptions. */
@@ -29,7 +30,22 @@ export class LocalProcessingError extends Error {
   constructor(readonly code: LocalProcessingFailureCode) { super(messages[code]); this.name = "LocalProcessingError"; }
 }
 
-function requestBody(profile: LocalProcessingProfile, text: string, context: readonly ConversationTurn[] = []): Buffer {
+/**
+ * Cleanup does not need a reasoning model to think first: thinking made qwen-class models take
+ * minutes or never answer. "off" asks the server to skip it; "default" is the retry for models
+ * that reject the setting. LM Studio exposes the switch only on its native chat API, which is
+ * used for single-turn requests; conversations keep the OpenAI-compatible endpoint.
+ */
+type ReasoningMode = "off" | "default";
+const nativeLmStudio = (profile: LocalProcessingProfile, context: readonly ConversationTurn[], reasoning: ReasoningMode) =>
+  profile.provider === "lm_studio" && reasoning === "off" && context.length === 0;
+
+function requestBody(profile: LocalProcessingProfile, text: string, context: readonly ConversationTurn[] = [],
+  reasoning: ReasoningMode = "default"): Buffer {
+  if (nativeLmStudio(profile, context, reasoning)) {
+    return Buffer.from(JSON.stringify({ model: profile.model, system_prompt: profile.instruction, input: text,
+      reasoning: "off", temperature: 0, max_output_tokens: profile.max_tokens, store: false }), "utf8");
+  }
   const base = { model: profile.model, messages: [
     { role: "system", content: profile.instruction },
     ...context.flatMap(({ user, assistant }) => [{ role: "user" as const, content: user }, { role: "assistant" as const, content: assistant }]),
@@ -37,12 +53,15 @@ function requestBody(profile: LocalProcessingProfile, text: string, context: rea
   ], stream: false };
   return Buffer.from(JSON.stringify(profile.provider === "lm_studio"
     ? { ...base, temperature: 0, max_tokens: profile.max_tokens }
-    : { ...base, options: { temperature: 0, num_predict: profile.max_tokens } }), "utf8");
+    : { ...base, ...(reasoning === "off" ? { think: false } : {}), options: { temperature: 0, num_predict: profile.max_tokens } }), "utf8");
 }
 
-function send(profile: LocalProcessingProfile, text: string, signal: AbortSignal, context: readonly ConversationTurn[]): Promise<string> {
+function send(profile: LocalProcessingProfile, text: string, signal: AbortSignal, context: readonly ConversationTurn[],
+  reasoning: ReasoningMode = "default"): Promise<string> {
   const endpoint = parseLocalProcessingEndpoint(profile.provider, profile.endpoint);
-  const body = requestBody(profile, text, context);
+  const native = nativeLmStudio(profile, context, reasoning);
+  const path = native ? "/api/v1/chat" : endpoint.path;
+  const body = requestBody(profile, text, context, reasoning);
   return new Promise<string>((accept, reject) => {
     // The global agent may inherit NODE_USE_ENV_PROXY. This request owns a proxy-free
     // agent and numeric socket destination; no cookies, credentials or redirects exist.
@@ -68,7 +87,7 @@ function send(profile: LocalProcessingProfile, text: string, signal: AbortSignal
     if (signal.aborted) { abort(); return; }
     try {
       outgoing = request({
-        protocol: "http:", hostname: endpoint.hostname, port: endpoint.port, path: endpoint.path,
+        protocol: "http:", hostname: endpoint.hostname, port: endpoint.port, path,
         method: "POST", agent, family: endpoint.hostname === "::1" ? 6 : 4,
         maxHeaderSize: 16 * 1024, insecureHTTPParser: false,
         // Literal IPs bypass lookup; fail closed if a future edit introduces a DNS lookup.
@@ -78,6 +97,8 @@ function send(profile: LocalProcessingProfile, text: string, signal: AbortSignal
         incoming = response;
         if (settled) { response.destroy(); return; }
         const status = response.statusCode;
+        // A 4xx to the reasoning switch means the model or server does not accept it; retry without it.
+        if (reasoning === "off" && status !== undefined && status >= 400 && status < 500) { fail("REASONING_UNSUPPORTED"); return; }
         if (status === undefined || status < 200 || status > 299) { fail("HTTP_REJECTED"); return; }
         const length = response.headers["content-length"];
         if (length !== undefined && (typeof length !== "string" || !/^[0-9]+$/u.test(length) ||
@@ -100,7 +121,7 @@ function send(profile: LocalProcessingProfile, text: string, signal: AbortSignal
           if (!response.complete) { fail("RESPONSE_READ_FAILED"); return; }
           try {
             const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks, bytes)));
-            finish({ ok: true, value: parseLocalProcessingResponse(profile.provider, value) });
+            finish({ ok: true, value: native ? parseLmStudioNativeResponse(value) : parseLocalProcessingResponse(profile.provider, value) });
           } catch { fail("INVALID_RESPONSE"); }
         });
       });
@@ -145,7 +166,12 @@ export class LocalProcessingService {
     const abort = (): void => { if (this.active === active) this.cancel(active.requestId); };
     signal?.addEventListener("abort", abort, { once: true });
     try {
-      const output = await send(profile, parsed.text, active.controller.signal, context);
+      let output: string;
+      try { output = await send(profile, parsed.text, active.controller.signal, context, "off"); }
+      catch (error: unknown) {
+        if (!(error instanceof LocalProcessingError && error.code === "REASONING_UNSUPPORTED")) throw error;
+        output = await send(profile, parsed.text, active.controller.signal, context, "default");
+      }
       if (this.active !== active || active.generation !== this.generation || active.controller.signal.aborted || this.closed) {
         throw new LocalProcessingError("CANCELLED");
       }
