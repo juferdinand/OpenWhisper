@@ -660,6 +660,8 @@
   "The current text preview is too large.": "The current text preview is too large.",
   "Only the first enabled connection is used; it receives transcript text. A local server does not prove local-only processing. Claude Code may send text to its configured cloud service. Model-requested tools are disabled; managed CLI policy still applies.": "Only the first enabled connection is used; it receives transcript text. Local servers do not prove local-only processing. CLI tools and custom commands may send text to cloud services or use their configured tools.",
   "AI text processing was skipped; your text was kept.": "AI text processing was skipped; your text was kept.",
+  "AI text processing timed out. LM Studio does not expose a setting to turn reasoning off for this model; try a model that does. Your original text was kept.": "AI text processing timed out. LM Studio does not expose a setting to turn reasoning off for this model; try a model that does. Your original text was kept.",
+  "LM Studio does not expose a setting to turn reasoning off for this model. If it reasons by default, AI revision may time out; your transcript will be kept.": "LM Studio does not expose a setting to turn reasoning off for this model. If it reasons by default, AI revision may time out; your transcript will be kept.",
   "Find local Ollama or LM Studio servers and installed CLI tools. Connections start off.": "Find local Ollama or LM Studio servers and installed CLI tools. Connections start off.",
   "Scan to check": "Scan to check",
   "Edit": "Edit",

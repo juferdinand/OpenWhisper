@@ -160,6 +160,8 @@ export const textConnectionAvailabilitySchema = z.strictObject({
   detected: z.boolean(),
   usable: z.boolean(),
   models: z.array(utf8(256).min(1)).max(128),
+  // LM Studio omits its reasoning capability when it cannot expose a public control.
+  models_without_reasoning_control: z.array(utf8(256).min(1)).max(128).optional(),
   model_options: z.array(textModelOptionSchema).max(128).optional(),
   reason: textConnectionAvailabilityReasonSchema.nullable(),
 });
@@ -178,7 +180,7 @@ export const textConnectionAvailabilityListSchema = z.array(textConnectionAvaila
 const textConnectionProcessingSchema = z.strictObject({
   status: z.enum(["idle", "processing", "complete", "fallback"]),
   provider: textProviderSchema.nullable(),
-  reason: z.enum(["unavailable", "failed", "cancelled", "context_full"]).nullable(),
+  reason: z.enum(["unavailable", "failed", "cancelled", "context_full", "timeout_without_reasoning_control"]).nullable(),
 });
 export type TextConnectionProcessing = z.infer<typeof textConnectionProcessingSchema>;
 

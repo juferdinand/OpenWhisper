@@ -88,6 +88,13 @@ test("AI models discovers providers and saves priority and model selections", as
   ).toHaveText("AI models");
   await expect(page.locator(".connection-row")).toHaveCount(4);
   await expect(page.locator(".ai-models-add-row")).toHaveCount(1);
+  await expect(
+    page.locator(
+      '.connection-row[data-provider="lm_studio"] .connection-reasoning-warning',
+    ),
+  ).toHaveText(
+    "LM Studio does not expose a setting to turn reasoning off for this model. If it reasons by default, AI revision may time out; your transcript will be kept.",
+  );
   await expect(page.locator(".ai-models-list > li").last()).toHaveClass(
     /ai-models-add-row/,
   );
@@ -1185,6 +1192,29 @@ test("completed text processing keeps a fallback notice with raw and final text"
 
   await page.evaluate(() => {
     window.testState.text_connections.processing = {
+      status: "fallback",
+      provider: "lm_studio",
+      reason: "timeout_without_reasoning_control",
+    };
+    window.publishState();
+  });
+  await expect(page.locator(".processing-fallback-notice")).toHaveText(
+    "AI text processing timed out. LM Studio does not expose a setting to turn reasoning off for this model; try a model that does. Your original text was kept.",
+  );
+  await page.evaluate(() => {
+    window.testState.preferences.ui_language = "de";
+    window.publishState();
+  });
+  await expect(page.locator(".processing-fallback-notice")).toHaveText(
+    "Zeitüberschreitung bei der KI-Textverarbeitung. LM Studio bietet für dieses Modell keine Einstellung, um Reasoning auszuschalten; probiere ein Modell, das diese Einstellung bietet. Dein Originaltext blieb erhalten.",
+  );
+  await page.evaluate(() => {
+    window.testState.preferences.ui_language = "en";
+    window.publishState();
+  });
+
+  await page.evaluate(() => {
+    window.testState.text_connections.processing = {
       status: "complete",
       provider: "claude_code",
       reason: null,
@@ -2152,6 +2182,7 @@ async function start(
               detected: true,
               usable: true,
               models: ["local-model"],
+              models_without_reasoning_control: ["local-model"],
               reason: null,
             },
             {
