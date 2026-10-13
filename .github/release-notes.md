@@ -1,16 +1,16 @@
 <!-- Prepared for the gated release workflow; repository status lives in README.md. -->
 
-## What's new in OpenWhisper 0.5.0
+## What's new in OpenWhisper 0.5.1
 
-- Connect optional local model servers or command-line tools for text cleanup and AI revision; raw recognition remains available when processing is skipped or fails.
-- Continue a voice conversation across recordings and restarts, or start a fresh chat when you choose.
-- Check microphone and keyboard access, get guidance for permission problems, and keep using the clipboard when automatic insertion is unavailable.
+- Background triggers on macOS start instantly (App Nap opt-out)
+- Stop and Cancel in the macOS recording overlay work without opening the main window
+- Silent macOS recordings no longer block new recordings
 
-## Neu in OpenWhisper 0.5.0
+## Neu in OpenWhisper 0.5.1
 
-- Verbinde optionale lokale Modellserver oder Kommandozeilenwerkzeuge für Textbereinigung und KI-Überarbeitung; der erkannte Rohtext bleibt verfügbar, wenn die Verarbeitung übersprungen wird oder fehlschlägt.
-- Führe ein Sprachgespräch über mehrere Aufnahmen und Neustarts fort oder beginne bewusst einen neuen Chat.
-- Prüfe Mikrofon- und Tastaturzugriff, erhalte Hilfe bei Berechtigungsproblemen und nutze die Zwischenablage weiter, wenn automatisches Einfügen nicht verfügbar ist.
+- Hintergrund-Auslöser auf macOS starten sofort (App Nap deaktiviert)
+- Stopp und Abbrechen im macOS-Aufnahme-Overlay funktionieren, ohne das Hauptfenster zu öffnen
+- Stille Aufnahmen auf macOS blockieren keine neuen Aufnahmen mehr
 
 Recognition runs locally. Exact package, desktop and test scope is recorded in
 [Electron status](https://github.com/juferdinand/OpenWhisper/blob/main/docs/ELECTRON-STATUS.md) and
