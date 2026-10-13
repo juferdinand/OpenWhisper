@@ -30,7 +30,9 @@ const isCode = (code: LocalProcessingFailureCode) => (error: unknown): boolean =
 
 function responseValue(provider: LocalProcessingProvider, content = "A structured fixture plan."): unknown {
   const message = { role: "assistant", content };
-  return provider === "lm_studio" ? { choices: [{ finish_reason: "stop", message }] } : { done: true, done_reason: "stop", message };
+  // LM Studio fixtures answer both the native chat shape (reasoning off) and the OpenAI-compatible shape.
+  return provider === "lm_studio" ? { output: [{ type: "message", content }], choices: [{ finish_reason: "stop", message }] }
+    : { done: true, done_reason: "stop", message };
 }
 
 interface CapturedRequest {
@@ -171,9 +173,12 @@ test("profile patches, Unicode byte bounds and IPC inputs reject malformed value
 const requestBodySchema = z.discriminatedUnion("provider", [
   z.strictObject({ provider: z.literal("lm_studio"), model: z.string(), stream: z.literal(false), temperature: z.literal(0), max_tokens: z.number().int(),
     messages: z.array(z.strictObject({ role: z.enum(["system", "user", "assistant"]), content: z.string() })).min(2) }),
-  z.strictObject({ provider: z.literal("ollama"), model: z.string(), stream: z.literal(false), options: z.strictObject({ temperature: z.literal(0), num_predict: z.number().int() }),
+  z.strictObject({ provider: z.literal("ollama"), model: z.string(), stream: z.literal(false), think: z.literal(false).optional(),
+    options: z.strictObject({ temperature: z.literal(0), num_predict: z.number().int() }),
     messages: z.array(z.strictObject({ role: z.enum(["system", "user", "assistant"]), content: z.string() })).min(2) }),
 ]);
+const lmStudioNativeBodySchema = z.strictObject({ model: z.string(), system_prompt: z.string(), input: z.string(),
+  reasoning: z.literal("off"), temperature: z.literal(0), max_output_tokens: z.number().int(), store: z.literal(false) });
 
 for (const host of ["127.0.0.1", "::1"] as const) for (const provider of ["lm_studio", "ollama"] as const) {
   test(`owned ${host} ${provider} sends original multilingual text and explicit model/instruction`, { timeout: 6000 }, async (t) => {
@@ -187,15 +192,22 @@ for (const host of ["127.0.0.1", "::1"] as const) for (const provider of ["lm_st
     assert.equal(await service.preview({ requestId: "owned-request", text: original }, p), output);
     const captured = await server.nextRequest();
     assert.equal(captured.method, "POST");
-    assert.equal(captured.path, provider === "lm_studio" ? "/v1/chat/completions" : "/api/chat");
+    // Single-turn cleanup asks the server to skip reasoning: LM Studio's native chat API, Ollama think: false.
+    assert.equal(captured.path, provider === "lm_studio" ? "/api/v1/chat" : "/api/chat");
     assert.equal(captured.headers.authorization, undefined);
     assert.equal(captured.headers.cookie, undefined);
     assert.equal(captured.headers["proxy-authorization"], undefined);
-    const body = requestBodySchema.parse({ ...z.record(z.string(), z.unknown()).parse(captured.body), provider });
-    assert.equal(body.model, "owned-fixture");
-    assert.equal(body.messages[0]!.content, instruction);
-    assert.equal(body.messages[1]!.content, original);
-    assert.equal(body.provider === "lm_studio" ? body.max_tokens : body.options.num_predict, 512);
+    if (provider === "lm_studio") {
+      const body = lmStudioNativeBodySchema.parse(captured.body);
+      assert.equal(body.model, "owned-fixture"); assert.equal(body.system_prompt, instruction);
+      assert.equal(body.input, original); assert.equal(body.max_output_tokens, 512);
+    } else {
+      const body = requestBodySchema.parse({ ...z.record(z.string(), z.unknown()).parse(captured.body), provider });
+      assert.equal(body.model, "owned-fixture");
+      assert.equal(body.messages[0]!.content, instruction);
+      assert.equal(body.messages[1]!.content, original);
+      assert.ok(body.provider === "ollama"); assert.equal(body.think, false); assert.equal(body.options.num_predict, 512);
+    }
     assert.equal(original.startsWith("  Synthetic"), true);
   });
 }
@@ -256,12 +268,13 @@ test("redirects are rejected without following Location or disclosing server det
 });
 
 test("authentication/server failures and invalid JSON expose only fixed safe errors", async (t) => {
-  for (const status of [401, 403, 500, 503]) {
+  for (const status of [400, 401, 403, 413, 422, 429, 500, 503]) {
     const server = await ownedServer(t, (_request, response) => {
       response.writeHead(status, { "WWW-Authenticate": "Basic realm=private" });
       response.end("private fixture detail");
     });
     await assert.rejects(new LocalProcessingService().preview({ requestId: `error-${status}`, text: "Synthetic original" }, profile({ endpoint: `${server.endpoint}/v1` })), isCode("HTTP_REJECTED"));
+    // Unrelated client and server errors are terminal; only a recognized reasoning rejection retries.
     assert.equal(server.requestCount, 1);
   }
   const invalid = await ownedServer(t, (_request, response) => response.end("private fixture detail; not JSON"));
@@ -414,4 +427,22 @@ test("a global environment proxy never receives the private numeric-loopback req
   assert.equal(await service.preview({ requestId: "proxy-free", text: "Synthetic original" }, profile({ provider: "ollama", endpoint: server.endpoint })), "A structured fixture plan.");
   assert.equal(server.requestCount, 1);
   assert.equal(proxy.requestCount, 0);
+});
+
+test("a model that rejects the reasoning switch is retried once without it", async (t) => {
+  for (const provider of ["lm_studio", "ollama"] as const) {
+    const server = await ownedServer(t, (request, response) => {
+      const rejectsSwitch = provider === "lm_studio" ? request.path === "/api/v1/chat" : Object.hasOwn(z.record(z.string(), z.unknown()).parse(request.body), "think");
+      if (rejectsSwitch) { response.writeHead(400); response.end(JSON.stringify({ error: { param: "reasoning", message: "Unsupported reasoning option" } })); return; }
+      response.end(JSON.stringify(responseValue(provider, "Answered without the switch.")));
+    });
+    const service = new LocalProcessingService();
+    t.after(() => service.close());
+    assert.equal(await service.preview({ requestId: `retry-${provider}`, text: "Synthetic original" },
+      profile({ provider, endpoint: server.endpoint + (provider === "lm_studio" ? "/v1" : "") })), "Answered without the switch.");
+    const first = await server.nextRequest(), second = await server.nextRequest();
+    assert.equal(first.path, provider === "lm_studio" ? "/api/v1/chat" : "/api/chat");
+    assert.equal(second.path, provider === "lm_studio" ? "/v1/chat/completions" : "/api/chat");
+    assert.equal(Object.hasOwn(z.record(z.string(), z.unknown()).parse(second.body), provider === "lm_studio" ? "reasoning" : "think"), false);
+  }
 });

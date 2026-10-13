@@ -283,7 +283,9 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         return processing.preview({ requestId, text }, {
           enabled: true, provider: selected.provider,
           endpoint: selected.provider === "ollama" ? "http://127.0.0.1:11434" : "http://127.0.0.1:1234/v1",
-          model: selected.model, instruction, max_tokens: 1024, timeout_seconds: 30,
+          // Reasoning models spend most tokens and time thinking before the answer (measured: 46 s and
+          // 474 of 622 tokens for one minute of dictation), so allow the profile's maximum.
+          model: selected.model, instruction, max_tokens: 4096, timeout_seconds: 120,
         }, signal, context);
       }
       if (selected.provider === "claude_code") {
