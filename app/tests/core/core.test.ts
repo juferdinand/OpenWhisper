@@ -82,6 +82,11 @@ test("explicit misheard forms map case-insensitively while entries without alias
   assert.equal(correctVocabulary("Opsidain", [{ spelling: "Obsidian", misheard: ["Opsidian"] }]), "Opsidain");
 });
 
+test("hyphenated aliases match equivalent spaced or hyphenated transcript tokens", () => {
+  const entries = [{ spelling: "OpenWhisper", misheard: ["Open-Whispur"] }];
+  assert.equal(correctVocabulary("Open Whispur, Open-Whispur", entries), "OpenWhisper, OpenWhisper");
+});
+
 test("snippets preserve literal expansions, Unicode boundaries, empty drafts and matching order", () => {
   const snippets = [
     { trigger: "mail", expansion: "$& $1 $` $' \\ 日本語 👩‍💻", enabled: true },

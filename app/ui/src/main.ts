@@ -16,6 +16,7 @@ import {
   type Snippet,
   type VocabEntry,
   vocabularyEntryKey,
+  vocabularyMatchKey,
 } from "../../src/contracts/ui/state.js";
 
 let state: State;
@@ -2268,6 +2269,13 @@ function render() {
       vocabularySaving = true;
       while (savedVocabularyRevision < vocabularyRevision) {
         const revision = vocabularyRevision;
+        if (vocabularyEntriesHaveConflicts(vocabularyDraft)) {
+          setVocabularyStatus(
+            "A misheard form can belong to only one spelling.",
+          );
+          vocabularySaving = false;
+          return;
+        }
         const active =
           document.activeElement instanceof HTMLElement
             ? document.activeElement.dataset.vocabFocus
@@ -2912,6 +2920,22 @@ function mergeVocabularyCorrection(
   return next;
 }
 
+function vocabularyEntriesHaveConflicts(
+  entries: readonly VocabEntry[],
+): boolean {
+  const aliasOwners = new Map<string, number>();
+  for (const [index, entry] of entries.entries()) {
+    for (const alias of entry.misheard) {
+      const key = vocabularyMatchKey(alias);
+      if (!key) continue;
+      const owner = aliasOwners.get(key);
+      if (owner !== undefined && owner !== index) return true;
+      if (owner === undefined) aliasOwners.set(key, index);
+    }
+  }
+  return false;
+}
+
 function correctionParts(value: string): string[] {
   return value
     .split(",")
@@ -2992,6 +3016,10 @@ function bindVocabularyContextActions(main: HTMLElement) {
         selectedText,
       );
       dialog.close();
+      if (vocabularyEntriesHaveConflicts(vocabulary)) {
+        notice("A misheard form can belong to only one spelling.");
+        return;
+      }
       if (await savePreferences({ vocabulary }))
         notice("Added correction to vocabulary.");
     })();

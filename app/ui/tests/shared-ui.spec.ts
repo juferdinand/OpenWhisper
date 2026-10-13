@@ -2762,6 +2762,32 @@ for (const platform of ["linux", "macos"] as const) {
     expect(page.url()).toBe(trustedUrl);
   });
 
+  test(`${platform}: vocabulary rejects a correction already assigned to another spelling`, async ({
+    page,
+  }) => {
+    await start(page, platform);
+    await selectSettingsTab(page, "text");
+    const spelling = page.locator("#new-vocabulary-spelling");
+    const misheard = page.locator("#new-vocabulary-misheard");
+    await spelling.fill("OpenWhisper");
+    await misheard.fill("Open-Whispur");
+    await page.locator("#vocabulary-add-form").press("Enter");
+    const saved = [{ spelling: "OpenWhisper", misheard: ["Open-Whispur"] }];
+    await expect
+      .poll(() => page.evaluate(() => window.testState.preferences.vocabulary))
+      .toEqual(saved);
+
+    await spelling.fill("Another spelling");
+    await misheard.fill("open whispur");
+    await page.locator("#vocabulary-add-form").press("Enter");
+    await expect(page.locator("#vocabulary-save-status")).toHaveText(
+      "A misheard form can belong to only one spelling.",
+    );
+    await expect
+      .poll(() => page.evaluate(() => window.testState.preferences.vocabulary))
+      .toEqual(saved);
+  });
+
   test(`${platform}: selected live transcript text can be saved as a vocabulary correction`, async ({
     page,
   }) => {

@@ -574,5 +574,6 @@
   "Corrected spelling": "Korrekte Schreibweise",
   "Enter the correct spelling": "Korrekte Schreibweise eingeben",
   "Add correction": "Korrektur hinzufügen",
-  "Added correction to vocabulary.": "Korrektur ins Vokabular aufgenommen."
+  "Added correction to vocabulary.": "Korrektur ins Vokabular aufgenommen.",
+  "A misheard form can belong to only one spelling.": "Eine falsch erkannte Form kann nur einer Schreibweise zugeordnet werden."
 }

@@ -1,12 +1,10 @@
-import type { VocabEntry } from "../../contracts/ui/state.js";
+import { vocabularyMatchKey, type VocabEntry } from "../../contracts/ui/state.js";
 
-const wordPattern = /[\p{L}\p{N}][\p{L}\p{N}'’\-]*/gu;
-const alphanumeric = /^[\p{Alphabetic}\p{Number}]$/u;
+const wordPattern = /[\p{L}\p{N}][\p{L}\p{N}'’]*/gu;
 
 /** Rust's deterministic NFKD/scalar-lowercase policy; compare keys only, never rewrite term text. */
 export function normalizeVocabularyKey(text: string): string {
-  return Array.from(text.normalize("NFKD").replace(/\p{Mark}/gu, ""))
-    .flatMap((scalar) => Array.from(scalar.toLowerCase())).filter((scalar) => alphanumeric.test(scalar)).join("");
+  return vocabularyMatchKey(text);
 }
 
 export function parseVocabulary(vocabulary: string): string[] {

@@ -205,9 +205,13 @@ test("structured vocabulary migrates legacy terms and rejects duplicate or malfo
   ]);
   const entries = [{ spelling: "OpenWhisper", misheard: ["Open Whispur"] }];
   assert.deepEqual(vocabularySchema.parse(entries), entries);
+  assert.deepEqual(vocabularySchema.parse([
+    { spelling: "WhisperFree", misheard: ["Whisper Free", "Whisper-Free"] },
+  ]), [{ spelling: "WhisperFree", misheard: ["Whisper Free", "Whisper-Free"] }]);
   for (const invalid of [
     [{ spelling: "OpenWhisper", misheard: [] }, { spelling: "openwhisper", misheard: [] }],
     [{ spelling: "OpenWhisper", misheard: ["Open Whispur", "open whispur"] }],
+    [{ spelling: "First spelling", misheard: ["Open-Whispur"] }, { spelling: "Second spelling", misheard: ["open whispur"] }],
     [{ spelling: " OpenWhisper ", misheard: [] }],
     [{ spelling: "Open\nWhisper", misheard: [] }],
   ]) assert.equal(vocabularySchema.safeParse(invalid).success, false);

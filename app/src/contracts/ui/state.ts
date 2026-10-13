@@ -55,6 +55,7 @@ const vocabularyEntrySchema = z.strictObject({
 export type VocabEntry = z.infer<typeof vocabularyEntrySchema>;
 const vocabularyEntriesSchema = z.array(vocabularyEntrySchema).max(4096).superRefine((entries, context) => {
   const spellings = new Set<string>();
+  const aliasOwners = new Map<string, number>();
   let textBytes = 0;
   let promptBytes = 0;
   for (const [index, entry] of entries.entries()) {
@@ -68,6 +69,11 @@ const vocabularyEntriesSchema = z.array(vocabularyEntrySchema).max(4096).superRe
       const key = vocabularyEntryKey(alias);
       if (aliases.has(key)) context.addIssue({ code: "custom", path: [index, "misheard", aliasIndex], message: "Duplicate correction" });
       aliases.add(key);
+      const matchKey = vocabularyMatchKey(alias);
+      const owner = aliasOwners.get(matchKey);
+      if (matchKey && owner !== undefined && owner !== index) {
+        context.addIssue({ code: "custom", path: [index, "misheard", aliasIndex], message: "Correction is assigned to another spelling" });
+      } else if (matchKey && owner === undefined) aliasOwners.set(matchKey, index);
       textBytes += encoder.encode(alias).byteLength;
     }
   }
@@ -83,6 +89,12 @@ function migrateVocabulary(input: unknown): unknown {
     .map((spelling) => ({ spelling, misheard: [] }));
 }
 export const vocabularySchema = z.preprocess(migrateVocabulary, vocabularyEntriesSchema);
+export function vocabularyMatchKey(value: string): string {
+  return Array.from(value.normalize("NFKD").replace(/\p{Mark}/gu, ""))
+    .flatMap((scalar) => Array.from(scalar.toLowerCase()))
+    .filter((scalar) => /^[\p{Alphabetic}\p{Number}]$/u.test(scalar))
+    .join("");
+}
 export function vocabularyEntryKey(value: string): string {
   return value.normalize("NFC").toLowerCase();
 }
