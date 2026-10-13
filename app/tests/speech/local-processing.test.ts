@@ -268,14 +268,14 @@ test("redirects are rejected without following Location or disclosing server det
 });
 
 test("authentication/server failures and invalid JSON expose only fixed safe errors", async (t) => {
-  for (const status of [401, 403, 500, 503]) {
+  for (const status of [400, 401, 403, 413, 422, 429, 500, 503]) {
     const server = await ownedServer(t, (_request, response) => {
       response.writeHead(status, { "WWW-Authenticate": "Basic realm=private" });
       response.end("private fixture detail");
     });
     await assert.rejects(new LocalProcessingService().preview({ requestId: `error-${status}`, text: "Synthetic original" }, profile({ endpoint: `${server.endpoint}/v1` })), isCode("HTTP_REJECTED"));
-    // A 4xx to the reasoning switch is retried once without it; server errors are not retried.
-    assert.equal(server.requestCount, status < 500 ? 2 : 1);
+    // Unrelated client and server errors are terminal; only a recognized reasoning rejection retries.
+    assert.equal(server.requestCount, 1);
   }
   const invalid = await ownedServer(t, (_request, response) => response.end("private fixture detail; not JSON"));
   await assert.rejects(new LocalProcessingService().preview({ requestId: "invalid", text: "Synthetic original" }, profile({ endpoint: `${invalid.endpoint}/v1` })), isCode("INVALID_RESPONSE"));
@@ -433,7 +433,7 @@ test("a model that rejects the reasoning switch is retried once without it", asy
   for (const provider of ["lm_studio", "ollama"] as const) {
     const server = await ownedServer(t, (request, response) => {
       const rejectsSwitch = provider === "lm_studio" ? request.path === "/api/v1/chat" : Object.hasOwn(z.record(z.string(), z.unknown()).parse(request.body), "think");
-      if (rejectsSwitch) { response.writeHead(400); response.end(JSON.stringify({ error: { param: "reasoning" } })); return; }
+      if (rejectsSwitch) { response.writeHead(400); response.end(JSON.stringify({ error: { param: "reasoning", message: "Unsupported reasoning option" } })); return; }
       response.end(JSON.stringify(responseValue(provider, "Answered without the switch.")));
     });
     const service = new LocalProcessingService();

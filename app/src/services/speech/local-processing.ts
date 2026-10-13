@@ -24,6 +24,27 @@ const messages = Object.freeze({
   INVALID_RESPONSE: "The model returned an invalid or incomplete text response",
   REASONING_UNSUPPORTED: "The model does not accept the reasoning setting",
 });
+const MAX_LOCAL_PROCESSING_ERROR_BYTES = 16 * 1024;
+
+function unsupportedReasoningResponse(status: number, body: Buffer): boolean {
+  if (status !== 400 && status !== 422) return false;
+  try {
+    const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(body));
+    if (typeof value !== "object" || value === null || Array.isArray(value) || !("error" in value)) return false;
+    const error = value.error;
+    if (typeof error === "string") return /\b(?:reasoning|think(?:ing)?)\b/iu.test(error) &&
+      /\b(?:unsupported|not supported|does not support|doesn't support|not exposed|does not expose|unknown|unrecognized|invalid|not allowed|not accepted)\b/iu.test(error);
+    if (typeof error !== "object" || error === null || Array.isArray(error)) return false;
+    const details = error as Record<string, unknown>;
+    const parameter = details.param ?? details.parameter;
+    if (typeof parameter === "string" && /^(?:reasoning|think|thinking)$/iu.test(parameter)) return true;
+    const description = [details.message, details.code, details.type, details.error]
+      .filter((part): part is string => typeof part === "string").join(" ");
+    return /\b(?:reasoning|think(?:ing)?)\b/iu.test(description) &&
+      /\b(?:unsupported|not supported|does not support|doesn't support|not exposed|does not expose|unknown|unrecognized|invalid|not allowed|not accepted)\b/iu.test(description);
+  } catch { return false; }
+}
+
 export type LocalProcessingFailureCode = keyof typeof messages;
 /** Error messages are fixed: never include submitted text, server bodies or transport exceptions. */
 export class LocalProcessingError extends Error {
@@ -97,9 +118,31 @@ function send(profile: LocalProcessingProfile, text: string, signal: AbortSignal
         incoming = response;
         if (settled) { response.destroy(); return; }
         const status = response.statusCode;
-        // A 4xx to the reasoning switch means the model or server does not accept it; retry without it.
-        if (reasoning === "off" && status !== undefined && status >= 400 && status < 500) { fail("REASONING_UNSUPPORTED"); return; }
-        if (status === undefined || status < 200 || status > 299) { fail("HTTP_REJECTED"); return; }
+        if (status === undefined || status < 200 || status > 299) {
+          // Only a bounded, explicit reasoning-option rejection can trigger a retry. Other client
+          // errors (authentication, limits, missing models, and rate limiting) remain terminal.
+          if (reasoning === "off" && (status === 400 || status === 422)) {
+            const errorChunks: Buffer[] = [];
+            let errorBytes = 0;
+            response.on("data", (chunk: unknown) => {
+              if (settled) return;
+              if (!Buffer.isBuffer(chunk) || errorBytes + chunk.byteLength > MAX_LOCAL_PROCESSING_ERROR_BYTES) {
+                fail("HTTP_REJECTED"); return;
+              }
+              errorBytes += chunk.byteLength;
+              errorChunks.push(chunk);
+            });
+            response.on("error", () => fail("HTTP_REJECTED"));
+            response.on("aborted", () => fail("HTTP_REJECTED"));
+            response.on("end", () => {
+              if (settled) return;
+              if (!response.complete) { fail("HTTP_REJECTED"); return; }
+              fail(unsupportedReasoningResponse(status, Buffer.concat(errorChunks, errorBytes)) ? "REASONING_UNSUPPORTED" : "HTTP_REJECTED");
+            });
+            return;
+          }
+          fail("HTTP_REJECTED"); return;
+        }
         const length = response.headers["content-length"];
         if (length !== undefined && (typeof length !== "string" || !/^[0-9]+$/u.test(length) ||
             !Number.isSafeInteger(Number(length)) || Number(length) > MAX_LOCAL_PROCESSING_RESPONSE_BYTES)) {
