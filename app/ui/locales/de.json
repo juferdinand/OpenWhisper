@@ -740,5 +740,7 @@
   "{count} active · applied in this order: {rules}": "{count} aktiv · werden in dieser Reihenfolge angewendet: {rules}",
   "“Seven o’clock” becomes “07:00”; dates use DD.MM.YYYY.": "„Sieben Uhr“ wird zu „07:00“; Daten als TT.MM.JJJJ.",
   "“Tuesday, no, Wednesday” becomes “Wednesday”.": "„Dienstag, nein, Mittwoch“ wird zu „Mittwoch“.",
-  "Finish saving settings before installing an update.": "Warte vor der Installation, bis die Einstellungen gespeichert sind."
+  "Finish saving settings before installing an update.": "Warte vor der Installation, bis die Einstellungen gespeichert sind.",
+  "Server stopped": "Server aus",
+  "Start server": "Server starten"
 }

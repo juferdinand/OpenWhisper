@@ -169,6 +169,41 @@ function supportedClaudeVersion(executable: string, environment: NodeJS.ProcessE
   });
 }
 
+/** LM Studio installs its CLI here; it can start the app's local API server on request. */
+export async function resolveLmStudioCli(home = process.env["HOME"] ?? homedir()): Promise<string | undefined> {
+  const candidate = join(home, ".lmstudio/bin/lms");
+  try {
+    await access(candidate, constants.X_OK);
+    const resolved = await realpath(candidate);
+    const metadata = await stat(resolved);
+    const uid = process.getuid?.();
+    if (!metadata.isFile() || (metadata.mode & 0o111) === 0 || (metadata.mode & 0o022) !== 0 ||
+        (uid !== undefined && metadata.uid !== uid && metadata.uid !== 0)) return undefined;
+    return resolved;
+  } catch { return undefined; }
+}
+
+const LM_STUDIO_START_TIMEOUT_MS = 30_000;
+/**
+ * Starts LM Studio's local API server after an explicit user action. Runs the fixed CLI without a
+ * shell; its output is discarded so model names or paths never reach OpenWhisper logs.
+ */
+export async function startLmStudioServer(home = process.env["HOME"] ?? homedir(),
+  timeoutMs = LM_STUDIO_START_TIMEOUT_MS): Promise<void> {
+  const cli = await resolveLmStudioCli(home);
+  if (!cli) throw new Error("LM Studio is not installed.");
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(cli, ["server", "start"], { shell: false, stdio: "ignore",
+      env: { HOME: home, PATH: "/usr/bin:/bin" } });
+    const timer = setTimeout(() => { child.kill("SIGTERM"); reject(new Error("LM Studio did not start its server in time.")); }, timeoutMs);
+    child.once("error", (error) => { clearTimeout(timer); reject(error); });
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve(); else reject(new Error("LM Studio could not start its server."));
+    });
+  });
+}
+
 /** Read-only local discovery. Never starts servers, reads CLI settings or invokes a model. */
 export class LocalTextConnectionScanner {
   constructor(private readonly environment: NodeJS.ProcessEnv = process.env,
@@ -177,9 +212,10 @@ export class LocalTextConnectionScanner {
   async scan(settings: TextConnectionSettings = defaultTextConnectionSettings()): Promise<TextConnectionAvailability[]> {
     const ollamaEndpoint = { ...localServer.ollama, ...(this.ports.ollama === undefined ? {} : { port: this.ports.ollama }) };
     const lmStudioEndpoint = { ...localServer.lm_studio, ...(this.ports.lm_studio === undefined ? {} : { port: this.ports.lm_studio }) };
-    const [ollama, lmStudio, claude, codex, ...customExecutables] = await Promise.all([
+    const [ollama, lmStudio, lmStudioCli, claude, codex, ...customExecutables] = await Promise.all([
       readLocalModels("ollama", ollamaEndpoint),
       readLocalModels("lm_studio", lmStudioEndpoint),
+      resolveLmStudioCli(this.environment["HOME"]),
       resolveTextCliExecutable("claude", this.environment["PATH"], this.environment["HOME"]),
       resolveTextCliExecutable("codex", this.environment["PATH"], this.environment["HOME"]),
       ...settings.connections.filter((connection): connection is CustomCliConnection => "command" in connection)
@@ -197,7 +233,8 @@ export class LocalTextConnectionScanner {
       { provider: "ollama", detected: ollama.detected, usable: ollama.models.length > 0, models: [...ollama.models],
         reason: ollama.failed ? "scan_failed" : ollama.models.length > 0 ? null : ollama.detected ? "no_models" : "not_running" },
       { provider: "lm_studio", detected: lmStudio.detected, usable: lmStudio.models.length > 0, models: [...lmStudio.models],
-        reason: lmStudio.failed ? "scan_failed" : lmStudio.models.length > 0 ? null : lmStudio.detected ? "no_models" : "not_running" },
+        reason: lmStudio.failed ? "scan_failed" : lmStudio.models.length > 0 ? null : lmStudio.detected ? "no_models"
+          : lmStudioCli !== undefined ? "server_stopped" : "not_running" },
       { provider: "claude_code", detected: claude !== undefined, usable: claudeSupported, models: [...claudeDiscovery.models],
         ...(claudeDiscovery.model_options.length > 0 ? { model_options: [...claudeDiscovery.model_options] } : {}),
         reason: claude === undefined ? "not_installed" : claudeSupported ? null : "unsupported" },

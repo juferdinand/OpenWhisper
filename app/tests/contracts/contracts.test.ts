@@ -86,9 +86,9 @@ test("schema-derived command maps cover all current renderer actions", async () 
   for (const name of [
     "enable_paste", "disable_paste", "enable_shortcut", "desktop_shortcut", "clear_shortcut",
     "retry_transcription", "discard_recovery", "toggle_recording", "cancel_recording", "check_updates", "download_update", "install_update",
-    "scan_connections", "save_connections", "new_conversation", "cancel_text_processing",
+    "scan_connections", "start_lm_studio_server", "save_connections", "new_conversation", "cancel_text_processing",
   ]) assert.doesNotThrow(() => validateCommandName(name));
-  assert.equal(Object.keys(commandInputSchemas).length, 39);
+  assert.equal(Object.keys(commandInputSchemas).length, 40);
   assert.deepEqual(Object.keys(commandOutputSchemas).sort(), Object.keys(commandInputSchemas).sort());
 });
 
