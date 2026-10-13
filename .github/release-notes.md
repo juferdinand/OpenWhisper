@@ -1,16 +1,16 @@
 <!-- Prepared for the gated release workflow; repository status lives in README.md. -->
 
-## What's new in OpenWhisper 0.5.2
+## What's new in OpenWhisper 0.5.3
 
-- Speech recognition can use the Apple Silicon GPU (Metal) on macOS
-- LM Studio shows when its server is stopped and can start it with one click
-- Saving AI model settings is instant and no longer blocks the page
+- Fixes GPU-enabled Metal recording startup on macOS.
+- Improves local AI text processing and retries only when a model explicitly rejects the reasoning option.
+- Warns when LM Studio cannot disable reasoning and keeps dictated text when processing times out.
 
-## Neu in OpenWhisper 0.5.2
+## Neu in OpenWhisper 0.5.3
 
-- Die Spracherkennung kann auf macOS die Apple-Silicon-GPU (Metal) nutzen
-- LM Studio zeigt an, wenn sein Server aus ist, und kann ihn mit einem Klick starten
-- Das Speichern der KI-Modell-Einstellungen geht sofort und blockiert die Seite nicht mehr
+- Behebt den Start von GPU-Aufnahmen mit Metal unter macOS.
+- Verbessert die lokale KI-Textverarbeitung und wiederholt Anfragen nur bei ausdrücklicher Ablehnung der Reasoning-Option.
+- Warnt, wenn LM Studio Reasoning nicht abschalten kann, und behält den diktierten Text bei Zeitüberschreitungen bei.
 
 Recognition runs locally. Exact package, desktop and test scope is recorded in
 [Electron status](https://github.com/juferdinand/OpenWhisper/blob/main/docs/ELECTRON-STATUS.md) and
