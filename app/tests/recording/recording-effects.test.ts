@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import type { DeliveryReceipt, WorkContext } from "../../src/core/recording/recording.js";
+import type { TranscriptDeliveryMetadata } from "../../src/contracts/text/processing.js";
 import { DeliveryReceiptCache, MainRecordingEffects } from "../../src/main/recording-effects.js";
 import { SpeechWorkerError } from "../../src/services/speech/speech-client.js";
 import { recordingEffectRequestSchema, recordingEffectReplySchema,
@@ -24,7 +25,8 @@ function fixture(receipts = new DeliveryReceiptCache()) {
   let creates = 0; let inferences = 0; let closes = 0; let deliveries = 0;
   let inferHook: ((signal?: AbortSignal) => Promise<string>) | undefined;
   let closeHook: (() => Promise<void>) | undefined;
-  let deliveryHook: ((text: string, context: WorkContext) => Promise<DeliveryReceipt>) | undefined;
+  let deliveryHook: ((text: string, context: WorkContext, identity: import("../../src/core/recording/recording.js").DeliveryIdentity,
+    metadata?: TranscriptDeliveryMetadata) => Promise<DeliveryReceipt>) | undefined;
   const options = { epoch: envelope.epoch, platform: "linux" as const, receipts,
     approveModel: (model: { path: string }) => model.path === "/owned/model.bin",
     createSpeech: () => {
@@ -32,8 +34,9 @@ function fixture(receipts = new DeliveryReceiptCache()) {
       return { async transcribeWindow(_model: unknown, _samples: Float32Array, _language: string, _vocabulary: string, signal?: AbortSignal) {
         inferences++; return inferHook ? inferHook(signal) : "Fixture result";
       }, async close() { closes++; await closeHook?.(); } };
-    }, delivery: { async deliver(text: string, context: WorkContext) {
-      deliveries++; return deliveryHook ? deliveryHook(text, context) : copied(context);
+    }, delivery: { async deliver(text: string, context: WorkContext,
+      identity: import("../../src/core/recording/recording.js").DeliveryIdentity, metadata?: TranscriptDeliveryMetadata) {
+      deliveries++; return deliveryHook ? deliveryHook(text, context, identity, metadata) : copied(context);
     } },
   };
   return { options, broker: new MainRecordingEffects(options), receipts,
@@ -71,6 +74,25 @@ test("complete final text above four MiB survives the delivery protocol byte for
   assert.equal(delivery.command, "deliver"); if (delivery.command === "deliver") assert.strictEqual(delivery.text, text);
   assert.throws(() => recordingEffectRequestSchema.parse({ ...envelope, command: "deliver", text,
     identity: { kind: "memory", generation: 4 } }));
+});
+
+test("main delivery forwards raw source and exact snippet metadata and caches accepted output", async () => {
+  const f = fixture(); let observed: { text: string; rawText?: string; snippets?: readonly unknown[] } | undefined;
+  f.delivery(async (text, context, _identity, metadata) => {
+    observed = { text, ...(metadata?.rawText === undefined ? {} : { rawText: metadata.rawText }),
+      ...(metadata?.snippets ? { snippets: metadata.snippets } : {}) };
+    return { ...copied(context), deliveredText: "model accepted output" };
+  });
+  const snippets = [{ id: "owned-rule", trigger: "Kubernetes", expansion: "K8s", enabled: true }];
+  const request = { ...delivery(), metadata: { rawText: "original recognition", snippets } };
+  const first = await f.broker.handle(request);
+  assert.deepEqual(observed, { text: request.text, rawText: "original recognition", snippets });
+  assert.equal(first?.kind, "deliver");
+  if (first?.kind === "deliver") assert.equal(first.receipt.deliveredText, "model accepted output");
+  const second = await f.broker.handle({ ...request, id: randomUUID(), attempt: 3 });
+  assert.equal(second?.kind, "deliver");
+  if (second?.kind === "deliver") assert.equal(second.receipt.deliveredText, "model accepted output");
+  assert.equal(f.counts().deliveries, 1); await f.broker.close();
 });
 
 test("delivery receipts cannot contradict native output confirmation", () => {

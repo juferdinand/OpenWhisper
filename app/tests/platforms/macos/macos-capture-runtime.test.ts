@@ -49,8 +49,10 @@ function fixture() {
       events.push("infer"); assert.equal(samples.byteOffset, 0); assert.equal(samples.byteLength, samples.buffer.byteLength);
       inferred.push({ path: model.path, vocabulary }); if (failSpeech) throw new Error("inert inference failure"); return "COUNTRI";
     } }),
-    delivery: { deliver: async (text, context, identity) => {
-      events.push("deliver"); assert.equal(text, "literal ✅"); identities.push(identity); if (deliveryLatch) await deliveryLatch.promise;
+    delivery: { deliver: async (text, context, identity, metadata) => {
+      events.push("deliver"); assert.equal(text, "COUNTRI");
+      assert.deepEqual(metadata, { rawText: "COUNTRI", snippets: request.snippets });
+      identities.push(identity); if (deliveryLatch) await deliveryLatch.promise;
       return failDelivery ? { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false }
         : { generation: context.generation, attempt: context.attempt, outcome: "clipboard", clipboardConfirmed: true };
     } },

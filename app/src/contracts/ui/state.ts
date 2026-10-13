@@ -2,6 +2,12 @@ import { z } from "zod";
 import { updateDownloadProgressSchema } from "../update/update-download-progress.js";
 import { speechLanguageSchema } from "../speech/speech.js";
 import {
+  defaultTextConnectionAvailability, defaultTextConnectionSettings, emptyTextConversation, idleTextConnectionProcessing,
+  textConnectionSettingsSchema, textConnectionsStateSchema,
+} from "../text/connections.js";
+import { textProcessingStageEventSchema } from "../text/processing.js";
+import { snippetSchema } from "../text/snippets.js";
+import {
   localProcessingProfileSchema, localProcessingProfilePatchSchema, localProcessingOutputSchema,
   previewLocalProcessingInputSchema, cancelLocalProcessingInputSchema,
 } from "../speech/local-processing.js";
@@ -41,14 +47,8 @@ const tabSchema = z.enum(["setup", "general", "models", "snippets", "history", "
 export type Tab = z.infer<typeof tabSchema>;
 const uiLanguageSchema = z.enum(["en", "de"]);
 
-export const snippetSchema = z.strictObject({
-  // Linux legacy snippets may have an empty generated ID; macOS persists empty drafts.
-  id: utf8(128),
-  trigger: utf8(128),
-  expansion: utf8(8192),
-  enabled: z.boolean(),
-});
-export type Snippet = z.infer<typeof snippetSchema>;
+export { snippetSchema };
+export type { Snippet } from "../text/snippets.js";
 // Native Linux's new-write policy is stricter than macOS's saved editable drafts.
 // Keep it separate so validating a snapshot/legacy Mac patch cannot hide the whole UI.
 export const nonEmptySnippetSchema = snippetSchema.refine(
@@ -79,6 +79,7 @@ export const preferencesSchema = z.strictObject({
   model: modelId,
   language: speechLanguageSchema,
   microphone: utf8(1024),
+  cleanup_enabled: z.boolean().default(true),
   vocabulary: utf8(8192),
   snippets: z.array(snippetSchema).max(100),
   output: z.enum(["paste", "clipboard", "editor"]),
@@ -100,11 +101,12 @@ export type Preferences = z.infer<typeof preferencesSchema>;
 // Match save_preferences: setup and captured trigger profiles have separate host commands.
 export const preferencePatchSchema = preferencesSchema.omit({
   setup_completed: true,
+  cleanup_enabled: true,
   gpu_configured: true,
   native_trigger: true,
   x11_trigger: true,
   macos_shortcut: true,
-}).partial().refine(
+}).partial().extend({ cleanup_enabled: z.boolean().optional() }).refine(
   (patch) => Object.values(patch).every((value) => value !== undefined),
   { message: "Preference patch values must be defined" },
 );
@@ -157,6 +159,9 @@ export const appStateSchema = z.strictObject({
   status: z.enum(["idle", "recording", "transcribing", "done", "error"]),
   message: userText,
   transcript: userText,
+  raw_transcript: userText.optional(),
+  raw_transcript_preview_omitted: z.boolean().optional(),
+  text_processing_preview_omitted: z.boolean().optional(),
   transcript_preview_omitted: z.boolean().optional(),
   history: z.array(userText).max(20),
   preferences: preferencesSchema,
@@ -201,6 +206,10 @@ export const appStateSchema = z.strictObject({
   recording_unavailable_reason: z.enum(["host", "audio", "model", "permission"]).optional(),
   local_processing: localProcessingProfileSchema.optional(),
   local_processing_invalid_profile: z.boolean().optional(),
+  text_connections: textConnectionsStateSchema.default(() => ({ settings: defaultTextConnectionSettings(),
+    available: defaultTextConnectionAvailability(), scanning: false,
+    processing: idleTextConnectionProcessing(), conversation: emptyTextConversation() })),
+  text_processing: textProcessingStageEventSchema.nullable().default(null),
 }).refine(
   (state) => state.platform !== "macos" || state.macos !== undefined,
   { message: "macOS state requires its capability snapshot", path: ["macos"] },
@@ -264,6 +273,10 @@ export const commandInputSchemas = {
   save_local_processing: z.strictObject({ changes: localProcessingProfilePatchSchema }),
   preview_local_processing: previewLocalProcessingInputSchema,
   cancel_local_processing: cancelLocalProcessingInputSchema,
+  scan_connections: noArgs,
+  save_connections: z.strictObject({ settings: textConnectionSettingsSchema }),
+  new_conversation: noArgs,
+  cancel_text_processing: noArgs,
   toggle_recording: noArgs,
   cancel_recording: noArgs,
   retry_transcription: noArgs,
@@ -303,6 +316,10 @@ export const commandOutputSchemas = {
   save_local_processing: appStateSchema,
   preview_local_processing: localProcessingPreviewResultSchema,
   cancel_local_processing: actionResult,
+  scan_connections: appStateSchema,
+  save_connections: appStateSchema,
+  new_conversation: appStateSchema,
+  cancel_text_processing: actionResult,
   toggle_recording: actionResult,
   cancel_recording: actionResult,
   retry_transcription: actionResult,

@@ -8,6 +8,7 @@ import {
   validateEventName, type AppState, type CommandInput, type CommandOutput,
 } from "../../src/contracts/ui/state.js";
 import { defaultLocalProcessingProfile } from "../../src/contracts/speech/local-processing.js";
+import { defaultTextConnectionAvailability, defaultTextConnectionSettings, emptyTextConversation, idleTextConnectionProcessing } from "../../src/contracts/text/connections.js";
 import { updateDownloadProgressSchema } from "../../src/contracts/update/update-download-progress.js";
 
 function state(): AppState {
@@ -17,11 +18,15 @@ function state(): AppState {
     preferences: {
       ui_language: "en", setup_completed: false, model: "tiny", language: "auto", microphone: "",
       vocabulary: "", snippets: [], output: "clipboard", hold_to_record: false, gpu: false, keep_history: true,
+      cleanup_enabled: true,
     },
     models: [{ id: "tiny", title: "Whisper Tiny", family: "whisper", size: "75 MB", note: "Fastest" }],
     installed: [], microphones: [], session: "X11", desktop: "Owned fixture", clipboard_available: false,
     shortcut_portal: false, paste_portal: false, shortcut: null, paste_ready: false, gpu_available: false,
     download: null, progress: 0, elapsed: 0, model_directory: "", profile: "development", recording_available: false,
+    text_connections: { settings: defaultTextConnectionSettings(), available: defaultTextConnectionAvailability(), scanning: false,
+      processing: idleTextConnectionProcessing(), conversation: emptyTextConversation() },
+    text_processing: null,
   };
 }
 
@@ -81,8 +86,9 @@ test("schema-derived command maps cover all current renderer actions", async () 
   for (const name of [
     "enable_paste", "disable_paste", "enable_shortcut", "desktop_shortcut", "clear_shortcut",
     "retry_transcription", "discard_recovery", "toggle_recording", "cancel_recording", "check_updates", "download_update", "install_update",
+    "scan_connections", "save_connections", "new_conversation", "cancel_text_processing",
   ]) assert.doesNotThrow(() => validateCommandName(name));
-  assert.equal(Object.keys(commandInputSchemas).length, 35);
+  assert.equal(Object.keys(commandInputSchemas).length, 39);
   assert.deepEqual(Object.keys(commandOutputSchemas).sort(), Object.keys(commandInputSchemas).sort());
 });
 

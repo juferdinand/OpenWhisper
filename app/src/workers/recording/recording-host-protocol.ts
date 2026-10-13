@@ -3,6 +3,7 @@ import { z } from "zod";
 import { recordingRequestSchema } from "../../core/recording/recording.js";
 import { preferencesSchema, recordingSourceIdSchema } from "../../contracts/ui/state.js";
 import { speechModelSchema, speechVocabularySchema } from "../speech/native-speech.js";
+import { textProcessingStageEventSchema } from "../../contracts/text/processing.js";
 
 const sequence = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const absolute = z.string().min(1).max(4096).refine((path) => isAbsolute(path) && resolve(path) === path && !path.includes("\0"));
@@ -41,6 +42,7 @@ export const recordingHostReplySchema = z.discriminatedUnion("kind", [
   z.strictObject({ ...envelope, kind: z.literal("snapshot"), snapshot: recordingSnapshotSchema }),
   z.strictObject({ ...envelope, kind: z.literal("progress"), generation: sequence, attempt: sequence,
     completedSamples: sequence, gpuFallback: z.boolean() }),
+  z.strictObject({ ...envelope, kind: z.literal("text-stage"), event: textProcessingStageEventSchema }),
   z.strictObject({ ...envelope, kind: z.literal("recovery-removed"), token: z.uuid(), generation: sequence, attempt: sequence }),
   z.strictObject({ ...envelope, kind: z.literal("memory-released"), generation: sequence, attempt: sequence }),
   z.strictObject({ ...request, kind: z.literal("control"), command: commands, reply: control }),

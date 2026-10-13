@@ -26,6 +26,16 @@ export function overlayWindowBounds(area: Readonly<Rectangle>): Rectangle {
     y: Math.floor(area.y + area.height - HEIGHT - 24), width: WIDTH, height: HEIGHT };
 }
 
+/** Linux/X11 can pass clicks through the transparent corners of the capsule. */
+export function overlayInputShape(): Rectangle[] {
+  const radius = HEIGHT / 2;
+  return Array.from({ length: HEIGHT }, (_, y) => {
+    const distance = Math.abs(y + 0.5 - radius);
+    const inset = Math.max(0, Math.ceil(radius - Math.sqrt(radius * radius - distance * distance) - 0.5));
+    return { x: inset, y, width: WIDTH - inset * 2, height: 1 };
+  });
+}
+
 export function waylandOverlayWindowOptions(options: Readonly<{ title: string; preloadPath: string }>): BrowserWindowConstructorOptions {
   const base = overlayWindowOptions(options);
   return { ...base, webPreferences: { ...base.webPreferences,

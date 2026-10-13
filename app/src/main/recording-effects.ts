@@ -18,7 +18,7 @@ type RemovalContext = z.infer<typeof removalContextSchema>;
 type ReceiptEntry = { readonly reservation: string; readonly receipt?: CommittedReceipt;
   readonly removal?: Readonly<RemovalContext & { readonly epoch: string }> };
 
-/** Content-free receipts scoped by one running main/private profile, not durable app-restart state. */
+/** Memory-only committed receipts, including the exact delivered text, scoped to one running host profile. */
 export class DeliveryReceiptCache {
   private readonly entries = new Map<string, ReceiptEntry>();
   constructor(private readonly capacity = 128) {
@@ -188,7 +188,7 @@ export class MainRecordingEffects {
     const cached = this.options.receipts.get(request.epoch, request.identity, context);
     if (cached) return recordingEffectReplySchema.parse({ ...envelope, kind: "deliver", receipt: cached });
     this.options.receipts.reserve(request.epoch, request.identity, request.id);
-    const raw = await this.options.delivery.deliver(request.text, context, request.identity);
+    const raw = await this.options.delivery.deliver(request.text, context, request.identity, request.metadata);
     const parsed = deliveryReceiptSchema.safeParse(raw);
     if (!parsed.success || parsed.data.generation !== context.generation || parsed.data.attempt !== context.attempt) {
       throw new RecordingEffectError("OWNERSHIP_FAILED");

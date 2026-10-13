@@ -107,7 +107,7 @@ try {
   for (const path of ["tests/owned-parakeet/run.ts", "tests/owned-parakeet/build-probe.ts", "tests/owned-parakeet/processor.ts",
     "tests/fixtures/parakeet-speech.ts", "tests/speech/parakeet-speech.test.ts", "scripts/fetch-parakeet-fixture.ts", "tests/fixtures/parakeet-model.ts",
     "tests/fixtures/speech-bootstrap-channel.ts", "src/services/speech/speech-client.ts", "src/services/speech/adaptive-speech.ts",
-    "src/core/text/transcript-cleaner.ts", "src/core/text/vocabulary-corrector.ts", "src/core/text/snippet-expander.ts",
+    "src/core/text/transcript-cleaner.ts", "src/core/text/vocabulary-corrector.ts", "src/core/text/snippet-expander.ts", "src/contracts/text/processing.ts", "src/contracts/text/snippets.ts",
     "src/workers/speech-entry.ts", "src/workers/speech/speech-bootstrap.ts", "src/workers/speech/speech-control.ts", "src/workers/speech/speech-protocol.ts", "native/whisper-source.json", "native/node-headers.json"]) {
     sources[path] = await sha(join(packageRoot, path));
     const destination = join(output, "frozen-source", path);

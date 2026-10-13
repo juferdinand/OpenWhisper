@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { defaultTextConnectionAvailability, defaultTextConnectionSettings, emptyTextConversation, idleTextConnectionProcessing } from "../../src/contracts/text/connections.js";
 import type { AppState } from "../../src/contracts/ui/state.js";
-import { overlayWindowBounds, overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "../../src/main/recording-overlay.js";
+import { overlayInputShape, overlayWindowBounds, overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "../../src/main/recording-overlay.js";
 
 function state(): AppState {
   return {
@@ -10,10 +11,14 @@ function state(): AppState {
     preferences: {
       ui_language: "en", setup_completed: true, model: "tiny", language: "auto", microphone: "",
       vocabulary: "", snippets: [], output: "clipboard", hold_to_record: false, gpu: false, keep_history: true,
+      cleanup_enabled: true,
     },
     models: [], installed: [], microphones: [], session: "Wayland", desktop: "Owned fixture", clipboard_available: true,
     shortcut_portal: false, paste_portal: false, shortcut: null, paste_ready: false, gpu_available: false,
     download: null, progress: 0, elapsed: 0, model_directory: "", recording_available: true,
+    text_connections: { settings: defaultTextConnectionSettings(), available: defaultTextConnectionAvailability(), scanning: false,
+      processing: idleTextConnectionProcessing(), conversation: emptyTextConversation() },
+    text_processing: null,
   };
 }
 
@@ -58,7 +63,7 @@ test("overlay starts hidden and cannot activate or resize the transparent floati
   assert.equal(options.transparent, true); assert.equal(options.frame, false);
   assert.equal(options.skipTaskbar, true); assert.equal(options.alwaysOnTop, true);
   assert.equal(options.resizable, false); assert.equal(options.hasShadow, false);
-  assert.equal(options.width, 476); assert.equal(options.height, 68);
+  assert.equal(options.width, 460); assert.equal(options.height, 52);
 });
 
 test("native Wayland renders the shared controls offscreen without mapping a BrowserWindow", () => {
@@ -77,6 +82,16 @@ test("overlay stays centered with a 24-pixel bottom inset on offset displays", (
     assert.equal(bounds.x + bounds.width / 2, area.x + area.width / 2);
     assert.equal(area.y + area.height - bounds.y - bounds.height, 24);
   }
+});
+
+test("Linux/X11 overlay hit shape follows the visible rounded capsule and excludes transparent corners", () => {
+  const shape = overlayInputShape();
+  assert.equal(shape.length, 52);
+  assert.deepEqual(shape[0], { x: 21, y: 0, width: 418, height: 1 });
+  assert.deepEqual(shape[25], { x: 0, y: 25, width: 460, height: 1 });
+  assert.deepEqual(shape[51], { x: 21, y: 51, width: 418, height: 1 });
+  assert.ok(shape.every((rect, y) => rect.y === y && rect.height === 1 &&
+    rect.x >= 0 && rect.x + rect.width <= 460));
 });
 
 test("overlay follows active recording and transcription then hides completed or failed phases", () => {

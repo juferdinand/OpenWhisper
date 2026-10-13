@@ -41,10 +41,10 @@ vocabulary correction, snippets, history, a shared settings interface, and Engli
 interface translations. Platform integrations and validation differ; consult the applicable
 [Linux evidence](docs/LINUX.md) and [platform overview](docs/PLATFORMS.md).
 
-Optional LM Studio and Ollama adapters are development groundwork. Their former manual
-preview is hidden while the redesigned Connections interface is deferred; ordinary dictation
-does not call them. Speech output and structured Obsidian notes are planned integrations,
-with prerequisites and delivery order in the [roadmap](docs/ROADMAP.md).
+The unreleased [Connections increment](docs/LOCAL_MODELS.md) adds optional Ollama, LM Studio
+and Claude Code text processing. Connections start disabled; Codex is detected but execution
+remains unavailable. Release 0.4.2 does not include this interface. Speech output and structured
+Obsidian notes follow the prerequisites and delivery order in the [roadmap](docs/ROADMAP.md).
 
 Recording continues until you stop or cancel it. Audio remains in memory while recording, so
 longer sessions use more RAM. Model downloads require a network connection. Recognition runs
@@ -157,7 +157,7 @@ export all keychain identities or commit signing material.
 - [Release signing](docs/SIGNING.md)
 - [Data locations](docs/DATA-LOCATIONS.md)
 - [Security policy](SECURITY.md)
-- [Local model communication groundwork](docs/LOCAL_MODELS.md)
+- [Optional text-model connections](docs/LOCAL_MODELS.md)
 - [Frontend redesign plan](docs/UI-REDESIGN.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Report an issue](https://github.com/juferdinand/OpenWhisper/issues)

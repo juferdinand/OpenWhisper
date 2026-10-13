@@ -13,6 +13,10 @@ import {
   MAX_USER_TEXT_BYTES, MAX_UI_REQUEST_BYTES,
   type AppState, type EventName, type EventPayload, type UpdateState,
 } from "../contracts/ui/state.js";
+import {
+  defaultTextConnectionSettings, emptyTextConversation, textConnectionSettingsSchema,
+} from "../contracts/text/connections.js";
+import { textProcessingStageEventSchema, type TextProcessingStageEvent } from "../contracts/text/processing.js";
 import { PreferenceStore } from "../services/settings/preferences.js";
 import type { HostProfile } from "../services/settings/host-profile.js";
 import type { BuildIdentity } from "../contracts/application/build-identity.js";
@@ -24,6 +28,13 @@ import { verifyMacApplicationBundle, macosMigrationContext } from "./macos-stabl
 import { StableMigrationError } from "../contracts/migration/stable-migration.js";
 import { PrivateStateStore } from "../services/settings/private-state.js";
 import { LocalProcessingService, LocalProcessingError } from "../services/speech/local-processing.js";
+import { LocalTextConnectionScanner, resolveCustomTextCliExecutable, resolveTextCliExecutable, validateTextConnectionChanges } from "../services/text/connections.js";
+import { runClaudeCodeText } from "../services/text/claude-code.js";
+import { runCodexText } from "../services/text/codex.js";
+import { runCustomCliText } from "../services/text/custom-cli.js";
+import { boundedTextPreview } from "../services/text/text-preview.js";
+import { OptionalTextProcessing, TextProviderUnavailableError } from "../services/text/optional-text-processing.js";
+import { TextConversationStore } from "../services/text/conversation.js";
 import {
   localProcessingProfileSchema, defaultLocalProcessingProfile, applyLocalProcessingProfilePatch,
 } from "../contracts/speech/local-processing.js";
@@ -39,6 +50,7 @@ import { DEVELOPMENT_RECORDING_BUILD } from "./development-recording-build.js";
 import { developmentRecordingDescriptorSchema, selectDevelopmentRecordingDescriptor, type DevelopmentRecordingDescriptor } from "./development-recording-descriptor.js";
 import { DevelopmentRecordingHost, developmentPulseServer, formatSourceDiscoveryFailure } from "./development-recording-host.js";
 import { saveTranscript } from "../services/development/development-transcripts.js";
+import { expandSnippets } from "../core/text/snippet-expander.js";
 import { DevelopmentPlatformHost } from "./development-platform-host.js";
 import { createRecordingControlPort, recordingUnavailableReason } from "./recording-control.js";
 import { portalShortcutStateSchema } from "../platforms/linux/shared/portal-shortcuts.js";
@@ -46,7 +58,7 @@ import { KdeKeyCapture } from "../platforms/linux/kde/key-capture.js";
 import { modifierOnly } from "../platforms/linux/kde/keyboard.js";
 import { recordingUnavailableTitle } from "../contracts/ui/recording-guidance.js";
 import { buildTrayMenu } from "./tray-menu.js";
-import { overlayWindowBounds, overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "./recording-overlay.js";
+import { overlayInputShape, overlayWindowBounds, overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "./recording-overlay.js";
 import { WaylandRecordingOverlay } from "./wayland-recording-overlay.js";
 import type { SurfaceUnavailableReason } from "../contracts/platforms/wayland-surface.js";
 import { MacosShortcut } from "./macos-shortcut.js";
@@ -194,6 +206,16 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     1024 * 1024, { invalidContent: "preserve-and-default" },
   );
   const processing = new LocalProcessingService();
+  const textConnectionStore = await PrivateStateStore.open(
+    join(profile.paths.settings, "text-connections.json"), textConnectionSettingsSchema, defaultTextConnectionSettings(),
+    1024 * 1024, { invalidContent: "preserve-and-default" },
+  );
+  const conversationStore = await TextConversationStore.open(
+    join(profile.paths.settings, "text-conversation.json"), textConnectionStore.snapshot());
+  const textConnectionScanner = new LocalTextConnectionScanner();
+  let textProcessing: TextProcessingStageEvent | null = null;
+  let textProcessingOwner: { readonly generation: number; readonly attempt: number } | undefined;
+  let rawTranscript = "";
   const rawCatalog: unknown = JSON.parse(await readFile(join(distribution, "resources/models.json"), "utf8"));
   const catalog = parseModelCatalog(rawCatalog);
   const inventory = await ModelInventory.open(profile, rawCatalog);
@@ -240,6 +262,49 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   const history = await PrivateStateStore.open(join(profile.paths.history, "history.json"),
     z.array(z.string().max(MAX_USER_TEXT_BYTES)).max(20), [], 8 * 1024 * 1024, { invalidContent: "preserve-and-default" });
   let notify = (): void => {};
+  const textProcessor = new OptionalTextProcessing({
+    settings: () => textConnectionStore.snapshot(),
+    scan: (settings) => textConnectionScanner.scan(settings),
+    isShuttingDown: () => shutdownInProgress,
+    onChange: () => notify(),
+    onStage: (event) => {
+      if (event === null) {
+        if (textProcessing?.stage === "model") textProcessing = null;
+        return;
+      }
+      if (event.generation !== recording.generation) return;
+      textProcessingOwner = { generation: event.generation, attempt: event.attempt };
+      textProcessing = event;
+    },
+    runProvider: async (selected, instruction, text, signal, requestId, context) => {
+      if (selected.provider === "ollama" || selected.provider === "lm_studio") {
+        return processing.preview({ requestId, text }, {
+          enabled: true, provider: selected.provider,
+          endpoint: selected.provider === "ollama" ? "http://127.0.0.1:11434" : "http://127.0.0.1:1234/v1",
+          model: selected.model, instruction, max_tokens: 1024, timeout_seconds: 30,
+        }, signal, context);
+      }
+      if (selected.provider === "claude_code") {
+        const executable = await resolveTextCliExecutable("claude");
+        if (!executable) throw new TextProviderUnavailableError();
+        return runClaudeCodeText({ executable, instruction, text, model: selected.model, signal,
+          ...(context === undefined ? {} : { context }) });
+      }
+      if (selected.provider === "codex") {
+        const executable = await resolveTextCliExecutable("codex");
+        if (!executable) throw new TextProviderUnavailableError();
+        return runCodexText({ executable, instruction, text, model: selected.model, signal,
+          ...(context === undefined ? {} : { context }) });
+      }
+      if ("command" in selected) {
+        const executable = await resolveCustomTextCliExecutable(selected);
+        if (!executable) throw new TextProviderUnavailableError();
+        return runCustomCliText({ executable, connection: selected, instruction, text, signal,
+          ...(context === undefined ? {} : { context }) });
+      }
+      throw new TextProviderUnavailableError();
+    },
+  });
   let autostart: LinuxAutostart | MacosAutostart | undefined;
   let updateAdmitted = false;
   let loginFact: { readonly requested: boolean; readonly pending?: boolean } | undefined;
@@ -330,9 +395,16 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       sourceDiscoveryFailure: (failure) => { console.error(formatSourceDiscoveryFailure(failure)); },
       snapshot: (value) => {
         const previous = recording;
+        if (value.generation !== previous.generation) {
+          rawTranscript = "";
+          textProcessing = null;
+          textProcessingOwner = undefined;
+          textProcessor.resetStatus();
+        }
         const hadMessage = message !== "";
         const hadDeliveryNotice = (value.phase === "starting" || value.phase === "recording") && deliveryNotice !== "";
         recording = value;
+        if (["done", "error", "idle"].includes(value.phase)) textProcessing = null;
         if (value.phase !== "error") message = "";
         if (value.phase === "starting" || value.phase === "recording") deliveryNotice = "";
         if (isSteadyRecordingUpdate(previous, value) && !hadMessage && !hadDeliveryNotice) {
@@ -345,16 +417,55 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       },
       progress: (value) => { inferenceProgress = recording.elapsedMs > 0
         ? Math.min(1, value.completedSamples / (recording.elapsedMs * 16)) : 0; notify(); },
-      delivery: { deliver: async (text, context) => {
+      textStage: (value) => {
+        let event: TextProcessingStageEvent;
+        try { event = textProcessingStageEventSchema.parse(value); } catch { return; }
+        if (event.generation !== recording.generation) return;
+        const owner = textProcessingOwner;
+        if (owner && owner.generation === event.generation && event.attempt < owner.attempt) return;
+        if (!owner || owner.generation !== event.generation || event.attempt > owner.attempt) {
+          textProcessingOwner = { generation: event.generation, attempt: event.attempt };
+          textProcessing = null;
+        }
+        if (event.stage === "recognition" && event.status === "completed" && event.text !== undefined) rawTranscript = event.text;
+        textProcessing = event;
+        notify();
+      },
+      delivery: { deliver: async (text, context, _identity, metadata) => {
         if (context.signal.aborted) return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
-        const oversized = Buffer.byteLength(text, "utf8") > MAX_USER_TEXT_BYTES;
+        if (metadata?.rawText !== undefined) rawTranscript = metadata.rawText;
+        const settings = textConnectionStore.snapshot();
+        const snippets = metadata?.snippets ?? [];
+        const processingInput = settings.mode === "conversation" ? expandSnippets(text, snippets) : text;
+        if (settings.mode === "conversation") textProcessor.reportSnippetsStage(context, processingInput);
+        let conversation: ReturnType<TextConversationStore["snapshot"]> | undefined;
+        let conversationReady = true;
+        if (settings.mode === "conversation") {
+          try {
+            await conversationStore.syncSettings(settings);
+            conversation = conversationStore.snapshotFor(settings);
+            if (!conversation) throw new Error("Conversation context does not match current settings.");
+          } catch {
+            conversationReady = false;
+            message = "Conversation context could not be saved; model processing was skipped.";
+            textProcessor.skipForStorageFailure(context);
+          }
+        }
+        const processedText = conversationReady ? await textProcessor.process(processingInput, context, conversation) : processingInput;
+        if (processedText === undefined || context.signal.aborted || shutdownInProgress) {
+          textProcessor.discardConversationTurn(context.generation, context.attempt);
+          return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
+        }
+        const acceptedText = settings.mode === "conversation" ? processedText : expandSnippets(processedText, snippets);
+        if (settings.mode !== "conversation") textProcessor.reportSnippetsStage(context, acceptedText);
+        const oversized = Buffer.byteLength(acceptedText, "utf8") > MAX_USER_TEXT_BYTES;
         if (oversized && preferences.snapshot().keep_history) {
-          try { await saveTranscript(profile, text); }
+          try { await saveTranscript(profile, acceptedText); }
           catch { return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false }; }
         }
         if (context.signal.aborted) return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
         const wantsPaste = preferences.snapshot().output === "paste";
-        const delivered = await deliverClipboard(text, context, { writeText: (text) => clipboardOutput.writeText(text), readText: () => clipboardOutput.readText(),
+        const delivered = await deliverClipboard(acceptedText, context, { writeText: (text) => clipboardOutput.writeText(text), readText: () => clipboardOutput.readText(),
           ...(wantsPaste ? { paste: async () => {
             try {
               if (macPaste) { accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(false); return await macPaste.paste(); }
@@ -362,18 +473,26 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
             }
             catch { pasteState = { ...pasteState, ready: false, available: false, result: "FAILED" }; notify(); return false; }
           } } : {}) });
-        if (!delivered.clipboardConfirmed) return delivered;
+        if (!delivered.clipboardConfirmed) {
+          textProcessor.discardConversationTurn(context.generation, context.attempt);
+          return delivered;
+        }
+        const acceptedTurn = textProcessor.takeAcceptedConversationTurn(context.generation, context.attempt);
+        if (acceptedTurn) {
+          try { await conversationStore.commit(acceptedTurn, settings); }
+          catch { message = "Text copied; this conversation turn could not be saved."; }
+        }
         if (wantsPaste && delivered.outcome === "clipboard") deliveryNotice = "Text copied; automatic paste is unavailable. Paste it from the clipboard.";
         if (!oversized && preferences.snapshot().keep_history) {
           // History is secondary to the already confirmed clipboard commit.
           void history.update((current) => {
-            const next = [text, ...current].slice(0, 20);
+            const next = [acceptedText, ...current].slice(0, 20);
             while (next.length > 1 && Buffer.byteLength(JSON.stringify(next), "utf8") > 6 * 1024 * 1024) next.pop();
             if (Buffer.byteLength(JSON.stringify(next), "utf8") > 8 * 1024 * 1024) return current;
             return next;
           }).then(notify, () => { message = "Text copied; history could not be saved."; notify(); });
         }
-        return delivered;
+        return { ...delivered, deliveredText: acceptedText };
       } },
     });
     // macOS lists CoreAudio inputs in main; only device UIDs and display names are read.
@@ -400,6 +519,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   };
   const state = (): AppState => {
     const preferenceSnapshot = preferences.snapshot();
+    const rawPreview = boundedTextPreview(rawTranscript, MAX_USER_TEXT_BYTES);
+    const stage = textProcessing && textProcessingOwner?.generation === recording.generation
+      ? textProcessing : null;
+    const stagePreview = stage?.text === undefined ? undefined : boundedTextPreview(stage.text, MAX_USER_TEXT_BYTES);
     const macShortcutState = macShortcut?.state();
     const gpuName = hardwareDeviceNameSchema.safeParse(gpuSelection.device);
     const unavailable = recordingUnavailableReason({ host: !recordingRetired && !!host,
@@ -423,6 +546,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         : recording.error ? `Recording failed: ${recording.error}.` : descriptor ? "" : "Recording is not available in this development preview."),
       transcript: Buffer.byteLength(recording.transcript, "utf8") <= MAX_USER_TEXT_BYTES ? recording.transcript : "",
       transcript_preview_omitted: Buffer.byteLength(recording.transcript, "utf8") > MAX_USER_TEXT_BYTES,
+      raw_transcript: rawPreview.text,
+      raw_transcript_preview_omitted: rawPreview.omitted,
+      text_processing: stage && stagePreview ? { ...stage, text: stagePreview.text } : stage,
+      text_processing_preview_omitted: stagePreview?.omitted ?? false,
       history: history.snapshot().filter((text) => Buffer.byteLength(text, "utf8") <= MAX_USER_TEXT_BYTES),
       preferences: { ...preferenceSnapshot, ...(loginFact ? { launch_at_login: loginFact.requested } : {}) },
       models: [...catalog.models, ...installed.filter((item) => !catalog.models.some((model) => model.id === item.model.id)).map((item) => item.model)],
@@ -459,6 +586,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       ...(unavailable ? { recording_unavailable_reason: unavailable } : {}),
       local_processing: processingProfile.snapshot(),
       local_processing_invalid_profile: processingProfile.invalidContent,
+      text_connections: { settings: textConnectionStore.snapshot(), ...textProcessor.snapshot(),
+        conversation: conversationStore.snapshotFor(textConnectionStore.snapshot()) ?? emptyTextConversation() },
     });
   };
   let latestSnapshot: AppState | undefined;
@@ -543,6 +672,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         ...overlayWindowBounds(area),
         webPreferences: { ...options.webPreferences, webSecurity: true, devTools: false },
       });
+      if (process.platform === "linux" && !nativeWaylandOverlay) overlay.setShape(overlayInputShape());
       overlay.on("closed", () => {
         overlayReady = false; overlay = undefined;
         void waylandOverlay?.close().catch(() => {}); notify();
@@ -613,7 +743,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     // Recovery may be transcribed with the microphone disconnected; resolve sources only on Start.
     const request = recordingRequestSchema.parse({ model: { path: join(profile.paths.models, model.model.file), family: model.model.family,
       gpu: selected.gpu && gpuSelection.supported },
-      language: selected.language, vocabulary: selected.vocabulary, snippets: selected.snippets });
+      language: selected.language, cleanup_enabled: selected.cleanup_enabled,
+      vocabulary: selected.vocabulary, snippets: selected.snippets });
     await host.configure({ id: model.model.id, request,
       ...(macRecording ? { source: selected.microphone } : { server: audioServer ?? `unix:${join(process.env.XDG_RUNTIME_DIR ?? profile.paths.locks, "pulse/native")}`,
         source: selected.microphone }) }); configured = true;
@@ -786,7 +917,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   window.on("blur", () => { macShortcut?.focusLost(); if (keyCapture) { keyCapture = undefined; contents.setIgnoreMenuShortcuts(false); notify(); } });
   function finishShutdown(retiring: boolean, macHandoff?: Readonly<PreparedMacosUpdateInstall>): Promise<void> {
     if (shutdownTask) return retiring || macHandoff ? Promise.reject(new Error("Shutdown already started.")) : shutdownTask;
-    shutdownInProgress = true; cancelRequested = true; processing.close(); downloadAbort?.abort();
+    shutdownInProgress = true; cancelRequested = true; textProcessor.close();
+    processing.close(); downloadAbort?.abort();
     if (!macHandoff) macUpdateAbort?.abort();
     updateCheckScheduler?.close(); updateCheckScheduler = undefined;
     powerMonitor.off("resume", resumeUpdateChecks);
@@ -982,7 +1114,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           throw new Error("Unknown catalog model.");
         }
         if ((recording.busy || recording.recoveryAvailable) &&
-          ["model", "language", "microphone", "vocabulary", "snippets", "gpu", "output", "hold_to_record"].some((key) => Object.hasOwn(changes, key))) {
+          ["model", "language", "microphone", "cleanup_enabled", "vocabulary", "snippets", "gpu", "output", "hold_to_record"].some((key) => Object.hasOwn(changes, key))) {
           throw new Error("Finish or discard the current recording before changing its request.");
         }
         if (changes.output && changes.output !== "clipboard" && !(changes.output === "paste" && (descriptor?.platform === "linux" || macPaste))) {
@@ -1008,7 +1140,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           throw error;
         }
         if (changes.hold_to_record !== undefined) await platformHost?.shortcut("mode", changes.hold_to_record);
-        if (["model", "language", "microphone", "vocabulary", "snippets", "gpu"].some((key) => Object.hasOwn(changes, key))) configured = false;
+        if (["model", "language", "microphone", "cleanup_enabled", "vocabulary", "snippets", "gpu"].some((key) => Object.hasOwn(changes, key))) configured = false;
         const current = state();
         emit("state", current);
         return current;
@@ -1039,6 +1171,32 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         }
       },
       cancel_local_processing: ({ requestId }) => { processing.cancel(requestId); },
+      scan_connections: async () => {
+        await textProcessor.scanConnections();
+        return state();
+      },
+      save_connections: ({ settings }) => withRecordingControl(async () => {
+        if (recording.busy || recording.recoveryAvailable || textProcessor.busy) {
+          throw new Error("Finish the current recording before changing text connections.");
+        }
+        const checked = textConnectionSettingsSchema.parse(settings);
+        await textProcessor.scanConnections(checked);
+        validateTextConnectionChanges(textConnectionStore.snapshot(), checked, textProcessor.snapshot().available);
+        await textConnectionStore.update(() => checked);
+        // Fingerprint-gated reads keep old context private if the second write fails.
+        await conversationStore.syncSettings(checked);
+        return state();
+      }),
+      new_conversation: () => withRecordingControl(async () => {
+        if (recording.busy || recording.recoveryAvailable || textProcessor.busy) {
+          throw new Error("Finish the current recording before starting a new conversation.");
+        }
+        await conversationStore.newConversation(textConnectionStore.snapshot());
+        return state();
+      }),
+      cancel_text_processing: () => {
+        textProcessor.cancel();
+      },
       enable_shortcut: () => shortcutAction("enable"),
       desktop_shortcut: () => shortcutAction("configure"),
       clear_shortcut: () => shortcutAction("clear"),

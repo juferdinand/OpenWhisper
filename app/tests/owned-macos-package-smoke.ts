@@ -73,7 +73,8 @@ const configRoot = join(ownedHome, "Library/Application Support/OpenWhisper/Conf
 const cacheRoot = join(ownedHome, "Library/Caches/OpenWhisper/electron");
 const ownedSnippet = snippetSchema.parse({ id: "b445efb4-72bb-4b98-97a7-576866917ec5", trigger: "owned package",
   expansion: "OpenWhisper owned stable fixture 日本語", enabled: true });
-const vocabulary = "OwnedStableFixture, 日本語";
+const vocabularyEntries = ["OwnedStableFixture", "日本語"] as const;
+const vocabulary = vocabularyEntries.join(", ");
 const digest = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 async function frozenFile(path: string) {
   const metadata = await lstat(path, { bigint: true });
@@ -178,6 +179,20 @@ try {
     if (!(await dialog.evaluate((element) => (element as HTMLDialogElement).open))) await target.locator("#open-settings").click();
     await expect(dialog).toBeVisible();
     await target.locator(`.settings-dialog-nav [data-tab="${tab}"]`).click();
+  };
+  const replaceVocabularyInSettings = async (target: Page, entries: readonly string[]) => {
+    await openSettingsTab(target, "text");
+    while (await target.locator("[data-remove-vocabulary]").count()) await target.locator("[data-remove-vocabulary]").first().click();
+    for (const entry of entries) {
+      await target.locator("#vocabulary-new-entry").fill(entry);
+      await target.locator("#add-vocabulary").click();
+    }
+    await expect.poll(async () => (await state()).preferences.vocabulary).toBe(entries.join(", "));
+  };
+  const expectVocabularyInSettings = async (target: Page, entries: readonly string[]) => {
+    await openSettingsTab(target, "text");
+    await expect(target.locator("[data-vocabulary-entry]")).toHaveCount(entries.length);
+    for (const [index, entry] of entries.entries()) await expect(target.locator(`[data-vocabulary-entry="${index}"]`)).toHaveValue(entry);
   };
   const finishSetupIfNeeded = async (setupPage: Page) => {
     let current = await state();
@@ -543,8 +558,9 @@ try {
     stage = "stable-migrated-ui";
     await finishSetupIfNeeded(page);
     await openSettingsTab(page, "text");
-    await expect(page.locator('#snippet-form [name="trigger"]')).toHaveValue(ownedSnippet.trigger);
-    await expect(page.locator('#snippet-form [name="expansion"]')).toHaveValue(ownedSnippet.expansion);
+    await expect(page.locator("#snippets .snippet-row")).toHaveCount(1);
+    await expect(page.locator('#snippets .snippet-row [name="trigger"]')).toHaveValue(ownedSnippet.trigger);
+    await expect(page.locator('#snippets .snippet-row [name="expansion"]')).toHaveValue(ownedSnippet.expansion);
     await page.locator("#close-settings").click();
     await page.locator("#open-model-drawer").click();
     await expect(page.locator('[data-delete="tiny"]')).toBeVisible();
@@ -776,8 +792,7 @@ try {
   checks.push("Typed clear-shortcut command unregisters the actual shortcut");
   if (stable) {
     stage = "stable-preference-edit";
-    await openSettingsTab(page, "text");
-    await page.locator("#vocabulary").fill(vocabulary); await page.locator("#save-vocabulary").click();
+    await replaceVocabularyInSettings(page, vocabularyEntries);
     await expect.poll(async () => (await state()).preferences.vocabulary, { timeout: 10_000 }).toBe(vocabulary);
     await preserved();
   }
@@ -819,7 +834,7 @@ try {
     assert.equal(retained.profile, undefined); assert.equal(retained.status, "idle"); assert.deepEqual(retained.installed, ["tiny"]);
     assert.equal(retained.preferences.vocabulary, vocabulary); assert.deepEqual(retained.preferences.snippets, [ownedSnippet]);
     assert.equal(retained.preferences.macos_shortcut ?? null, null);
-    await openSettingsTab(page, "text"); await expect(page.locator("#vocabulary")).toHaveValue(vocabulary);
+    await expectVocabularyInSettings(page, vocabularyEntries);
     await preserved(); stage = "restarted-original-quit";
     await application.close(); restartExit = await restartedClosed; application = undefined;
     assert.equal(restartExit.code, 0); assert.equal(restartExit.signal, null); await preserved();

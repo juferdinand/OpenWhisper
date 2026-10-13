@@ -19,6 +19,7 @@ function fixture() {
   const epoch = randomUUID(), messages: RecordingHostReply[] = [], events: string[] = [];
   let audio: PreparedAudio | undefined, token: RecoveryToken | null = null;
   const sessions: NativeCaptureSession[] = [], inferred: { model: string; vocabulary: string }[] = [];
+  const deliveries: { text: string; metadata: unknown }[] = [];
   let startLatch: ReturnType<typeof deferred<CaptureMetadata>> | undefined;
   let fenceLatch: ReturnType<typeof deferred<CaptureMetadata>> | undefined;
   let preparationLatch: ReturnType<typeof deferred<void>> | undefined;
@@ -50,8 +51,11 @@ function fixture() {
       assert.equal(samples.byteOffset, 0); assert.equal(samples.byteLength, samples.buffer.byteLength);
       inferred.push({ model: model.path, vocabulary }); events.push("infer"); return "COUNTRI";
     } }),
-    delivery: { deliver: async (text, context) => {
-      events.push("deliver"); assert.equal(text, "literal ✅"); if (deliveryLatch) await deliveryLatch.promise;
+    delivery: { deliver: async (text, context, _identity, metadata) => {
+      events.push("deliver"); deliveries.push({ text, metadata });
+      assert.equal(text, "COUNTRI");
+      assert.deepEqual(metadata, { rawText: "COUNTRI", snippets: request.snippets });
+      if (deliveryLatch) await deliveryLatch.promise;
       return failDelivery ? { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false }
         : { generation: context.generation, attempt: context.attempt, outcome: "clipboard", clipboardConfirmed: true };
     } },
@@ -70,7 +74,7 @@ function fixture() {
     while (!last() || last()?.busy) { if (performance.now() >= until) throw new Error("inert fixture deadline"); await turn(); }
     return last();
   }
-  return { runtime, messages, events, effects, command, configuration, last, terminal, inferred, meta,
+  return { runtime, messages, events, effects, command, configuration, last, terminal, inferred, deliveries, meta,
     token: () => token, cleanup: () => cleanup, savedAudio: () => audio,
     startHold: () => { startLatch = deferred<CaptureMetadata>(); return startLatch; },
     fenceHold: () => { fenceLatch = deferred<CaptureMetadata>(); return fenceLatch; },
@@ -147,6 +151,7 @@ test("configuration captures model vocabulary and exact snippet bytes before use
   const snippet = config.request.snippets[0]; assert.ok(snippet); snippet.expansion = "changed";
   await f.runtime.receive(f.command("start")); await f.runtime.receive(f.command("stop")); await f.terminal();
   assert.deepEqual(f.inferred, [{ model: request.model.path, vocabulary: request.vocabulary }]); await f.runtime.close();
+  assert.deepEqual(f.deliveries, [{ text: "COUNTRI", metadata: { rawText: "COUNTRI", snippets: request.snippets } }]);
 });
 test("failed explicit delivery retains stopped audio and retry confirms output without another capture", async () => {
   const f = fixture(); f.failDelivery(true); await f.runtime.receive(f.configuration());

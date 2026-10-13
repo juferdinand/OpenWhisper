@@ -17,7 +17,8 @@ export type OwnedRecordingPoolBuildInputs = z.infer<typeof buildInputsSchema>;
 export const FIXED_PRODUCTION_IMPORTS = Object.freeze(["main/linux-speech-host.js", "services/speech/backend-supervisor.js", "services/models/model-inventory.js",
   "services/settings/profiles.js", "services/speech/speech-resources.js", "services/speech/speech-entry-graph.js", "services/platform-lifecycle/process-retirement.js", "workers/speech/speech-protocol.js", "workers/speech/native-speech.js", "main/recording-effects.js", "services/speech/recording-speech.js", "core/recording/recording.js",
   "services/speech/adaptive-speech.js", "services/recording/capture.js", "workers/recording/native-capture.js", "workers/recording/recording-effects.js",
-  "workers/recording/recording-effects-protocol.js", "workers/recording/recovery.js", "workers/speech/speech-gate.js"]);
+  "workers/recording/recording-effects-protocol.js", "workers/recording/recovery.js", "workers/speech/speech-gate.js",
+  "contracts/text/processing.js"]);
 export function externalProductionImport(path: string, importer: string): string | undefined {
   const resolved = resolve(dirname(importer), path);
   const name = FIXED_PRODUCTION_IMPORTS.find((candidate) => resolved === join(root, "src", candidate));

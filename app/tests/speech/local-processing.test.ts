@@ -170,9 +170,9 @@ test("profile patches, Unicode byte bounds and IPC inputs reject malformed value
 
 const requestBodySchema = z.discriminatedUnion("provider", [
   z.strictObject({ provider: z.literal("lm_studio"), model: z.string(), stream: z.literal(false), temperature: z.literal(0), max_tokens: z.number().int(),
-    messages: z.tuple([z.strictObject({ role: z.literal("system"), content: z.string() }), z.strictObject({ role: z.literal("user"), content: z.string() })]) }),
+    messages: z.array(z.strictObject({ role: z.enum(["system", "user", "assistant"]), content: z.string() })).min(2) }),
   z.strictObject({ provider: z.literal("ollama"), model: z.string(), stream: z.literal(false), options: z.strictObject({ temperature: z.literal(0), num_predict: z.number().int() }),
-    messages: z.tuple([z.strictObject({ role: z.literal("system"), content: z.string() }), z.strictObject({ role: z.literal("user"), content: z.string() })]) }),
+    messages: z.array(z.strictObject({ role: z.enum(["system", "user", "assistant"]), content: z.string() })).min(2) }),
 ]);
 
 for (const host of ["127.0.0.1", "::1"] as const) for (const provider of ["lm_studio", "ollama"] as const) {
@@ -193,12 +193,28 @@ for (const host of ["127.0.0.1", "::1"] as const) for (const provider of ["lm_st
     assert.equal(captured.headers["proxy-authorization"], undefined);
     const body = requestBodySchema.parse({ ...z.record(z.string(), z.unknown()).parse(captured.body), provider });
     assert.equal(body.model, "owned-fixture");
-    assert.equal(body.messages[0].content, instruction);
-    assert.equal(body.messages[1].content, original);
+    assert.equal(body.messages[0]!.content, instruction);
+    assert.equal(body.messages[1]!.content, original);
     assert.equal(body.provider === "lm_studio" ? body.max_tokens : body.options.num_predict, 512);
     assert.equal(original.startsWith("  Synthetic"), true);
   });
 }
+
+test("conversation history is sent as separate user and assistant messages before the current user turn", async (t) => {
+  const server = await ownedServer(t, (_request, response) => response.end(JSON.stringify(responseValue("ollama", "Current answer"))));
+  const service = new LocalProcessingService();
+  t.after(() => service.close());
+  const context = [{ user: "Synthetic earlier question", assistant: "Synthetic earlier answer" }];
+  await service.preview({ requestId: "conversation", text: "Synthetic current question" },
+    profile({ provider: "ollama", endpoint: server.endpoint, instruction: "Answer the latest message." }), undefined, context);
+  const body = requestBodySchema.parse({ ...z.record(z.string(), z.unknown()).parse((await server.nextRequest()).body), provider: "ollama" });
+  assert.deepEqual(body.messages.map(({ role, content }) => [role, content]), [
+    ["system", "Answer the latest message."],
+    ["user", "Synthetic earlier question"],
+    ["assistant", "Synthetic earlier answer"],
+    ["user", "Synthetic current question"],
+  ]);
+});
 
 test("disabled and invalid previews do not contact even the owned server", async (t) => {
   const server = await ownedServer(t, (_request, response) => response.end(JSON.stringify(responseValue("lm_studio"))));
@@ -221,8 +237,8 @@ test("maximum UTF-8 input is sent intact rather than truncated", async (t) => {
   const original = "é".repeat(MAX_LOCAL_PROCESSING_TEXT_BYTES / 2);
   await service.preview({ requestId: "boundary", text: original }, profile({ provider: "ollama", endpoint: server.endpoint }));
   const body = requestBodySchema.parse({ ...z.record(z.string(), z.unknown()).parse((await server.nextRequest()).body), provider: "ollama" });
-  assert.equal(body.messages[1].content, original);
-  assert.equal(Buffer.byteLength(body.messages[1].content, "utf8"), MAX_LOCAL_PROCESSING_TEXT_BYTES);
+  assert.equal(body.messages[1]!.content, original);
+  assert.equal(Buffer.byteLength(body.messages[1]!.content, "utf8"), MAX_LOCAL_PROCESSING_TEXT_BYTES);
 });
 
 test("redirects are rejected without following Location or disclosing server detail", async (t) => {

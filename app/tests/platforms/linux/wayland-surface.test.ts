@@ -12,7 +12,7 @@ function png(width = WIDTH, height = HEIGHT): Uint8Array {
   header.setUint32(16, width); header.setUint32(20, height);
   return bytes;
 }
-const regions: SurfaceRegion[] = [{ x: 4, y: 8, width: 36, height: 48 }, { x: 300, y: 8, width: 36, height: 48 }];
+const regions: SurfaceRegion[] = [{ x: 4, y: 8, width: 36, height: 36 }, { x: 300, y: 8, width: 36, height: 36 }];
 function fixture() {
   const replies: SurfaceReply[] = [], calls: string[] = [];
   let pointer: Parameters<SurfaceNativeFactory>[0] = () => {};
