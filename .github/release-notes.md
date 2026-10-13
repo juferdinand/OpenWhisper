@@ -1,16 +1,16 @@
 <!-- Prepared for the gated release workflow; repository status lives in README.md. -->
 
-## What's new in OpenWhisper 0.5.1
+## What's new in OpenWhisper 0.5.2
 
-- Background triggers on macOS start instantly (App Nap opt-out)
-- Stop and Cancel in the macOS recording overlay work without opening the main window
-- Silent macOS recordings no longer block new recordings
+- Speech recognition can use the Apple Silicon GPU (Metal) on macOS
+- LM Studio shows when its server is stopped and can start it with one click
+- Saving AI model settings is instant and no longer blocks the page
 
-## Neu in OpenWhisper 0.5.1
+## Neu in OpenWhisper 0.5.2
 
-- Hintergrund-Auslöser auf macOS starten sofort (App Nap deaktiviert)
-- Stopp und Abbrechen im macOS-Aufnahme-Overlay funktionieren, ohne das Hauptfenster zu öffnen
-- Stille Aufnahmen auf macOS blockieren keine neuen Aufnahmen mehr
+- Die Spracherkennung kann auf macOS die Apple-Silicon-GPU (Metal) nutzen
+- LM Studio zeigt an, wenn sein Server aus ist, und kann ihn mit einem Klick starten
+- Das Speichern der KI-Modell-Einstellungen geht sofort und blockiert die Seite nicht mehr
 
 Recognition runs locally. Exact package, desktop and test scope is recorded in
 [Electron status](https://github.com/juferdinand/OpenWhisper/blob/main/docs/ELECTRON-STATUS.md) and
