@@ -199,7 +199,7 @@ jobs:
           downloaded="$RUNNER_TEMP/existing-release-assets"
           mkdir -m 700 "$downloaded"
           gh release download "$tag" --dir "$downloaded"
-          node --import tsx app/scripts/verify-release-recovery.ts \
+          ./app/node_modules/.bin/tsx app/scripts/verify-release-recovery.ts \
             --release-json "$release_json" --tag "$tag" --staged-assets "$ASSETS_DIR" --downloaded-assets "$downloaded"
       - name: Advance development version after public publication
         env:
@@ -210,7 +210,7 @@ jobs:
           git merge-base --is-ancestor "$RELEASE_COMMIT" origin/main || { echo "Release is public, but main no longer contains its source commit. Recover by applying the successor version on current main." >&2; exit 1; }
           expected_main="$(git rev-parse origin/main)"
           git checkout -B release-post-publication-bump "$expected_main"
-          node --import tsx app/scripts/bump-development-version.ts --release-version "$VERSION" --github-output "$RUNNER_TEMP/development-version.txt"
+          ./app/node_modules/.bin/tsx app/scripts/bump-development-version.ts --release-version "$VERSION" --github-output "$RUNNER_TEMP/development-version.txt"
           if [[ -z "$(git status --porcelain)" ]]; then
             echo "Development version is already advanced; no second bump was created."
           else
