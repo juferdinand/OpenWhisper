@@ -34,8 +34,10 @@ export async function buildDevelopmentRecording(): Promise<void> {
     throw new Error("The recording development build requires Linux or macOS.");
   }
   const speech = await buildNativeSpeech({ backend: "cpu" });
-  const vulkanSpeech = process.platform === "linux" && process.arch === "x64"
-    ? await buildNativeSpeech({ backend: "vulkan" }) : undefined;
+  const gpuBackend = process.platform === "linux" && process.arch === "x64" ? "vulkan" as const
+    : process.platform === "darwin" ? "metal" as const : undefined;
+  // Both Mac architectures build Metal so the universal merge sees one inventory; Intel keeps using the CPU.
+  const gpuSpeech = gpuBackend ? await buildNativeSpeech({ backend: gpuBackend }) : undefined;
   if (process.platform === "darwin") {
     await buildMacCapture();
     await buildMacRetirementProduction();
@@ -49,16 +51,16 @@ export async function buildDevelopmentRecording(): Promise<void> {
   const captureName = process.platform === "darwin" ? "openwhisper_macos_capture.node" : "openwhisper_capture.node";
   const speechFile = join(speechDirectory, "openwhisper_speech.node"), captureFile = join(captureDirectory, captureName);
   await cp(speech.binding, speechFile);
-  const vulkanFile = vulkanSpeech ? join(root, "dist/native/speech/vulkan/openwhisper_speech.node") : undefined;
-  if (vulkanSpeech && vulkanFile) {
-    if (vulkanSpeech.manifest.speech.revision !== speech.manifest.speech.revision ||
-        vulkanSpeech.manifest.speech.sha256 !== speech.manifest.speech.sha256 ||
-        vulkanSpeech.manifest.platform !== speech.manifest.platform ||
-        vulkanSpeech.manifest.architecture !== speech.manifest.architecture) {
-      throw new Error("CPU and Vulkan speech artifacts must use the same pinned source and host.");
+  const gpuFile = gpuSpeech ? join(root, `dist/native/speech/${gpuSpeech.backend}/openwhisper_speech.node`) : undefined;
+  if (gpuSpeech && gpuFile) {
+    if (gpuSpeech.manifest.speech.revision !== speech.manifest.speech.revision ||
+        gpuSpeech.manifest.speech.sha256 !== speech.manifest.speech.sha256 ||
+        gpuSpeech.manifest.platform !== speech.manifest.platform ||
+        gpuSpeech.manifest.architecture !== speech.manifest.architecture) {
+      throw new Error("CPU and GPU speech artifacts must use the same pinned source and host.");
     }
-    await mkdir(join(root, "dist/native/speech/vulkan"), { recursive: true });
-    await cp(vulkanSpeech.binding, vulkanFile);
+    await mkdir(dirname(gpuFile), { recursive: true });
+    await cp(gpuSpeech.binding, gpuFile);
   }
   await cp(join(root, "dist/native", captureName), captureFile);
   const entry = await bundleEntry(process.platform === "darwin" ? "macos-capture-entry" : "capture-entry");
@@ -67,7 +69,7 @@ export async function buildDevelopmentRecording(): Promise<void> {
   } : undefined;
   const graph = await buildSpeechEntryGraph(root), speechDigest = await digest(speechFile);
   const speechEntries = [{ backend: "cpu" as const, ...speechDigest },
-    ...(vulkanFile ? [{ backend: "vulkan" as const, ...await digest(vulkanFile) }] : [])];
+    ...(gpuSpeech && gpuFile ? [{ backend: gpuSpeech.backend, ...await digest(gpuFile) }] : [])];
   const descriptor = developmentRecordingDescriptorSchema.parse({
     version: 1, platform: process.platform, architecture: process.arch,
     capture: await digest(captureFile), captureEntry: await digest(entry),

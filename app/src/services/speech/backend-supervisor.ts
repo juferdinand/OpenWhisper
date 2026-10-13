@@ -14,7 +14,10 @@ const uidSchema = z.number().int().nonnegative().max(0xffff_fffe);
 const hostSchema = z.strictObject({ platform: z.enum(["linux", "darwin"]), architecture: z.enum(["x64", "arm64"]),
   uid: uidSchema, parentPid: pidSchema }).readonly();
 const deadlinesSchema = z.strictObject({ startupMs: z.number().int().min(1).max(8000).default(8000),
-  requestMs: z.number().int().min(1).max(600_000).default(600_000), cleanupMs: z.number().int().min(1).max(8000).default(8000) }).readonly();
+  requestMs: z.number().int().min(1).max(600_000).default(600_000), cleanupMs: z.number().int().min(1).max(8000).default(8000),
+  // The first Metal device query after an install or update compiles the embedded shader library
+  // (about 15 s on Apple Silicon); later processes reuse the system shader cache.
+  metalDiscoveryMs: z.number().int().min(1).max(120_000).default(60_000) }).readonly();
 const birthSchema = z.discriminatedUnion("platform", [
   z.strictObject({ platform: z.literal("linux"), startTicks: z.bigint().positive().max((1n << 64n) - 1n) }).readonly(),
   z.strictObject({ platform: z.literal("darwin"), seconds: z.bigint().nonnegative().max((1n << 63n) - 1n),
@@ -147,6 +150,16 @@ function bounded<T>(operation: Promise<T>, ms: number, code: SpeechFailureCode, 
   });
 }
 
+/**
+ * The accelerated backend a host may try before its CPU fallback: Vulkan on Linux x64 and Metal on
+ * Apple Silicon. Intel Macs and other hosts recognize on the CPU only.
+ */
+export function gpuBackendFor(host: Readonly<{ platform: "linux" | "darwin"; architecture: "x64" | "arm64" }>): "vulkan" | "metal" | undefined {
+  if (host.platform === "linux" && host.architecture === "x64") return "vulkan";
+  if (host.platform === "darwin" && host.architecture === "arm64") return "metal";
+  return undefined;
+}
+
 class MainBackendSupervisor implements BackendSupervisor {
   private readonly allocation = new SpeechAllocation();
   private readonly effects: BackendEffects;
@@ -193,10 +206,11 @@ class MainBackendSupervisor implements BackendSupervisor {
         }
         active(signal); return existing;
       }
-      if (requestedGpu && this.host.platform === "darwin") throw new BackendSupervisorError("BACKEND_UNAVAILABLE");
+      const gpuBackend = gpuBackendFor(this.host);
+      if (requestedGpu && !gpuBackend) throw new BackendSupervisorError("BACKEND_UNAVAILABLE");
       let detection: BackendSelection["detection"] = "none";
-      if (requestedGpu) {
-        const gpu = this.openContext("vulkan", () => lease.validate()); current = gpu;
+      if (requestedGpu && gpuBackend) {
+        const gpu = this.openContext(gpuBackend, () => lease.validate()); current = gpu;
         try {
           await this.admitContext(gpu, signal);
           const device = await this.client(gpu).gpuDevice(signal);
@@ -205,7 +219,7 @@ class MainBackendSupervisor implements BackendSupervisor {
           detection = device === null ? "none" : /\b(?:lavapipe|llvmpipe|swiftshader|software|cpu)\b/iu.test(device) ? "software" : "device";
           if (detection === "device") {
             const gpuDevice = device && device.trim().length <= 256 ? device.trim() : undefined;
-            gpu.selection = Object.freeze({ backend: "vulkan", requestedGpu, gpu: true, detection,
+            gpu.selection = Object.freeze({ backend: gpuBackend, requestedGpu, gpu: true, detection,
               ...(gpuDevice ? { gpuDevice } : {}) }); return gpu;
           }
         } catch (error: unknown) {
@@ -261,20 +275,20 @@ class MainBackendSupervisor implements BackendSupervisor {
     });
   }
   discoverGpu(): Promise<BackendSelection> {
-    if (this.host.platform !== "linux" || this.host.architecture !== "x64") {
-      return Promise.reject(new BackendSupervisorError("BACKEND_UNAVAILABLE"));
-    }
-    this.gpuDiscovery ??= this.discoverGpuOnce();
+    const gpuBackend = gpuBackendFor(this.host);
+    if (!gpuBackend) return Promise.reject(new BackendSupervisorError("BACKEND_UNAVAILABLE"));
+    this.gpuDiscovery ??= this.discoverGpuOnce(gpuBackend);
     return this.gpuDiscovery;
   }
-  private async discoverGpuOnce(): Promise<BackendSelection> {
+  private async discoverGpuOnce(gpuBackend: "vulkan" | "metal"): Promise<BackendSelection> {
     let context: Context | undefined;
     let detection: BackendSelection["detection"] = "unavailable";
     let gpuDevice: string | undefined;
     try {
-      context = this.openContext("vulkan", async () => {});
+      context = this.openContext(gpuBackend, async () => {});
       await this.admitContext(context, context.startup.signal);
-      const device = await bounded(this.client(context).gpuDevice(context.startup.signal), this.deadlines.startupMs,
+      const deviceMs = gpuBackend === "metal" ? this.deadlines.metalDiscoveryMs : this.deadlines.startupMs;
+      const device = await bounded(this.client(context).gpuDevice(context.startup.signal), deviceMs,
         "TIMEOUT", context.startup.signal, () => context?.startup.abort());
       if (device !== null && (device.trim().length === 0 || /\p{Cc}/u.test(device))) throw worker("INVALID_REPLY");
       detection = device === null ? "none" : /\b(?:lavapipe|llvmpipe|swiftshader|software|cpu)\b/iu.test(device) ? "software" : "device";
@@ -291,7 +305,7 @@ class MainBackendSupervisor implements BackendSupervisor {
       detection = "unavailable";
     }
     if (context) await this.closeContext(context);
-    return Object.freeze({ backend: detection === "device" ? "vulkan" : "cpu", requestedGpu: true,
+    return Object.freeze({ backend: detection === "device" ? gpuBackend : "cpu", requestedGpu: true,
       gpu: detection === "device", detection, ...(gpuDevice ? { gpuDevice } : {}) });
   }
   private openContext(backend: ResourceBackend, validate: () => Promise<void>): Context {

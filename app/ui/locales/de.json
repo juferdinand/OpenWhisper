@@ -742,5 +742,10 @@
   "“Tuesday, no, Wednesday” becomes “Wednesday”.": "„Dienstag, nein, Mittwoch“ wird zu „Mittwoch“.",
   "Finish saving settings before installing an update.": "Warte vor der Installation, bis die Einstellungen gespeichert sind.",
   "Server stopped": "Server aus",
-  "Start server": "Server starten"
+  "Start server": "Server starten",
+  "Metal GPU selected: {device}": "Metal-GPU ausgewählt: {device}",
+  "CPU selected; Metal GPU available: {device}": "CPU ausgewählt; Metal-GPU verfügbar: {device}",
+  "Use Metal acceleration (experimental)": "Metal-Beschleunigung nutzen (experimentell)",
+  "Metal GPU": "Metal-GPU",
+  "GPU selected. Metal device detected: {device}": "GPU ausgewählt. Metal-Gerät erkannt: {device}"
 }
