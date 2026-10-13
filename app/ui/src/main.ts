@@ -92,6 +92,7 @@ const aiModelsSettings = createAiModelsSettings({
   getSettings: latestConnectionSettings,
   saveSettings: saveConnections,
   scan: () => void scanConnections(),
+  startLmStudio: () => void startLmStudioServer(),
   requestRender: () => {
     contentKey = "";
     render();
@@ -1011,6 +1012,19 @@ async function saveConnections(
 }
 function latestConnectionSettings(): TextConnectionSettings {
   return pendingConnectionSettings ?? state.text_connections.settings;
+}
+async function startLmStudioServer() {
+  try {
+    const startedState = await invoke("start_lm_studio_server", {});
+    startedState.text_connections.settings = latestConnectionSettings();
+    state = startedState;
+    contentKey = "";
+    render();
+  } catch (error) {
+    contentKey = "";
+    render();
+    notice(String(error));
+  }
 }
 async function scanConnections() {
   connectionScanStarted = true;

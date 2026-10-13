@@ -35,6 +35,48 @@ declare global {
   }
 }
 
+test("LM Studio with its server off offers Start server and lists models afterwards", async ({
+  page,
+}) => {
+  await start(page, "macos");
+  await selectSettingsTab(page, "connections");
+  // Opening the page scans once; report the stopped server after that scan.
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.calls.some((call) => call.command === "scan_connections"),
+      ),
+    )
+    .toBe(true);
+  await page.evaluate(() => {
+    window.testState.text_connections.available =
+      window.testState.text_connections.available.map((entry: any) =>
+        entry.provider === "lm_studio"
+          ? {
+              ...entry,
+              detected: false,
+              usable: false,
+              models: [],
+              reason: "server_stopped",
+            }
+          : entry,
+      );
+    window.publishState();
+  });
+  const row = page.locator('.connection-row[data-provider="lm_studio"]');
+  await expect(row.locator(".connection-state")).toHaveText("Server stopped");
+  await row.getByRole("button", { name: "Start server" }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+    .toBe("start_lm_studio_server");
+  await expect(row.locator(".connection-state")).toHaveText(
+    "Available · 1 models",
+  );
+  await expect(row.getByRole("button", { name: "Start server" })).toHaveCount(
+    0,
+  );
+});
+
 test("AI models discovers providers and saves priority and model selections", async ({
   page,
 }) => {
@@ -2080,6 +2122,21 @@ async function start(
             state.recommended_models = args.changes.gpu
               ? ["large-v3-turbo-q5_0", "parakeet-v3-q8"]
               : ["base", "parakeet-v3-q4"];
+        }
+        if (command === "start_lm_studio_server") {
+          state.text_connections.available =
+            state.text_connections.available.map((entry: any) =>
+              entry.provider === "lm_studio"
+                ? {
+                    ...entry,
+                    detected: true,
+                    usable: true,
+                    models: ["qwen3-8b"],
+                    reason: null,
+                  }
+                : entry,
+            );
+          return JSON.parse(JSON.stringify(state));
         }
         if (command === "scan_connections") {
           state.text_connections.available = [

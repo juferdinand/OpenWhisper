@@ -145,6 +145,8 @@ export const emptyTextConversation = (): TextConversation => ({ id: "", provider
 
 const textConnectionAvailabilityReasonSchema = z.enum([
   "not_running", "not_installed", "no_models", "unsupported", "scan_failed",
+  // LM Studio is installed (its `lms` tool exists) but its local API server is off.
+  "server_stopped",
 ]);
 export const textModelOptionSchema = z.strictObject({
   value: cliTextModelSchema.refine((value) => value.length > 0),

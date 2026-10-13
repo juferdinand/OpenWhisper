@@ -189,3 +189,10 @@
     grid-row: 1;
   }
 }
+.settings-content .connection-identity .connection-start-server {
+  align-self: flex-start;
+  margin-top: 6px;
+  min-height: 24px;
+  padding: 0 10px;
+  font-size: 11.5px;
+}

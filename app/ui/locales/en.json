@@ -740,5 +740,7 @@
   "{count} active · applied in this order: {rules}": "{count} active · applied in this order: {rules}",
   "“Seven o’clock” becomes “07:00”; dates use DD.MM.YYYY.": "“Seven o’clock” becomes “07:00”; dates use DD.MM.YYYY.",
   "“Tuesday, no, Wednesday” becomes “Wednesday”.": "“Tuesday, no, Wednesday” becomes “Wednesday”.",
-  "Finish saving settings before installing an update.": "Finish saving settings before installing an update."
+  "Finish saving settings before installing an update.": "Finish saving settings before installing an update.",
+  "Server stopped": "Server stopped",
+  "Start server": "Start server"
 }

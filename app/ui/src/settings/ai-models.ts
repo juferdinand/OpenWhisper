@@ -19,6 +19,7 @@ type Dependencies = {
   getSettings(): TextConnectionSettings;
   saveSettings(settings: TextConnectionSettings): Promise<boolean>;
   scan(): void;
+  startLmStudio(): void;
   requestRender(): void;
   notice(message: string): void;
 };
@@ -208,21 +209,23 @@ export function createAiModelsSettings(deps: Dependencies) {
             ? (connection as CustomCliConnection).name
             : builtins[provider as BuiltinTextProvider];
           const status =
-            found?.reason === "not_running"
-              ? t("Not running")
-              : found?.reason === "not_installed"
-                ? t("Not installed")
-                : found?.reason === "no_models"
-                  ? t("No models found")
-                  : found?.reason === "scan_failed"
-                    ? t("Could not check this connection")
-                    : usable
-                      ? local && found?.models.length
-                        ? t("Available · {count} models", {
-                            count: found.models.length,
-                          })
-                        : t("Available")
-                      : t("Not checked");
+            found?.reason === "server_stopped"
+              ? t("Server stopped")
+              : found?.reason === "not_running"
+                ? t("Not running")
+                : found?.reason === "not_installed"
+                  ? t("Not installed")
+                  : found?.reason === "no_models"
+                    ? t("No models found")
+                    : found?.reason === "scan_failed"
+                      ? t("Could not check this connection")
+                      : usable
+                        ? local && found?.models.length
+                          ? t("Available · {count} models", {
+                              count: found.models.length,
+                            })
+                          : t("Available")
+                        : t("Not checked");
           const selected = local
             ? connection.model || found?.models[0] || ""
             : cli
@@ -256,7 +259,7 @@ export function createAiModelsSettings(deps: Dependencies) {
             (!connection.enabled && (!usable || (local && !selected))) ||
             busy ||
             scanning;
-          return `<li class="connection-card connection-row" data-provider="${esc(provider)}"><span class="connection-number">${index + 1}</span><div class="connection-identity"><strong>${esc(name)}${provider === standardProvider ? `<span class="connection-default">${esc(t("Standard"))}</span>` : ""}</strong><span class="connection-state ${usable ? "available" : "unavailable"}">${esc(status)}</span></div><label class="connection-model"><span class="visually-hidden">${esc(t("Model"))}</span>${model}</label><label class="connection-toggle" title="${esc(t("Enabled"))}"><input class="switch connection-switch" type="checkbox" data-connection-enabled="${esc(provider)}" ${connection.enabled ? "checked" : ""} ${toggleDisabled ? "disabled" : ""}><span class="visually-hidden">${esc(t("Enabled"))}</span></label><div class="connection-order"><button type="button" data-connection-move="up" data-provider="${esc(provider)}" aria-label="${esc(t("Move {provider} up", { provider: name }))}" ${index === 0 || controlsDisabled ? "disabled" : ""}>↑</button><button type="button" data-connection-move="down" data-provider="${esc(provider)}" aria-label="${esc(t("Move {provider} down", { provider: name }))}" ${index === settings.connections.length - 1 || controlsDisabled ? "disabled" : ""}>↓</button>${custom ? `<button type="button" data-connection-edit="${esc(provider)}" ${controlsDisabled ? "disabled" : ""}>${esc(t("Edit"))}</button><button type="button" data-connection-remove="${esc(provider)}" aria-label="${esc(t("Remove {provider}", { provider: name }))}" ${controlsDisabled ? "disabled" : ""}>×</button>` : ""}</div></li>`;
+          return `<li class="connection-card connection-row" data-provider="${esc(provider)}"><span class="connection-number">${index + 1}</span><div class="connection-identity"><strong>${esc(name)}${provider === standardProvider ? `<span class="connection-default">${esc(t("Standard"))}</span>` : ""}</strong><span class="connection-state ${usable ? "available" : "unavailable"}">${esc(status)}</span>${provider === "lm_studio" && found?.reason === "server_stopped" ? `<button type="button" class="connection-start-server" data-start-lm-studio ${controlsDisabled ? "disabled" : ""}>${esc(t("Start server"))}</button>` : ""}</div><label class="connection-model"><span class="visually-hidden">${esc(t("Model"))}</span>${model}</label><label class="connection-toggle" title="${esc(t("Enabled"))}"><input class="switch connection-switch" type="checkbox" data-connection-enabled="${esc(provider)}" ${connection.enabled ? "checked" : ""} ${toggleDisabled ? "disabled" : ""}><span class="visually-hidden">${esc(t("Enabled"))}</span></label><div class="connection-order"><button type="button" data-connection-move="up" data-provider="${esc(provider)}" aria-label="${esc(t("Move {provider} up", { provider: name }))}" ${index === 0 || controlsDisabled ? "disabled" : ""}>↑</button><button type="button" data-connection-move="down" data-provider="${esc(provider)}" aria-label="${esc(t("Move {provider} down", { provider: name }))}" ${index === settings.connections.length - 1 || controlsDisabled ? "disabled" : ""}>↓</button>${custom ? `<button type="button" data-connection-edit="${esc(provider)}" ${controlsDisabled ? "disabled" : ""}>${esc(t("Edit"))}</button><button type="button" data-connection-remove="${esc(provider)}" aria-label="${esc(t("Remove {provider}", { provider: name }))}" ${controlsDisabled ? "disabled" : ""}>×</button>` : ""}</div></li>`;
         })
         .join(
           "",
@@ -266,6 +269,12 @@ export function createAiModelsSettings(deps: Dependencies) {
     content
       .querySelector("#scan-connections")
       ?.addEventListener("click", deps.scan);
+    content
+      .querySelector<HTMLButtonElement>("[data-start-lm-studio]")
+      ?.addEventListener("click", (event) => {
+        (event.currentTarget as HTMLButtonElement).disabled = true;
+        deps.startLmStudio();
+      });
     content
       .querySelector("#add-custom-connection")
       ?.addEventListener("click", () => {

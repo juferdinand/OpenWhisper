@@ -28,7 +28,7 @@ import { verifyMacApplicationBundle, macosMigrationContext } from "./macos-stabl
 import { StableMigrationError } from "../contracts/migration/stable-migration.js";
 import { PrivateStateStore } from "../services/settings/private-state.js";
 import { LocalProcessingService, LocalProcessingError } from "../services/speech/local-processing.js";
-import { LocalTextConnectionScanner, resolveCustomTextCliExecutable, resolveTextCliExecutable, validateTextConnectionChanges } from "../services/text/connections.js";
+import { LocalTextConnectionScanner, resolveCustomTextCliExecutable, resolveTextCliExecutable, startLmStudioServer, validateTextConnectionChanges } from "../services/text/connections.js";
 import { runClaudeCodeText } from "../services/text/claude-code.js";
 import { runCodexText } from "../services/text/codex.js";
 import { runCustomCliText } from "../services/text/custom-cli.js";
@@ -1172,6 +1172,12 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       },
       cancel_local_processing: ({ requestId }) => { processing.cancel(requestId); },
       scan_connections: async () => {
+        await textProcessor.scanConnections();
+        return state();
+      },
+      // Explicit user action only; discovery itself never starts servers.
+      start_lm_studio_server: async () => {
+        await startLmStudioServer();
         await textProcessor.scanConnections();
         return state();
       },
