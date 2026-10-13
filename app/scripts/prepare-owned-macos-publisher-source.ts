@@ -81,6 +81,13 @@ try {
   await mkdir(dirname(cpuManifestPath), { recursive: true, mode: 0o700 });
   await mkdir(dirname(whisperLicensePath), { recursive: true, mode: 0o700 });
   await writeFile(cpuManifestPath, cpuManifest, { flag: "wx", mode: 0o600 });
+  // Mac packages ship a Metal speech build next to the CPU build; restore its manifest the same way.
+  const metalNotice = join(notices, "speech-metal-unsigned-build.json");
+  if (await lstat(metalNotice).then(() => true, () => false)) {
+    const metalManifestPath = join(source, "app/native/build-metal/build-manifest.json");
+    await mkdir(dirname(metalManifestPath), { recursive: true, mode: 0o700 });
+    await writeFile(metalManifestPath, await readFile(metalNotice), { flag: "wx", mode: 0o600 });
+  }
   await writeFile(whisperLicensePath, whisperLicense, { flag: "wx", mode: 0o600 });
   const aliases: readonly [string, string][] = [["app/node_modules", "app/node_modules"],
     ["app/ui/node_modules", "app/ui/node_modules"]];

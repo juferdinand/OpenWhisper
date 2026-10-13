@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { transcriptDeliveryMetadataSchema } from "../../contracts/text/processing.js";
 import { speechLanguageSchema, speechModelSchema, speechTextSchema,
   speechVocabularySchema, speechWindowSchema } from "../speech/native-speech.js";
 
@@ -10,10 +11,10 @@ export const deliveryIdentitySchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("memory"), generation }),
 ]);
 export const deliveryReceiptSchema = z.discriminatedUnion("outcome", [
-  z.strictObject({ ...ownership, outcome: z.literal("clipboard"), clipboardConfirmed: z.literal(true) }),
-  z.strictObject({ ...ownership, outcome: z.literal("paste"), clipboardConfirmed: z.literal(true) }),
-  z.strictObject({ ...ownership, outcome: z.literal("editor"), clipboardConfirmed: z.literal(false) }),
-  z.strictObject({ ...ownership, outcome: z.literal("failed"), clipboardConfirmed: z.literal(false) }),
+  z.strictObject({ ...ownership, outcome: z.literal("clipboard"), clipboardConfirmed: z.literal(true), deliveredText: z.string().optional() }),
+  z.strictObject({ ...ownership, outcome: z.literal("paste"), clipboardConfirmed: z.literal(true), deliveredText: z.string().optional() }),
+  z.strictObject({ ...ownership, outcome: z.literal("editor"), clipboardConfirmed: z.literal(false), deliveredText: z.string().optional() }),
+  z.strictObject({ ...ownership, outcome: z.literal("failed"), clipboardConfirmed: z.literal(false), deliveredText: z.string().optional() }),
 ]);
 const recordingEffectFailureSchema = z.enum(["INVALID_FRAME", "OWNERSHIP_FAILED", "DELIVERY_FAILED",
   "CANCELLED", "BUSY", "START_FAILED", "TEARDOWN_FAILED", "WORKER_FAILED", "TIMEOUT", "INVALID_REPLY", "NATIVE_FAILED", "CLOSED"]);
@@ -28,7 +29,7 @@ export const recordingEffectRequestSchema = z.discriminatedUnion("command", [
     samples: speechWindowSchema, language: speechLanguageSchema, vocabulary: speechVocabularySchema }),
   z.strictObject({ ...envelope, command: z.literal("deliver"), identity: deliveryIdentitySchema,
     // The complete processed transcript can exceed a native-window or optional-preview bound.
-    text: z.string().min(1) }).refine((value) => value.identity.kind !== "memory"
+    text: z.string().min(1), metadata: transcriptDeliveryMetadataSchema.optional() }).refine((value) => value.identity.kind !== "memory"
       || value.identity.generation === value.generation),
   z.strictObject({ ...envelope, command: z.literal("cancel") }),
 ]);

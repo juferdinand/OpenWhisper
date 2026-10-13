@@ -91,7 +91,10 @@ interface OwnerRecord {
   terminates: number;
   readSettled: boolean;
 }
-function fixture(deadlines: Partial<{ startupMs: number; requestMs: number; cleanupMs: number }> = {}) {
+function fixture(deadlines: Partial<{ startupMs: number; requestMs: number; cleanupMs: number }> = {}, platform: "linux" | "darwin" = "linux") {
+  // Darwin hosts identify children by their start time instead of Linux start ticks.
+  const birth = (index: number): BackendIdentity["birth"] => platform === "darwin"
+    ? { platform: "darwin", seconds: BigInt(1_700_000_000 + index), micros: 0 } : { platform: "linux", startTicks: BigInt(1000 + index) };
   const controls: Controls = { discovery: "Owned hardware-category fixture", initial: "running", infer: "success", challenge: "normal", discoveryReply: "normal",
     changedBirth: false, changedUid: false, invalidReady: false, extraResource: false, badResourceBackend: false,
     verifyFailure: undefined, openFailure: undefined, noOwner: undefined, openGate: undefined, verifyGate: undefined,
@@ -112,12 +115,12 @@ function fixture(deadlines: Partial<{ startupMs: number; requestMs: number; clea
       if (controls.openFailure) throw new SpeechWorkerError(controls.openFailure);
       if (controls.noOwner === resource.backend) return { kind: "not-created", code: "START_FAILED" };
       const identity: BackendIdentity = { pid: 10_000 + owners.length, uid: host.uid, parentPid: host.parentPid,
-        epoch, birth: { platform: "linux", startTicks: BigInt(1000 + owners.length) } };
+        epoch, birth: birth(owners.length) };
       const record: OwnerRecord = { identity, challenges: [], level: controls.initial, terminates: 0, readSettled: false };
       owners.push(record);
       const listeners = new Set<(value: unknown) => void>(), exits = new Set<() => void>();
       const observedIdentity = (): BackendIdentity => ({ ...identity, uid: controls.changedUid ? identity.uid + 1 : identity.uid,
-        birth: { platform: "linux", startTicks: BigInt(1000 + owners.indexOf(record) + (controls.changedBirth ? 1 : 0)) } });
+        birth: birth(owners.indexOf(record) + (controls.changedBirth ? 1 : 0)) });
       const emit = (value: unknown): void => { for (const listener of listeners) listener(value); };
       const channel: SpeechChannel = {
         onMessage: (listener) => {
@@ -196,7 +199,7 @@ type Case = "manual" | "none" | "software" | "hardware" | "startup" | "inference
   "late-read-failure" | "wrong-nonce" | "extra-challenge" | "resource-extra" | "resource-backend" |
   "resource-failure" | "generic-open" | "terminal-open" | "invalid-ready" | "zombie" | "absent" | "invalid-input" |
   "late-admission" | "late-cleanup" | "late-integrity" | "discovery-timeout" | "discovery-exit" |
-  "wrong-pid" | "wrong-epoch" | "nonce-repeat" | "lease-failure" | "resource-teardown" | "ambiguous" | "admission-birth" |
+  "metal-device" | "metal-discovery" | "intel-mac" | "metal-none" | "wrong-pid" | "wrong-epoch" | "nonce-repeat" | "lease-failure" | "resource-teardown" | "ambiguous" | "admission-birth" |
   "concurrent-job" | "empty-device" | "mac-unavailable" | "changed-lease";
 function facadeShape(value: unknown): value is BackendSupervisor {
   return typeof value === "object" && value !== null && "createJob" in value && typeof value.createJob === "function";
@@ -246,6 +249,26 @@ for (const [name, discovery, detection] of [["none", null, "none"], ["software",
     assert.ok(f.events.indexOf("settle-reads") < f.events.indexOf("verify:cpu")); await job.close();
   });
 }
+
+test("Apple Silicon selects Metal for GPU requests and keeps Intel Macs on the CPU", async () => {
+  const f = fixture({}, "darwin"), main = await fresh("metal-device", { ...f.bindings, host: { ...host, platform: "darwin", architecture: "arm64" } });
+  const job = main.createJob(f.lease(true, "whisper"));
+  assert.deepEqual(await job.prepare(), { backend: "metal", requestedGpu: true, gpu: true, detection: "device",
+    gpuDevice: "Owned hardware-category fixture" });
+  assert.deepEqual(f.verifies, ["metal"]); await job.close();
+  const discovery = await fresh("metal-discovery", { ...fixture({}, "darwin").bindings, host: { ...host, platform: "darwin", architecture: "arm64" } });
+  assert.equal((await discovery.discoverGpu!()).backend, "metal");
+  const intel = await fresh("intel-mac", { ...fixture({}, "darwin").bindings, host: { ...host, platform: "darwin", architecture: "x64" } });
+  await assert.rejects(intel.discoverGpu!(), (error: unknown) => error instanceof Error && "code" in error && error.code === "BACKEND_UNAVAILABLE");
+});
+
+test("a Metal device that is not detected falls back to the CPU after retiring the Metal worker", async () => {
+  const f = fixture({}, "darwin"); f.controls.discovery = null;
+  const main = await fresh("metal-none", { ...f.bindings, host: { ...host, platform: "darwin", architecture: "arm64" } });
+  const job = main.createJob(f.lease());
+  assert.deepEqual(await job.prepare(), { backend: "cpu", requestedGpu: true, gpu: false, detection: "none" });
+  assert.deepEqual(f.verifies, ["metal", "cpu"]); assert.equal(f.owners[0]?.readSettled, true); await job.close();
+});
 
 test("hardware metadata authorizes a GPU request without claiming GPU execution", async () => {
   const f = fixture(), main = await fresh("hardware", f.bindings), job = main.createJob(f.lease(true, "parakeet"));

@@ -68,6 +68,28 @@ function validate(context: Context): void {
   if (!existing(context.home)) throw new Error("Stable profile requires an existing user-owned home.");
 }
 
+export type StableStorageRoots = { readonly config: string; readonly data: string; readonly cache: string };
+/**
+ * Product-named stable storage. macOS keeps all persistent data under one Application Support
+ * folder (with separate Config and Data roots) and caches under Library/Caches/OpenWhisper.
+ */
+export function stableStorageRoots(platform: "linux" | "darwin", home: string, bases: readonly string[]): StableStorageRoots {
+  if (platform === "linux") return { config: join(bases[0]!, "openwhisper"), data: join(bases[1]!, "openwhisper"), cache: join(bases[2]!, "openwhisper") };
+  const support = join(home, "Library/Application Support/OpenWhisper");
+  return { config: join(support, "Config"), data: join(support, "Data"), cache: join(home, "Library/Caches/OpenWhisper") };
+}
+/** Pre-#65 roots, relocated once to {@link stableStorageRoots} before the profile is resolved. */
+export function previousStableStorageRoots(platform: "linux" | "darwin", home: string, bases: readonly string[]): StableStorageRoots {
+  if (platform === "linux") return { config: join(bases[0]!, "whisperfree"), data: join(bases[1]!, "whisperfree"), cache: join(bases[2]!, "whisperfree") };
+  return { config: join(home, "Library/Application Support/io.github.whisperfree"),
+    data: join(home, "Library/Application Support/WhisperFree"), cache: join(home, "Library/Caches/io.github.whisperfree") };
+}
+/** XDG bases in config, data, cache order; macOS uses fixed Library paths and has none. */
+export function stableStorageBases(input: z.infer<typeof stableProfileInputSchema>): string[] {
+  return input.platform === "linux" ? [input.configHome ?? join(input.home, ".config"),
+    input.dataHome ?? join(input.home, ".local/share"), input.cacheHome ?? join(input.home, ".cache")] : [];
+}
+
 /** Resolve fixed stable destinations and legacy source references without reading or migrating user files. */
 export function resolveStableProfile(options: unknown): StableProfile {
   const input = stableProfileInputSchema.parse(options), uid = process.getuid?.();
@@ -75,8 +97,7 @@ export function resolveStableProfile(options: unknown): StableProfile {
   if (input.platform === "darwin" && [input.configHome, input.dataHome, input.cacheHome].some((path) => path !== undefined)) {
     throw new Error("Mac stable storage uses fixed Library paths, not XDG overrides.");
   }
-  const bases = input.platform === "linux" ? [input.configHome ?? join(input.home, ".config"),
-    input.dataHome ?? join(input.home, ".local/share"), input.cacheHome ?? join(input.home, ".cache")] : [];
+  const bases = stableStorageBases(input);
   separate(bases);
   if (bases.some((path) => ["whisperfree", "openwhisper", "io.github.whisperfree", "io-github-whisperfree"].includes(path.split(sep).at(-1)!.toLowerCase()))) {
     throw new Error("XDG bases must not already name application storage.");
@@ -84,9 +105,7 @@ export function resolveStableProfile(options: unknown): StableProfile {
   for (const path of [input.home, ...bases]) if (path.split(sep).some((part) => devNames.has(part.toLowerCase()))) {
     throw new Error("Stable profiles must not alias development storage.");
   }
-  const roots = input.platform === "linux" ? { config: join(bases[0]!, "whisperfree"), data: join(bases[1]!, "whisperfree"), cache: join(bases[2]!, "whisperfree") }
-    : { config: join(input.home, "Library/Application Support/io.github.whisperfree"),
-      data: join(input.home, "Library/Application Support/WhisperFree"), cache: join(input.home, "Library/Caches/io.github.whisperfree") };
+  const roots = stableStorageRoots(input.platform, input.home, bases);
   separate(Object.values(roots));
   const config = join(roots.config, "electron"), data = join(roots.data, "electron"), cache = join(roots.cache, "electron");
   const models = join(roots.data, input.platform === "darwin" ? "Models" : "models");

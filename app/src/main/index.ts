@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, protocol, screen, session, shell, systemPreferences, Tray } from "electron";
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences, Tray } from "electron";
 import { deliverClipboard } from "../services/recording/clipboard-output.js";
 import { WaylandClipboard } from "../services/platforms/linux/wayland-clipboard.js";
 import { portalPasteStateSchema } from "../platforms/linux/shared/portal-paste.js";
@@ -13,17 +13,28 @@ import {
   MAX_USER_TEXT_BYTES, MAX_UI_REQUEST_BYTES,
   type AppState, type EventName, type EventPayload, type UpdateState,
 } from "../contracts/ui/state.js";
+import {
+  defaultTextConnectionSettings, emptyTextConversation, textConnectionSettingsSchema,
+} from "../contracts/text/connections.js";
+import { textProcessingStageEventSchema, type TextProcessingStageEvent } from "../contracts/text/processing.js";
 import { PreferenceStore } from "../services/settings/preferences.js";
 import type { HostProfile } from "../services/settings/host-profile.js";
 import type { BuildIdentity } from "../contracts/application/build-identity.js";
 import { APPLICATION_BUILD } from "./application-build.js";
 import { selectApplicationBuild } from "./build-selection.js";
-import { formatBootstrapFailure, initializeStableLinuxProfile, initializeStableMacosProfile, observeBootstrapLoginStatus,
+import { formatBootstrapFailure, formatStartFailure, initializeStableLinuxProfile, initializeStableMacosProfile, observeBootstrapLoginStatus,
   type ApplicationBootstrapStage, type ApplicationBootstrapLoginStatus } from "./stable-profile-startup.js";
 import { verifyMacApplicationBundle, macosMigrationContext } from "./macos-stable-admission.js";
 import { StableMigrationError } from "../contracts/migration/stable-migration.js";
 import { PrivateStateStore } from "../services/settings/private-state.js";
 import { LocalProcessingService, LocalProcessingError } from "../services/speech/local-processing.js";
+import { LocalTextConnectionScanner, resolveCustomTextCliExecutable, resolveTextCliExecutable, startLmStudioServer, validateTextConnectionSave } from "../services/text/connections.js";
+import { runClaudeCodeText } from "../services/text/claude-code.js";
+import { runCodexText } from "../services/text/codex.js";
+import { runCustomCliText } from "../services/text/custom-cli.js";
+import { boundedTextPreview } from "../services/text/text-preview.js";
+import { OptionalTextProcessing, TextProviderUnavailableError } from "../services/text/optional-text-processing.js";
+import { TextConversationStore } from "../services/text/conversation.js";
 import {
   localProcessingProfileSchema, defaultLocalProcessingProfile, applyLocalProcessingProfilePatch,
 } from "../contracts/speech/local-processing.js";
@@ -37,19 +48,24 @@ import { vocabularyPrompt } from "../core/text/vocabulary-corrector.js";
 import type { RecordingSource } from "../workers/recording/recording-host-protocol.js";
 import { recordingSnapshotSchema } from "../workers/recording/recording-host-protocol.js";
 import { DEVELOPMENT_RECORDING_BUILD } from "./development-recording-build.js";
-import { developmentRecordingDescriptorSchema, selectDevelopmentRecordingDescriptor, type DevelopmentRecordingDescriptor } from "./development-recording-descriptor.js";
+import { runsInMacosVirtualMachine } from "./macos-virtual-machine.js";
+import { developmentRecordingDescriptorSchema, recordingDescriptorSupportsGpu, selectDevelopmentRecordingDescriptor, type DevelopmentRecordingDescriptor } from "./development-recording-descriptor.js";
 import { DevelopmentRecordingHost, developmentPulseServer, formatSourceDiscoveryFailure } from "./development-recording-host.js";
 import { saveTranscript } from "../services/development/development-transcripts.js";
+import { expandSnippets } from "../core/text/snippet-expander.js";
 import { DevelopmentPlatformHost } from "./development-platform-host.js";
 import { createRecordingControlPort, recordingUnavailableReason } from "./recording-control.js";
 import { portalShortcutStateSchema } from "../platforms/linux/shared/portal-shortcuts.js";
 import { KdeKeyCapture } from "../platforms/linux/kde/key-capture.js";
 import { modifierOnly } from "../platforms/linux/kde/keyboard.js";
+import { recordingUnavailableTitle } from "../contracts/ui/recording-guidance.js";
 import { buildTrayMenu } from "./tray-menu.js";
-import { overlayWindowBounds, overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "./recording-overlay.js";
+import { overlayInputShape, overlayWindowBounds, overlayWindowOptions, shouldShowRecordingOverlay, supportsInactiveRecordingOverlay, waylandOverlayWindowOptions } from "./recording-overlay.js";
 import { WaylandRecordingOverlay } from "./wayland-recording-overlay.js";
 import type { SurfaceUnavailableReason } from "../contracts/platforms/wayland-surface.js";
 import { MacosShortcut } from "./macos-shortcut.js";
+import { MacosMouseTrigger } from "./macos-mouse-trigger.js";
+import { macosAudioInputSources } from "./macos-audio-devices.js";
 import { MacosPaste } from "./macos-paste.js";
 import { MacosAutostart } from "./macos-autostart.js";
 import { APPLICATION_MACOS_UPDATE_BUILD } from "./macos-update-build.js";
@@ -192,6 +208,16 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     1024 * 1024, { invalidContent: "preserve-and-default" },
   );
   const processing = new LocalProcessingService();
+  const textConnectionStore = await PrivateStateStore.open(
+    join(profile.paths.settings, "text-connections.json"), textConnectionSettingsSchema, defaultTextConnectionSettings(),
+    1024 * 1024, { invalidContent: "preserve-and-default" },
+  );
+  const conversationStore = await TextConversationStore.open(
+    join(profile.paths.settings, "text-conversation.json"), textConnectionStore.snapshot());
+  const textConnectionScanner = new LocalTextConnectionScanner();
+  let textProcessing: TextProcessingStageEvent | null = null;
+  let textProcessingOwner: { readonly generation: number; readonly attempt: number } | undefined;
+  let rawTranscript = "";
   const rawCatalog: unknown = JSON.parse(await readFile(join(distribution, "resources/models.json"), "utf8"));
   const catalog = parseModelCatalog(rawCatalog);
   const inventory = await ModelInventory.open(profile, rawCatalog);
@@ -203,8 +229,9 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     catch (error: unknown) { console.error(formatSourceDiscoveryFailure({ stage: "checked-pulse", code: "FAILED" })); throw error; }
   };
   let host: DevelopmentRecordingHost | undefined;
+  let gpuDiscovery: Promise<void> | undefined;
   let gpuSelection = {
-    supported: descriptor?.platform === "linux" && descriptor.speech.entries.some((entry) => entry.backend === "vulkan"),
+    supported: descriptor ? recordingDescriptorSupportsGpu(descriptor) && !(descriptor.platform === "darwin" && runsInMacosVirtualMachine()) : false,
     checked: false, available: false, fallback: false, device: null as string | null,
   };
   const cpuName = hardwareDeviceNameSchema.safeParse(cpus()[0]?.model.trim());
@@ -229,6 +256,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let overlayUnavailableReason: SurfaceUnavailableReason | undefined;
   let tray: Tray | undefined, trayKey = "";
   let macShortcut: MacosShortcut | undefined;
+  let macMouse: MacosMouseTrigger | undefined;
   let recording = recordingSnapshotSchema.parse({ phase: "idle", generation: 0, elapsedMs: 0, level: 0,
     busy: false, recoveryAvailable: false, error: null, transcript: "" });
   let message = "", inferenceProgress = 0;
@@ -237,6 +265,51 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   const history = await PrivateStateStore.open(join(profile.paths.history, "history.json"),
     z.array(z.string().max(MAX_USER_TEXT_BYTES)).max(20), [], 8 * 1024 * 1024, { invalidContent: "preserve-and-default" });
   let notify = (): void => {};
+  const textProcessor = new OptionalTextProcessing({
+    settings: () => textConnectionStore.snapshot(),
+    scan: (settings) => textConnectionScanner.scan(settings),
+    isShuttingDown: () => shutdownInProgress,
+    onChange: () => notify(),
+    onStage: (event) => {
+      if (event === null) {
+        if (textProcessing?.stage === "model") textProcessing = null;
+        return;
+      }
+      if (event.generation !== recording.generation) return;
+      textProcessingOwner = { generation: event.generation, attempt: event.attempt };
+      textProcessing = event;
+    },
+    runProvider: async (selected, instruction, text, signal, requestId, context) => {
+      if (selected.provider === "ollama" || selected.provider === "lm_studio") {
+        return processing.preview({ requestId, text }, {
+          enabled: true, provider: selected.provider,
+          endpoint: selected.provider === "ollama" ? "http://127.0.0.1:11434" : "http://127.0.0.1:1234/v1",
+          // Reasoning models spend most tokens and time thinking before the answer (measured: 46 s and
+          // 474 of 622 tokens for one minute of dictation), so allow the profile's maximum.
+          model: selected.model, instruction, max_tokens: 4096, timeout_seconds: 120,
+        }, signal, context);
+      }
+      if (selected.provider === "claude_code") {
+        const executable = await resolveTextCliExecutable("claude");
+        if (!executable) throw new TextProviderUnavailableError();
+        return runClaudeCodeText({ executable, instruction, text, model: selected.model, signal,
+          ...(context === undefined ? {} : { context }) });
+      }
+      if (selected.provider === "codex") {
+        const executable = await resolveTextCliExecutable("codex");
+        if (!executable) throw new TextProviderUnavailableError();
+        return runCodexText({ executable, instruction, text, model: selected.model, signal,
+          ...(context === undefined ? {} : { context }) });
+      }
+      if ("command" in selected) {
+        const executable = await resolveCustomTextCliExecutable(selected);
+        if (!executable) throw new TextProviderUnavailableError();
+        return runCustomCliText({ executable, connection: selected, instruction, text, signal,
+          ...(context === undefined ? {} : { context }) });
+      }
+      throw new TextProviderUnavailableError();
+    },
+  });
   let autostart: LinuxAutostart | MacosAutostart | undefined;
   let updateAdmitted = false;
   let loginFact: { readonly requested: boolean; readonly pending?: boolean } | undefined;
@@ -308,7 +381,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   const waylandClipboard = descriptor?.platform === "linux" && process.env["XDG_SESSION_TYPE"] === "wayland"
     ? new WaylandClipboard() : undefined;
   const clipboardOutput = waylandClipboard ?? clipboard;
-  let microphoneAllowed = macRecording && systemPreferences.getMediaAccessStatus("microphone") === "granted";
+  let microphonePermission = macRecording ? systemPreferences.getMediaAccessStatus("microphone") : "unknown" as const;
+  let microphoneAllowed = microphonePermission === "granted";
   let accessibilityAllowed = macRecording && systemPreferences.isTrustedAccessibilityClient(false);
   const macPaste = macRecording ? MacosPaste.create({
     accessibilityGranted: () => systemPreferences.isTrustedAccessibilityClient(false),
@@ -326,9 +400,16 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       sourceDiscoveryFailure: (failure) => { console.error(formatSourceDiscoveryFailure(failure)); },
       snapshot: (value) => {
         const previous = recording;
+        if (value.generation !== previous.generation) {
+          rawTranscript = "";
+          textProcessing = null;
+          textProcessingOwner = undefined;
+          textProcessor.resetStatus();
+        }
         const hadMessage = message !== "";
         const hadDeliveryNotice = (value.phase === "starting" || value.phase === "recording") && deliveryNotice !== "";
         recording = value;
+        if (["done", "error", "idle"].includes(value.phase)) textProcessing = null;
         if (value.phase !== "error") message = "";
         if (value.phase === "starting" || value.phase === "recording") deliveryNotice = "";
         if (isSteadyRecordingUpdate(previous, value) && !hadMessage && !hadDeliveryNotice) {
@@ -341,16 +422,55 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       },
       progress: (value) => { inferenceProgress = recording.elapsedMs > 0
         ? Math.min(1, value.completedSamples / (recording.elapsedMs * 16)) : 0; notify(); },
-      delivery: { deliver: async (text, context) => {
+      textStage: (value) => {
+        let event: TextProcessingStageEvent;
+        try { event = textProcessingStageEventSchema.parse(value); } catch { return; }
+        if (event.generation !== recording.generation) return;
+        const owner = textProcessingOwner;
+        if (owner && owner.generation === event.generation && event.attempt < owner.attempt) return;
+        if (!owner || owner.generation !== event.generation || event.attempt > owner.attempt) {
+          textProcessingOwner = { generation: event.generation, attempt: event.attempt };
+          textProcessing = null;
+        }
+        if (event.stage === "recognition" && event.status === "completed" && event.text !== undefined) rawTranscript = event.text;
+        textProcessing = event;
+        notify();
+      },
+      delivery: { deliver: async (text, context, _identity, metadata) => {
         if (context.signal.aborted) return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
-        const oversized = Buffer.byteLength(text, "utf8") > MAX_USER_TEXT_BYTES;
+        if (metadata?.rawText !== undefined) rawTranscript = metadata.rawText;
+        const settings = textConnectionStore.snapshot();
+        const snippets = metadata?.snippets ?? [];
+        const processingInput = settings.mode === "conversation" ? expandSnippets(text, snippets) : text;
+        if (settings.mode === "conversation") textProcessor.reportSnippetsStage(context, processingInput);
+        let conversation: ReturnType<TextConversationStore["snapshot"]> | undefined;
+        let conversationReady = true;
+        if (settings.mode === "conversation") {
+          try {
+            await conversationStore.syncSettings(settings);
+            conversation = conversationStore.snapshotFor(settings);
+            if (!conversation) throw new Error("Conversation context does not match current settings.");
+          } catch {
+            conversationReady = false;
+            message = "Conversation context could not be saved; model processing was skipped.";
+            textProcessor.skipForStorageFailure(context);
+          }
+        }
+        const processedText = conversationReady ? await textProcessor.process(processingInput, context, conversation) : processingInput;
+        if (processedText === undefined || context.signal.aborted || shutdownInProgress) {
+          textProcessor.discardConversationTurn(context.generation, context.attempt);
+          return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
+        }
+        const acceptedText = settings.mode === "conversation" ? processedText : expandSnippets(processedText, snippets);
+        if (settings.mode !== "conversation") textProcessor.reportSnippetsStage(context, acceptedText);
+        const oversized = Buffer.byteLength(acceptedText, "utf8") > MAX_USER_TEXT_BYTES;
         if (oversized && preferences.snapshot().keep_history) {
-          try { await saveTranscript(profile, text); }
+          try { await saveTranscript(profile, acceptedText); }
           catch { return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false }; }
         }
         if (context.signal.aborted) return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
         const wantsPaste = preferences.snapshot().output === "paste";
-        const delivered = await deliverClipboard(text, context, { writeText: (text) => clipboardOutput.writeText(text), readText: () => clipboardOutput.readText(),
+        const delivered = await deliverClipboard(acceptedText, context, { writeText: (text) => clipboardOutput.writeText(text), readText: () => clipboardOutput.readText(),
           ...(wantsPaste ? { paste: async () => {
             try {
               if (macPaste) { accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(false); return await macPaste.paste(); }
@@ -358,32 +478,46 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
             }
             catch { pasteState = { ...pasteState, ready: false, available: false, result: "FAILED" }; notify(); return false; }
           } } : {}) });
-        if (!delivered.clipboardConfirmed) return delivered;
+        if (!delivered.clipboardConfirmed) {
+          textProcessor.discardConversationTurn(context.generation, context.attempt);
+          return delivered;
+        }
+        const acceptedTurn = textProcessor.takeAcceptedConversationTurn(context.generation, context.attempt);
+        if (acceptedTurn) {
+          try { await conversationStore.commit(acceptedTurn, settings); }
+          catch { message = "Text copied; this conversation turn could not be saved."; }
+        }
         if (wantsPaste && delivered.outcome === "clipboard") deliveryNotice = "Text copied; automatic paste is unavailable. Paste it from the clipboard.";
         if (!oversized && preferences.snapshot().keep_history) {
           // History is secondary to the already confirmed clipboard commit.
           void history.update((current) => {
-            const next = [text, ...current].slice(0, 20);
+            const next = [acceptedText, ...current].slice(0, 20);
             while (next.length > 1 && Buffer.byteLength(JSON.stringify(next), "utf8") > 6 * 1024 * 1024) next.pop();
             if (Buffer.byteLength(JSON.stringify(next), "utf8") > 8 * 1024 * 1024) return current;
             return next;
           }).then(notify, () => { message = "Text copied; history could not be saved."; notify(); });
         }
-        return delivered;
+        return { ...delivered, deliveredText: acceptedText };
       } },
     });
+    // macOS lists CoreAudio inputs in main; only device UIDs and display names are read.
+    if (descriptor.platform === "darwin") sources = macosAudioInputSources();
     if (descriptor.platform === "linux") {
       try { audioServer = await checkedAudioServer(); sources = await host.enumerate(audioServer); }
       catch { message = "A local audio server is not available."; }
-      // Complete the no-model probe before enabling recording; it shares the supervised speech allocation.
-      if (gpuSelection.supported) {
-        try { await host.discoverGpu(); }
-        catch {
-          // Eligible loader/device failures already return safe CPU fallback after cleanup.
-          // A rejected probe may have poisoned ownership; never advertise this host as ready.
-          recordingRetired = true;
-        }
-      }
+    }
+    // Complete the no-model probe (Vulkan on Linux, Metal on Apple Silicon) before recording;
+    // it shares the supervised speech allocation.
+    if (gpuSelection.supported) {
+      const probe = host.discoverGpu().then(() => {}, () => {
+        // Eligible loader/device failures already return safe CPU fallback after cleanup.
+        // A rejected probe may have poisoned ownership; never advertise this host as ready.
+        recordingRetired = true; notify();
+      });
+      // The first Metal query after an install or update compiles shaders for several seconds; keep the
+      // window responsive and let a recording wait for the probe instead of finding the allocation busy.
+      if (descriptor.platform === "darwin") gpuDiscovery = probe.finally(() => { gpuDiscovery = undefined; });
+      else await probe;
     }
   }
   const platform = process.platform === "darwin" ? "macos" : "linux";
@@ -394,17 +528,22 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   };
   const state = (): AppState => {
     const preferenceSnapshot = preferences.snapshot();
+    const rawPreview = boundedTextPreview(rawTranscript, MAX_USER_TEXT_BYTES);
+    const stage = textProcessing && textProcessingOwner?.generation === recording.generation
+      ? textProcessing : null;
+    const stagePreview = stage?.text === undefined ? undefined : boundedTextPreview(stage.text, MAX_USER_TEXT_BYTES);
     const macShortcutState = macShortcut?.state();
     const gpuName = hardwareDeviceNameSchema.safeParse(gpuSelection.device);
     const unavailable = recordingUnavailableReason({ host: !recordingRetired && !!host,
       model: installed.some((item) => item.model.id === preferenceSnapshot.model), busy: recording.busy,
-      recovery: recording.recoveryAvailable, mac: macRecording, microphoneAllowed, audioServer: !!audioServer });
+      recovery: recording.recoveryAvailable, mac: macRecording, microphoneAllowed, audioServer: !!audioServer,
+      audioInput: sources.length > 0 && (!preferenceSnapshot.microphone || sources.some((source) => source.id === preferenceSnapshot.microphone)) });
     return appStateSchema.parse({
       updates,
       launch_at_login_available: !!autostart && loginFact !== undefined,
       platform,
       ...(platform === "macos" ? { macos: {
-        microphone_allowed: microphoneAllowed, recording_shortcut: macShortcutState?.configuring ?? false,
+        microphone_allowed: microphoneAllowed, microphone_permission: microphonePermission, recording_shortcut: macShortcutState?.configuring ?? false,
         shortcut_toggle_only: macRecording, clipboard_restore_available: false,
         shortcut_hint: "Press and release a keyboard key. Escape cancels.",
         editor: "", recommended: [], updates_configured: updates.configured, launch_at_login_pending: loginFact?.pending ?? false,
@@ -416,6 +555,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         : recording.error ? `Recording failed: ${recording.error}.` : descriptor ? "" : "Recording is not available in this development preview."),
       transcript: Buffer.byteLength(recording.transcript, "utf8") <= MAX_USER_TEXT_BYTES ? recording.transcript : "",
       transcript_preview_omitted: Buffer.byteLength(recording.transcript, "utf8") > MAX_USER_TEXT_BYTES,
+      raw_transcript: rawPreview.text,
+      raw_transcript_preview_omitted: rawPreview.omitted,
+      text_processing: stage && stagePreview ? { ...stage, text: stagePreview.text } : stage,
+      text_processing_preview_omitted: stagePreview?.omitted ?? false,
       history: history.snapshot().filter((text) => Buffer.byteLength(text, "utf8") <= MAX_USER_TEXT_BYTES),
       preferences: { ...preferenceSnapshot, ...(loginFact ? { launch_at_login: loginFact.requested } : {}) },
       models: [...catalog.models, ...installed.filter((item) => !catalog.models.some((model) => model.id === item.model.id)).map((item) => item.model)],
@@ -427,13 +570,15 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         gpuFallback: gpuSelection.fallback,
         memoryBytes: totalmem(),
       }), preferenceSnapshot.language === "auto" ? preferenceSnapshot.ui_language : preferenceSnapshot.language).map((model) => model.id),
-      session: process.env["XDG_SESSION_TYPE"] ?? "unknown",
-      desktop: process.env["XDG_CURRENT_DESKTOP"] ?? "unknown", clipboard_available: descriptor !== null,
+      // XDG variables exist only on Linux desktops; macOS reports its version and architecture instead.
+      session: process.platform === "darwin" ? process.arch : process.env["XDG_SESSION_TYPE"] ?? "unknown",
+      desktop: process.platform === "darwin" ? `macOS ${process.getSystemVersion()}` : process.env["XDG_CURRENT_DESKTOP"] ?? "unknown",
+      clipboard_available: descriptor !== null,
       shortcut_portal: shortcut.available, paste_portal: pasteState.available, shortcut: macShortcutState?.label ?? shortcut.label,
       native_shortcuts: macShortcutState?.available ?? shortcut.nativeAvailable,
       shortcut_configuring: shortcut.configuring && !shortcut.nativeX11,
       native_x11: shortcut.nativeX11 ?? false, native_paste: !!macPaste,
-      native_mouse: shortcut.nativeMouse ?? false, native_middle_mouse: shortcut.nativeMiddleMouse ?? false,
+      native_mouse: macShortcut?.mouseAvailable() ?? shortcut.nativeMouse ?? false, native_middle_mouse: macShortcut?.mouseAvailable() ?? shortcut.nativeMiddleMouse ?? false,
       recording_shortcut: (macShortcutState?.configuring ?? false) || !!keyCapture || !!shortcut.nativeX11 && shortcut.configuring,
       paste_ready: macPaste ? accessibilityAllowed : pasteState.ready, paste_configuring: pasteState.configuring,
       gpu_available: gpuSelection.available, gpu_supported: gpuSelection.supported, gpu_checked: gpuSelection.checked,
@@ -450,6 +595,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       ...(unavailable ? { recording_unavailable_reason: unavailable } : {}),
       local_processing: processingProfile.snapshot(),
       local_processing_invalid_profile: processingProfile.invalidContent,
+      text_connections: { settings: textConnectionStore.snapshot(), ...textProcessor.snapshot(),
+        conversation: conversationStore.snapshotFor(textConnectionStore.snapshot()) ?? emptyTextConversation() },
     });
   };
   let latestSnapshot: AppState | undefined;
@@ -534,6 +681,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         ...overlayWindowBounds(area),
         webPreferences: { ...options.webPreferences, webSecurity: true, devTools: false },
       });
+      if (process.platform === "linux" && !nativeWaylandOverlay) overlay.setShape(overlayInputShape());
       overlay.on("closed", () => {
         overlayReady = false; overlay = undefined;
         void waylandOverlay?.close().catch(() => {}); notify();
@@ -569,6 +717,13 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       emit("state", snapshot);
       updateTray(snapshot);
       syncOverlayVisibility(snapshot);
+      // macOS reports a background or covered window as hidden and pauses its animation frames,
+      // which left gaps in the live waveform. Keep the main window and the recording overlay
+      // unthrottled only while recording.
+      const throttle = snapshot.status !== "recording";
+      for (const target of [contents, overlay && !overlay.isDestroyed() ? overlay.webContents : undefined]) {
+        if (target && !target.isDestroyed() && target.getBackgroundThrottling() !== throttle) target.setBackgroundThrottling(throttle);
+      }
     }
     catch { console.error("OpenWhisper Dev could not publish its UI state."); }
   };
@@ -588,6 +743,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   };
   const recordingAction = (operation: () => Promise<void>): Promise<void> => action(() => withRecordingControl(operation));
   const configureRecording = async (): Promise<void> => {
+    await gpuDiscovery;
     if (configured && host?.isConfigured()) return;
     if (!host) throw new Error("Recording unavailable.");
     const selected = preferences.snapshot(), model = installed.find((item) => item.model.id === selected.model);
@@ -598,9 +754,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     const request = recordingRequestSchema.parse({ model: { path: join(profile.paths.models, model.model.file), family: model.model.family,
       gpu: selected.gpu && gpuSelection.supported },
       language: selected.language, vocabulary: vocabularyPrompt(selected.vocabulary),
-      vocabulary_entries: selected.vocabulary, snippets: selected.snippets });
+      cleanup_enabled: selected.cleanup_enabled, vocabulary_entries: selected.vocabulary,
+      snippets: selected.snippets });
     await host.configure({ id: model.model.id, request,
-      ...(macRecording ? {} : { server: audioServer ?? `unix:${join(process.env.XDG_RUNTIME_DIR ?? profile.paths.locks, "pulse/native")}`,
+      ...(macRecording ? { source: selected.microphone } : { server: audioServer ?? `unix:${join(process.env.XDG_RUNTIME_DIR ?? profile.paths.locks, "pulse/native")}`,
         source: selected.microphone }) }); configured = true;
   };
   const toggleRecording = (): Promise<void> => recordingAction(async () => {
@@ -612,18 +769,31 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     if (recordingRetired) throw new Error("Recording is unavailable until the app restarts.");
     cancelRequested = true; if (host?.isConfigured()) await host.command("cancel");
   });
+  let lastUnavailableNotice = 0;
+  const unavailableTrigger = (): void => {
+    if (shutdownInProgress || state().recording_available !== false || Date.now() - lastUnavailableNotice < 3000) return;
+    lastUnavailableNotice = Date.now();
+    const snapshot = state(), key = recordingUnavailableTitle(snapshot);
+    message = key; notify();
+    if (Notification.isSupported()) {
+      const notification = new Notification({ title: profile.productName,
+        body: trayLocales[snapshot.preferences.ui_language][key] ?? key });
+      notification.on("click", showSettings); notification.show();
+    } else showSettings();
+  };
   if (host && macRecording && process.platform === "darwin") {
-    macShortcut = new MacosShortcut({ shortcuts: globalShortcut,
+    macMouse = MacosMouseTrigger.create();
+    macShortcut = new MacosShortcut({ shortcuts: globalShortcut, ...(macMouse ? { mouse: macMouse } : {}),
       allowed: () => !shutdownInProgress && updateReserved !== "install" && !recordingControl && !recording.recoveryAvailable &&
         !["stopping", "transcribing", "restoring", "discarding"].includes(recording.phase),
       setupAllowed: () => !shutdownInProgress && updateReserved !== "install" && !recording.busy && !recording.recoveryAvailable,
-      capture: createRecordingControlPort({ owner: host, snapshot: () => recording, configure: configureRecording,
+      capture: createRecordingControlPort({ owner: host, snapshot: () => recording, configure: configureRecording, unavailable: unavailableTrigger,
         available: () => !shutdownInProgress && state().recording_available === true,
         serialize: withRecordingControl, cleanupSerialize: (operation) => withRecordingControl(operation, true) }),
       changed: (value) => {
         contents.setIgnoreMenuShortcuts(value.configuring);
         const messages = { NONE: "", ENABLED: "", CANCELLED: "Shortcut setup was cancelled. Window recording remains usable.",
-          UNSUPPORTED: "Use a regular key or shortcut. Fn and mouse triggers are not available in this build.",
+          UNSUPPORTED: "Use a regular key, a shortcut, or the middle, back or forward mouse button.",
           CONFLICT: "This trigger conflicts with an existing desktop shortcut. Choose another trigger.",
           FAILED: "Shortcut setup or recording failed. Window recording remains usable." };
         message = messages[value.result];
@@ -633,6 +803,12 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         }
         notify();
       } });
+    const savedTrigger = preferences.snapshot().macos_shortcut;
+    if (savedTrigger) {
+      // Saved triggers are registered again at startup; a failure keeps window recording usable.
+      try { macShortcut.bind(savedTrigger); }
+      catch { message = "Shortcut setup or recording failed. Window recording remains usable."; }
+    }
     notify();
   }
   if (host && descriptor?.platform === "linux" && descriptor.platformServices) {
@@ -679,10 +855,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           }
           notify();
         },
-        capture: createRecordingControlPort({ owner: host, snapshot: () => recording, configure: configureRecording,
+        capture: createRecordingControlPort({ owner: host, snapshot: () => recording, configure: configureRecording, unavailable: unavailableTrigger,
           serialize: withRecordingControl,
           cleanupSerialize: <T>(operation: () => Promise<T>) => withRecordingControl(operation, true),
-          available: () => !shutdownInProgress && updateReserved !== "install" && !keyCapture && !!audioServer && installed.some((item) => item.model.id === preferences.snapshot().model) }),
+          available: () => !shutdownInProgress && !keyCapture && state().recording_available === true }),
       }, new AbortController().signal);
       const savedTrigger = preferences.snapshot().native_trigger;
       if (preferences.snapshot().setup_completed && !shortcut.nativeX11 && savedTrigger) {
@@ -752,7 +928,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   window.on("blur", () => { macShortcut?.focusLost(); if (keyCapture) { keyCapture = undefined; contents.setIgnoreMenuShortcuts(false); notify(); } });
   function finishShutdown(retiring: boolean, macHandoff?: Readonly<PreparedMacosUpdateInstall>): Promise<void> {
     if (shutdownTask) return retiring || macHandoff ? Promise.reject(new Error("Shutdown already started.")) : shutdownTask;
-    shutdownInProgress = true; cancelRequested = true; processing.close(); downloadAbort?.abort();
+    shutdownInProgress = true; cancelRequested = true; textProcessor.close();
+    processing.close(); downloadAbort?.abort();
     if (!macHandoff) macUpdateAbort?.abort();
     updateCheckScheduler?.close(); updateCheckScheduler = undefined;
     powerMonitor.off("resume", resumeUpdateChecks);
@@ -761,7 +938,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     const closeOwners = async (): Promise<void> => {
       await recordingOperation?.catch(() => {}); await downloading; await downloads.finalize();
       nativeCleanupStarted = true;
-      await macShortcut?.close(); macPaste?.close(); await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); await waylandOverlay?.close();
+      await macShortcut?.close(); macMouse?.close(); macPaste?.close(); await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); await waylandOverlay?.close();
       if (macRecording) { recordingRetired = true; host = undefined; configured = false; }
     };
     shutdownTask = (async () => {
@@ -948,7 +1125,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           throw new Error("Unknown catalog model.");
         }
         if ((recording.busy || recording.recoveryAvailable) &&
-          ["model", "language", "microphone", "vocabulary", "snippets", "gpu", "output", "hold_to_record"].some((key) => Object.hasOwn(changes, key))) {
+          ["model", "language", "microphone", "cleanup_enabled", "vocabulary", "snippets", "gpu", "output", "hold_to_record"].some((key) => Object.hasOwn(changes, key))) {
           throw new Error("Finish or discard the current recording before changing its request.");
         }
         if (changes.output && changes.output !== "clipboard" && !(changes.output === "paste" && (descriptor?.platform === "linux" || macPaste))) {
@@ -974,7 +1151,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           throw error;
         }
         if (changes.hold_to_record !== undefined) await platformHost?.shortcut("mode", changes.hold_to_record);
-        if (["model", "language", "microphone", "vocabulary", "snippets", "gpu"].some((key) => Object.hasOwn(changes, key))) configured = false;
+        if (["model", "language", "microphone", "cleanup_enabled", "vocabulary", "snippets", "gpu"].some((key) => Object.hasOwn(changes, key))) configured = false;
         const current = state();
         emit("state", current);
         return current;
@@ -1005,11 +1182,52 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         }
       },
       cancel_local_processing: ({ requestId }) => { processing.cancel(requestId); },
+      scan_connections: async () => {
+        await textProcessor.scanConnections();
+        return state();
+      },
+      // Explicit user action only; discovery itself never starts servers.
+      start_lm_studio_server: async () => {
+        await startLmStudioServer();
+        await textProcessor.scanConnections();
+        return state();
+      },
+      save_connections: ({ settings }) => withRecordingControl(async () => {
+        if (recording.busy || recording.recoveryAvailable || textProcessor.busy) {
+          throw new Error("Finish the current recording before changing text connections.");
+        }
+        const checked = textConnectionSettingsSchema.parse(settings);
+        await validateTextConnectionSave(textConnectionStore.snapshot(), checked, () => textProcessor.snapshot().available,
+          () => textProcessor.scanConnections(checked));
+        await textConnectionStore.update(() => checked);
+        // Fingerprint-gated reads keep old context private if the second write fails.
+        await conversationStore.syncSettings(checked);
+        // A newly added custom CLI has no availability yet; check it in the background without blocking the save.
+        const known = new Set(textProcessor.snapshot().available.map((entry) => entry.provider));
+        if (checked.connections.some((connection) => !known.has(connection.provider))) {
+          void textProcessor.scanConnections(checked).catch(() => {});
+        }
+        return state();
+      }),
+      new_conversation: () => withRecordingControl(async () => {
+        if (recording.busy || recording.recoveryAvailable || textProcessor.busy) {
+          throw new Error("Finish the current recording before starting a new conversation.");
+        }
+        await conversationStore.newConversation(textConnectionStore.snapshot());
+        return state();
+      }),
+      cancel_text_processing: () => {
+        textProcessor.cancel();
+      },
       enable_shortcut: () => shortcutAction("enable"),
       desktop_shortcut: () => shortcutAction("configure"),
       clear_shortcut: () => shortcutAction("clear"),
       cancel_shortcut: () => shortcutAction("cancel"),
       capture_mouse_trigger: ({ button }) => recordingAction(async () => {
+        if (macShortcut) {
+          if (!window?.isFocused() || recording.busy || recording.recoveryAvailable || shutdownInProgress) throw new Error("Mouse trigger setup is unavailable.");
+          macShortcut.captureMouse(button); return;
+        }
         if (!keyCapture || !shortcut.nativeMouse || !platformHost || !window?.isFocused() ||
             recording.busy || recording.recoveryAvailable || shutdownInProgress) {
           throw new Error("Mouse trigger setup is unavailable.");
@@ -1035,12 +1253,16 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       retry_transcription: () => recordingAction(async () => { await configureRecording(); if (cancelRequested) return; inferenceProgress = 0; await host?.command("retry"); }),
       discard_recovery: () => recordingAction(async () => { await configureRecording(); if (!cancelRequested) await host?.command("discard"); }),
       refresh_microphones: () => recordingAction(async () => { if (!host) throw new Error("Recording unavailable.");
-        if (macRecording) { microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted"; return; }
+if (macRecording) { microphonePermission = systemPreferences.getMediaAccessStatus("microphone"); microphoneAllowed = microphonePermission === "granted"; sources = macosAudioInputSources(); return; }
         audioServer = await checkedAudioServer(); sources = await host.enumerate(audioServer); }),
       allow_microphone: () => action(async () => {
         if (!macRecording) throw new Error("Microphone permission is unavailable.");
         const permission = systemPreferences.getMediaAccessStatus("microphone");
-        if (permission === "not-determined") microphoneAllowed = await systemPreferences.askForMediaAccess("microphone");
+        microphonePermission = permission;
+        if (permission === "not-determined") {
+          microphoneAllowed = await systemPreferences.askForMediaAccess("microphone");
+          microphonePermission = systemPreferences.getMediaAccessStatus("microphone");
+        }
         else {
           microphoneAllowed = permission === "granted";
           if (!microphoneAllowed) await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone");
@@ -1083,13 +1305,19 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     },
   });
   try {
-    const icon = nativeImage.createFromPath(join(distribution, "ui/app-icon.png")).resize({ width: 18, height: 18 });
+    // macOS renders menu bar template images from alpha only, so it needs a monochrome mark;
+    // the opaque application icon would show as a solid square there.
+    const icon = process.platform === "darwin"
+      ? nativeImage.createFromPath(join(distribution, "ui/branding/trayTemplate.png"))
+      : nativeImage.createFromPath(join(distribution, "ui/app-icon.png")).resize({ width: 18, height: 18 });
     if (icon.isEmpty()) throw new Error("Tray icon unavailable.");
     if (process.platform === "darwin") icon.setTemplateImage(true);
-    tray = new Tray(icon); tray.setToolTip(profile.productName); tray.on("click", showSettings);
+    tray = new Tray(icon); tray.setToolTip(profile.productName);
+    // macOS shows the menu (with Settings and Stop recording) on click; opening the window there hid its actions.
+    if (process.platform !== "darwin") tray.on("click", showSettings);
     updateTray = (snapshot) => {
       if (!tray || tray.isDestroyed()) return;
-      const key = JSON.stringify([snapshot.status, snapshot.recording_available, snapshot.recovery_available, snapshot.preferences.ui_language]);
+      const key = JSON.stringify([snapshot.status, snapshot.recording_available, snapshot.recording_unavailable_reason, snapshot.recovery_available, snapshot.preferences.ui_language]);
       if (key === trayKey) return;
       trayKey = key;
       const labels = trayLocales[snapshot.preferences.ui_language];
@@ -1128,8 +1356,12 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   window.on("minimize", syncOverlayAfterWindowEvent);
   window.on("restore", syncOverlayAfterWindowEvent);
   if (macRecording) window.on("focus", () => {
-    microphoneAllowed = systemPreferences.getMediaAccessStatus("microphone") === "granted";
-    accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(false); notify();
+microphonePermission = systemPreferences.getMediaAccessStatus("microphone");
+    microphoneAllowed = microphonePermission === "granted";
+    sources = macosAudioInputSources();
+    accessibilityAllowed = systemPreferences.isTrustedAccessibilityClient(false);
+    try { macMouse?.refresh(String(accessibilityAllowed)); } catch { message = "Shortcut setup or recording failed. Window recording remains usable."; }
+    notify();
   });
   if (autostart) window.on("focus", () => { void refreshLogin().then(notify); });
   // Configure the saved request to discover private stopped audio before showing
@@ -1201,8 +1433,8 @@ if (control) {
     app.exit(1);
     return undefined;
   });
-  if (bootstrap) void start(bootstrap).catch(() => {
-    console.error("OpenWhisper could not initialize its application services or UI.");
+  if (bootstrap) void start(bootstrap).catch((error: unknown) => {
+    console.error(formatStartFailure(error));
     app.exit(1);
   });
 }

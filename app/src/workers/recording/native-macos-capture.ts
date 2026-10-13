@@ -1,12 +1,14 @@
 import { createRequire } from "node:module";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { recordingSourceIdSchema } from "../../contracts/ui/state.js";
 import { captureMetadataSchema, preparedMetadataSchema } from "./native-capture.js";
 import type { NativeCaptureSession } from "./native-capture.js";
 
 const macCaptureSelectionSchema = z.discriminatedUnion("mode", [
   z.strictObject({ mode: z.literal("synthetic"), sampleRate: z.number().int().min(8000).max(192000), channels: z.number().int().min(1).max(8) }),
-  z.strictObject({ mode: z.literal("avfoundation") }),
+  // An empty device keeps the system default input; otherwise a CoreAudio device UID.
+  z.strictObject({ mode: z.literal("avfoundation"), device: z.union([z.literal(""), recordingSourceIdSchema]) }),
 ]);
 type MacCaptureSelection = z.infer<typeof macCaptureSelectionSchema>;
 const macCaptureDiagnosticsSchema = z.strictObject({ engineAllocations: z.number().int().nonnegative(),
@@ -46,7 +48,7 @@ export function loadNativeMacCapture(binding: string): NativeMacCapture {
     z.number().int().positive().max(Number.MAX_SAFE_INTEGER).parse(generation);
     const selection = macCaptureSelectionSchema.parse(requested), synthetic = selection.mode === "synthetic";
     const rate = synthetic ? selection.sampleRate : 48000, channels = synthetic ? selection.channels : 1;
-    const handle = call("create", generation, synthetic, rate, channels);
+    const handle = call("create", generation, synthetic, rate, channels, synthetic ? "" : selection.device);
     const meta = (value: unknown) => {
       const result = captureMetadataSchema.parse(value);
       if (result.generation !== generation) throw new Error("OWNERSHIP_FAILED"); return result;

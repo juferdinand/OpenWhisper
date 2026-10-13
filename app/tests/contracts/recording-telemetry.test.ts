@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { defaultTextConnectionAvailability, defaultTextConnectionSettings, emptyTextConversation, idleTextConnectionProcessing } from "../../src/contracts/text/connections.js";
 import {
   appStateSchema,
   isCurrentRecordingTelemetry,
@@ -35,6 +36,7 @@ const idleState: AppState = {
     hold_to_record: false,
     gpu: false,
     keep_history: true,
+    cleanup_enabled: true,
   },
   models: [],
   installed: [],
@@ -52,6 +54,9 @@ const idleState: AppState = {
   elapsed: 0,
   model_directory: "",
   recording_generation: 7,
+  text_connections: { settings: defaultTextConnectionSettings(), available: defaultTextConnectionAvailability(), scanning: false,
+    processing: idleTextConnectionProcessing(), conversation: emptyTextConversation() },
+  text_processing: null,
 };
 
 test("recording telemetry is a strict bounded event and cannot update stale or final state", () => {

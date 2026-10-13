@@ -1,6 +1,7 @@
 import type { GlobalShortcut, Input } from "electron";
 import type { ControlCapturePort } from "../core/recording/control.js";
 import { ShortcutRecording } from "../core/recording/shortcut.js";
+import { macosMouseAccelerator, macosMouseButton } from "./macos-mouse-trigger.js";
 
 export interface MacosShortcutState {
   available: boolean;
@@ -11,6 +12,8 @@ export interface MacosShortcutState {
 }
 export interface MacosShortcutOptions {
   readonly shortcuts: Pick<GlobalShortcut, "register" | "unregister">;
+  /** Optional global listener for extra mouse buttons saved as "Mouse2", "Mouse8" or "Mouse9". */
+  readonly mouse?: Pick<GlobalShortcut, "register" | "unregister">;
   readonly capture: ControlCapturePort;
   readonly allowed: () => boolean;
   /** Explicit setup can already own the recording-control reservation that blocks global callbacks. */
@@ -43,10 +46,27 @@ export function normalizeMacosShortcutAccelerator(value: string): string | undef
   if (!key || !regularKey(key) || new Set(parts).size !== parts.length || parts.some((part) => !modifiers.has(part))) return undefined;
   return [...modifierOrder.filter((modifier) => parts.includes(modifier)), key].join("+");
 }
+const codeNames: Readonly<Record<string, string>> = { Space: "Space", Tab: "Tab", Enter: "Return",
+  Backspace: "Backspace", Delete: "Delete", Insert: "Insert", Home: "Home", End: "End", PageUp: "PageUp",
+  PageDown: "PageDown", ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right",
+  Comma: ",", Period: ".", Slash: "/", Semicolon: ";", Quote: "'", BracketLeft: "[", BracketRight: "]",
+  Backslash: "\\", Minus: "-", Equal: "=", Backquote: "`" };
+/**
+ * Physical key names follow the US positions that globalShortcut registers. Deriving them from
+ * `code` keeps German or other layouts and Option-modified characters (such as "ß" or "å") usable.
+ */
+function keyFromCode(code: string): string | undefined {
+  const letter = /^Key([A-Z])$/u.exec(code)?.[1], digit = /^Digit([0-9])$/u.exec(code)?.[1];
+  return letter ?? digit ?? (/^F(?:[1-9]|1[0-9]|2[0-4])$/u.test(code) ? code : codeNames[code]);
+}
 function acceleratorFor(input: MacosShortcutInput): string | undefined {
+  const physical = keyFromCode(input.code);
+  // macOS flags function-row and navigation keys with Fn even without the Fn key held.
+  const fnAllowed = physical !== undefined && (/^F[0-9]+$/u.test(physical) || namedKeys.has(physical));
   if (input.isComposing || input.code.startsWith("Numpad") || input.modifiers?.some((modifier) =>
-    /^(?:fn|function|iskeypad|leftbuttondown|middlebuttondown|rightbuttondown)$/iu.test(modifier))) return undefined;
-  const key = inputNames[input.key] ?? (/^[a-z]$/u.test(input.key) ? input.key.toUpperCase() : input.key);
+    /^(?:iskeypad|leftbuttondown|middlebuttondown|rightbuttondown)$/iu.test(modifier) ||
+    (/^(?:fn|function)$/iu.test(modifier) && !fnAllowed))) return undefined;
+  const key = physical ?? inputNames[input.key] ?? (/^[a-z]$/u.test(input.key) ? input.key.toUpperCase() : input.key);
   const parts = [input.meta ? "Command" : "", input.control ? "Control" : "", input.alt ? "Alt" : "",
     input.shift ? "Shift" : "", key].filter(Boolean);
   return normalizeMacosShortcutAccelerator(parts.join("+"));
@@ -67,6 +87,7 @@ export class MacosShortcut {
   constructor(private readonly options: MacosShortcutOptions) {
     const capture: ControlCapturePort = {
       status: () => this.admitted() ? options.capture.status() : "unavailable",
+      unavailable: () => options.capture.unavailable?.(),
       start: (signal) => {
         if (!this.admitted()) return Promise.reject(new MacosShortcutError("UNAVAILABLE"));
         return options.capture.start(signal);
@@ -88,24 +109,28 @@ export class MacosShortcut {
     const token = {};
     let registered: boolean;
     try {
-      registered = this.options.shortcuts.register(accelerator, () => {
+      const owner = macosMouseButton(accelerator) === undefined ? this.options.shortcuts : this.options.mouse;
+      if (!owner) throw new MacosShortcutError("UNSUPPORTED");
+      registered = owner.register(accelerator, () => {
         if (this.binding?.token !== token || !this.admitted()) return;
         // A Carbon hotkey callback is one toggle, not a physical held-key edge.
         this.recording.activate(); this.recording.deactivate();
       });
-    } catch { throw new MacosShortcutError("FAILED"); }
+    } catch (error: unknown) { throw error instanceof MacosShortcutError ? error : new MacosShortcutError("FAILED"); }
     if (!registered) throw new MacosShortcutError("CONFLICT");
     return { accelerator, token };
   }
   private unregister(): void {
     const binding = this.binding;
     if (!binding) return;
-    this.options.shortcuts.unregister(binding.accelerator); this.binding = undefined;
+    (macosMouseButton(binding.accelerator) === undefined ? this.options.shortcuts : this.options.mouse)
+      ?.unregister(binding.accelerator);
+    this.binding = undefined;
   }
   bind(value: string): void {
     this.ensureOpen();
     if (this.configuring) throw new MacosShortcutError("UNAVAILABLE");
-    const accelerator = normalizeMacosShortcutAccelerator(value);
+    const accelerator = this.options.mouse && macosMouseButton(value) !== undefined ? value : normalizeMacosShortcutAccelerator(value);
     if (!accelerator) { this.publish("UNSUPPORTED"); throw new MacosShortcutError("UNSUPPORTED"); }
     if (accelerator === this.binding?.accelerator) { this.publish("ENABLED"); return; }
     let replacement: Binding;
@@ -137,6 +162,8 @@ export class MacosShortcut {
   }
   consume(input: MacosShortcutInput): boolean {
     if (this.closed || !this.configuring) return false;
+    // Character events accompany printable key presses; the physical keyDown/keyUp pair decides.
+    if (String(input.type) === "char") return true;
     if (input.type !== "keyDown" && input.type !== "keyUp") { this.finishSetup("UNSUPPORTED"); return true; }
     if (input.key === "Escape" && input.type === "keyDown") { this.cancelSetup(); return true; }
     if (input.isAutoRepeat) return true;
@@ -151,6 +178,15 @@ export class MacosShortcut {
     } else if (!this.candidate && modifierKeys.has(input.key)) { this.finishSetup("UNSUPPORTED"); }
     return true;
   }
+  /** Completes explicit setup with an extra mouse button pressed in the main window. */
+  captureMouse(button: number): void {
+    this.ensureOpen();
+    const accelerator = macosMouseAccelerator(button);
+    if (!this.configuring) throw new MacosShortcutError("UNAVAILABLE");
+    if (!this.options.mouse || !accelerator) { this.finishSetup("UNSUPPORTED"); throw new MacosShortcutError("UNSUPPORTED"); }
+    this.finishSetup("ENABLED", accelerator);
+  }
+  mouseAvailable(): boolean { return !this.closed && this.options.mouse !== undefined; }
   cancelSetup(): void { this.ensureOpen(); if (this.configuring) this.finishSetup("CANCELLED"); }
   focusLost(): void { if (!this.closed && this.configuring) this.finishSetup("CANCELLED"); }
   clear(): void {

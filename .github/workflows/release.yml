@@ -1,19 +1,18 @@
 name: Release
 run-name: Release ${{ inputs.version }}
 
-# Builds the committed Electron source on both platforms, then tags that exact source commit.
-# Releases are manual and start from main. Draft is enabled by default for artifact review.
+# The release metadata commit is the exact source built, signed, tagged and published.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Committed project version to release (e.g. 0.3.0)"
+        description: "Canonical release version (e.g. 0.5.0)"
         required: true
         type: string
-      draft:
-        description: "Keep the release private until final artifact verification is complete"
-        type: boolean
-        default: true
+      highlights:
+        description: 'Authored bilingual highlights as JSON: {"en":[...],"de":[...]}'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -23,55 +22,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  validate:
+  prepare:
+    if: github.repository == 'juferdinand/OpenWhisper' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
-    env:
-      VERSION: ${{ inputs.version }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-      - name: Validate manual main release and committed version
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$GITHUB_REF" = refs/heads/main || { echo "::error::Releases must be started from main"; exit 1; }
-          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "::error::Version must use X.Y.Z format"; exit 1; }
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test -z "$(git status --porcelain --untracked-files=all)"
-          test "$(cat VERSION)" = "$VERSION" || { echo "::error::Release version must already be committed in VERSION"; exit 1; }
-          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
-            echo "::error::Tag v$VERSION already exists"; exit 1
-          fi
-
-  linux:
-    needs: validate
-    uses: ./.github/workflows/electron-linux-build.yml
-    secrets:
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-    with:
-      version: ${{ inputs.version }}
-      artifact_name: OpenWhisper-electron-Linux-v${{ inputs.version }}
-      retention_days: 30
-
-  macos:
-    needs: validate
-    uses: ./.github/workflows/electron-macos-build.yml
-    secrets:
-      SIGNING_CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
-      SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
-    with:
-      version: ${{ inputs.version }}
-
-  publish:
-    needs: [linux, macos]
-    runs-on: ubuntu-22.04
+    timeout-minutes: 45
     permissions:
       contents: write
+    outputs:
+      source_commit: ${{ steps.source.outputs.commit }}
+      version: ${{ steps.context.outputs.current_version }}
+      successor: ${{ steps.context.outputs.successor_version }}
     env:
-      VERSION: ${{ inputs.version }}
+      RELEASE_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -79,18 +41,97 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24.21.0"
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            app/ui/package-lock.json
+      - name: Install locked dependencies
+        run: |
+          npm ci --prefix app/ui
+          npm ci --prefix app
+      - name: Validate selected version, highlights, and source; prepare release metadata
+        id: context
+        env:
+          RELEASE_HIGHLIGHTS: ${{ inputs.highlights }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          tag="v$RELEASE_VERSION"
+          if [[ -n "$(git ls-remote --tags origin "refs/tags/$tag")" ]]; then
+            echo "Release tag $tag already exists; refusing to reuse it." >&2
+            exit 1
+          fi
+          notes="$RUNNER_TEMP/release-highlights.json"
+          printf '%s' "$RELEASE_HIGHLIGHTS" > "$notes"
+          npm run prepare-release --prefix app -- --mode preview --version "$RELEASE_VERSION" --highlights "$notes"
+          npm run prepare-release --prefix app -- --mode apply --version "$RELEASE_VERSION" --highlights "$notes"
+          npm run preflight --prefix app
+          ./app/node_modules/.bin/tsx app/scripts/release-context.ts --github-output "$GITHUB_OUTPUT"
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add VERSION app/package.json app/package-lock.json app/ui/package.json app/ui/package-lock.json README.md .github/release-notes.md
+            git commit -m "Prepare release $RELEASE_VERSION"
+            # The lease rejects any unrelated update to main since this run started.
+            git push --force-with-lease="refs/heads/main:$GITHUB_SHA" origin HEAD:refs/heads/main
+          fi
+      - name: Record exact tested source commit
+        id: source
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  linux:
+    needs: prepare
+    uses: ./.github/workflows/electron-linux-build.yml
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      source_commit: ${{ needs.prepare.outputs.source_commit }}
+      artifact_name: OpenWhisper-electron-Linux-v${{ needs.prepare.outputs.version }}
+      retention_days: 30
+
+  macos:
+    needs: prepare
+    uses: ./.github/workflows/electron-macos-build.yml
+    secrets:
+      SIGNING_CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
+      SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      source_commit: ${{ needs.prepare.outputs.source_commit }}
+
+  publish:
+    needs: [prepare, linux, macos]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_COMMIT: ${{ needs.prepare.outputs.source_commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.source_commit }}
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
           cache: npm
           cache-dependency-path: app/package-lock.json
       - name: Install locked publication validator dependencies
         run: npm ci --prefix app
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: OpenWhisper-electron-macOS-v${{ inputs.version }}
+          name: OpenWhisper-electron-macOS-v${{ needs.prepare.outputs.version }}
           path: ${{ runner.temp }}/release-input/macos
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: OpenWhisper-electron-Linux-v${{ inputs.version }}
+          name: OpenWhisper-electron-Linux-v${{ needs.prepare.outputs.version }}
           path: ${{ runner.temp }}/release-input/linux
       - name: Validate exact builder artifacts and stage canonical assets
         working-directory: app
@@ -100,38 +141,86 @@ jobs:
           ASSETS_DIR: ${{ runner.temp }}/release-assets
         run: |
           set -euo pipefail
+          node --import tsx scripts/verify-release-source.ts --version "$VERSION" --commit "$SOURCE_COMMIT"
           node --import tsx scripts/validate-release-publication.ts \
-            --version "$VERSION" --commit "$GITHUB_SHA" --macos-dir "$MACOS_DIR" \
+            --version "$VERSION" --commit "$SOURCE_COMMIT" --macos-dir "$MACOS_DIR" \
             --linux-dir "$LINUX_DIR" --output-dir "$ASSETS_DIR"
-      - name: Confirm main still identifies the tested source and create its tag
-        shell: bash
+      - name: Confirm main still contains the tested release source
         run: |
           set -euo pipefail
-          remote_main="$(git ls-remote --exit-code origin refs/heads/main | awk 'NR == 1 { print $1 }')"
-          test "$remote_main" = "$GITHUB_SHA" || { echo "::error::main moved after release builds; refusing to publish stale artifacts"; exit 1; }
-          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
-            echo "::error::Tag v$VERSION already exists"; exit 1
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$SOURCE_COMMIT" origin/main || { echo "main no longer contains the tested release source" >&2; exit 1; }
+          test "$(git show "$SOURCE_COMMIT:VERSION")" = "$VERSION"
+      - name: Create or verify the exact source tag
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            git fetch --no-tags origin "refs/tags/$tag:refs/tags/$tag"
+            test "$(git rev-parse "$tag^{commit}")" = "$SOURCE_COMMIT" || { echo "Existing tag $tag points to different source" >&2; exit 1; }
+          else
+            git tag "$tag" "$SOURCE_COMMIT"
+            git push origin "refs/tags/$tag"
           fi
-          git tag "v$VERSION" "$GITHUB_SHA"
-      - name: Push the exact source and tag atomically, then create the release
+      - name: Create the public release once, or verify a prior publication for recovery
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_DRAFT: ${{ inputs.draft }}
           ASSETS_DIR: ${{ runner.temp }}/release-assets
-        shell: bash
         run: |
           set -euo pipefail
-          git push --atomic --force-with-lease="refs/heads/main:$GITHUB_SHA" origin \
-            "$GITHUB_SHA:refs/heads/main" "refs/tags/v$VERSION"
-          EXTRA_ARGS=()
-          if [[ "$RELEASE_DRAFT" == "true" ]]; then EXTRA_ARGS+=(--draft); fi
-          gh release create "v$VERSION" \
-            "$ASSETS_DIR/OpenWhisper-macOS.dmg" \
-            "$ASSETS_DIR/OpenWhisper-macOS.zip" \
-            "$ASSETS_DIR/OpenWhisper-Linux-x86_64.AppImage" \
-            "$ASSETS_DIR/OpenWhisper-Linux-amd64.deb" \
-            "$ASSETS_DIR/OpenWhisper-Linux-x86_64.AppImage.sig" \
-            "$ASSETS_DIR/OpenWhisper-Linux-amd64.deb.sig" \
-            "$ASSETS_DIR/latest.json" "$ASSETS_DIR/SHA256SUMS" \
-            --title "OpenWhisper $VERSION" --verify-tag \
-            --notes-file .github/release-notes.md --generate-notes "${EXTRA_ARGS[@]}"
+          tag="v$VERSION"
+          response="$RUNNER_TEMP/release-api-response.txt"
+          release_json="$RUNNER_TEMP/existing-public-release.json"
+          lookup_release() {
+            if gh api --include "repos/$GITHUB_REPOSITORY/releases/tags/$tag" > "$response"; then api_exit=0; else api_exit=$?; fi
+            http_status="$(sed -nE '/^HTTP\/[0-9.]+ [0-9]{3}([[:space:]]|$)/{s/^HTTP\/[0-9.]+ ([0-9]{3}).*/\1/;p}' "$response" | tail -n 1)"
+          }
+          lookup_release
+          if [[ "$api_exit" -ne 0 && "$http_status" == 404 ]]; then
+            gh release create "$tag" \
+              "$ASSETS_DIR/OpenWhisper-macOS.dmg" \
+              "$ASSETS_DIR/OpenWhisper-macOS.zip" \
+              "$ASSETS_DIR/OpenWhisper-Linux-x86_64.AppImage" \
+              "$ASSETS_DIR/OpenWhisper-Linux-amd64.deb" \
+              "$ASSETS_DIR/OpenWhisper-Linux-x86_64.AppImage.sig" \
+              "$ASSETS_DIR/OpenWhisper-Linux-amd64.deb.sig" \
+              "$ASSETS_DIR/latest.json" "$ASSETS_DIR/SHA256SUMS" \
+              --title "OpenWhisper $VERSION" --verify-tag \
+              --notes-file .github/release-notes.md
+            lookup_release
+            [[ "$api_exit" -eq 0 && "$http_status" == 200 ]] || { echo "Release creation returned, but the release API did not confirm a public release (HTTP ${http_status:-unknown})." >&2; exit 1; }
+          elif [[ "$api_exit" -ne 0 || "$http_status" != 200 ]]; then
+            echo "Could not confirm release state for $tag (HTTP ${http_status:-unknown}); refusing to publish or bump." >&2
+            exit 1
+          else
+            echo "Release $tag already exists; verifying it before recovery."
+          fi
+          awk 'BEGIN { body = 0 } { line = $0; sub(/\r$/, "", line); if (!body && line == "") { body = 1; next } if (body) print line }' "$response" > "$release_json"
+          downloaded="$RUNNER_TEMP/existing-release-assets"
+          mkdir -m 700 "$downloaded"
+          gh release download "$tag" --dir "$downloaded"
+          ./app/node_modules/.bin/tsx app/scripts/verify-release-recovery.ts \
+            --release-json "$release_json" --tag "$tag" --staged-assets "$ASSETS_DIR" --downloaded-assets "$downloaded"
+      - name: Advance development version after public publication
+        env:
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$RELEASE_COMMIT" origin/main || { echo "Release is public, but main no longer contains its source commit. Recover by applying the successor version on current main." >&2; exit 1; }
+          expected_main="$(git rev-parse origin/main)"
+          git checkout -B release-post-publication-bump "$expected_main"
+          ./app/node_modules/.bin/tsx app/scripts/bump-development-version.ts --release-version "$VERSION" --github-output "$RUNNER_TEMP/development-version.txt"
+          if [[ -z "$(git status --porcelain)" ]]; then
+            echo "Development version is already advanced; no second bump was created."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add VERSION app/package.json app/package-lock.json app/ui/package.json app/ui/package-lock.json
+            git commit -m "Advance development version after $VERSION"
+            git push --force-with-lease="refs/heads/main:$expected_main" origin HEAD:refs/heads/main || {
+              echo "Release is public, but main changed during the guarded successor push. Re-run this failed job after reviewing main; it never overwrites a concurrent update." >&2
+              exit 1
+            }
+          fi
+          cat "$RUNNER_TEMP/development-version.txt" >> "$GITHUB_STEP_SUMMARY"

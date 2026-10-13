@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { test } from "node:test";
+import { defaultTextConnectionAvailability, defaultTextConnectionSettings, emptyTextConversation, idleTextConnectionProcessing } from "../../src/contracts/text/connections.js";
 import { MAX_USER_TEXT_BYTES } from "../../src/contracts/ui/state.js";
 import type { AppState, PreferencePatch } from "../../src/contracts/ui/state.js";
 import {
@@ -26,12 +27,15 @@ function state(): AppState {
     preferences: {
       ui_language: "en", setup_completed: false, model: "tiny", language: "auto",
       microphone: "", vocabulary: [], snippets: [], output: "clipboard",
-      hold_to_record: false, gpu: false, keep_history: true,
+      hold_to_record: false, gpu: false, keep_history: true, cleanup_enabled: true,
     },
     models: [], installed: [], microphones: [], session: "Owned fixture", desktop: "Owned fixture",
     clipboard_available: true, shortcut_portal: false, paste_portal: false, shortcut: null,
     paste_ready: false, gpu_available: false, download: null, progress: 0, elapsed: 0,
     model_directory: "/fixture/models",
+    text_connections: { settings: defaultTextConnectionSettings(), available: defaultTextConnectionAvailability(), scanning: false,
+      processing: idleTextConnectionProcessing(), conversation: emptyTextConversation() },
+    text_processing: null,
   };
 }
 

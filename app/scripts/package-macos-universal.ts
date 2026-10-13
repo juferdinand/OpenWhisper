@@ -20,11 +20,13 @@ type Architecture = "arm64" | "x64";
 const architectures = ["arm64", "x64"] as const;
 const appRelative = "Contents/Resources/app", descriptorRelative = `${appRelative}/dist/main/development-recording-build.js`;
 const nativeRelative = ["dist/native/capture/openwhisper_macos_capture.node", "dist/native/openwhisper_macos_capture.node",
-  "dist/native/openwhisper_macos_retirement.node", "dist/native/speech/cpu/openwhisper_speech.node", "dist/native/openwhisper_speech.node"];
+  "dist/native/openwhisper_macos_retirement.node", "dist/native/speech/cpu/openwhisper_speech.node", "dist/native/openwhisper_speech.node",
+  "dist/native/speech/metal/openwhisper_speech.node"];
 const koffiRelative = (architecture: Architecture) => `${appRelative}/node_modules/@koromix/koffi-darwin-${architecture}`;
 const snapshotRelative = (architecture: Architecture) => `Contents/Frameworks/Electron Framework.framework/Versions/A/Resources/v8_context_snapshot.${architecture === "x64" ? "x86_64" : "arm64"}.bin`;
 const thinPackageNotice = (mode: MacPackageConstructionMode) => `Contents/Resources/notices/${mode === "release" ? "mac-stable-release-input.json" : "mac-stable-validation-package.json"}`;
 const namespaced = ["Contents/Resources/notices/mac-stable-validation-package.json", "Contents/Resources/notices/speech-cpu-unsigned-build.json",
+  "Contents/Resources/notices/speech-metal-unsigned-build.json",
   `${appRelative}/dist/native/macos-capture-notices/build-manifest.json`, `${appRelative}/dist/native/macos-retirement-notices/build-manifest.json`];
 const sourceSchema = z.strictObject({ commit: z.string().length(40).regex(/^[a-f0-9]{40}$/u), modified: z.literal(false) });
 const mergerRoot = dirname(dirname(fileURLToPath(import.meta.resolve("@electron/universal"))));

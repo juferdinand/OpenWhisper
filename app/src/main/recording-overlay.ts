@@ -12,10 +12,15 @@ export function supportsInactiveRecordingOverlay({ platform, sessionType, ozoneP
   return ozonePlatform !== "wayland" && sessionType !== "wayland" && !waylandDisplay;
 }
 
-export function overlayWindowOptions({ title, preloadPath }: Readonly<{ title: string; preloadPath: string }>): BrowserWindowConstructorOptions {
+export function overlayWindowOptions({ title, preloadPath, platform = process.platform }: Readonly<{
+  title: string; preloadPath: string; platform?: string;
+}>): BrowserWindowConstructorOptions {
   return {
     title, width: WIDTH, height: HEIGHT,
     transparent: true, frame: false, show: false, focusable: false,
+    // A click on a normal window first activates OpenWhisper, which brought the main window forward
+    // and swallowed the click. A non-activating panel lets Cancel and Stop act directly.
+    ...(platform === "darwin" ? { type: "panel", acceptFirstMouse: true } : {}),
     skipTaskbar: true, alwaysOnTop: true, resizable: false, hasShadow: false,
     webPreferences: { preload: preloadPath, sandbox: true, contextIsolation: true, nodeIntegration: false },
   };
@@ -24,6 +29,16 @@ export function overlayWindowOptions({ title, preloadPath }: Readonly<{ title: s
 export function overlayWindowBounds(area: Readonly<Rectangle>): Rectangle {
   return { x: Math.floor(area.x + (area.width - WIDTH) / 2),
     y: Math.floor(area.y + area.height - HEIGHT - 24), width: WIDTH, height: HEIGHT };
+}
+
+/** Linux/X11 can pass clicks through the transparent corners of the capsule. */
+export function overlayInputShape(): Rectangle[] {
+  const radius = HEIGHT / 2;
+  return Array.from({ length: HEIGHT }, (_, y) => {
+    const distance = Math.abs(y + 0.5 - radius);
+    const inset = Math.max(0, Math.ceil(radius - Math.sqrt(radius * radius - distance * distance) - 0.5));
+    return { x: inset, y, width: WIDTH - inset * 2, height: 1 };
+  });
 }
 
 export function waylandOverlayWindowOptions(options: Readonly<{ title: string; preloadPath: string }>): BrowserWindowConstructorOptions {

@@ -1,16 +1,16 @@
 <!-- Prepared for the gated release workflow; repository status lives in README.md. -->
 
-## What's new in OpenWhisper 0.4.2
+## What's new in OpenWhisper 0.5.3
 
-- Download updates with visible progress, then choose Restart now or Later.
-- Read update highlights in your selected interface language.
-- Discover updates automatically at startup, hourly, and after resuming.
+- Fixes GPU-enabled Metal recording startup on macOS.
+- Improves local AI text processing and retries only when a model explicitly rejects the reasoning option.
+- Warns when LM Studio cannot disable reasoning and keeps dictated text when processing times out.
 
-## Neu in OpenWhisper 0.4.2
+## Neu in OpenWhisper 0.5.3
 
-- Updates mit sichtbarem Fortschritt herunterladen und anschließend Jetzt neu starten oder Später wählen.
-- Die Neuerungen eines Updates in der gewählten Oberflächensprache lesen.
-- Updates automatisch beim Start, stündlich und nach dem Aufwachen erkennen.
+- Behebt den Start von GPU-Aufnahmen mit Metal unter macOS.
+- Verbessert die lokale KI-Textverarbeitung und wiederholt Anfragen nur bei ausdrücklicher Ablehnung der Reasoning-Option.
+- Warnt, wenn LM Studio Reasoning nicht abschalten kann, und behält den diktierten Text bei Zeitüberschreitungen bei.
 
 Recognition runs locally. Exact package, desktop and test scope is recorded in
 [Electron status](https://github.com/juferdinand/OpenWhisper/blob/main/docs/ELECTRON-STATUS.md) and

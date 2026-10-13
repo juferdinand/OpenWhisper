@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { test } from "node:test";
 import { prepareStableProfile, prepareStableProfileStorage, resolveStableProfile, stableProfileSchema, validateStableProfile, type StableProfile } from "../../src/services/settings/stable-profile.js";
-import { formatBootstrapFailure, observeBootstrapLoginStatus, type ApplicationBootstrapStage, type ApplicationBootstrapLoginStatus } from "../../src/main/stable-profile-startup.js";
+import { formatBootstrapFailure, formatStartFailure, observeBootstrapLoginStatus, type ApplicationBootstrapStage, type ApplicationBootstrapLoginStatus } from "../../src/main/stable-profile-startup.js";
 import { StableMigrationError } from "../../src/contracts/migration/stable-migration.js";
 import { MacBundleAdmissionError } from "../../src/main/macos-stable-admission.js";
 
@@ -64,7 +64,7 @@ test("Linux stable resolution preserves identity and XDG/model paths without mut
     const before = snapshot(root), profile = resolveStableProfile({ home, platform: "linux" });
     assert.deepEqual(snapshot(root), before);
     assert.equal(profile.appId, "io.github.whisperfree"); assert.equal(profile.productName, "OpenWhisper");
-    assert.deepEqual(profile.roots, { config: join(home, ".config/whisperfree"), data: join(home, ".local/share/whisperfree"), cache: join(home, ".cache/whisperfree") });
+    assert.deepEqual(profile.roots, { config: join(home, ".config/openwhisper"), data: join(home, ".local/share/openwhisper"), cache: join(home, ".cache/openwhisper") });
     assert.equal(profile.paths.models, join(profile.roots.data, "models")); assert.equal(profile.legacy.models, profile.paths.models);
     assert.equal(profile.legacy.settings, join(profile.roots.config, "settings.json"));
     assert.equal(profile.legacy.history, join(profile.roots.config, "history.json"));
@@ -94,13 +94,15 @@ test("preparation retains existing 0755 Linux model roots and originals while cr
 
 test("Mac profile preserves legacy Models, plist, snippets and Diktate references with separate stable state", () => {
   fixture((home) => {
-    const support = join(home, "Library/Application Support/WhisperFree"), models = join(support, "Models"), transcripts = join(support, "Diktate");
+    // Relocation (#65) has already moved the former WhisperFree folder to the Data root.
+    const support = join(home, "Library/Application Support/OpenWhisper/Data"), models = join(support, "Models"), transcripts = join(support, "Diktate");
     legacyFile(join(models, "model.bin")); legacyFile(join(transcripts, "old-dictation.txt")); legacyFile(join(support, "snippets.json"));
     const plist = join(home, "Library/Preferences/io.github.whisperfree.plist"); legacyFile(plist);
     for (const path of [support, models, transcripts]) chmodSync(path, 0o755);
     const before = snapshot(support), plistBefore = readFileSync(plist), profile = resolveStableProfile({ home, platform: "darwin" });
-    assert.equal(profile.roots.config, join(home, "Library/Application Support/io.github.whisperfree"));
-    assert.equal(profile.roots.cache, join(home, "Library/Caches/io.github.whisperfree"));
+    assert.equal(profile.roots.config, join(home, "Library/Application Support/OpenWhisper/Config"));
+    assert.equal(profile.roots.data, support);
+    assert.equal(profile.roots.cache, join(home, "Library/Caches/OpenWhisper"));
     assert.equal(profile.paths.models, models); assert.equal(profile.legacy.settings, plist); assert.equal(profile.legacy.history, plist);
     assert.equal(profile.legacy.snippets, join(support, "snippets.json")); assert.equal(profile.legacy.transcripts, transcripts);
     assert.equal(profile.legacy.recovery, null); assert.deepEqual(snapshot(support), before);
@@ -117,9 +119,9 @@ test("custom Linux XDG bases remain distinct and Mac chooses Transcripts when Di
   fixture((home, root) => {
     const configHome = join(root, "config"), dataHome = join(root, "data"), cacheHome = join(root, "cache");
     const profile = resolveStableProfile({ home, platform: "linux", configHome, dataHome, cacheHome });
-    assert.equal(profile.paths.models, join(dataHome, "whisperfree/models")); prepareStableProfile(profile);
+    assert.equal(profile.paths.models, join(dataHome, "openwhisper/models")); prepareStableProfile(profile);
     assert.deepEqual(readdirSync(home), []);
-    assert.equal(resolveStableProfile({ home, platform: "darwin" }).legacy.transcripts, join(home, "Library/Application Support/WhisperFree/Transcripts"));
+    assert.equal(resolveStableProfile({ home, platform: "darwin" }).legacy.transcripts, join(home, "Library/Application Support/OpenWhisper/Data/Transcripts"));
     assert.throws(() => resolveStableProfile({ home, platform: "darwin", configHome }), /fixed Library/);
   });
 });
@@ -186,4 +188,13 @@ test("storage-only preparation reserves config publication for migration while v
     assert.equal(existsSync(join(profile.roots.config, "electron")), false);
     assert.strictEqual(validateStableProfile(profile), profile);
   });
+});
+
+test("service startup failures report only the error class and categorical code", () => {
+  class SpeechWorkerError extends Error { constructor(readonly code: string) { super(`/Users/private/path ${code}`); } }
+  assert.equal(formatStartFailure(new SpeechWorkerError("INTEGRITY_FAILED")),
+    "OpenWhisper could not initialize its application services or UI. error=SpeechWorkerError code=INTEGRITY_FAILED");
+  assert.equal(formatStartFailure(new SpeechWorkerError("/Users/private/path")),
+    "OpenWhisper could not initialize its application services or UI. error=SpeechWorkerError code=unknown");
+  assert.equal(formatStartFailure("text"), "OpenWhisper could not initialize its application services or UI. error=unknown code=unknown");
 });

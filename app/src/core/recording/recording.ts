@@ -3,6 +3,7 @@ import { setImmediate } from "node:timers";
 import { z } from "zod";
 import { snippetSchema, vocabularySchema } from "../../contracts/ui/state.js";
 import { speechLanguageSchema } from "../../contracts/speech/speech.js";
+import type { TextProcessingStageEvent, TranscriptDeliveryMetadata } from "../../contracts/text/processing.js";
 
 export const recordingRequestSchema = z.strictObject({
   model: z.strictObject({
@@ -12,6 +13,7 @@ export const recordingRequestSchema = z.strictObject({
   language: speechLanguageSchema,
   vocabulary: z.string().refine((value) => !value.includes("\0")),
   vocabulary_entries: vocabularySchema.optional(),
+  cleanup_enabled: z.boolean().optional(),
   snippets: z.array(snippetSchema.readonly()).default([]).readonly(),
 }).readonly();
 export type RecordingRequest = z.infer<typeof recordingRequestSchema>;
@@ -54,13 +56,15 @@ export interface CaptureBoundary<C extends CapturedHandle> {
   /** Allocate ownership only; opening a native stream belongs to start(). */
   create(callbacks: CaptureCallbacks): CaptureSession<C>;
 }
-export interface SpeechResult extends Ownership { readonly text: string }
+export interface SpeechResult extends Ownership { readonly text: string; readonly rawText?: string }
 export interface SpeechBoundary {
-  /** Produce final processed text using a captured request, independently of optional LLMs:
-   * raw inference -> cleanup -> vocabulary correction -> snippets. Parakeet vocabulary
+  /** Produce the deterministic pre-revision text using a captured request:
+   * raw inference -> cleanup -> vocabulary correction. Main applies optional revision,
+   * then the same captured snippets before delivery. Parakeet vocabulary
    * is postprocessed; its native model does not accept a vocabulary prompt.
    * The adapter owns bounded inference windows, disposable workers and CPU/GPU retries. */
-  transcribe(audio: PreparedAudio, request: RecordingRequest, context: WorkContext): Promise<SpeechResult>;
+  transcribe(audio: PreparedAudio, request: RecordingRequest, context: WorkContext,
+    onStage?: (event: TextProcessingStageEvent) => void): Promise<SpeechResult>;
 }
 export interface SpeechDisposition extends Ownership { readonly hasSpeech: boolean }
 export interface SpeechGate {
@@ -68,8 +72,8 @@ export interface SpeechGate {
   classify(audio: PreparedAudio, context: WorkContext): Promise<SpeechDisposition>;
 }
 export type DeliveryReceipt = Ownership & (
-  | { readonly outcome: "clipboard" | "paste"; readonly clipboardConfirmed: true }
-  | { readonly outcome: "editor" | "failed"; readonly clipboardConfirmed: false }
+  | { readonly outcome: "clipboard" | "paste"; readonly clipboardConfirmed: true; readonly deliveredText?: string | undefined }
+  | { readonly outcome: "editor" | "failed"; readonly clipboardConfirmed: false; readonly deliveredText?: string | undefined }
 );
 export type DeliveryIdentity =
   | { readonly kind: "recovery"; readonly token: string }
@@ -78,7 +82,8 @@ export interface DeliveryBoundary {
   /** Check cancellation/target ownership at commit, then confirm delivery. Linux recovery
    * identity survives a capture-helper restart; memory identity is scoped by its helper epoch.
    * Retrying one identity must not duplicate an already confirmed commit. */
-  deliver(text: string, context: WorkContext, identity: DeliveryIdentity): Promise<DeliveryReceipt>;
+  deliver(text: string, context: WorkContext, identity: DeliveryIdentity,
+    metadata?: TranscriptDeliveryMetadata): Promise<DeliveryReceipt>;
 }
 export interface RecoveryToken { readonly id: string }
 export interface RecoverySaved extends Ownership {
@@ -124,10 +129,11 @@ interface CommonOptions<C extends CapturedHandle> {
   readonly speech: SpeechBoundary;
   readonly delivery: DeliveryBoundary;
   readonly clock: RecordingClock;
+  readonly onTextStage?: (event: TextProcessingStageEvent) => void;
 }
 export type RecordingOptions<C extends CapturedHandle> = CommonOptions<C> & (
   | { readonly platform: "linux"; readonly recovery: RecoveryBoundary; readonly speechGate?: SpeechGate }
-  | { readonly platform: "macos"; readonly recovery?: never; readonly speechGate?: never }
+  | { readonly platform: "macos"; readonly recovery?: never; readonly speechGate?: SpeechGate }
 );
 interface CaptureOwner<C extends CapturedHandle> {
   readonly generation: number;
@@ -153,6 +159,7 @@ interface Pending<C extends CapturedHandle> {
   durabilityPending: boolean;
   captureFailed: boolean;
   text: string | undefined;
+  rawText: string | undefined;
   receipt: DeliveryReceipt | undefined;
   saving: Promise<RecoverySaved> | undefined;
   delivering: Promise<DeliveryReceipt> | undefined;
@@ -215,9 +222,6 @@ export class RecordingCoordinator<C extends CapturedHandle> {
     if (options.platform === "macos" && options.recovery !== undefined) {
       throw new Error("macOS recording recovery must remain in memory.");
     }
-    if (options.platform === "macos" && options.speechGate !== undefined) {
-      throw new Error("macOS recording must not use the Linux silence gate.");
-    }
     if (options.platform === "linux" && options.recovery === undefined) {
       throw new Error("Linux recording requires a private recovery boundary.");
     }
@@ -253,7 +257,8 @@ export class RecordingCoordinator<C extends CapturedHandle> {
     return { generation: owner.generation, request: owner.request, session, captured, token,
       prepared: undefined, preparing: undefined, speechDetected: undefined, releasing: undefined,
       released: false, text: undefined, receipt: undefined, saving: undefined,
-      delivering: undefined, removing: undefined, discarded: false, durabilityPending: false, captureFailed: false };
+      delivering: undefined, removing: undefined, discarded: false, durabilityPending: false, captureFailed: false,
+      rawText: undefined };
   }
 
   async start(input: RecordingRequestInput, control: StartControl = { acknowledge: accepted }): Promise<ControlReply> {
@@ -546,9 +551,12 @@ export class RecordingCoordinator<C extends CapturedHandle> {
         const identity: DeliveryIdentity = pending.token
           ? { kind: "recovery", token: pending.token.id }
           : { kind: "memory", generation: pending.generation };
-        const receipt = await this.options.delivery.deliver(pending.text ?? "", context, identity);
+        const metadata = { ...(pending.rawText === undefined ? {} : { rawText: pending.rawText }),
+          snippets: pending.request.snippets };
+        const receipt = await this.options.delivery.deliver(pending.text ?? "", context, identity, metadata);
         if (!owned(receipt, context)) throw new Error("Invalid delivery ownership.");
         pending.receipt = receipt;
+        if (this.deliveryConfirmed(receipt) && typeof receipt.deliveredText === "string") pending.text = receipt.deliveredText;
         return receipt;
       })();
     }
@@ -590,7 +598,7 @@ export class RecordingCoordinator<C extends CapturedHandle> {
       }
       if (!this.current(job)) return;
       const audio: PreparedAudio = { ...pending.prepared, generation: context.generation, attempt: context.attempt };
-      const gate = this.options.platform === "linux" ? this.options.speechGate : undefined;
+      const gate = this.options.speechGate;
       if (gate && !pending.token && !pending.captureFailed) {
         if (pending.speechDetected === undefined) {
           const disposition = await gate.classify(audio, context);
@@ -612,13 +620,25 @@ export class RecordingCoordinator<C extends CapturedHandle> {
       if (job.retentionError) { this.fail(job.retentionError); return; }
       if (pending.text === undefined) {
         stage = "SPEECH_FAILED";
-        const result = await this.options.speech.transcribe(audio, pending.request, context);
+        const result = await this.options.speech.transcribe(audio, pending.request, context, (event) => {
+          if (event.generation !== context.generation || event.attempt !== context.attempt) return;
+          try { this.options.onTextStage?.(event); } catch { /* Telemetry cannot fail transcription. */ }
+        });
         if (!this.current(job)) return;
         if (!owned(result, context)) { stage = "OWNERSHIP_FAILED"; throw new Error("Invalid speech ownership."); }
-        if (typeof result.text !== "string" || result.text.trim().length === 0) {
+        if (this.options.platform === "macos" && typeof result.text === "string" && result.text.trim().length === 0
+            && (result.rawText === undefined || typeof result.rawText === "string")) {
+          // On macOS an empty result (silence above the energy floor, e.g. headset noise) cannot be
+          // improved by retrying the same audio; return to idle instead of blocking new recordings.
+          stage = "CAPTURE_RELEASE_FAILED"; await this.release(pending);
+          if (!this.current(job)) return;
+          this.pending = undefined; this.phase = "idle"; this.error = null; return;
+        }
+        if (typeof result.text !== "string" || result.text.trim().length === 0
+            || (result.rawText !== undefined && typeof result.rawText !== "string")) {
           stage = "EMPTY_TRANSCRIPT"; throw new Error("No speech was recognized.");
         }
-        pending.text = result.text;
+        pending.text = result.text; pending.rawText = result.rawText ?? result.text;
       }
       if (!this.current(job)) return;
       stage = "DELIVERY_FAILED"; await this.deliver(pending, context);

@@ -2,6 +2,12 @@ import { z } from "zod";
 import { updateDownloadProgressSchema } from "../update/update-download-progress.js";
 import { speechLanguageSchema } from "../speech/speech.js";
 import {
+  defaultTextConnectionAvailability, defaultTextConnectionSettings, emptyTextConversation, idleTextConnectionProcessing,
+  textConnectionSettingsSchema, textConnectionsStateSchema,
+} from "../text/connections.js";
+import { textProcessingStageEventSchema } from "../text/processing.js";
+import { snippetSchema } from "../text/snippets.js";
+import {
   localProcessingProfileSchema, localProcessingProfilePatchSchema, localProcessingOutputSchema,
   previewLocalProcessingInputSchema, cancelLocalProcessingInputSchema,
 } from "../speech/local-processing.js";
@@ -16,6 +22,11 @@ const utf8 = (limit: number) => z.string().max(limit).refine(
   { message: "String exceeds the supported UTF-8 byte length" },
 );
 const label = utf8(1024);
+/**
+ * Recording source identifiers: PulseAudio source names on Linux and CoreAudio device UIDs on
+ * macOS. CoreAudio UIDs may contain spaces, so printable ASCII is allowed without outer spaces.
+ */
+export const recordingSourceIdSchema = z.string().regex(/^[!-~](?:[ -~]{0,253}[!-~])?$/u);
 export const hardwareDeviceNameSchema = utf8(256).refine(
   (value) => value.length > 0 && value === value.trim() && !/\p{Cc}/u.test(value),
 );
@@ -36,14 +47,8 @@ const tabSchema = z.enum(["setup", "general", "models", "snippets", "history", "
 export type Tab = z.infer<typeof tabSchema>;
 const uiLanguageSchema = z.enum(["en", "de"]);
 
-export const snippetSchema = z.strictObject({
-  // Linux legacy snippets may have an empty generated ID; macOS persists empty drafts.
-  id: utf8(128),
-  trigger: utf8(128),
-  expansion: utf8(8192),
-  enabled: z.boolean(),
-});
-export type Snippet = z.infer<typeof snippetSchema>;
+export { snippetSchema };
+export type { Snippet } from "../text/snippets.js";
 const vocabularyText = utf8(8192).refine(
   (value) => value.length > 0 && value === value.trim() && !/\p{Cc}/u.test(value.replace(/\t/gu, "")),
   { message: "Vocabulary entries must contain trimmed text" },
@@ -137,6 +142,7 @@ export const preferencesSchema = z.strictObject({
   language: speechLanguageSchema,
   microphone: utf8(1024),
   vocabulary: vocabularySchema,
+  cleanup_enabled: z.boolean().default(true),
   snippets: z.array(snippetSchema).max(100),
   output: z.enum(["paste", "clipboard", "editor"]),
   hold_to_record: z.boolean(),
@@ -157,11 +163,15 @@ export type Preferences = z.infer<typeof preferencesSchema>;
 // Match save_preferences: setup and captured trigger profiles have separate host commands.
 export const preferencePatchSchema = preferencesSchema.omit({
   setup_completed: true,
+  cleanup_enabled: true,
   gpu_configured: true,
   native_trigger: true,
   x11_trigger: true,
   macos_shortcut: true,
-}).extend({ vocabulary: editableVocabularyEntriesSchema.optional() }).partial().refine(
+}).partial().extend({
+  cleanup_enabled: z.boolean().optional(),
+  vocabulary: editableVocabularyEntriesSchema.optional(),
+}).refine(
   (patch) => Object.values(patch).every((value) => value !== undefined),
   { message: "Preference patch values must be defined" },
 );
@@ -181,6 +191,7 @@ export type Model = z.infer<typeof modelSchema>;
 
 const macStateSchema = z.strictObject({
   microphone_allowed: z.boolean(),
+  microphone_permission: z.enum(["not-determined", "granted", "denied", "restricted", "unknown"]).optional(),
   recording_shortcut: z.boolean(),
   shortcut_toggle_only: z.boolean().optional(),
   clipboard_restore_available: z.boolean().optional(),
@@ -213,13 +224,16 @@ export const appStateSchema = z.strictObject({
   status: z.enum(["idle", "recording", "transcribing", "done", "error"]),
   message: userText,
   transcript: userText,
+  raw_transcript: userText.optional(),
+  raw_transcript_preview_omitted: z.boolean().optional(),
+  text_processing_preview_omitted: z.boolean().optional(),
   transcript_preview_omitted: z.boolean().optional(),
   history: z.array(userText).max(20),
   preferences: preferencesSchema,
   models: z.array(modelSchema).max(128),
   installed: z.array(modelId).max(128),
   microphones: z.array(label).max(256),
-  microphone_labels: z.array(z.strictObject({ id: z.string().regex(/^[A-Za-z0-9_.:-]{1,255}$/u), name: label })).max(256).optional(),
+  microphone_labels: z.array(z.strictObject({ id: recordingSourceIdSchema, name: label })).max(256).optional(),
   recommended_models: z.array(modelId).max(128).optional(),
   session: label,
   desktop: label,
@@ -257,6 +271,10 @@ export const appStateSchema = z.strictObject({
   recording_unavailable_reason: z.enum(["host", "audio", "model", "permission"]).optional(),
   local_processing: localProcessingProfileSchema.optional(),
   local_processing_invalid_profile: z.boolean().optional(),
+  text_connections: textConnectionsStateSchema.default(() => ({ settings: defaultTextConnectionSettings(),
+    available: defaultTextConnectionAvailability(), scanning: false,
+    processing: idleTextConnectionProcessing(), conversation: emptyTextConversation() })),
+  text_processing: textProcessingStageEventSchema.nullable().default(null),
 }).refine(
   (state) => state.platform !== "macos" || state.macos !== undefined,
   { message: "macOS state requires its capability snapshot", path: ["macos"] },
@@ -320,6 +338,11 @@ export const commandInputSchemas = {
   save_local_processing: z.strictObject({ changes: localProcessingProfilePatchSchema }),
   preview_local_processing: previewLocalProcessingInputSchema,
   cancel_local_processing: cancelLocalProcessingInputSchema,
+  scan_connections: noArgs,
+  start_lm_studio_server: noArgs,
+  save_connections: z.strictObject({ settings: textConnectionSettingsSchema }),
+  new_conversation: noArgs,
+  cancel_text_processing: noArgs,
   toggle_recording: noArgs,
   cancel_recording: noArgs,
   retry_transcription: noArgs,
@@ -359,6 +382,11 @@ export const commandOutputSchemas = {
   save_local_processing: appStateSchema,
   preview_local_processing: localProcessingPreviewResultSchema,
   cancel_local_processing: actionResult,
+  scan_connections: appStateSchema,
+  start_lm_studio_server: appStateSchema,
+  save_connections: appStateSchema,
+  new_conversation: appStateSchema,
+  cancel_text_processing: actionResult,
   toggle_recording: actionResult,
   cancel_recording: actionResult,
   retry_transcription: actionResult,

@@ -4,7 +4,7 @@ import { chmod, link, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { verifyDevelopmentCaptureArtifact, verifyDevelopmentCaptureEntry } from "../../src/services/development/development-artifact.js";
+import { trustedAncestor, verifyDevelopmentCaptureArtifact, verifyDevelopmentCaptureEntry } from "../../src/services/development/development-artifact.js";
 
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-development-artifact-")));
@@ -38,4 +38,18 @@ test("development native destinations refuse aliases hardlinks and writable ance
     await rm(value.native); await symlink(value.entry, value.native);
     await assert.rejects(verifyDevelopmentCaptureArtifact(value.root, value.expected));
   } finally { await rm(value.root, { recursive: true, force: true }); }
+});
+test("development ancestors accept the default macOS Applications folder but not world-writable or foreign directories", () => {
+  const directory = (uid: bigint, gid: bigint, mode: bigint) => ({ uid, gid, mode, isDirectory: () => true, isSymbolicLink: () => false });
+  const user = 501n;
+  // /Applications is root:admin 0775 on a standard macOS installation.
+  assert.equal(trustedAncestor(directory(0n, 80n, 0o40775n), user, "darwin"), true);
+  assert.equal(trustedAncestor(directory(0n, 80n, 0o40775n), user, "linux"), false);
+  assert.equal(trustedAncestor(directory(0n, 80n, 0o40777n), user, "darwin"), false);
+  assert.equal(trustedAncestor(directory(0n, 20n, 0o40775n), user, "darwin"), false);
+  assert.equal(trustedAncestor(directory(user, 80n, 0o40775n), user, "darwin"), false);
+  assert.equal(trustedAncestor(directory(502n, 20n, 0o40755n), user, "darwin"), false);
+  assert.equal(trustedAncestor(directory(0n, 0n, 0o41777n), user, "linux"), true);
+  assert.equal(trustedAncestor(directory(user, 20n, 0o40755n), user, "linux"), true);
+  assert.equal(trustedAncestor({ ...directory(0n, 0n, 0o40755n), isSymbolicLink: () => true }, user, "darwin"), false);
 });

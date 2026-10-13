@@ -20,6 +20,7 @@ test("legacy stable preferences retain ordinary values, both independent profile
   const before = structuredClone(input), converted = convertLegacyLinuxData(input);
   assert.deepEqual(converted.preferences, { ...legacy,
     vocabulary: ["café", "İstanbul", "東京", "OpenWhisper"].map((spelling) => ({ spelling, misheard: [] })),
+    cleanup_enabled: true,
     snippets: [legacy.snippets[0], { ...legacy.snippets[1], id: "" }] });
   assert.equal(converted.preferences.auto_check_updates, true); assert.equal(converted.preferences.launch_at_login, true);
   assert.equal(converted.preferences.gpu, false); assert.equal(converted.preferences.hold_to_record, true);

@@ -33,16 +33,26 @@ updates the five version files, the README release statement, and the bilingual 
 an identical repeat is a no-op. Existing historical notes and fixtures stay intact. CI derives its
 private next-patch test successor from the validated producer commit, without per-release edits.
 
-Alternatively, dispatch **Prepare release review** from `main` with the same version and JSON.
-It runs preflight before pushing a review branch. Enable the repository's **Allow GitHub Actions
-to create and approve pull requests** setting once; the workflow never approves or merges its PR.
-If PR creation fails after the push, use the recovery command in the job output or rerun with the
-same inputs. A rerun accepts only an identical branch tree and refuses an existing tag or release.
-Confirm the PR's CI, approving bot-created workflow runs or dispatching CI on that branch if needed.
+For production, dispatch **Release** from `main` with the selected version and the same bilingual
+JSON. The workflow validates and commits the release metadata, runs preflight, builds and signs
+macOS/Linux packages from that commit, checks the builder receipts and signatures, publishes the
+tagged release, then advances the five version manifests to the next patch. It does not open a PR.
+The release tag and assets remain tied to the tested release commit; the development bump does not
+rebuild or retag them. Actions-token pushes do not recursively start another workflow.
 
-After acceptance and merge, explicitly dispatch **Release** from `main` with the committed version
-and `draft=true`. Verify its signed assets before publication. For a failed run, rerun only the failed
-jobs; keep the existing signing identities and never overwrite a published version.
+If preflight or a build fails, the release metadata commit remains on `main` and the release has not
+been tagged; rerun the failed workflow jobs with the same version and highlights. If publication
+fails after the tag is pushed, rerun the failed publish job: it accepts only the same tag commit and
+continues creating the release. If the public release exists but the successor push fails, rerun the
+failed job; it requires an exact public tag response, downloads all published assets, compares their
+SHA-256 digests byte-for-byte with the staged assets, and only then performs an idempotent,
+lease-guarded bump. A draft, mismatched asset, missing release, or ambiguous API failure stops the
+bump. The README and bilingual release notes continue to identify the last published version after
+the version manifests advance; the next release preparation replaces those headings with the newly
+selected release version.
+When an unrelated `main` update wins the push race, review the branch and rerun the failed job; the
+workflow never overwrites that update. Keep the existing signing identities and never reuse a tag
+for different source.
 
 ## Build and run
 

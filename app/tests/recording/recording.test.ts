@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { setImmediate } from "node:timers/promises";
 import { test } from "node:test";
 import { RecordingCoordinator, recordingRequestSchema } from "../../src/core/recording/recording.js";
-import { LinuxSpeechGate } from "../../src/workers/speech/speech-gate.js";
+import { SilenceSpeechGate } from "../../src/workers/speech/speech-gate.js";
+import type { TranscriptDeliveryMetadata } from "../../src/contracts/text/processing.js";
 import type {
   CaptureCallbacks, CapturedHandle, CaptureFinalization, CaptureSession, ControlReply,
   DeliveryIdentity, DeliveryReceipt, Ownership, PreparedAudio, RecordingOptions, RecordingRequest,
@@ -116,7 +117,7 @@ class OwnedRecovery implements RecoveryBoundary {
   }
 }
 
-function fixture(platform: "macos" | "linux" = "linux", recoveryStore?: OwnedRecovery, speechGate?: LinuxSpeechGate) {
+function fixture(platform: "macos" | "linux" = "linux", recoveryStore?: OwnedRecovery, speechGate?: SilenceSpeechGate) {
   const events: string[] = [];
   const sessions: OwnedCapture[] = [];
   const recovery = recoveryStore ?? new OwnedRecovery(events);
@@ -125,7 +126,8 @@ function fixture(platform: "macos" | "linux" = "linux", recoveryStore?: OwnedRec
   let deliveryCalls = 0;
   let configure: ((capture: OwnedCapture) => void) | undefined;
   let speechHook: ((samples: PreparedAudio, input: RecordingRequest, context: WorkContext) => Promise<SpeechResult>) | undefined;
-  let deliveryHook: ((text: string, context: WorkContext, identity: DeliveryIdentity) => Promise<DeliveryReceipt>) | undefined;
+  let deliveryHook: ((text: string, context: WorkContext, identity: DeliveryIdentity,
+    metadata?: TranscriptDeliveryMetadata) => Promise<DeliveryReceipt>) | undefined;
   const common = {
     clock: { now: () => time },
     capture: { create(callbacks: CaptureCallbacks) {
@@ -136,14 +138,15 @@ function fixture(platform: "macos" | "linux" = "linux", recoveryStore?: OwnedRec
       if (speechHook) return speechHook(samples, input, context);
       return { ...ownership(context), text: "  Unchanged fixture 日本語 👩‍💻  " };
     } },
-    delivery: { async deliver(text: string, context: WorkContext, identity: DeliveryIdentity) {
+    delivery: { async deliver(text: string, context: WorkContext, identity: DeliveryIdentity,
+      metadata?: TranscriptDeliveryMetadata) {
       deliveryCalls++; events.push("delivery");
-      if (deliveryHook) return deliveryHook(text, context, identity);
+      if (deliveryHook) return deliveryHook(text, context, identity, metadata);
       return copied(context);
     } },
   };
   const options: RecordingOptions<Samples> = platform === "linux"
-    ? { ...common, platform, recovery, ...(speechGate ? { speechGate } : {}) } : { ...common, platform };
+    ? { ...common, platform, recovery, ...(speechGate ? { speechGate } : {}) } : { ...common, platform, ...(speechGate ? { speechGate } : {}) };
   const coordinator = new RecordingCoordinator(options);
   return {
     coordinator, options, events, sessions, recovery,
@@ -163,6 +166,54 @@ async function until(condition: () => boolean): Promise<void> {
   }
   assert.fail("Owned deferred boundary did not reach its expected stage");
 }
+
+test("delivery keeps raw source and exact recording snippets separate and publishes confirmed output", async () => {
+  const f = fixture("macos"); let delivered: { text: string; rawText?: string; snippets?: readonly unknown[] } | undefined;
+  f.speech(async (_audio, _request, context) => ({ ...ownership(context), text: "deterministic output", rawText: "raw source" }));
+  f.delivery(async (text, context, _identity, metadata) => {
+    delivered = { text, ...(metadata?.rawText === undefined ? {} : { rawText: metadata.rawText }),
+      ...(metadata?.snippets ? { snippets: metadata.snippets } : {}) };
+    return { ...copied(context), deliveredText: "accepted model output" };
+  });
+  const capturedRequest = { ...request, snippets: [{ id: "owned-rule", trigger: "Kubernetes", expansion: "K8s", enabled: true }] };
+  assert.equal((await f.coordinator.start(capturedRequest)).ok, true);
+  await f.coordinator.stop(); await f.coordinator.completion();
+  assert.deepEqual(delivered, { text: "deterministic output", rawText: "raw source", snippets: capturedRequest.snippets });
+  assert.equal(f.coordinator.snapshot().transcript, "accepted model output");
+});
+
+test("captured snippets still cross delivery when a speech boundary omits raw text", async () => {
+  const f = fixture("macos"); let deliveredSnippets: readonly unknown[] | undefined;
+  f.speech(async (_audio, _request, context) => ({ ...ownership(context), text: "recognized output" }));
+  f.delivery(async (_text, context, _identity, metadata) => {
+    deliveredSnippets = metadata?.snippets;
+    return copied(context);
+  });
+  const capturedSnippets = [{ id: "captured", trigger: "name", expansion: "exact expansion", enabled: true }];
+  assert.equal((await f.coordinator.start({ ...request, snippets: capturedSnippets })).ok, true);
+  await f.coordinator.stop(); await f.coordinator.completion();
+  assert.deepEqual(deliveredSnippets, capturedSnippets);
+});
+
+test("malformed, unconfirmed, or stale delivery receipts cannot replace the deterministic transcript", async () => {
+  for (const receiptKind of ["malformed", "unconfirmed", "stale"] as const) {
+    const f = fixture("macos");
+    f.speech(async (_audio, _request, context) => ({ ...ownership(context), text: "deterministic output" }));
+    f.delivery(async (_text, context) => {
+      if (receiptKind === "malformed") return { ...copied(context), outcome: "clipboard", clipboardConfirmed: true,
+        deliveredText: 42 } as never;
+      if (receiptKind === "unconfirmed") return { ...copied(context), outcome: "failed", clipboardConfirmed: false,
+        deliveredText: "unconfirmed output" };
+      return { ...copied(context), generation: context.generation + 1, outcome: "clipboard", clipboardConfirmed: true,
+        deliveredText: "stale output" };
+    });
+    assert.equal((await f.coordinator.start(request)).ok, true);
+    await f.coordinator.stop(); await f.coordinator.completion();
+    assert.notEqual(f.coordinator.snapshot().transcript, "unconfirmed output");
+    assert.notEqual(f.coordinator.snapshot().transcript, "stale output");
+    if (receiptKind === "malformed") assert.equal(f.coordinator.snapshot().transcript, "deterministic output");
+  }
+});
 
 test("clean cancellation and failed start rollback release fenced capture without preparing or saving", async () => {
   for (const mode of ["cancel", "start-failure"] as const) {
@@ -266,12 +317,12 @@ test("discard after processing cancellation waits for native preparation before 
 
 test("Linux silence returns idle without recovery or inference but speech-like empty recognition remains recoverable", async () => {
   for (const chunks of [[new Float32Array(3199).fill(0.5)], [new Float32Array(16000)]] as const) {
-    const f = fixture("linux", undefined, new LinuxSpeechGate()); f.configure((session) => { session.chunks = [...chunks]; });
+    const f = fixture("linux", undefined, new SilenceSpeechGate()); f.configure((session) => { session.chunks = [...chunks]; });
     await f.coordinator.start(request); await f.coordinator.stop(); await f.coordinator.completion();
     assert.equal(f.coordinator.snapshot().phase, "idle"); assert.equal(f.capture().released, true);
     assert.equal(f.recovery.saves, 0); assert.deepEqual(f.counts(), { speech: 0, delivery: 0 });
   }
-  const spoken = fixture("linux", undefined, new LinuxSpeechGate());
+  const spoken = fixture("linux", undefined, new SilenceSpeechGate());
   spoken.configure((session) => { session.chunks = [new Float32Array(3200).fill(0.01)]; });
   spoken.speech(async (_samples, _request, context) => ({ ...ownership(context), text: "" }));
   await spoken.coordinator.start(request); await spoken.coordinator.stop(); await spoken.coordinator.completion();
@@ -280,7 +331,7 @@ test("Linux silence returns idle without recovery or inference but speech-like e
 });
 
 test("failed capture bypasses silence classification and preserves its partial backup until discard", async () => {
-  const f = fixture("linux", undefined, new LinuxSpeechGate()); f.configure((session) => {
+  const f = fixture("linux", undefined, new SilenceSpeechGate()); f.configure((session) => {
     session.chunks = [new Float32Array(1)]; session.finalError = "capture_failed";
   });
   await f.coordinator.start(request); await f.coordinator.stop(); await f.coordinator.completion();
@@ -290,7 +341,7 @@ test("failed capture bypasses silence classification and preserves its partial b
 });
 
 test("failed capture remains recoverable after an initial save failure even when its partial audio is silent", async () => {
-  const f = fixture("linux", undefined, new LinuxSpeechGate()); f.configure((session) => {
+  const f = fixture("linux", undefined, new SilenceSpeechGate()); f.configure((session) => {
     session.chunks = [new Float32Array(1000)]; session.finalError = "capture_failed";
   });
   f.recovery.saveGate = async () => { throw new Error("Owned disk failure"); };
@@ -749,4 +800,21 @@ test("unknown or contradictory native delivery receipts cannot report success", 
     assert.equal(f.coordinator.snapshot().error, "DELIVERY_FAILED");
     assert.equal(f.coordinator.snapshot().recoveryAvailable, true); assert.equal(f.coordinator.snapshot().transcript, "");
   }
+});
+
+test("macOS discards quick, silent and empty-recognition recordings and returns to idle", async () => {
+  for (const chunks of [[new Float32Array(3199).fill(0.5)], [new Float32Array(16000)]] as const) {
+    const f = fixture("macos", undefined, new SilenceSpeechGate()); f.configure((session) => { session.chunks = [...chunks]; });
+    await f.coordinator.start(request); await f.coordinator.stop(); await f.coordinator.completion();
+    assert.equal(f.coordinator.snapshot().phase, "idle"); assert.equal(f.coordinator.snapshot().recoveryAvailable, false);
+    assert.equal(f.capture().released, true); assert.deepEqual(f.counts(), { speech: 0, delivery: 0 });
+  }
+  const spoken = fixture("macos", undefined, new SilenceSpeechGate());
+  spoken.configure((session) => { session.chunks = [new Float32Array(3200).fill(0.01)]; });
+  spoken.speech(async (_samples, _request, context) => ({ ...ownership(context), text: "" }));
+  await spoken.coordinator.start(request); await spoken.coordinator.stop(); await spoken.coordinator.completion();
+  // Headset noise passes the energy floor; an empty recognition still returns to idle on macOS.
+  assert.equal(spoken.coordinator.snapshot().phase, "idle"); assert.equal(spoken.coordinator.snapshot().error, null);
+  assert.equal(spoken.coordinator.snapshot().recoveryAvailable, false); assert.equal(spoken.capture().released, true);
+  assert.deepEqual(spoken.counts(), { speech: 1, delivery: 0 });
 });

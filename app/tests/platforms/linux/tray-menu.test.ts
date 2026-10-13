@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { MenuItemConstructorOptions } from "electron";
 import { z } from "zod";
+import { defaultTextConnectionAvailability, defaultTextConnectionSettings, emptyTextConversation, idleTextConnectionProcessing } from "../../../src/contracts/text/connections.js";
 import type { AppState } from "../../../src/contracts/ui/state.js";
 import { buildTrayMenu, type TrayMenuActions } from "../../../src/main/tray-menu.js";
 
@@ -11,10 +12,13 @@ function state(changes: Partial<AppState> = {}): AppState {
     updates: { configured: false, status: "idle", version: null, progress: 0, error: null, package: "development" },
     platform: "linux", version: "0.3.0", status: "idle", message: "", transcript: "", history: [],
     preferences: { ui_language: "en", setup_completed: true, model: "tiny", language: "auto", microphone: "",
-      vocabulary: [], snippets: [], output: "clipboard", hold_to_record: false, gpu: false, keep_history: true },
+      vocabulary: [], snippets: [], output: "clipboard", hold_to_record: false, gpu: false, keep_history: true, cleanup_enabled: true },
     models: [], installed: [], microphones: [], session: "wayland", desktop: "Owned fixture", clipboard_available: true,
     shortcut_portal: false, paste_portal: false, shortcut: null, paste_ready: false, gpu_available: false,
     download: null, progress: 0, elapsed: 0, model_directory: "", recording_available: true, recovery_available: false,
+    text_connections: { settings: defaultTextConnectionSettings(), available: defaultTextConnectionAvailability(), scanning: false,
+      processing: idleTextConnectionProcessing(), conversation: emptyTextConversation() },
+    text_processing: null,
     ...changes,
   };
 }
@@ -106,6 +110,20 @@ test("tray labels use the supplied English or German translator and existing sha
       assert.deepEqual(keys, expectedKeys);
       assert.deepEqual(menu.filter((entry) => entry.type !== "separator").map((entry) => entry.label), expectedKeys.map((key) => translations[key]));
       assert.equal(item(menu, "settings").label, language === "de" ? "Einstellungen …" : "Settings …");
+    }
+  }
+});
+
+test("unavailable tray entries expose each bounded reason in both languages", async () => {
+  for (const language of ["en", "de"] as const) {
+    const translations = z.record(z.string(), z.string()).parse(JSON.parse(await readFile(new URL(`../../../ui/locales/${language}.json`, import.meta.url), "utf8")));
+    const expected = language === "en" ? ["Microphone access", "No speech model", "No microphone", "HOST_UNAVAILABLE"]
+      : ["Mikrofonzugriff", "Sprachmodell", "Kein Mikrofon", "HOST_UNAVAILABLE"];
+    for (const [index, reason] of (["permission", "model", "audio", "host"] as const).entries()) {
+      const menu = buildTrayMenu(state({ recording_available: false, recording_unavailable_reason: reason }), routed().actions,
+        (key) => { assert.ok(translations[key]); return translations[key]; });
+      const detail = item(menu, "recording-unavailable");
+      assert.equal(detail.enabled, false); assert.ok(detail.label?.includes(expected[index]!));
     }
   }
 });

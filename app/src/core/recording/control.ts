@@ -32,6 +32,8 @@ export class ControlCaptureLeaseError extends Error {
 /** Platform-neutral control port used by desktop shortcuts and session control. */
 export interface ControlCapturePort {
   status(): ControlStatus | Promise<ControlStatus>;
+  /** Explicit failed shortcut intent; observing status alone remains silent. */
+  unavailable?(): void | Promise<void>;
   /** Separate wire observation preserves done/error/recovery without changing action gating. */
   wireStatus?(): ControlWireStatus | Promise<ControlWireStatus>;
   start(signal: AbortSignal): Promise<ControlCaptureLease>;

@@ -3,6 +3,7 @@ import { RecordingCoordinator, type CaptureBoundary, type ControlReply, type Del
   type RecordingSnapshot, type WorkContext } from "../../core/recording/recording.js";
 import { AdaptiveSpeechBoundary, createUtilitySpeechEffects } from "../../services/speech/adaptive-speech.js";
 import type { NativeCapturedHandle } from "../../services/recording/capture.js";
+import { SilenceSpeechGate } from "../speech/speech-gate.js";
 import type { SpeechClient } from "../../services/speech/speech-client.js";
 import { macRecordingHostReplySchema, macRecordingHostRequestSchema,
   type MacRecordingConfiguration, type MacRecordingHostReply, type MacRecordingHostRequest } from "./macos-recording-host-protocol.js";
@@ -116,9 +117,11 @@ export class MacCaptureRuntime {
           },
         };
       } };
+      // A quick start/stop or silent recording returns to idle instead of keeping an empty recording.
       this.coordinator = new RecordingCoordinator({ platform: "macos", capture, clock: { now: () => performance.now() },
-        delivery: { deliver: async (text, context, identity) => {
-          const receipt = await this.effects.delivery.deliver(text, context, identity);
+        speechGate: new SilenceSpeechGate(),
+        delivery: { deliver: async (text, context, identity, metadata) => {
+          const receipt = await this.effects.delivery.deliver(text, context, identity, metadata);
           if (identity.kind === "memory" && identity.generation === context.generation
               && receipt.generation === context.generation && receipt.attempt === context.attempt
               && ((receipt.clipboardConfirmed && (receipt.outcome === "clipboard" || receipt.outcome === "paste"))
@@ -126,10 +129,12 @@ export class MacCaptureRuntime {
             this.confirmedDelivery.set(context.generation, { generation: context.generation, attempt: context.attempt });
           }
           return receipt;
-        } }, speech: { transcribe: (audio, selected, context) => {
-          const adaptive = new AdaptiveSpeechBoundary(createUtilitySpeechEffects({ gpuAvailable: false,
+        } }, onTextStage: (event) => { this.emit({ kind: "text-stage", event }); },
+        speech: { transcribe: (audio, selected, context, onStage) => {
+          // GPU requests reach the main speech supervisor, which uses Metal or falls back to the CPU.
+          const adaptive = new AdaptiveSpeechBoundary(createUtilitySpeechEffects({ gpuAvailable: true,
             infer: this.effects.infer(context), progress: (value) => { this.emit({ kind: "progress", ...value }); } }));
-          return adaptive.transcribe(audio, selected, context);
+          return adaptive.transcribe(audio, selected, context, onStage);
         } },
       });
       this.timer = setInterval(() => { try { this.publish(); } catch { void this.close().catch(() => {}); } }, 100);

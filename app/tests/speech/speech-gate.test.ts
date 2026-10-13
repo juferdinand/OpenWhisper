@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { setImmediate } from "node:timers/promises";
 import { test } from "node:test";
 import type { PreparedAudio, WorkContext } from "../../src/core/recording/recording.js";
-import { LinuxSpeechGate } from "../../src/workers/speech/speech-gate.js";
+import { SilenceSpeechGate } from "../../src/workers/speech/speech-gate.js";
 
 function context(signal = new AbortController().signal): WorkContext {
   return { generation: 7, attempt: 3, signal };
@@ -13,7 +13,7 @@ function audio(chunks: readonly Float32Array[]): PreparedAudio {
 }
 
 test("Linux speech gate applies the exact sample and Float32 energy thresholds", async () => {
-  const gate = new LinuxSpeechGate();
+  const gate = new SilenceSpeechGate();
   for (const [count, amplitude, expected] of [
     [0, 0, false], [3199, 1, false], [3200, 0, false],
     [3200, 0.00049999997, false], [3200, 0.0005, true], [3200, -0.0005, true],
@@ -27,7 +27,7 @@ test("Linux speech gate applies the exact sample and Float32 energy thresholds",
 });
 
 test("Linux gate validates finite samples, complete counts, ownership and exclusive buffers", async () => {
-  const gate = new LinuxSpeechGate();
+  const gate = new SilenceSpeechGate();
   const inputs = [
     audio([new Float32Array([Number.NaN])]), audio([new Float32Array([Number.POSITIVE_INFINITY])]),
     { ...audio([new Float32Array(3200)]), sampleCount: 3199 },
@@ -41,7 +41,7 @@ test("Linux gate yields and observes cancellation during a complete long ledger 
   const chunk = new Float32Array(16000).fill(0.25);
   const input = audio(Array.from({ length: 3601 }, () => chunk));
   const controller = new AbortController();
-  const classification = new LinuxSpeechGate().classify(input, context(controller.signal));
+  const classification = new SilenceSpeechGate().classify(input, context(controller.signal));
   await setImmediate(); controller.abort();
   await assert.rejects(classification, /CANCELLED/);
   assert.equal(input.sampleCount, 57_616_000); assert.equal(chunk[0], 0.25); assert.equal(chunk.at(-1), 0.25);
@@ -50,7 +50,7 @@ test("Linux gate yields and observes cancellation during a complete long ledger 
 test("Linux whole-recording classification preserves chunk boundaries and evaluates a complete long ledger", async () => {
   const second = new Float32Array(16000).fill(0.01); const tail = new Float32Array([0, -0.02, 0.02]);
   const input = audio([...Array.from({ length: 3601 }, () => second), tail]);
-  const result = await new LinuxSpeechGate().classify(input, context());
+  const result = await new SilenceSpeechGate().classify(input, context());
   assert.equal(result.hasSpeech, true); assert.equal(input.sampleCount, 57_616_003);
   assert.strictEqual(input.chunks.at(-1), tail); assert.deepEqual([...tail], [0, Math.fround(-0.02), Math.fround(0.02)]);
 });

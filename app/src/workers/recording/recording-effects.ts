@@ -65,9 +65,10 @@ export class WorkerRecordingEffects {
       this.detach.push(port.onMessage((input) => this.receive(input)));
       this.detach.push(port.onExit(() => this.fail(new RecordingEffectError("WORKER_FAILED"))));
     } catch { for (const detach of this.detach.splice(0)) detach(); throw new RecordingEffectError("CLOSED"); }
-    this.delivery = { deliver: async (text, context, identity) => {
+    this.delivery = { deliver: async (text, context, identity, metadata) => {
       const reply = await this.run({ version: 1, epoch: this.epoch, id: randomUUID(),
-        generation: context.generation, attempt: context.attempt, command: "deliver", text, identity }, context.signal);
+        generation: context.generation, attempt: context.attempt, command: "deliver", text,
+        ...(metadata ? { metadata } : {}), identity }, context.signal);
       if (reply.kind === "failed") throw new RecordingEffectError(reply.code);
       if (reply.kind !== "deliver") throw new RecordingEffectError("INVALID_REPLY");
       return reply.receipt;

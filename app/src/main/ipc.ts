@@ -94,6 +94,7 @@ const overlayCommands: ReadonlySet<CommandName> = new Set([
   "cancel_recording",
   "retry_transcription",
   "discard_recovery",
+  "cancel_text_processing",
 ]);
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -181,6 +182,11 @@ export function createUiDispatcher(options: {
     save_local_processing: route("save_local_processing", handlers.save_local_processing),
     preview_local_processing: route("preview_local_processing", handlers.preview_local_processing),
     cancel_local_processing: route("cancel_local_processing", handlers.cancel_local_processing),
+    scan_connections: route("scan_connections", handlers.scan_connections),
+    start_lm_studio_server: route("start_lm_studio_server", handlers.start_lm_studio_server),
+    save_connections: route("save_connections", handlers.save_connections),
+    new_conversation: route("new_conversation", handlers.new_conversation),
+    cancel_text_processing: route("cancel_text_processing", handlers.cancel_text_processing),
     toggle_recording: route("toggle_recording", handlers.toggle_recording),
     cancel_recording: route("cancel_recording", handlers.cancel_recording),
     retry_transcription: route("retry_transcription", handlers.retry_transcription),

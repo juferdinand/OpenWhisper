@@ -209,6 +209,11 @@ async function run(root: string, distribution: string): Promise<void> {
       const held = probeStateSchema.parse(probe.probeState(edge));
       assert.equal(held.busy, true); assert.equal(held.descriptorOpen, true); assert.equal(held.disposals, 0); assert.equal(held.reserved, 1);
       assert.throws(() => edge.create(child.pid, process.getuid?.() ?? 0, process.pid));
+      // Capture and speech workers are observed at the same time: a different child may
+      // still be admitted while this owner is held, and is fully retired before continuing.
+      const other = await spawn("clean"), otherProbe = acquire(other); assert.equal((await otherProbe.bind()).canAdmit, true);
+      assert.equal(probeStateSchema.parse(otherProbe.probeState(edge)).reserved, 2);
+      other.utility.postMessage({ kind: "retire" }); await otherProbe.waitForFullReap(); await bounded(other.exit); await otherProbe.close();
       probe.releaseBarrier(edge); await probe.close();
       const state = probeStateSchema.parse(probe.probeState(edge)); assert.equal(state.reserved, 0); assert.equal(state.disposals, 1);
       // Re-observe the SAME original utility only after exact observer disposal;

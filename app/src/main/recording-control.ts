@@ -9,7 +9,7 @@ import type { AppState } from "../contracts/ui/state.js";
 export function recordingUnavailableReason(input: {
   readonly host: boolean; readonly model: boolean; readonly busy: boolean;
   readonly recovery: boolean; readonly mac: boolean; readonly microphoneAllowed: boolean;
-  readonly audioServer: boolean;
+  readonly audioServer: boolean; readonly audioInput?: boolean;
 }): AppState["recording_unavailable_reason"] {
   if (!input.host) return "host";
   if (input.busy) return undefined;
@@ -17,7 +17,7 @@ export function recordingUnavailableReason(input: {
   // Retrying a stopped recording must not require a connected microphone/server.
   if (input.recovery) return undefined;
   if (input.mac && !input.microphoneAllowed) return "permission";
-  if (!input.mac && !input.audioServer) return "audio";
+  if (!input.mac && (!input.audioServer || input.audioInput === false)) return "audio";
   return undefined;
 }
 
@@ -30,6 +30,7 @@ export interface RecordingControlOptions {
   readonly snapshot: () => Pick<RecordingSnapshot, "phase" | "busy" | "recoveryAvailable"> & { readonly elapsedMs?: number };
   readonly available: () => boolean;
   readonly configure: () => Promise<void>;
+  readonly unavailable?: () => void;
   readonly serialize: <T>(operation: () => Promise<T>) => Promise<T>;
   readonly cleanupSerialize?: <T>(operation: () => Promise<T>) => Promise<T>;
 }
@@ -70,6 +71,7 @@ export function createRecordingControlPort(options: RecordingControlOptions): Co
     return result;
   };
   return Object.freeze({
+    unavailable: () => { if (!options.available()) options.unavailable?.(); },
     status,
     wireStatus(): ControlWireStatus {
       const snapshot = options.snapshot(), elapsedMs = snapshot.elapsedMs;

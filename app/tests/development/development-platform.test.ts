@@ -167,3 +167,18 @@ test("content-free wire status crosses existing RPC with exact elapsed and rejec
     value: { command: "wire-status", text: '{"status":"error","elapsed":0,"recovery_available":true,"transcript":"private"}' } }).success, false);
   await bridge.close(); client.close();
 });
+
+test("unavailable shortcut intent crosses the content-free bridge while status polling stays silent", async () => {
+  let notices = 0, starts = 0;
+  const port = createRecordingControlPort({ available: () => false, unavailable: () => { notices++; },
+    configure: async () => {}, snapshot: () => ({ phase: "idle", busy: false, recoveryAvailable: false }),
+    serialize: <T>(operation: () => Promise<T>) => Promise.resolve().then(operation),
+    owner: { currentIdentity: () => undefined, async command() { starts++; throw Error("Unavailable capture must not start."); } } });
+  const bridge = new DevelopmentPlatformCaptureBridge(port); let client: PlatformCaptureClient;
+  client = new PlatformCaptureClient(bridge.epoch, (request) => { void bridge.handle(request).then((reply) => client.receive(reply)); });
+  assert.equal(await client.status(), "unavailable"); assert.equal(await client.status(), "unavailable"); assert.equal(notices, 0);
+  assert.throws(() => frame(bridge, { command: "unavailable", transcript: "private" }));
+  const shortcut = new ShortcutRecording(client, () => false, () => assert.fail("Unavailable intent is recoverable."));
+  shortcut.activate(); shortcut.deactivate(); await until(() => notices === 1);
+  assert.equal(starts, 0); await shortcut.close(); await bridge.close(); client.close();
+});

@@ -1,8 +1,8 @@
 import { z } from "zod";
 
-// The 460 × 52 control keeps an eight-pixel transparent margin on every side.
-export const WIDTH = 476;
-export const HEIGHT = 68;
+// Keep the native surface exactly aligned with the 460 × 52 visible capsule.
+export const WIDTH = 460;
+export const HEIGHT = 52;
 export const MAX_PNG_BYTES = 131_072;
 
 const surfaceRegionSchema = z.strictObject({

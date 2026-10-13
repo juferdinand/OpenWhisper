@@ -86,6 +86,18 @@ test("Mac cache disagreement and unknown first login state refuse before publica
   });
 });
 
+test("a fresh Mac domain that only holds the StoreKit launch timestamp migrates despite a newer cached value", darwin, async () => {
+  await fixture(async (profile) => {
+    const storeKit = (stamp: string) => `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>
+<key>SKPurchaseIntentUpdatesLastChecked</key><string>${stamp}</string></dict></plist>`;
+    file(profile.legacy.settings, storeKit("813486870.132337"));
+    const cached = decodeLegacyMacosPlist(Buffer.from(storeKit("813486908.272902")));
+    const result = await migrateStableMacosProfile(profile, context, access(cached));
+    assert.equal(result.status, "migrated");
+    assert.equal(existsSync(join(publication(profile), "migration.json")), true);
+  });
+});
+
 test("a changed final Mac snapshot keeps the private interrupted stage and original bytes", darwin, async () => {
   await fixture(async (profile) => {
     file(profile.legacy.settings, ownedPlist); const decoded = decodeLegacyMacosPlist(Buffer.from(ownedPlist)); let reads = 0;

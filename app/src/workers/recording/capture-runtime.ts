@@ -4,7 +4,7 @@ import { RecordingCoordinator, type CaptureBoundary, type ControlReply, type Del
 import { AdaptiveSpeechBoundary, createUtilitySpeechEffects } from "../../services/speech/adaptive-speech.js";
 import type { NativeCapturedHandle } from "../../services/recording/capture.js";
 import type { SpeechClient } from "../../services/speech/speech-client.js";
-import { LinuxSpeechGate } from "../speech/speech-gate.js";
+import { SilenceSpeechGate } from "../speech/speech-gate.js";
 import { recordingHostReplySchema, recordingHostRequestSchema,
   type RecordingConfiguration, type RecordingEnumeration, type RecordingHostReply,
   type RecordingHostRequest, type RecordingSource } from "./recording-host-protocol.js";
@@ -138,9 +138,9 @@ export class CaptureRuntime {
         },
       };
       this.coordinator = new RecordingCoordinator({ platform: "linux", capture: prepared.capture, recovery,
-        clock: { now: () => performance.now() }, speechGate: new LinuxSpeechGate(), delivery: {
-          deliver: async (text, context, identity) => {
-            const receipt = await this.effects.delivery.deliver(text, context, identity);
+        clock: { now: () => performance.now() }, speechGate: new SilenceSpeechGate(), delivery: {
+          deliver: async (text, context, identity, metadata) => {
+            const receipt = await this.effects.delivery.deliver(text, context, identity, metadata);
             if (identity.kind === "recovery" && receipt.generation === context.generation && receipt.attempt === context.attempt
                 && receipt.clipboardConfirmed && (receipt.outcome === "clipboard" || receipt.outcome === "paste")) {
               this.confirmedDelivery.set(identity.token, { generation: context.generation, attempt: context.attempt });
@@ -148,7 +148,8 @@ export class CaptureRuntime {
             return receipt;
           },
         },
-        speech: { transcribe: async (audio, selected, context) => {
+        onTextStage: (event) => { this.emit({ kind: "text-stage", event }); },
+        speech: { transcribe: async (audio, selected, context, onStage) => {
           // Coordinator reaches this boundary only after stopped audio was privately saved.
           this.pastRecoverySave = true;
           if (this.halted || this.closing) {
@@ -156,7 +157,7 @@ export class CaptureRuntime {
           }
           const adaptive = new AdaptiveSpeechBoundary(createUtilitySpeechEffects({ gpuAvailable: true,
             infer: this.effects.infer(context), progress: (value) => { this.emit({ kind: "progress", ...value }); } }));
-          return adaptive.transcribe(audio, selected, context);
+          return adaptive.transcribe(audio, selected, context, onStage);
         } },
       });
       await this.coordinator.restoreRecovery(request.request);

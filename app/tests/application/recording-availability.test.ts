@@ -13,6 +13,7 @@ test("a fresh Dev profile explains its missing model before Start can run", () =
 test("Start reports unavailable host, audio and Mac permission prerequisites", () => {
   assert.equal(recordingUnavailableReason({ ...ready, host: false }), "host");
   assert.equal(recordingUnavailableReason({ ...ready, audioServer: false }), "audio");
+  assert.equal(recordingUnavailableReason({ ...ready, audioInput: false }), "audio");
   assert.equal(recordingUnavailableReason({ ...ready, mac: true }), "permission");
   assert.equal(recordingUnavailableReason({ ...ready, mac: true, microphoneAllowed: true }), undefined);
 });

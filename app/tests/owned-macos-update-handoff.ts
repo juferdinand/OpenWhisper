@@ -89,8 +89,9 @@ run("/usr/bin/codesign", ["--verify", "--deep", "--strict", successorBundle], 30
 const installationRoot = join(evidence, "Installation Slot"), bundle = join(installationRoot, "OpenWhisper.app");
 await mkdir(installationRoot, { mode: 0o700 }); run("/usr/bin/ditto", [sourceBundle, bundle], 120_000);
 run("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], 30_000);
-const ownedHome = join(evidence, "home"), cacheDirectory = join(ownedHome, "Library/Caches/io.github.whisperfree/electron/cache");
+const ownedHome = join(evidence, "home"), cacheDirectory = join(ownedHome, "Library/Caches/OpenWhisper/electron/cache");
 await mkdir(ownedHome, { mode: 0o700 });
+// Legacy sources are seeded at the pre-#65 WhisperFree folder; the first launch relocates them.
 const legacySnippets = join(ownedHome, "Library/Application Support/WhisperFree/snippets.json");
 await mkdir(join(ownedHome, "Library/Application Support/WhisperFree"), { recursive: true, mode: 0o700 });
 await writeFile(legacySnippets, "[]\n", { flag: "wx", mode: 0o600 });
@@ -125,13 +126,13 @@ try {
   await page.evaluate(() => window.openwhisper!.invoke("save_preferences", { changes: {
     ui_language: "en", vocabulary: [{ spelling: "OwnedMacUpdatePreservationFixture", misheard: [] }], auto_check_updates: false } }));
   assert.deepEqual((await state()).preferences.vocabulary, [{ spelling: "OwnedMacUpdatePreservationFixture", misheard: [] }]);
-  const preferencesPath = join(ownedHome, "Library/Application Support/io.github.whisperfree/electron/settings/preferences.json");
+  const preferencesPath = join(ownedHome, "Library/Application Support/OpenWhisper/Config/electron/settings/preferences.json");
   const preferenceBytes = await readFile(preferencesPath); const preferences = preferencesSchema.parse(JSON.parse(preferenceBytes.toString("utf8")) as unknown);
   assert.equal(preferences.setup_completed, true); assert.deepEqual(preferences.vocabulary, [{ spelling: "OwnedMacUpdatePreservationFixture", misheard: [] }]);
-  const migrationPaths = [join(ownedHome, "Library/Application Support/io.github.whisperfree/electron/migration.json"),
-    join(ownedHome, "Library/Application Support/io.github.whisperfree/electron/legacy/snippets.json"),
-    join(ownedHome, "Library/Application Support/io.github.whisperfree/electron/legacy/decoded.json"),
-    join(ownedHome, "Library/Application Support/io.github.whisperfree/electron/legacy/conversion.json")];
+  const migrationPaths = [join(ownedHome, "Library/Application Support/OpenWhisper/Config/electron/migration.json"),
+    join(ownedHome, "Library/Application Support/OpenWhisper/Config/electron/legacy/snippets.json"),
+    join(ownedHome, "Library/Application Support/OpenWhisper/Config/electron/legacy/decoded.json"),
+    join(ownedHome, "Library/Application Support/OpenWhisper/Config/electron/legacy/conversion.json")];
   const migrationBefore = await Promise.all(migrationPaths.map(async (path) => {
     const bytes = await readFile(path); return createHash("sha256").update(bytes).digest("hex");
   }));

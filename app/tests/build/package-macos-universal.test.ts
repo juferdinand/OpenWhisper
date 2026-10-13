@@ -11,7 +11,8 @@ import { SPEECH_ENTRY_FILES } from "../../src/services/speech/speech-entry-graph
 
 const app = "Contents/Resources/app", commit = "0123456789abcdef0123456789abcdef01234567";
 const native = ["dist/native/capture/openwhisper_macos_capture.node", "dist/native/openwhisper_macos_capture.node",
-  "dist/native/openwhisper_macos_retirement.node", "dist/native/speech/cpu/openwhisper_speech.node", "dist/native/openwhisper_speech.node"];
+  "dist/native/openwhisper_macos_retirement.node", "dist/native/speech/cpu/openwhisper_speech.node", "dist/native/openwhisper_speech.node",
+  "dist/native/speech/metal/openwhisper_speech.node"];
 const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 test("Darwin load-command inspection opens a real Mach-O helper ending in parentheses literally", {
   skip: process.platform !== "darwin" ? "Requires the actual Darwin otool and system Mach-O fixture." : false,
@@ -82,7 +83,7 @@ async function fixture() {
     const recording = developmentRecordingDescriptorSchema.parse({ version: 1, platform: "darwin", architecture,
       capture: await captured(native[0]!), captureEntry: await captured("dist/workers/macos-capture-entry.js"), retirement: await captured(native[2]!),
       speech: { version: 1, platform: "darwin", architecture, napiVersion: 8, speechRevision: "927cfce34f31707e17f2bff35c349632fb9e2c3a",
-        speechSourceSha256: "41b664fee09e79176ac277b5237debec34f8d74af3c7d71f333f1ec67989ecde", entries: [{ backend: "cpu", ...await captured(native[3]!) }] },
+        speechSourceSha256: "41b664fee09e79176ac277b5237debec34f8d74af3c7d71f333f1ec67989ecde", entries: [{ backend: "cpu", ...await captured(native[3]!) }, { backend: "metal", ...await captured(native[5]!) }] },
       speechEntryGraph: { version: 1, zodVersion: "4.6.5", entries: await Promise.all([...SPEECH_ENTRY_FILES, "node_modules/zod/package.json", "node_modules/zod/index.js"].map(async (path) => ({ path, ...await captured(path) }))) } });
     await write(join(application, "dist/main/development-recording-build.js"), `export const DEVELOPMENT_RECORDING_BUILD = ${JSON.stringify(recording)};`);
     const receipt = { version: 1, architecture, sourceVersion: "0.3.0", source: { commit, modified: false }, runtimeVersion: "44.7.0", applicationBuild: identity,
@@ -91,6 +92,7 @@ async function fixture() {
       native: await Promise.all([...native, `${koffi}/darwin_${architecture}/koffi.node`].map(async (path) => ({ path, unsigned: await captured(path), signed: await captured(path) }))) };
     await write(join(directory, "Contents/Resources/notices/mac-stable-validation-package.json"), JSON.stringify(receipt));
     await write(join(directory, "Contents/Resources/notices/speech-cpu-unsigned-build.json"), JSON.stringify({ architecture }));
+    await write(join(directory, "Contents/Resources/notices/speech-metal-unsigned-build.json"), JSON.stringify({ architecture, backend: "metal" }));
     for (const kind of ["macos-capture-notices", "macos-retirement-notices"]) await write(join(application, `dist/native/${kind}/build-manifest.json`), JSON.stringify({ architecture }));
     await write(join(directory, "Contents/MacOS/OpenWhisper"), thin(architecture));
     await write(join(directory, "Contents/Info.plist"), "inert common plist fixture");

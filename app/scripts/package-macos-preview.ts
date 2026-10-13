@@ -202,6 +202,8 @@ export async function stageMacPreview(options: MacPreviewStageOptions): Promise<
     [join(root, "node_modules/@noble/hashes/LICENSE"), "noble-hashes-LICENSE"],
     ...(metadata.dependencies["tar"] ? [[join(root, "node_modules/tar/LICENSE.md"), "tar-LICENSE.md"]] : []),
     [join(root, "vendor/whisper.cpp/LICENSE"), "whisper.cpp-LICENSE"], [join(root, "native/build-cpu/build-manifest.json"), "speech-cpu-unsigned-build.json"],
+    ...(recording.speech.entries.some((entry) => entry.backend === "metal")
+      ? [[join(root, "native/build-metal/build-manifest.json"), "speech-metal-unsigned-build.json"]] : []),
     ];
   const icon = resolve(root, "resources/AppIcon.icns");
   for (const [path] of [...notices, [icon]]) { if (!path) throw new Error("Missing notice input."); await files(path); }
@@ -277,8 +279,14 @@ async function machFiles(root: string, architecture: Architecture, inspectPolicy
   }
   return result;
 }
-function updatePlist(path: string, values: Readonly<Record<string, string>>): void {
+/**
+ * App Nap delayed global triggers by up to several seconds once OpenWhisper had been idle in the
+ * background, so the main app opts out. Only this app is affected; system sleep is unchanged.
+ */
+export const MAC_PREVIEW_PLIST_FLAGS: Readonly<Record<string, boolean>> = Object.freeze({ LSAppNapIsDisabled: true });
+function updatePlist(path: string, values: Readonly<Record<string, string>>, flags: Readonly<Record<string, boolean>> = {}): void {
   for (const [key, value] of Object.entries(values)) run("/usr/bin/plutil", ["-replace", key, "-string", value, path]);
+  for (const [key, value] of Object.entries(flags)) run("/usr/bin/plutil", ["-replace", key, "-bool", value ? "YES" : "NO", path]);
   run("/usr/bin/plutil", ["-lint", path]);
 }
 
@@ -314,6 +322,9 @@ function verifyBundleMetadata(directory: string, identity: BuildIdentity, versio
     actual[key] = run("/usr/bin/plutil", ["-extract", key, "raw", "-o", "-", plist]).trim();
     if (actual[key] !== expected) throw new Error(`Mac bundle metadata differs: ${key}.`);
   }
+  for (const [key, expected] of Object.entries(MAC_PREVIEW_PLIST_FLAGS)) {
+    if (run("/usr/bin/plutil", ["-extract", key, "raw", "-o", "-", plist]).trim() !== String(expected)) throw new Error(`Mac bundle metadata differs: ${key}.`);
+  }
   validateMacBundleMetadata(identity, version, actual);
   for (const name of helpers) {
     const helper = join(directory, "Contents/Frameworks", name, "Contents/Info.plist");
@@ -333,7 +344,7 @@ export async function packageMacPreview(output: string, root = defaultRoot, opti
     ...(options.enableUpdates !== undefined ? { enableUpdates: options.enableUpdates } : {}),
     ...(options.constructionMode !== undefined ? { constructionMode: options.constructionMode } : {}) });
   const plist = join(staged.directory, "Contents/Info.plist");
-  updatePlist(plist, macPreviewPlistValues(staged.identity, staged.version));
+  updatePlist(plist, macPreviewPlistValues(staged.identity, staged.version), MAC_PREVIEW_PLIST_FLAGS);
   const helpers = (await readdir(join(staged.directory, "Contents/Frameworks"))).filter((name) => name.endsWith(".app"));
   for (const name of helpers) updatePlist(join(staged.directory, "Contents/Frameworks", name, "Contents/Info.plist"), {
     CFBundleIdentifier: macHelperBundleIdentifier(staged.identity, name),

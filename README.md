@@ -11,7 +11,7 @@ German; dictation can use multiple languages.
 
 ## Project status
 
-The current release is **0.4.2**, a shared Electron app for macOS and Linux. Automated package,
+The current release is **0.5.3**, a shared Electron app for macOS and Linux. Automated package,
 update, and owned-runtime checks cover the scopes listed in [release status](docs/ELECTRON-STATUS.md);
 they do not establish every desktop, device, or distribution combination. The older native 0.2.5
 source and evidence remain available as an immutable reference.
@@ -25,12 +25,10 @@ source and evidence remain available as an immutable reference.
 The immutable [0.2.5 source snapshot](https://github.com/juferdinand/OpenWhisper/tree/d69b43bf6e7017c61089e117e79af34f57f297c4)
 preserves the legacy hosts and their historical evidence.
 
-Maintainers can prepare a review-only release change with the **Prepare release review** workflow,
-using authored English and German highlights. Before its first run, enable **Settings → Actions →
-General → Workflow permissions → Allow GitHub Actions to create and approve pull requests**.
-Review the generated PR and confirm its CI; GitHub may require maintainer approval or a manual CI
-dispatch for workflows on bot-created PRs. Preparation does not publish a release. Local preview,
-recovery, and publication steps are in the [development guide](docs/ELECTRON-DEVELOPMENT.md#release-preparation).
+Maintainers start a release from `main` with the **Release** workflow, selecting a version and
+providing English and German highlights. It commits release metadata, checks and builds that exact
+source, publishes the signed assets, then advances the development version. Recovery steps are in
+the [development guide](docs/ELECTRON-DEVELOPMENT.md#release-preparation).
 
 Linux release evidence covers owned KDE Plasma 5.27 Wayland and X11 profiles, plus a package
 transition on one Kubuntu 24 baseline. Other desktop and distribution combinations require
@@ -43,10 +41,10 @@ vocabulary correction, snippets, history, a shared settings interface, and Engli
 interface translations. Platform integrations and validation differ; consult the applicable
 [Linux evidence](docs/LINUX.md) and [platform overview](docs/PLATFORMS.md).
 
-Optional LM Studio and Ollama adapters are development groundwork. Their former manual
-preview is hidden while the redesigned Connections interface is deferred; ordinary dictation
-does not call them. Speech output and structured Obsidian notes are planned integrations,
-with prerequisites and delivery order in the [roadmap](docs/ROADMAP.md).
+The unreleased [Connections increment](docs/LOCAL_MODELS.md) adds optional Ollama, LM Studio
+and Claude Code text processing. Connections start disabled; Codex is detected but execution
+remains unavailable. Release 0.4.2 does not include this interface. Speech output and structured
+Obsidian notes follow the prerequisites and delivery order in the [roadmap](docs/ROADMAP.md).
 
 Recording continues until you stop or cancel it. Audio remains in memory while recording, so
 longer sessions use more RAM. Model downloads require a network connection. Recognition runs
@@ -157,8 +155,9 @@ export all keychain identities or commit signing material.
 - [Linux implementation and acceptance](docs/LINUX.md)
 - [Platform architecture](docs/PLATFORMS.md)
 - [Release signing](docs/SIGNING.md)
+- [Data locations](docs/DATA-LOCATIONS.md)
 - [Security policy](SECURITY.md)
-- [Local model communication groundwork](docs/LOCAL_MODELS.md)
+- [Optional text-model connections](docs/LOCAL_MODELS.md)
 - [Frontend redesign plan](docs/UI-REDESIGN.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Report an issue](https://github.com/juferdinand/OpenWhisper/issues)

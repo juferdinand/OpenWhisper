@@ -63,10 +63,14 @@ assert.equal(packageMetadata.sourceVersion,
   releaseContextFromCommit(resolve(process.cwd(), ".."), packageSource.commit).currentVersion);
 assert.deepEqual(packageMetadata.applicationBuild, capturedBuild);
 
-const ownedHome = join(evidence, "home"), legacyRoot = join(ownedHome, "Library/Application Support/WhisperFree");
-const legacySnippets = join(legacyRoot, "snippets.json"), legacyModel = join(legacyRoot, "Models/ggml-tiny.bin");
-const configRoot = join(ownedHome, "Library/Application Support/io.github.whisperfree/electron");
-const cacheRoot = join(ownedHome, "Library/Caches/io.github.whisperfree/electron");
+// Legacy 0.2.x sources are seeded at the pre-#65 WhisperFree folder; the stable startup relocates
+// that folder unchanged (same inodes) to Application Support/OpenWhisper/Data before migrating it.
+const ownedHome = join(evidence, "home"), previousLegacyRoot = join(ownedHome, "Library/Application Support/WhisperFree");
+const legacyRoot = join(ownedHome, "Library/Application Support/OpenWhisper/Data");
+let relocated = false;
+const legacyFiles = (): string[] => ["snippets.json", "Models/ggml-tiny.bin"].map((name) => join(relocated ? legacyRoot : previousLegacyRoot, name));
+const configRoot = join(ownedHome, "Library/Application Support/OpenWhisper/Config/electron");
+const cacheRoot = join(ownedHome, "Library/Caches/OpenWhisper/electron");
 const ownedSnippet = snippetSchema.parse({ id: "b445efb4-72bb-4b98-97a7-576866917ec5", trigger: "owned package",
   expansion: "OpenWhisper owned stable fixture 日本語", enabled: true });
 const vocabulary = [
@@ -87,7 +91,8 @@ const migrationPaths = [join(configRoot, "migration.json"), join(configRoot, "le
 async function preserved(): Promise<void> {
   assert.deepEqual(await readFile(sourceDescriptorPath), sourceDescriptor);
   assert.deepEqual(await readFile(join(appPath, "dist/main/development-recording-build.js")), sourceDescriptor);
-  assert.deepEqual(await Promise.all([legacySnippets, legacyModel].map(frozenFile)), originals);
+  assert.deepEqual(await Promise.all(legacyFiles().map(frozenFile)), originals);
+  if (relocated) await assert.rejects(lstat(previousLegacyRoot), { code: "ENOENT" });
   if (completionFiles) assert.deepEqual(await Promise.all(migrationPaths.map(frozenFile)), completionFiles);
   await assert.rejects(lstat(join(ownedHome, "Library/Preferences/io.github.whisperfree.plist")), { code: "ENOENT" });
 }
@@ -105,6 +110,7 @@ let stableMigration: unknown;
 let updateConfiguration: unknown;
 let automaticUpdatePreferencePatch: unknown;
 let restartExit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+let accessibilityPermissionObserved: boolean | undefined;
 const checks: string[] = [];
 try {
   const environment: Record<string, string> = {};
@@ -130,7 +136,8 @@ try {
     assert.deepEqual(parseApplicationBuildModule(await readFile(join(appPath, "dist/main/application-build.js"), "utf8")), capturedBuild);
     stage = "owned-stable-legacy-source";
     await mkdir(ownedHome, { mode: 0o700 });
-    await mkdir(join(legacyRoot, "Models"), { recursive: true, mode: 0o700 });
+    await mkdir(join(previousLegacyRoot, "Models"), { recursive: true, mode: 0o700 });
+    const [legacySnippets, legacyModel] = legacyFiles() as [string, string];
     const fixture = join(fixtures, "ggml-tiny.bin");
     assert.equal(await realpath(fixtures), fixtures);
     assert.ok((await lstat(fixture)).isFile() && !(await lstat(fixture)).isSymbolicLink());
@@ -139,7 +146,7 @@ try {
     assert.equal(digest(fixtureBytes), "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21");
     await copyFile(fixture, legacyModel); await chmod(legacyModel, 0o644);
     await writeFile(legacySnippets, JSON.stringify([ownedSnippet]), { flag: "wx", mode: 0o600 });
-    originals = await Promise.all([legacySnippets, legacyModel].map(frozenFile));
+    originals = await Promise.all(legacyFiles().map(frozenFile));
     await assert.rejects(lstat(configRoot), { code: "ENOENT" });
     environment["HOME"] = ownedHome;
     environment["TMPDIR"] = evidence;
@@ -212,9 +219,39 @@ try {
     }).toBe(true);
     await expect(setupPage.locator("main.setup-main #setup-title")).toBeVisible();
     await expect(setupPage.locator("#dictation-workspace, #settings-dialog")).toHaveCount(0);
+    // Traverse clipboard setup without requesting microphone or Accessibility permission.
+    stage = "setup-navigation";
+    await setupPage.locator('[data-ui-language="en"]').click();
+    await expect.poll(async () => (await state()).preferences.ui_language).toBe("en");
     await setupPage.locator("[data-setup-next]").click();
-    for (let step = 0; step < 6; step += 1) await setupPage.locator("[data-setup-next]").click();
+    const setupTitle = setupPage.locator("main.setup-main #setup-title");
+    // Apple Silicon with a Metal device shows the recognition hardware step first; keep the CPU default.
+    await expect(setupTitle).toHaveText(/^(Choose recognition hardware|Download a speech model)$/u);
+    if (await setupTitle.textContent() === "Choose recognition hardware") {
+      await expect(setupPage.locator('input[name="gpu-mode"][value="false"]')).toBeChecked();
+      await setupPage.locator("[data-setup-next]").click();
+    }
+    await expect(setupTitle).toHaveText("Download a speech model");
+    for (const title of ["Allow microphone access", "Choose a language", "Where should the text go?", "Allow Accessibility access"]) {
+      const next = setupPage.locator("[data-setup-next]");
+      await expect(next).toBeEnabled();
+      await next.click();
+      await expect(setupTitle).toHaveText(title);
+      if (title === "Where should the text go?") {
+        await setupPage.locator('input[name="output"][value="clipboard"]').check();
+        await expect.poll(async () => (await state()).preferences.output).toBe("clipboard");
+      }
+    }
+    accessibilityPermissionObserved = (await state()).paste_ready === true;
+    // Observe pre-existing trust only; clipboard setup follows the same UI path without it.
+    await expect(setupPage.locator('[data-portal="enable_paste"], [data-portal="disable_paste"]')).toBeVisible();
+    const next = setupPage.locator("[data-setup-next]");
+    await expect(next).toBeEnabled();
+    await next.click();
+    await expect(setupTitle).toHaveText("How do you start the recording?");
+    await expect(setupPage.locator('[data-command="complete_setup"]')).toBeEnabled();
     await setupPage.locator('[data-command="complete_setup"]').click();
+    checks.push("Mac clipboard setup traverses the real permission and trigger steps without requesting Accessibility access or starting capture");
     await expect.poll(async () => (await state()).preferences.setup_completed).toBe(true);
   };
   if (packageMetadata.updateConfigured) {
@@ -448,7 +485,8 @@ try {
   assert.equal(initial.profile, stable ? undefined : "development"); assert.equal(initial.platform, "macos");
   assert.equal(initial.native_shortcuts, true, "The packaged normal main must enable Mac keyboard controls.");
   assert.equal(initial.macos?.shortcut_toggle_only, true, "The Mac recording descriptor must be active.");
-  assert.equal(initial.status, "idle"); assert.deepEqual(initial.installed, stable ? ["tiny"] : []); assert.equal(initial.microphones.length, 0);
+  assert.equal(initial.status, "idle"); assert.deepEqual(initial.installed, stable ? ["tiny"] : []);
+  assert.ok(initial.microphones.length <= 128); assert.equal(initial.microphone_labels?.length, initial.microphones.length);
   assert.equal(initial.preferences.macos_shortcut ?? null, null);
   if (!initial.preferences.setup_completed) {
     await expect(page.locator("main.setup-main #setup-title")).toBeVisible();
@@ -480,7 +518,8 @@ try {
     const manifest = z.object({ version: z.literal(1), appId: z.literal("io.github.whisperfree"),
       sourceFormat: z.literal("macos-v0.2.5"), preferences: z.null(), snippets: backup, decoded: backup, conversion: backup })
       .parse(JSON.parse(await readFile(migrationPaths[0]!, "utf8")) as unknown);
-    const rawSnippet = await readFile(legacySnippets);
+    relocated = true;
+    const rawSnippet = await readFile(legacyFiles()[0]!);
     assert.deepEqual(await readFile(migrationPaths[1]!), rawSnippet);
     for (const [path, expected] of [[migrationPaths[1]!, manifest.snippets], [migrationPaths[2]!, manifest.decoded],
       [migrationPaths[3]!, manifest.conversion]] as const) {
@@ -503,7 +542,7 @@ try {
       const metadata = await lstat(path); assert.ok(metadata.isDirectory() && !metadata.isSymbolicLink());
       assert.equal(metadata.uid, process.getuid?.()); assert.equal(metadata.mode & 0o7777, 0o700);
     }
-    assert.ok((await readdir(join(ownedHome, "Library/Application Support/io.github.whisperfree")))
+    assert.ok((await readdir(join(ownedHome, "Library/Application Support/OpenWhisper/Config")))
       .every((name) => !name.startsWith(".electron-migration-")));
     completionFiles = await Promise.all(migrationPaths.map(frozenFile)); await preserved();
     stableMigration = { context: nativeContext, preferencesDomain: "actual OS current user / io.github.whisperfree / AnyHost; empty",
@@ -513,8 +552,9 @@ try {
     stage = "stable-migrated-ui";
     await finishSetupIfNeeded(page);
     await openSettingsTab(page, "text");
-    await expect(page.locator('#snippet-form [name="trigger"]')).toHaveValue(ownedSnippet.trigger);
-    await expect(page.locator('#snippet-form [name="expansion"]')).toHaveValue(ownedSnippet.expansion);
+    await expect(page.locator("#snippets .snippet-row")).toHaveCount(1);
+    await expect(page.locator('#snippets .snippet-row [name="trigger"]')).toHaveValue(ownedSnippet.trigger);
+    await expect(page.locator('#snippets .snippet-row [name="expansion"]')).toHaveValue(ownedSnippet.expansion);
     await page.locator("#close-settings").click();
     await page.locator("#open-model-drawer").click();
     await expect(page.locator('[data-delete="tiny"]')).toBeVisible();
@@ -626,7 +666,7 @@ try {
         const captureControl = { async call(command: "configure" | "close") {
           const id = crypto.randomUUID();
           const request = recording.macRecordingHostRequestSchema.parse({ version: 1, channel: "recording-host", epoch, id, command,
-            ...(command === "configure" ? { capture: descriptor.capture, request: {
+            ...(command === "configure" ? { capture: descriptor.capture, source: "", request: {
               model: { path: path.join(app.getPath("userData"), "unused-native-loading-model.bin"), family: "whisper", gpu: false },
               language: "auto", vocabulary: "", snippets: [] } } : {}) });
           captureOwner.child.postMessage(request);
@@ -803,9 +843,10 @@ try {
     checks.push("Owned vocabulary edit survives normal stable restart; raw originals and completion stay unchanged; second original Quit exits 0");
   }
   await writeFile(join(evidence, "result.json"), JSON.stringify({ status: "PASS", architecture: process.arch, packageFormat, applicationBuild: capturedBuild, identity, checks,
-    input: "CDP to owned window only; no OS global input injection", microphone: stable && packageFormat === "thin"
-      ? "No permission request, capture Start, recording stream or inference in this stable smoke"
-      : "No permission request, capture Start or microphone operation; pinned public inference fixture only",
+    input: "CDP to owned window only; no OS global input injection", microphone: "Read-only CoreAudio input-device metadata enumeration on the hosted Mac; no device names or UIDs in the receipt, no permission request, capture Start or recording stream",
+    accessibilityPermission: accessibilityPermissionObserved === undefined ? "Setup was already complete; permission status is not reported separately"
+      : accessibilityPermissionObserved ? "Pre-existing Accessibility trust observed read-only; no permission command was invoked"
+        : "Accessibility trust was absent at observation; clipboard setup completed through the UI; no permission command was invoked",
     installation, nativeUtilityLoading, signatureAdmission, archiveAdmission, stableMigration, updateConfiguration, automaticUpdatePreferencePatch,
     tccAttribution: "Permission and real microphone behavior remain pending", exit, restartExit,
     scope: stable ? (packageFormat === "universal"

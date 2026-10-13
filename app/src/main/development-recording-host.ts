@@ -4,6 +4,7 @@ import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { z } from "zod";
 import type { RecordingRequest } from "../core/recording/recording.js";
+import type { TextProcessingStageEvent } from "../contracts/text/processing.js";
 import { initializeBackendSupervisor, type BackendSelection, type BackendSupervisor, type RetirementBoundary } from "../services/speech/backend-supervisor.js";
 import { prepareLinuxSpeechRetirement, type LinuxSpeechRetirementAllocation } from "../services/speech/linux-speech-retirement.js";
 import type { ModelInventory } from "../services/models/model-inventory.js";
@@ -16,7 +17,7 @@ import { recordingHostErrorSchema, recordingHostReplySchema, recordingHostReques
   type RecordingHostReply, type RecordingHostRequest, type RecordingSource } from "../workers/recording/recording-host-protocol.js";
 import { recordingEffectRequestSchema } from "../workers/recording/recording-effects-protocol.js";
 import { createLinuxSpeechBindings, speechEnvironment } from "./linux-speech-host.js";
-import type { DevelopmentRecordingDescriptor } from "./development-recording-descriptor.js";
+import { recordingDescriptorSupportsGpu, type DevelopmentRecordingDescriptor } from "./development-recording-descriptor.js";
 import { DeliveryReceiptCache, MainRecordingEffects } from "./recording-effects.js";
 import type { DeliveryBoundary } from "../core/recording/recording.js";
 import { macRecordingHostRequestSchema } from "../workers/recording/macos-recording-host-protocol.js";
@@ -35,6 +36,7 @@ interface Owner {
   readonly effects: MainRecordingEffects | undefined;
   readonly acknowledgements: Set<Promise<void>>;
   snapshot?: SnapshotReply["snapshot"];
+  attempt?: Readonly<{ generation: number; attempt: number }>;
   allocation?: RetirementAllocation; boundary?: RetirementBoundary; generation: number;
   closing?: Promise<void>; failed?: Error; exited: boolean;
 }
@@ -90,7 +92,8 @@ export class DevelopmentRecordingHost {
     private readonly options: { readonly recoveryPath: string; readonly delivery: DeliveryBoundary;
       readonly sourceDiscoveryFailure?: (failure: SourceDiscoveryFailure) => void;
       readonly gpuSelection?: (selection: GpuSelectionState) => void;
-      readonly snapshot: (snapshot: SnapshotReply["snapshot"]) => void; readonly progress: (progress: ProgressReply) => void }) {}
+      readonly snapshot: (snapshot: SnapshotReply["snapshot"]) => void; readonly progress: (progress: ProgressReply) => void;
+      readonly textStage: (event: TextProcessingStageEvent) => void }) {}
 
   static async open(root: string, descriptor: DevelopmentRecordingDescriptor, inventory: ModelInventory,
     options: DevelopmentRecordingHost["options"]): Promise<DevelopmentRecordingHost> {
@@ -175,9 +178,18 @@ export class DevelopmentRecordingHost {
         if (reply.kind === "snapshot") { owner.snapshot = reply.snapshot; owner.generation = Math.max(owner.generation, reply.snapshot.generation);
           if (!owner.closing) this.options.snapshot(reply.snapshot); return; }
         if (reply.kind === "progress") {
+          owner.attempt = { generation: reply.generation, attempt: reply.attempt };
           if (!owner.closing) {
             if (reply.gpuFallback) this.reportAdaptiveGpuFallback();
             this.options.progress(reply);
+          }
+          return;
+        }
+        if (reply.kind === "text-stage") {
+          if (!owner.closing && reply.event.generation === owner.generation
+              && reply.event.generation === owner.attempt?.generation
+              && reply.event.attempt === owner.attempt.attempt) {
+            try { this.options.textStage(reply.event); } catch { /* UI telemetry cannot fail recording. */ }
           }
           return;
         }
@@ -273,7 +285,8 @@ export class DevelopmentRecordingHost {
     const owner = await this.allocate(input);
     try {
       const reply = await this.request(owner, { command: "configure", capture: this.descriptor.capture, request: input.request,
-        ...(this.descriptor.platform === "linux" ? { server: input.server, source: input.source, recoveryPath: this.options.recoveryPath } : {}) });
+        ...(this.descriptor.platform === "linux" ? { server: input.server, source: input.source, recoveryPath: this.options.recoveryPath }
+          : { source: input.source ?? "" }) });
       if (reply.kind !== "control" || !reply.reply.ok) throw fail();
     } catch (error: unknown) { await this.retire(owner); throw error; }
   }
@@ -288,10 +301,7 @@ export class DevelopmentRecordingHost {
     this.reportGpuState();
     return selection;
   }
-  private supportsGpu(): boolean {
-    return this.descriptor.platform === "linux" && this.descriptor.architecture === "x64" &&
-      this.descriptor.speech.entries.some((entry) => entry.backend === "vulkan");
-  }
+  private supportsGpu(): boolean { return recordingDescriptorSupportsGpu(this.descriptor); }
   private reportGpuState(): void {
     if (!this.supportsGpu()) return;
     try { this.options.gpuSelection?.({ supported: true, checked: this.gpuChecked,
