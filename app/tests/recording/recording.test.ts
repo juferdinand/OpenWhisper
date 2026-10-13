@@ -802,7 +802,7 @@ test("unknown or contradictory native delivery receipts cannot report success", 
   }
 });
 
-test("macOS discards a quick or silent recording but keeps speech-like empty recognition in memory", async () => {
+test("macOS discards quick, silent and empty-recognition recordings and returns to idle", async () => {
   for (const chunks of [[new Float32Array(3199).fill(0.5)], [new Float32Array(16000)]] as const) {
     const f = fixture("macos", undefined, new SilenceSpeechGate()); f.configure((session) => { session.chunks = [...chunks]; });
     await f.coordinator.start(request); await f.coordinator.stop(); await f.coordinator.completion();
@@ -813,5 +813,8 @@ test("macOS discards a quick or silent recording but keeps speech-like empty rec
   spoken.configure((session) => { session.chunks = [new Float32Array(3200).fill(0.01)]; });
   spoken.speech(async (_samples, _request, context) => ({ ...ownership(context), text: "" }));
   await spoken.coordinator.start(request); await spoken.coordinator.stop(); await spoken.coordinator.completion();
-  assert.equal(spoken.coordinator.snapshot().error, "EMPTY_TRANSCRIPT"); assert.equal(spoken.coordinator.snapshot().recoveryAvailable, true);
+  // Headset noise passes the energy floor; an empty recognition still returns to idle on macOS.
+  assert.equal(spoken.coordinator.snapshot().phase, "idle"); assert.equal(spoken.coordinator.snapshot().error, null);
+  assert.equal(spoken.coordinator.snapshot().recoveryAvailable, false); assert.equal(spoken.capture().released, true);
+  assert.deepEqual(spoken.counts(), { speech: 1, delivery: 0 });
 });

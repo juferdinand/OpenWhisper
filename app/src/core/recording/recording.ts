@@ -625,6 +625,14 @@ export class RecordingCoordinator<C extends CapturedHandle> {
         });
         if (!this.current(job)) return;
         if (!owned(result, context)) { stage = "OWNERSHIP_FAILED"; throw new Error("Invalid speech ownership."); }
+        if (this.options.platform === "macos" && typeof result.text === "string" && result.text.trim().length === 0
+            && (result.rawText === undefined || typeof result.rawText === "string")) {
+          // On macOS an empty result (silence above the energy floor, e.g. headset noise) cannot be
+          // improved by retrying the same audio; return to idle instead of blocking new recordings.
+          stage = "CAPTURE_RELEASE_FAILED"; await this.release(pending);
+          if (!this.current(job)) return;
+          this.pending = undefined; this.phase = "idle"; this.error = null; return;
+        }
         if (typeof result.text !== "string" || result.text.trim().length === 0
             || (result.rawText !== undefined && typeof result.rawText !== "string")) {
           stage = "EMPTY_TRANSCRIPT"; throw new Error("No speech was recognized.");

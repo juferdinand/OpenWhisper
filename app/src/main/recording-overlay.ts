@@ -12,10 +12,15 @@ export function supportsInactiveRecordingOverlay({ platform, sessionType, ozoneP
   return ozonePlatform !== "wayland" && sessionType !== "wayland" && !waylandDisplay;
 }
 
-export function overlayWindowOptions({ title, preloadPath }: Readonly<{ title: string; preloadPath: string }>): BrowserWindowConstructorOptions {
+export function overlayWindowOptions({ title, preloadPath, platform = process.platform }: Readonly<{
+  title: string; preloadPath: string; platform?: string;
+}>): BrowserWindowConstructorOptions {
   return {
     title, width: WIDTH, height: HEIGHT,
     transparent: true, frame: false, show: false, focusable: false,
+    // A click on a normal window first activates OpenWhisper, which brought the main window forward
+    // and swallowed the click. A non-activating panel lets Cancel and Stop act directly.
+    ...(platform === "darwin" ? { type: "panel", acceptFirstMouse: true } : {}),
     skipTaskbar: true, alwaysOnTop: true, resizable: false, hasShadow: false,
     webPreferences: { preload: preloadPath, sandbox: true, contextIsolation: true, nodeIntegration: false },
   };
