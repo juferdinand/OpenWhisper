@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 import {
-  cliTextModelSchema, customCliConnectionSchema, defaultTextConnectionAvailability, defaultTextConnectionSettings,
+  cliTextModelSchema, customCliConnectionSchema, defaultTextConnectionAvailability, defaultTextConnectionSettings, defaultTextRevisionSettings,
   textConnectionAvailabilitySchema, textConnectionSettingsSchema, textConnectionsStateSchema,
 } from "../../src/contracts/text/connections.js";
 import { validateCommandInput, appStateSchema } from "../../src/contracts/ui/state.js";
@@ -13,6 +13,7 @@ import { ensureTextProviderAvailability, LocalTextConnectionScanner, resolveText
   validateTextConnectionChanges, validateTextConnectionSave } from "../../src/services/text/connections.js";
 import { boundedTextPreview } from "../../src/services/text/text-preview.js";
 import { OptionalTextProcessing } from "../../src/services/text/optional-text-processing.js";
+import { LocalProcessingError } from "../../src/services/speech/local-processing.js";
 
 const servers: Server[] = [];
 const directories: string[] = [];
@@ -230,13 +231,33 @@ test("optional processor snapshot matches the strict AppState text-connection wi
   });
 });
 
+test("an LM Studio timeout without reasoning controls gets a specific fallback reason", async () => {
+  const defaults = defaultTextConnectionSettings();
+  const settings = { ...defaults, revision: { ...defaultTextRevisionSettings(), enabled: true },
+    connections: defaults.connections.map((entry) => entry.provider === "lm_studio"
+      ? { ...entry, enabled: true, model: "owned-no-reasoning-control" } : entry) };
+  const available = defaultTextConnectionAvailability().map((entry) => entry.provider === "lm_studio"
+    ? { ...entry, detected: true, usable: true, models: ["owned-no-reasoning-control"],
+      models_without_reasoning_control: ["owned-no-reasoning-control"], reason: null } : entry);
+  const processor = new OptionalTextProcessing({ settings: () => settings, scan: async () => available,
+    runProvider: async () => { throw new LocalProcessingError("TIMEOUT"); }, isShuttingDown: () => false });
+  const result = await processor.process("Synthetic transcript", { generation: 1, attempt: 1, signal: new AbortController().signal });
+  assert.equal(result, "Synthetic transcript");
+  assert.deepEqual(processor.snapshot().processing, { status: "fallback", provider: "lm_studio",
+    reason: "timeout_without_reasoning_control" });
+});
+
 test("local discovery uses only fixed loopback routes and reports bounded model choices", async () => {
   const port = await serve((path, response) => {
     response.setHeader("Content-Type", "application/json");
     if (path === "/api/tags") response.end(JSON.stringify({ models: [{ name: "qwen-local" }] }));
     else if (path === "/api/v1/models") response.end(JSON.stringify({ models: [
-      { key: "llama-local", type: "llm" }, { key: "nomic-embed", type: "embedding" },
-      { key: "decision-model", type: "decision" },
+      { key: "llama-local", type: "llm", capabilities: { reasoning: { allowed_options: ["off", "on"] } } },
+      { key: "owned-no-reasoning-control", type: "llm" },
+      { key: "owned-reasoning-on-only", type: "llm", capabilities: { reasoning: { allowed_options: ["on"] } } },
+      { key: "owned-malformed-capability", type: "llm", capabilities: { reasoning: { allowed_options: ["future-option"] } } },
+      { key: "owned-off-with-future-option", type: "llm", capabilities: { reasoning: { allowed_options: ["off", "future-option"] } } },
+      { key: "nomic-embed", type: "embedding" }, { key: "decision-model", type: "decision" },
     ] }));
     else { response.statusCode = 404; response.end("{}"); }
   });
@@ -245,7 +266,9 @@ test("local discovery uses only fixed loopback routes and reports bounded model 
     provider: "ollama", detected: true, usable: true, models: ["qwen-local"], reason: null,
   });
   assert.deepEqual(available.find(({ provider }) => provider === "lm_studio"), {
-    provider: "lm_studio", detected: true, usable: true, models: ["llama-local"], reason: null,
+    provider: "lm_studio", detected: true, usable: true,
+    models: ["llama-local", "owned-no-reasoning-control", "owned-reasoning-on-only", "owned-malformed-capability", "owned-off-with-future-option"],
+    models_without_reasoning_control: ["owned-no-reasoning-control", "owned-reasoning-on-only", "owned-malformed-capability"], reason: null,
   });
   const codex = available.find(({ provider }) => provider === "codex");
   assert.ok(codex);

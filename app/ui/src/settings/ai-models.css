@@ -42,6 +42,16 @@
 .settings-content .ai-models-list .connection-model > select {
   min-height: 32px;
 }
+.settings-content .ai-models-list .connection-model-warning {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 5px;
+}
+.settings-content .connection-reasoning-warning {
+  display: block;
+  color: var(--warning);
+  line-height: 1.35;
+}
 .settings-content .ai-models-add-row {
   padding: 8px 12px;
 }

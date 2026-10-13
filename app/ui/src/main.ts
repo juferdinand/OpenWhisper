@@ -2062,12 +2062,17 @@ function renderWorkspace() {
         : transcriptAvailable
           ? `<p class="transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</p>${state.raw_transcript !== undefined || state.raw_transcript_preview_omitted ? `<details class="raw-transcript"><summary>${esc(t("Raw recognition"))}</summary><p class="transcript">${esc(state.raw_transcript_preview_omitted ? t("The raw transcript is too large to preview.") : (state.raw_transcript ?? ""))}</p></details>` : ""}`
           : `<div class="dictation-empty"><p>${esc(t("Press Record or the shortcut. Your text will appear here."))}</p></div>`;
+  const processingFallbackMessage =
+    state.text_connections.processing.reason ===
+    "timeout_without_reasoning_control"
+      ? "AI text processing timed out. LM Studio does not expose a setting to turn reasoning off for this model; try a model that does. Your original text was kept."
+      : "AI text processing was skipped; your text was kept.";
   const processingFallbackNotice =
     selectedHistoryText === undefined &&
     transcriptAvailable &&
     state.status !== "transcribing" &&
     state.text_connections.processing.status === "fallback"
-      ? `<p class="processing-fallback-notice" role="status">${esc(t("AI text processing was skipped; your text was kept."))}</p>`
+      ? `<p class="processing-fallback-notice" role="status">${esc(t(processingFallbackMessage))}</p>`
       : "";
   const selectedConnection = state.text_connections.settings.connections.find(
     (item) => item.enabled,

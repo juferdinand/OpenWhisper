@@ -17,7 +17,16 @@ const MAX_DISCOVERY_BYTES = 1024 * 1024;
 const DISCOVERY_TIMEOUT_MS = 1800;
 const modelName = z.string().min(1).max(256).refine((value) => !/[\u0000-\u001f\u007f-\u009f]/u.test(value));
 const ollamaModels = z.object({ models: z.array(z.object({ name: modelName })).max(128) });
-const lmStudioModels = z.object({ models: z.array(z.object({ key: modelName, type: z.string().min(1).max(32) })).max(128) });
+const lmStudioModels = z.object({ models: z.array(z.object({ key: modelName, type: z.string().min(1).max(32),
+  capabilities: z.unknown().optional() })).max(128) });
+const lmStudioReasoningCapabilities = z.object({ reasoning: z.object({
+  allowed_options: z.array(z.string().min(1).max(32)).max(16),
+}).optional() });
+
+function canDisableLmStudioReasoning(capabilities: unknown): boolean {
+  const parsed = lmStudioReasoningCapabilities.safeParse(capabilities);
+  return parsed.success && parsed.data.reasoning?.allowed_options.includes("off") === true;
+}
 
 const localServer = Object.freeze({
   ollama: { hostname: "127.0.0.1", port: 11434, path: "/api/tags" },
@@ -54,7 +63,12 @@ export async function validateTextConnectionSave(previous: TextConnectionSetting
   validateTextConnectionChanges(previous, next, current());
 }
 
-interface LocalScanResult { readonly detected: boolean; readonly models: readonly string[]; readonly failed: boolean }
+interface LocalScanResult {
+  readonly detected: boolean;
+  readonly models: readonly string[];
+  readonly modelsWithoutReasoningControl?: readonly string[];
+  readonly failed: boolean;
+}
 
 function readLocalModels(provider: "ollama" | "lm_studio", endpoint = localServer[provider]): Promise<LocalScanResult> {
   return new Promise((resolve) => {
@@ -98,9 +112,18 @@ function readLocalModels(provider: "ollama" | "lm_studio", endpoint = localServe
           if (settled || !response.complete) { finish({ detected: true, models: [], failed: true }); return; }
           try {
             const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, bytes)));
-            const models = provider === "ollama" ? ollamaModels.parse(value).models.map(({ name }) => name)
-              : lmStudioModels.parse(value).models.filter(({ type }) => type === "llm").map(({ key }) => key);
-            finish({ detected: true, models: [...new Set(models)].slice(0, 128), failed: false });
+            let models: string[], modelsWithoutReasoningControl: string[] | undefined;
+            if (provider === "ollama") models = ollamaModels.parse(value).models.map(({ name }) => name);
+            else {
+              const entries = lmStudioModels.parse(value).models.filter(({ type }) => type === "llm");
+              models = entries.map(({ key }) => key);
+              modelsWithoutReasoningControl = entries.filter(({ capabilities }) =>
+                !canDisableLmStudioReasoning(capabilities)).map(({ key }) => key);
+            }
+            finish({ detected: true, models: [...new Set(models)].slice(0, 128), failed: false,
+              ...(modelsWithoutReasoningControl === undefined ? {} : {
+                modelsWithoutReasoningControl: [...new Set(modelsWithoutReasoningControl)].slice(0, 128),
+              }) });
           } catch { finish({ detected: true, models: [], failed: true }); }
         });
       });
@@ -247,6 +270,7 @@ export class LocalTextConnectionScanner {
       { provider: "ollama", detected: ollama.detected, usable: ollama.models.length > 0, models: [...ollama.models],
         reason: ollama.failed ? "scan_failed" : ollama.models.length > 0 ? null : ollama.detected ? "no_models" : "not_running" },
       { provider: "lm_studio", detected: lmStudio.detected, usable: lmStudio.models.length > 0, models: [...lmStudio.models],
+        ...(lmStudio.modelsWithoutReasoningControl ? { models_without_reasoning_control: [...lmStudio.modelsWithoutReasoningControl] } : {}),
         reason: lmStudio.failed ? "scan_failed" : lmStudio.models.length > 0 ? null : lmStudio.detected ? "no_models"
           : lmStudioCli !== undefined ? "server_stopped" : "not_running" },
       { provider: "claude_code", detected: claude !== undefined, usable: claudeSupported, models: [...claudeDiscovery.models],

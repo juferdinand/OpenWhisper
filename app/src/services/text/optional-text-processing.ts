@@ -7,6 +7,7 @@ import {
 } from "../../contracts/text/connections.js";
 import type { TextProcessingStageEvent } from "../../contracts/text/processing.js";
 import { compileTextRevisionPrompt } from "../../core/text/text-revision-prompt.js";
+import { LocalProcessingError } from "../speech/local-processing.js";
 import { ensureTextProviderAvailability, safeAvailabilityFallback } from "./connections.js";
 
 type TextConnection = TextConnectionSettings["connections"][number];
@@ -156,8 +157,12 @@ export class OptionalTextProcessing {
     } catch (error: unknown) {
       if (this.parentCancelled(owner) || this.active !== active) return undefined;
       if (this.userCancelled(active)) return this.fallback(text, owner, selected.provider, "cancelled");
+      const timeoutWithoutReasoningControl = selected.provider === "lm_studio" &&
+        availability?.models_without_reasoning_control?.includes(selected.model) === true &&
+        error instanceof LocalProcessingError && error.code === "TIMEOUT";
       this.processing = { status: "fallback", provider: selected.provider,
-        reason: error instanceof TextProviderUnavailableError ? "unavailable" : "failed" };
+        reason: timeoutWithoutReasoningControl ? "timeout_without_reasoning_control"
+          : error instanceof TextProviderUnavailableError ? "unavailable" : "failed" };
       this.emitStage(owner, "skipped");
       return text;
     } finally {
