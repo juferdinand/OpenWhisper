@@ -58,14 +58,19 @@ const vocabularyEntrySchema = z.strictObject({
   misheard: z.array(vocabularyText).max(4096),
 });
 export type VocabEntry = z.infer<typeof vocabularyEntrySchema>;
-function refineVocabularyEntries(entries: VocabEntry[], context: z.RefinementCtx, allowDuplicates: boolean): void {
+function refineVocabularyEntries(
+  entries: VocabEntry[],
+  context: z.RefinementCtx,
+  allowDuplicateSpellings: boolean,
+  allowDuplicateCorrections: boolean,
+): void {
   const spellings = new Set<string>();
   const aliasOwners = new Map<string, string>();
   let textBytes = 0;
   let promptBytes = 0;
   for (const [index, entry] of entries.entries()) {
     const spelling = vocabularyEntryKey(entry.spelling);
-    if (!allowDuplicates && spellings.has(spelling)) {
+    if (!allowDuplicateSpellings && spellings.has(spelling)) {
       context.addIssue({ code: "custom", path: [index, "spelling"], message: "Duplicate spelling" });
     }
     spellings.add(spelling);
@@ -74,7 +79,7 @@ function refineVocabularyEntries(entries: VocabEntry[], context: z.RefinementCtx
     const aliases = new Set<string>();
     for (const [aliasIndex, alias] of entry.misheard.entries()) {
       const key = vocabularyEntryKey(alias);
-      if (!allowDuplicates && aliases.has(key)) {
+      if (!allowDuplicateCorrections && aliases.has(key)) {
         context.addIssue({ code: "custom", path: [index, "misheard", aliasIndex], message: "Duplicate correction" });
       }
       aliases.add(key);
@@ -91,17 +96,38 @@ function refineVocabularyEntries(entries: VocabEntry[], context: z.RefinementCtx
   }
 }
 const vocabularyEntriesSchema = z.array(vocabularyEntrySchema).max(4096)
-  .superRefine((entries, context) => refineVocabularyEntries(entries, context, true));
+  .superRefine((entries, context) => refineVocabularyEntries(entries, context, true, true));
 const editableVocabularyEntriesSchema = z.array(vocabularyEntrySchema).max(4096)
-  .superRefine((entries, context) => refineVocabularyEntries(entries, context, false));
+  .superRefine((entries, context) => refineVocabularyEntries(entries, context, false, false));
+const preferenceVocabularyPatchSchema = z.array(vocabularyEntrySchema).max(4096)
+  .superRefine((entries, context) => refineVocabularyEntries(entries, context, true, false));
 function migrateVocabulary(input: unknown): unknown {
   if (typeof input !== "string") return input;
   return input.split(/[,;\n\r]/u)
-    .map((term) => term.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, ""))
+    .map((term) => term.trim())
     .filter(Boolean)
     .map((spelling) => ({ spelling, misheard: [] }));
 }
 export const vocabularySchema = z.preprocess(migrateVocabulary, vocabularyEntriesSchema);
+export function vocabularyEditAllowed(current: readonly VocabEntry[], candidate: unknown): boolean {
+  const editable = editableVocabularyEntriesSchema.safeParse(candidate);
+  if (editable.success) return true;
+  if (editable.error.issues.some((issue) => issue.message !== "Duplicate spelling")) return false;
+  const parsed = vocabularyEntriesSchema.safeParse(candidate);
+  if (!parsed.success) return false;
+  const previousCounts = new Map<string, number>();
+  for (const entry of current) {
+    const key = vocabularyEntryKey(entry.spelling);
+    previousCounts.set(key, (previousCounts.get(key) ?? 0) + 1);
+  }
+  const candidateCounts = new Map<string, number>();
+  for (const entry of parsed.data) {
+    const key = vocabularyEntryKey(entry.spelling);
+    candidateCounts.set(key, (candidateCounts.get(key) ?? 0) + 1);
+  }
+  return Array.from(candidateCounts).every(([key, count]) =>
+    count <= 1 || count <= (previousCounts.get(key) ?? 0));
+}
 export function vocabularyMatchKey(value: string): string {
   return Array.from(value.normalize("NFKD").replace(/\p{Mark}/gu, ""))
     .flatMap((scalar) => Array.from(scalar.toLowerCase()))
@@ -170,7 +196,7 @@ export const preferencePatchSchema = preferencesSchema.omit({
   macos_shortcut: true,
 }).partial().extend({
   cleanup_enabled: z.boolean().optional(),
-  vocabulary: editableVocabularyEntriesSchema.optional(),
+  vocabulary: preferenceVocabularyPatchSchema.optional(),
 }).refine(
   (patch) => Object.values(patch).every((value) => value !== undefined),
   { message: "Preference patch values must be defined" },

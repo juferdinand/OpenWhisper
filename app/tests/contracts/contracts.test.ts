@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   appStateSchema, commandInputSchemas, commandOutputSchemas, MAX_UI_STATE_BYTES,
   MAX_USER_TEXT_BYTES, nonEmptySnippetSchema, preferencesSchema, preferencePatchSchema, snippetSchema,
-  vocabularySchema,
+  vocabularyEditAllowed, vocabularySchema,
   validateCommandInput, validateCommandName, validateCommandOutput, validateEvent,
   validateEventName, type AppState, type CommandInput, type CommandOutput,
 } from "../../src/contracts/ui/state.js";
@@ -221,15 +221,21 @@ test("structured vocabulary migrates legacy terms and rejects duplicate or malfo
     { spelling: "jira", misheard: [] },
     { spelling: "Open\tWhisper", misheard: [] },
   ]);
+  assert.deepEqual(vocabularySchema.parse("\uFEFFJira\uFEFF"), [
+    { spelling: "Jira", misheard: [] },
+  ]);
   assert.equal(preferencesSchema.safeParse({ ...state().preferences, vocabulary: legacyDuplicates }).success, true);
-  assert.equal(preferencePatchSchema.safeParse({ vocabulary: legacyDuplicates }).success, false);
+  assert.equal(preferencePatchSchema.safeParse({ vocabulary: legacyDuplicates }).success, true);
+  assert.equal(vocabularyEditAllowed([], legacyDuplicates), false);
+  assert.equal(vocabularyEditAllowed(legacyDuplicates, [...legacyDuplicates, { spelling: "Obsidian", misheard: [] }]), true);
+  assert.equal(vocabularyEditAllowed(legacyDuplicates, [...legacyDuplicates, { spelling: "Jira", misheard: [] }]), false);
   for (const invalid of [
     [{ spelling: "First spelling", misheard: ["Open-Whispur"] }, { spelling: "Second spelling", misheard: ["open whispur"] }],
     [{ spelling: " OpenWhisper ", misheard: [] }],
     [{ spelling: "Open\nWhisper", misheard: [] }],
   ]) assert.equal(vocabularySchema.safeParse(invalid).success, false);
   for (const invalid of [
-    [{ spelling: "OpenWhisper", misheard: [] }, { spelling: "openwhisper", misheard: [] }],
+    [{ spelling: "First spelling", misheard: ["Open-Whispur"] }, { spelling: "Second spelling", misheard: ["open whispur"] }],
     [{ spelling: "OpenWhisper", misheard: ["Open Whispur", "open whispur"] }],
   ]) assert.equal(preferencePatchSchema.safeParse({ vocabulary: invalid }).success, false);
 });

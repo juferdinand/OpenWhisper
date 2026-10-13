@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import {
   MAX_UI_REQUEST_BYTES, preferencePatchSchema, preferencesSchema,
-  nativeTriggerSchema, type NativeTrigger, x11TriggerSchema, type X11Trigger,
+  nativeTriggerSchema, vocabularyEditAllowed, type NativeTrigger, x11TriggerSchema, type X11Trigger,
   type PreferencePatch, type Preferences,
 } from "../../contracts/ui/state.js";
 import { prepareHostProfile, type HostProfile } from "./host-profile.js";
@@ -71,6 +71,10 @@ export class PreferenceStore {
 
   private update(changes: PreferencePatch | Pick<Preferences, "setup_completed"> | Pick<Preferences, "native_trigger"> | Pick<Preferences, "x11_trigger"> | Pick<Preferences, "macos_shortcut">): Promise<Preferences> {
     return this.state.update((current) => {
+      if ("vocabulary" in changes && changes.vocabulary !== undefined &&
+        !vocabularyEditAllowed(current.vocabulary, changes.vocabulary)) {
+        throw new Error("Vocabulary edits cannot introduce duplicate spellings or corrections.");
+      }
       const preferences = preferencesSchema.parse({ ...current, ...changes });
       enforcePolicy(preferences, this.development, this.allowDevelopmentAutostart);
       return preferences;

@@ -2789,13 +2789,11 @@ function render() {
     const textConnectionSettings = latestConnectionSettings();
     content.innerHTML =
       `<section class="text-processing-card" id="settings-vocabulary"><header class="text-processing-heading"><i class="text-processing-dot vocabulary" aria-hidden="true"></i><div><div class="vocabulary-heading-line"><h2>${esc(t("2 · Vocabulary"))}</h2><span id="vocabulary-save-status" role="status" aria-live="polite">${esc(t("Saved"))}</span></div><p class="text-processing-description">${esc(t("Add proper names and technical terms. Similar-sounding words are corrected to your spelling."))}</p></div></header><div class="text-processing-body"><div class="vocabulary-example"><span>${esc(t("You say “Obsidian”, recognized as"))}</span><del>Opsidian</del><span aria-hidden="true">→</span><strong>Obsidian</strong></div><div class="vocabulary-list" id="vocabulary-list"><div class="vocabulary-table-head"><span>${esc(t("Spelling"))}</span><span>${esc(t("Corrected from"))}</span><span aria-hidden="true"></span></div>${p.vocabulary.map((entry, index) => vocabularyRow(entry, index)).join("")}</div><form id="vocabulary-add-form" class="vocabulary-add-grid"><input id="new-vocabulary-spelling" class="vocabulary-input" data-vocab-focus="new-spelling" aria-label="${esc(t("Spelling"))}" placeholder="${esc(t("Spelling, e.g. Obsidian"))}" maxlength="8192"><input id="new-vocabulary-misheard" class="vocabulary-input" data-vocab-focus="new-misheard" aria-label="${esc(t("Often recognized as"))}" placeholder="${esc(t("Often recognized as … (comma-separated)"))}" maxlength="8192"><button type="submit" class="vocabulary-add-button">${esc(t("Add"))}</button></form><p class="vocabulary-help">${esc(t("Click a spelling to edit it. Add misheard forms with Enter; remove them with ×. Without entries, OpenWhisper still corrects similar-sounding words automatically."))}</p></div></section>` +
-      `<form id="snippet-form"><section class="text-processing-card"><header class="text-processing-heading"><i class="text-processing-dot snippets" aria-hidden="true"></i><div><h2>${esc(t("Snippets"))}</h2><p class="text-processing-description">${esc(t("Say a trigger word to insert its saved text. Matching ignores letter case, hyphens, and trailing punctuation."))}</p></div></header><div class="text-processing-body"><div id="snippets">${p.snippets.length ? p.snippets.map(snippetRow).join("") : `<p id="empty-snippets" class="secondary">${esc(t("No snippets yet. For example, say “my YouTube link” to insert a URL instead."))}</p>`}</div><div class="snippet-card-actions"><button type="button" id="add-snippet">${esc(t("Add snippet"))}</button><div class="edit-actions" id="snippet-actions" hidden><button type="submit">${esc(t("Save snippets"))}</button><button type="button" data-discard-snippets>${esc(t("Discard"))}</button></div></div></div></section></form>`;
-    content.querySelector<HTMLElement>("#snippet-form > section")!.id =
-      "settings-snippets";
+      `<section class="text-processing-card" id="settings-snippets"><header class="text-processing-heading"><i class="text-processing-dot snippets" aria-hidden="true"></i><div><h2>${esc(t("Snippets"))}</h2><p class="text-processing-description">${esc(t("Say a trigger word to insert its saved text. Matching ignores letter case, hyphens, and trailing punctuation."))}</p></div></header><div class="text-processing-body"><div id="snippets">${p.snippets.length ? p.snippets.map(snippetRow).join("") : `<p id="empty-snippets" class="secondary">${esc(t("No snippets yet. For example, say “my YouTube link” to insert a URL instead."))}</p>`}</div><div class="snippet-card-actions"><button type="button" id="add-snippet">${esc(t("Add snippet"))}</button></div></div></section>`;
     content.querySelector<HTMLElement>("#settings-snippets h2")!.textContent =
       `${textConnectionSettings.mode === "conversation" ? "3." : "4."} ${t("Snippets")}`;
     content
-      .querySelector<HTMLFormElement>("#snippet-form")!
+      .querySelector<HTMLElement>("#settings-snippets")!
       .insertAdjacentHTML(
         "beforeend",
         `<p id="snippet-draft-error" role="status" hidden></p>`,
@@ -2831,9 +2829,6 @@ function render() {
       misheard: [...entry.misheard],
     }));
     let vocabularyRevision = 0;
-    let savedVocabularyRevision = 0;
-    let vocabularySaving = false;
-    let vocabularyTimer: number | undefined;
     let restoreVocabularyFocus: string | undefined;
     const setVocabularyStatus = (message: string) => {
       vocabularyStatus.textContent = t(message);
@@ -2872,52 +2867,42 @@ function render() {
       if (focus) focusVocabulary(focus);
     };
     const saveVocabularyDraft = async () => {
-      if (vocabularySaving) return;
-      vocabularySaving = true;
-      while (savedVocabularyRevision < vocabularyRevision) {
-        const revision = vocabularyRevision;
-        if (vocabularyEntriesHaveConflicts(vocabularyDraft)) {
-          setVocabularyStatus(
-            "A misheard form can belong to only one spelling.",
-          );
-          vocabularySaving = false;
-          return;
-        }
-        const active =
-          document.activeElement instanceof HTMLElement
-            ? document.activeElement.dataset.vocabFocus
-            : undefined;
-        const focus = restoreVocabularyFocus ?? active;
-        const ok = await savePreferences({
-          vocabulary: vocabularyDraft.map((entry) => ({
-            ...entry,
-            misheard: [...entry.misheard],
-          })),
-        });
-        if (!ok) {
-          setVocabularyStatus("Could not save vocabulary.");
-          vocabularySaving = false;
-          return;
-        }
-        savedVocabularyRevision = revision;
-        if (revision !== vocabularyRevision) continue;
+      const revision = vocabularyRevision;
+      if (vocabularyEntriesHaveConflicts(vocabularyDraft)) {
+        setVocabularyStatus("A misheard form can belong to only one spelling.");
+        return true;
+      }
+      const active =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement.dataset.vocabFocus
+          : undefined;
+      const focus = restoreVocabularyFocus ?? active;
+      const ok = await writePreferences({
+        vocabulary: vocabularyDraft.map((entry) => ({
+          ...entry,
+          misheard: [...entry.misheard],
+        })),
+      });
+      if (!ok) {
+        setVocabularyStatus("Could not save vocabulary.");
+        return false;
+      }
+      if (revision === vocabularyRevision) {
         setVocabularyStatus("Saved");
         restoreVocabularyFocus = undefined;
         focusVocabulary(focus);
       }
-      vocabularySaving = false;
+      return true;
     };
     const scheduleVocabularySave = (focus?: string, immediate = false) => {
       vocabularyRevision++;
       restoreVocabularyFocus = focus ?? restoreVocabularyFocus;
       setVocabularyStatus("Saving …");
-      if (vocabularyTimer !== undefined) window.clearTimeout(vocabularyTimer);
-      if (immediate) void saveVocabularyDraft();
-      else
-        vocabularyTimer = window.setTimeout(
-          () => void saveVocabularyDraft(),
-          450,
-        );
+      void settingsAutosave
+        .save("vocabulary", saveVocabularyDraft, immediate ? 0 : 450)
+        .then((saved) => {
+          if (!saved) setVocabularyStatus("Could not save vocabulary.");
+        });
     };
     vocabularyList.addEventListener("input", (event) => {
       const input = event.target;
@@ -2934,9 +2919,6 @@ function render() {
             vocabularyEntryKey(entry.spelling) === vocabularyEntryKey(spelling),
         );
         if (duplicate) {
-          if (vocabularyTimer !== undefined)
-            window.clearTimeout(vocabularyTimer);
-          vocabularyTimer = undefined;
           return;
         }
         vocabularyDraft[index]!.spelling = spelling;
@@ -3599,14 +3581,15 @@ function mergeVocabularyCorrection(
 function vocabularyEntriesHaveConflicts(
   entries: readonly VocabEntry[],
 ): boolean {
-  const aliasOwners = new Map<string, number>();
-  for (const [index, entry] of entries.entries()) {
+  const aliasOwners = new Map<string, string>();
+  for (const entry of entries) {
+    const ownerSpelling = vocabularyEntryKey(entry.spelling);
     for (const alias of entry.misheard) {
       const key = vocabularyMatchKey(alias);
       if (!key) continue;
       const owner = aliasOwners.get(key);
-      if (owner !== undefined && owner !== index) return true;
-      if (owner === undefined) aliasOwners.set(key, index);
+      if (owner !== undefined && owner !== ownerSpelling) return true;
+      if (owner === undefined) aliasOwners.set(key, ownerSpelling);
     }
   }
   return false;

@@ -40,7 +40,7 @@ export function vocabularySimilarity(left: string, right: string): number {
 
 interface Word { readonly key: readonly string[]; readonly start: number; readonly end: number }
 interface Match { readonly first: number; readonly last: number; readonly term: string; readonly score: number }
-interface ExplicitAlias { readonly key: readonly string[]; readonly wordCount: number; readonly term: string }
+interface ExplicitAlias { readonly key: readonly string[]; readonly term: string }
 
 function normalizeEntries(entries: readonly (string | VocabEntry)[]): VocabEntry[] {
   return entries.map((entry) => typeof entry === "string"
@@ -54,8 +54,7 @@ function explicitAliases(entries: readonly VocabEntry[]): ExplicitAlias[] {
     for (const alias of misheard) {
       const key = Array.from(normalizeVocabularyKey(alias));
       if (key.length === 0) continue;
-      const wordCount = Math.max(1, Array.from(alias.matchAll(wordPattern)).length);
-      aliases.push({ key, wordCount, term: spelling });
+      aliases.push({ key, term: spelling });
     }
   }
   return aliases;
@@ -66,7 +65,7 @@ function explicitMatches(words: readonly Word[], aliases: readonly ExplicitAlias
   for (const alias of aliases) {
     for (let start = 0; start < words.length; start++) {
       let keyIndex = 0;
-      const limit = Math.min(alias.wordCount, words.length - start);
+      const limit = Math.min(alias.key.length, words.length - start);
       for (let length = 1; length <= limit; length++) {
         let matchesPrefix = true;
         for (const scalar of entry(words, start + length - 1).key) {

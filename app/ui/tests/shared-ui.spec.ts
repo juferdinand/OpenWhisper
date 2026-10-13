@@ -4560,6 +4560,9 @@ for (const platform of ["linux", "macos"] as const) {
       .click();
     await trigger.fill("my signature");
     await expect(page.locator("#snippet-draft-error")).toBeVisible();
+    await trigger.press("Enter");
+    await expect(trigger).toHaveValue("my signature");
+    await expect(page.locator("#settings-snippets")).toBeVisible();
     await expect(page.locator("#settings-save-status")).toHaveAttribute(
       "data-status",
       "error",
@@ -4644,6 +4647,31 @@ for (const platform of ["linux", "macos"] as const) {
         () => (window as any).testState.preferences.snippets[0].expansion,
       ),
     ).toBe('<img src=x onerror="alert(1)"> $1 edited');
+  });
+}
+
+for (const platform of ["linux", "macos"] as const) {
+  test(`${platform}: closing settings flushes a pending vocabulary autosave`, async ({
+    page,
+  }) => {
+    await start(page, platform);
+    await openSettings(page);
+    await selectSettingsTab(page, "text");
+    await addVocabulary(page, "OpenWhisper");
+    await page
+      .locator("[data-vocabulary-spelling]")
+      .first()
+      .fill("Open Whisper");
+    await page.evaluate(() => {
+      const close =
+        document.querySelector<HTMLButtonElement>("#close-settings");
+      if (!close) throw new Error("Settings close button is missing.");
+      close.click();
+    });
+    await expect(page.locator("#settings-dialog")).toBeHidden();
+    await expect
+      .poll(() => page.evaluate(() => window.testState.preferences.vocabulary))
+      .toEqual([{ spelling: "Open Whisper", misheard: [] }]);
   });
 }
 

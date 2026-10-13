@@ -55,6 +55,13 @@ test("legacy vocabulary duplicates and internal tabs survive preference startup 
     assert.deepEqual(migrated.snapshot().vocabulary, expected);
     await migrated.patch({ ui_language: "de" });
     assert.deepEqual((await DevelopmentPreferenceStore.open(profile)).snapshot().vocabulary, expected);
+    const expanded = [...expected, { spelling: "Obsidian", misheard: ["Obsydian"] }];
+    await migrated.patch({ vocabulary: expanded });
+    await assert.rejects(
+      migrated.patch({ vocabulary: [...expanded, { spelling: "Jira", misheard: [] }] }),
+      /duplicate spellings/u,
+    );
+    assert.deepEqual((await DevelopmentPreferenceStore.open(profile)).snapshot().vocabulary, expanded);
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 

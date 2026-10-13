@@ -85,6 +85,7 @@ test("explicit misheard forms map case-insensitively while entries without alias
 test("hyphenated aliases match equivalent spaced or hyphenated transcript tokens", () => {
   const entries = [{ spelling: "OpenWhisper", misheard: ["Open-Whispur"] }];
   assert.equal(correctVocabulary("Open Whispur, Open-Whispur", entries), "OpenWhisper, OpenWhisper");
+  assert.equal(correctVocabulary("Open Whispur", [{ spelling: "OpenWhisper", misheard: ["OpenWhispur"] }]), "OpenWhisper");
 });
 
 test("long explicit aliases match incrementally without quadratic candidate normalization", () => {
