@@ -1,7 +1,7 @@
 import { isAbsolute } from "node:path";
 import { setImmediate } from "node:timers";
 import { z } from "zod";
-import { snippetSchema } from "../../contracts/ui/state.js";
+import { snippetSchema, vocabularySchema } from "../../contracts/ui/state.js";
 import { speechLanguageSchema } from "../../contracts/speech/speech.js";
 
 export const recordingRequestSchema = z.strictObject({
@@ -11,6 +11,7 @@ export const recordingRequestSchema = z.strictObject({
   }).readonly(),
   language: speechLanguageSchema,
   vocabulary: z.string().refine((value) => !value.includes("\0")),
+  vocabulary_entries: vocabularySchema.optional(),
   snippets: z.array(snippetSchema.readonly()).default([]).readonly(),
 }).readonly();
 export type RecordingRequest = z.infer<typeof recordingRequestSchema>;

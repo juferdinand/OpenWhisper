@@ -14,10 +14,10 @@ test("concurrent development patches preserve each field and retain text across 
     const profile = resolveDevelopmentProfile({ home });
     prepareDevelopmentProfile(profile);
     const store = await DevelopmentPreferenceStore.open(profile);
-    const text = "Mehrsprachig: café, İstanbul, 東京";
-    await Promise.all([store.patch({ vocabulary: text }), store.patch({ ui_language: "de" })]);
+    const vocabulary = [{ spelling: "Mehrsprachig: café", misheard: [] }, { spelling: "İstanbul", misheard: [] }, { spelling: "東京", misheard: [] }];
+    await Promise.all([store.patch({ vocabulary }), store.patch({ ui_language: "de" })]);
     const reopened = await DevelopmentPreferenceStore.open(profile);
-    assert.equal(reopened.snapshot().vocabulary, text);
+    assert.deepEqual(reopened.snapshot().vocabulary, vocabulary);
     assert.equal(reopened.snapshot().ui_language, "de");
     assert.equal(reopened.snapshot().launch_at_login, false);
     await assert.rejects(reopened.patch({ launch_at_login: true }));

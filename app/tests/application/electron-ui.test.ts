@@ -448,22 +448,16 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
 
     await page.getByRole("button", { name: /Vocabulary/ }).click();
     await expect(page.locator("#page-title")).toHaveText("Text processing");
-    const vocabulary = page.locator("#vocabulary");
+    const vocabularySpelling = page.locator("#new-vocabulary-spelling");
+    const vocabularyCorrections = page.locator("#new-vocabulary-misheard");
+    const expectedVocabulary = [{ spelling: "Kubernetes", misheard: ["Kubernetis", "Grüß Gott", "東京"] }];
     const settingsUrl = page.url();
     assert.equal(page.url(), settingsUrl, "Settings section navigation must preserve the trusted renderer URL.");
-    await expect(vocabulary).toBeInViewport();
-    await vocabulary.fill("Kubernetes, Grüß Gott, 東京");
-    await page.keyboard.press("Escape");
-    await expect(page.locator("#settings-dialog")).toBeVisible();
-    await expect(vocabulary).toHaveValue("Kubernetes, Grüß Gott, 東京");
-    await expect(page.locator("#settings-notice")).toBeVisible();
-    // The modal blocks pointer input to the titlebar; exercise its close handler directly.
-    await page.evaluate(() => document.querySelector<HTMLButtonElement>('[data-window-action="close"]')?.click());
-    await expect(page.locator("#settings-dialog")).toBeVisible();
-    await expect(vocabulary).toHaveValue("Kubernetes, Grüß Gott, 東京");
-    await expect(page.locator("#settings-notice")).toBeVisible();
-    await page.locator("#save-vocabulary").click();
-    await expect.poll(async () => validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.vocabulary).toBe("Kubernetes, Grüß Gott, 東京");
+    await expect(vocabularySpelling).toBeInViewport();
+    await vocabularySpelling.fill("Kubernetes");
+    await vocabularyCorrections.fill("Kubernetis, Grüß Gott, 東京");
+    await page.locator("#vocabulary-add-form").press("Enter");
+    await expect.poll(async () => validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {}))).preferences.vocabulary).toEqual(expectedVocabulary);
     await page.keyboard.press("Escape");
     await expect(page.locator("#settings-dialog")).toBeHidden();
     await expect(page.locator('.dictation-feature-card[data-settings-section="settings-vocabulary"]')).toBeFocused();
@@ -482,13 +476,14 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     await expect(page.locator('[data-ui-language="de"]')).toHaveAttribute("aria-pressed", "true");
     await screenshot(page, "dev-general-de.png");
     await openSettings(page, "text");
-    await expect(vocabulary).toHaveValue("Kubernetes, Grüß Gott, 東京");
+    await expect(page.locator("[data-vocabulary-spelling]")).toHaveValue("Kubernetes");
     await openSettings(page, "general");
     await page.locator('[data-ui-language="en"]').click();
     await expect(page.locator("#page-title")).toHaveText("General");
     await screenshot(page, "dev-general-en.png");
     await openSettings(page, "text");
-    await expect(page.locator("#vocabulary")).toHaveValue("Kubernetes, Grüß Gott, 東京");
+    await expect(page.locator("[data-vocabulary-spelling]")).toHaveValue("Kubernetes");
+    await expect(page.locator(".vocabulary-chip")).toHaveCount(3);
     await expect(page.locator("#snippet-form")).toBeVisible();
     await expect(page.locator("#processing-preview")).toHaveCount(0);
     await expect(page.locator('nav [data-tab="models"], nav [data-tab="snippets"]')).toHaveCount(0);
@@ -500,7 +495,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     checks.push("vocabulary and snippets share Text processing; no optional model preview or automatic provider traffic; history exposes its actual folder action");
     const saved = validateCommandOutput("get_state", await page.evaluate(() => window.openwhisper?.invoke("get_state", {})));
     assert.equal(saved.preferences.hold_to_record, true);
-    assert.equal(saved.preferences.vocabulary, "Kubernetes, Grüß Gott, 東京");
+    assert.deepEqual(saved.preferences.vocabulary, expectedVocabulary);
     assert.equal(saved.preferences.ui_language, "en");
     await app.close();
     application = undefined;
@@ -512,7 +507,7 @@ test("owned Electron Dev UI preserves isolation, security and preference patches
     assert.deepEqual(restored.preferences, saved.preferences);
     assert.deepEqual(restored.local_processing, saved.local_processing);
     await openSettings(reopened, "text");
-    await expect(reopened.locator("#vocabulary")).toHaveValue("Kubernetes, Grüß Gott, 東京");
+    await expect(reopened.locator("[data-vocabulary-spelling]")).toHaveValue("Kubernetes");
     await expect(reopened.locator("#processing-preview")).toHaveCount(0);
     assert.equal(restored.transcript, "");
     assert.deepEqual(restored.history, []);

@@ -72,6 +72,16 @@ test("vocabulary thresholds, ties, overlapping windows and original offsets matc
   assert.equal(correctVocabulary("same text", ["", "!!!"]), "same text");
 });
 
+test("explicit misheard forms map case-insensitively while entries without aliases retain fuzzy matching", () => {
+  const entries = [
+    { spelling: "Obsidian", misheard: ["Opsidian", "OB-SIDIAN"] },
+    { spelling: "Kubernetes", misheard: [] },
+  ];
+  assert.equal(correctVocabulary("OPSIDIAN, ob-sidian and kubernetis.", entries),
+    "Obsidian, Obsidian and Kubernetes.");
+  assert.equal(correctVocabulary("Opsidain", [{ spelling: "Obsidian", misheard: ["Opsidian"] }]), "Opsidain");
+});
+
 test("snippets preserve literal expansions, Unicode boundaries, empty drafts and matching order", () => {
   const snippets = [
     { trigger: "mail", expansion: "$& $1 $` $' \\ 日本語 👩‍💻", enabled: true },
@@ -96,6 +106,7 @@ test("processing retains cleaner then vocabulary then snippet order", () => {
   assert.equal(processTranscript("[BLANK_AUDIO]  kubernetis. ", "Kubernetes", [
     { trigger: "Kubernetes", expansion: "$10\n日本語", enabled: true },
   ]), "$10\n日本語");
+  assert.equal(processTranscript("Opsidian", [{ spelling: "Obsidian", misheard: ["Opsidian"] }], []), "Obsidian");
 });
 
 test("catalog preserves shared metadata, safe downloads and hardware/language ordering", () => {

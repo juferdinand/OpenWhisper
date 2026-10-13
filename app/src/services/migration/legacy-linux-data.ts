@@ -32,7 +32,7 @@ const legacyPreferencesSchema = preferencesSchema.pick({ ui_language: true, mode
   launch_at_login: true, auto_check_updates: true }).extend({
   ui_language: preferencesSchema.shape.ui_language.default("en"), model: preferencesSchema.shape.model.default("base"),
   language: z.string().regex(/^(?:auto|[a-z]{2})$/u).default("auto"), microphone: preferencesSchema.shape.microphone.default(""),
-  vocabulary: preferencesSchema.shape.vocabulary.default(""), snippets: z.array(legacySnippetSchema).max(100).default([]),
+  vocabulary: z.string().max(8192).default(""), snippets: z.array(legacySnippetSchema).max(100).default([]),
   output: z.enum(["clipboard", "paste"]).default("clipboard"), hold_to_record: z.boolean().default(false),
   native_trigger: legacyNativeTriggerSchema.nullable().default(null),
   gpu: z.boolean().default(true), gpu_configured: z.boolean().optional(), keep_history: z.boolean().default(true),

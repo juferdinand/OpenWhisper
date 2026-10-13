@@ -33,6 +33,7 @@ import { createUiDispatcher, performWindowAction, uiFailure, type UiSender } fro
 import { ModelInventory, type InstalledModel } from "../services/models/model-inventory.js";
 import { ModelDownloads } from "../services/models/model-download.js";
 import { recordingRequestSchema } from "../core/recording/recording.js";
+import { vocabularyPrompt } from "../core/text/vocabulary-corrector.js";
 import type { RecordingSource } from "../workers/recording/recording-host-protocol.js";
 import { recordingSnapshotSchema } from "../workers/recording/recording-host-protocol.js";
 import { DEVELOPMENT_RECORDING_BUILD } from "./development-recording-build.js";
@@ -596,7 +597,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     // Recovery may be transcribed with the microphone disconnected; resolve sources only on Start.
     const request = recordingRequestSchema.parse({ model: { path: join(profile.paths.models, model.model.file), family: model.model.family,
       gpu: selected.gpu && gpuSelection.supported },
-      language: selected.language, vocabulary: selected.vocabulary, snippets: selected.snippets });
+      language: selected.language, vocabulary: vocabularyPrompt(selected.vocabulary),
+      vocabulary_entries: selected.vocabulary, snippets: selected.snippets });
     await host.configure({ id: model.model.id, request,
       ...(macRecording ? {} : { server: audioServer ?? `unix:${join(process.env.XDG_RUNTIME_DIR ?? profile.paths.locks, "pulse/native")}`,
         source: selected.microphone }) }); configured = true;

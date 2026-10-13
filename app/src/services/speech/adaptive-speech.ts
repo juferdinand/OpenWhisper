@@ -130,7 +130,7 @@ export function processRawSpeechParts(parts: readonly string[], request: Recordi
   const validated = recordingRequestSchema.parse(request);
   const raw = parts.map((part) => speechTextSchema.parse(part)
     .replace(/^\p{White_Space}+|\p{White_Space}+$/gu, "")).filter((part) => part.length > 0).join(" ");
-  return processTranscript(raw, validated.vocabulary, validated.snippets);
+  return processTranscript(raw, validated.vocabulary_entries ?? validated.vocabulary, validated.snippets);
 }
 
 function owned(value: { generation: number; attempt: number }, context: WorkContext): boolean {

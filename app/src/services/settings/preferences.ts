@@ -11,7 +11,7 @@ import { PrivateStateStore } from "./private-state.js";
 function developmentPreferences(): Preferences {
   return preferencesSchema.parse({
     ui_language: "en", setup_completed: false, model: "tiny", language: "auto",
-    microphone: "", vocabulary: "", snippets: [], output: "clipboard",
+    microphone: "", vocabulary: [], snippets: [], output: "clipboard",
     hold_to_record: false, gpu: false, keep_history: true,
     restore_clipboard: false, play_sounds: false, show_idle_overlay: false,
     launch_at_login: false, auto_check_updates: false,

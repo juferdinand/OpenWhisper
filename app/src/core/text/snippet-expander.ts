@@ -1,4 +1,4 @@
-import type { Snippet } from "../../contracts/ui/state.js";
+import type { Snippet, VocabEntry } from "../../contracts/ui/state.js";
 import { cleanTranscript } from "./transcript-cleaner.js";
 import { correctVocabulary, parseVocabulary } from "./vocabulary-corrector.js";
 
@@ -39,6 +39,9 @@ export function expandSnippets(text: string, snippets: readonly ExpansionSnippet
 }
 
 /** The preserved delivery order is cleaner → vocabulary correction → snippets. */
-export function processTranscript(text: string, vocabulary: string, snippets: readonly ExpansionSnippet[]): string {
-  return expandSnippets(correctVocabulary(cleanTranscript(text), parseVocabulary(vocabulary)), snippets);
+export function processTranscript(text: string, vocabulary: string | readonly VocabEntry[], snippets: readonly ExpansionSnippet[]): string {
+  const entries = typeof vocabulary === "string"
+    ? parseVocabulary(vocabulary)
+    : vocabulary;
+  return expandSnippets(correctVocabulary(cleanTranscript(text), entries), snippets);
 }

@@ -409,13 +409,12 @@ test("missing selected model gives a direct model download path and translates u
   await expect(page.locator("#record")).toBeDisabled();
   await openSettings(page);
   await selectSettingsTab(page, "text");
-  await page.locator("#vocabulary").fill("Unsaved vocabulary");
+  await page.locator("#new-vocabulary-spelling").fill("Unsaved vocabulary");
+  await page.locator("#vocabulary-add-form").press("Enter");
+  await expect
+    .poll(() => page.evaluate(() => window.testState.preferences.vocabulary))
+    .toEqual([{ spelling: "Unsaved vocabulary", misheard: [] }]);
   await page.locator('.settings-dialog-nav [data-tab="history"]').click();
-  await expect(page.locator("#settings-notice")).toHaveText(
-    "Save or discard your changes before switching tabs or language.",
-  );
-  await expect(page.locator("#vocabulary")).toHaveValue("Unsaved vocabulary");
-  await page.locator("[data-discard-vocabulary]").click();
   await closeSettings(page);
   await page.locator("#record-unavailable-action").click();
   await expect(page.locator("dialog#model-drawer")).toBeVisible();
@@ -728,7 +727,7 @@ async function start(
           model: "base",
           language: "en",
           microphone: "",
-          vocabulary: "",
+          vocabulary: [],
           snippets: [],
           output: "clipboard",
           hold_to_record: false,
@@ -1084,7 +1083,13 @@ for (const platform of ["linux", "macos"] as const) {
 
     await openSettings(page);
     await selectSettingsTab(page, "text");
-    const vocabulary = page.locator("#vocabulary");
+    await page.evaluate(() => {
+      window.testState.preferences.vocabulary = [
+        { spelling: "Existing", misheard: [] },
+      ];
+      window.publishState();
+    });
+    const vocabulary = page.locator("[data-vocabulary-spelling]").first();
     await vocabulary.fill("Unsaved focused vocabulary");
     await page.evaluate(() => {
       window.testState.elapsed = 3;
@@ -1093,14 +1098,12 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(dialog).toBeVisible();
     await expect(vocabulary).toBeFocused();
     await expect(vocabulary).toHaveValue("Unsaved focused vocabulary");
-    await page.keyboard.press("Escape");
-    await expect(dialog).toBeVisible();
-    await expect(page.locator("#settings-notice")).toContainText(
-      "Save or discard your changes before switching tabs or language.",
-    );
-    await expect(vocabulary).toHaveValue("Unsaved focused vocabulary");
-    await page.locator("[data-discard-vocabulary]").click();
-    await expect(vocabulary).toHaveValue("");
+    await expect(page.locator("#vocabulary-save-status")).toHaveText("Saved", {
+      timeout: 2_000,
+    });
+    await expect
+      .poll(() => page.evaluate(() => window.testState.preferences.vocabulary))
+      .toEqual([{ spelling: "Unsaved focused vocabulary", misheard: [] }]);
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
     await expect(opener).toBeFocused();
@@ -2716,7 +2719,7 @@ for (const platform of ["linux", "macos"] as const) {
     );
   });
 
-  test(`${platform}: Text processing remains keyboard reachable and saves vocabulary after navigation`, async ({
+  test(`${platform}: Text processing adds structured vocabulary entries and saves them automatically`, async ({
     page,
   }) => {
     await start(page, platform);
@@ -2728,40 +2731,76 @@ for (const platform of ["linux", "macos"] as const) {
     await page.keyboard.press("Enter");
     await expect(textTab).toHaveAttribute("aria-current", "page");
     await expect(page.locator("#settings-vocabulary")).toBeVisible();
-    const vocabulary = page.locator("#vocabulary");
-    await vocabulary.scrollIntoViewIfNeeded();
-    await vocabulary.focus();
-    await expect(vocabulary).toBeFocused();
-    await expect(vocabulary).toBeInViewport();
-    await vocabulary.fill("OpenWhisper, Kubernetes");
-    await page
-      .locator('[data-window-action="close"]')
-      .evaluate((button: HTMLButtonElement) => button.click());
-    await expect(page.locator("dialog#settings-dialog")).toBeVisible();
-    await expect(page.locator("#settings-notice")).toContainText(
-      "Save or discard your changes before switching tabs or language.",
-    );
-    await expect(vocabulary).toHaveValue("OpenWhisper, Kubernetes");
-    expect(
-      await page.evaluate(() =>
-        window.calls.some(
-          (call) =>
-            call.command === "window_action" &&
-            (call.args as { action?: string }).action === "close",
-        ),
-      ),
-    ).toBe(false);
-    await page.locator("#save-vocabulary").click();
+    const spelling = page.locator("#new-vocabulary-spelling");
+    const misheard = page.locator("#new-vocabulary-misheard");
+    await spelling.scrollIntoViewIfNeeded();
+    await spelling.focus();
+    await expect(spelling).toBeFocused();
+    await expect(spelling).toBeInViewport();
+    await spelling.fill("OpenWhisper");
+    await misheard.fill("Open Whispur, OpenWhisper");
+    await page.locator("#vocabulary-add-form").press("Enter");
+    await expect(page.locator("#vocabulary-save-status")).toHaveText("Saved");
+    const expectedVocabulary = [
+      { spelling: "OpenWhisper", misheard: ["Open Whispur", "OpenWhisper"] },
+    ];
     await expect
       .poll(() => page.evaluate(() => window.calls.at(-1)))
       .toEqual({
         command: "save_preferences",
-        args: { changes: { vocabulary: "OpenWhisper, Kubernetes" } },
+        args: { changes: { vocabulary: expectedVocabulary } },
       });
     await expect
       .poll(() => page.evaluate(() => window.testState.preferences.vocabulary))
-      .toBe("OpenWhisper, Kubernetes");
+      .toEqual(expectedVocabulary);
+    await selectSettingsTab(page, "history");
+    await selectSettingsTab(page, "text");
+    await expect(
+      page.locator("[data-vocabulary-spelling]").first(),
+    ).toHaveValue("OpenWhisper");
+    await expect(page.locator(".vocabulary-chip")).toHaveCount(2);
     expect(page.url()).toBe(trustedUrl);
+  });
+
+  test(`${platform}: selected live transcript text can be saved as a vocabulary correction`, async ({
+    page,
+  }) => {
+    await start(page, platform, false, false, false, null);
+    await page.evaluate(() => {
+      window.testState.transcript = "I use Open Whispur every day.";
+      window.publishState();
+    });
+    const transcript = page.locator(".dictation-transcript-body .transcript");
+    await expect(transcript).toHaveText("I use Open Whispur every day.");
+    await transcript.evaluate((element) => {
+      const text = element.firstChild;
+      if (!text || text.nodeType !== Node.TEXT_NODE)
+        throw new Error("Synthetic transcript text is missing.");
+      const start = text.textContent!.indexOf("Open Whispur");
+      const selection = window.getSelection()!;
+      const range = document.createRange();
+      range.setStart(text, start);
+      range.setEnd(text, start + "Open Whispur".length);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      element.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 90,
+          clientY: 90,
+        }),
+      );
+    });
+    await page.getByRole("menuitem", { name: "Add to vocabulary" }).click();
+    const dialog = page.locator("#vocabulary-correction-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.locator("#corrected-vocabulary-spelling").fill("OpenWhisper");
+    await dialog.getByRole("button", { name: "Add correction" }).click();
+    await expect(dialog).toBeHidden();
+    await expect
+      .poll(() => page.evaluate(() => window.testState.preferences.vocabulary))
+      .toEqual([{ spelling: "OpenWhisper", misheard: ["Open Whispur"] }]);
   });
 
   test(`${platform}: signed-file-compatible bundle, shared navigation and branding`, async ({
@@ -2815,15 +2854,13 @@ for (const platform of ["linux", "macos"] as const) {
     await page.screenshot({ path: `test-results/${platform}-about.png` });
   });
 
-  test(`${platform}: vocabulary and snippet drafts discard and save independently`, async ({
+  test(`${platform}: vocabulary autosaves edits and merges duplicates while snippet drafts stay independent`, async ({
     page,
   }) => {
     await start(page, platform);
     await selectSettingsTab(page, "text");
-    const vocabulary = page.getByRole("textbox", {
-      name: "Custom vocabulary",
-      exact: true,
-    });
+    const newSpelling = page.locator("#new-vocabulary-spelling");
+    const newMisheard = page.locator("#new-vocabulary-misheard");
     const trigger = page.getByRole("textbox", {
       name: "When I say",
       exact: true,
@@ -2832,7 +2869,60 @@ for (const platform of ["linux", "macos"] as const) {
       name: "Insert",
       exact: true,
     });
-    await vocabulary.fill("WhisperFree, Kubernetes");
+    await newSpelling.fill("WhisperFree");
+    await newMisheard.fill("Whisper Free");
+    await page.locator("#vocabulary-add-form").press("Enter");
+    await expect
+      .poll(() => page.evaluate(() => window.testState.preferences.vocabulary))
+      .toEqual([{ spelling: "WhisperFree", misheard: ["Whisper Free"] }]);
+    await newSpelling.fill("whisperfree");
+    await newMisheard.fill("Whisper-Free");
+    await page.locator("#vocabulary-add-form").press("Enter");
+    await expect
+      .poll(() => page.evaluate(() => window.testState.preferences.vocabulary))
+      .toEqual([
+        { spelling: "WhisperFree", misheard: ["Whisper Free", "Whisper-Free"] },
+      ]);
+    await newSpelling.fill("Another term");
+    await newMisheard.fill("Another recognized form");
+    await page.locator("#vocabulary-add-form").press("Enter");
+    await expect
+      .poll(() => page.evaluate(() => window.testState.preferences.vocabulary))
+      .toEqual([
+        { spelling: "WhisperFree", misheard: ["Whisper Free", "Whisper-Free"] },
+        { spelling: "Another term", misheard: ["Another recognized form"] },
+      ]);
+    const duplicateSpelling = page.locator("[data-vocabulary-spelling]").nth(1);
+    await duplicateSpelling.fill("whisperfree");
+    await duplicateSpelling.press("Tab");
+    await expect
+      .poll(() => page.evaluate(() => window.testState.preferences.vocabulary))
+      .toEqual([
+        {
+          spelling: "WhisperFree",
+          misheard: ["Whisper Free", "Whisper-Free", "Another recognized form"],
+        },
+      ]);
+    await page
+      .getByRole("button", { name: "Remove correction Whisper Free" })
+      .click();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.calls.filter((call) => call.command === "save_preferences")
+              .length,
+        ),
+      )
+      .toBe(5);
+    await expect
+      .poll(() => page.evaluate(() => window.testState.preferences.vocabulary))
+      .toEqual([
+        {
+          spelling: "WhisperFree",
+          misheard: ["Whisper-Free", "Another recognized form"],
+        },
+      ]);
     await page
       .getByRole("button", { name: "Add snippet", exact: true })
       .click();
@@ -2843,16 +2933,21 @@ for (const platform of ["linux", "macos"] as const) {
       w.testState.elapsed = 2;
       w.publishState();
     });
-    await expect(vocabulary).toHaveValue("WhisperFree, Kubernetes");
     await expect(expansion).toHaveValue('<img src=x onerror="alert(1)"> $1');
-    await page.locator("[data-discard-vocabulary]").click();
-    await expect(vocabulary).toHaveValue("");
-    await expect(expansion).toHaveValue('<img src=x onerror="alert(1)"> $1');
+    await page.locator("[data-discard-snippets]").click();
+    await expect(expansion).toHaveCount(0);
+    await expect(
+      page.locator("[data-vocabulary-spelling]").first(),
+    ).toHaveValue("WhisperFree");
     await page.keyboard.press("Escape");
-    await expect(page.locator("dialog#settings-dialog")).toBeVisible();
-    await expect(page.locator("#settings-notice")).toContainText(
-      "Save or discard your changes before switching tabs or language.",
-    );
+    await expect(page.locator("dialog#settings-dialog")).toBeHidden();
+    await openSettings(page);
+    await selectSettingsTab(page, "text");
+    await page
+      .getByRole("button", { name: "Add snippet", exact: true })
+      .click();
+    await trigger.fill("my signature");
+    await expansion.fill('<img src=x onerror="alert(1)"> $1');
     await page.locator("#snippet-actions button[type=submit]").click();
     await expect
       .poll(() =>
@@ -2866,20 +2961,17 @@ for (const platform of ["linux", "macos"] as const) {
           enabled: true,
         },
       ]);
-    await expect(vocabulary).toHaveValue("");
     await expect(page.locator("#snippets img")).toHaveCount(0);
-
-    await vocabulary.fill("Kubernetes");
-    await expansion.fill("Unsaved snippet draft");
-    await page.locator("[data-discard-snippets]").click();
-    await expect(expansion).toHaveValue('<img src=x onerror="alert(1)"> $1');
-    await expect(vocabulary).toHaveValue("Kubernetes");
-    await page.locator("#save-vocabulary").click();
     await expect
       .poll(() =>
         page.evaluate(() => (window as any).testState.preferences.vocabulary),
       )
-      .toBe("Kubernetes");
+      .toEqual([
+        {
+          spelling: "WhisperFree",
+          misheard: ["Whisper-Free", "Another recognized form"],
+        },
+      ]);
     expect(
       await page.evaluate(
         () => (window as any).testState.preferences.snippets[0].expansion,
@@ -4957,8 +5049,11 @@ for (const platform of ["linux", "macos"] as const) {
     });
 
     await selectSettingsTab(page, "text");
-    const vocabulary = page.locator("#vocabulary");
-    await vocabulary.fill("Unsaved update-guard fixture");
+    await page.locator("#add-snippet").click();
+    const trigger = page.locator('.snippet-row [name="trigger"]');
+    const expansion = page.locator('.snippet-row [name="expansion"]');
+    await trigger.fill("unsaved update guard");
+    await expansion.fill("Synthetic draft");
     await page.evaluate(() => {
       document.querySelector<HTMLButtonElement>("#header-update")?.click();
     });
@@ -4977,9 +5072,9 @@ for (const platform of ["linux", "macos"] as const) {
       )
       .toBe(0);
     await page.locator("#update-later").click();
-    await expect(vocabulary).toHaveValue("Unsaved update-guard fixture");
-    await page.locator("[data-discard-vocabulary]").click();
-    await expect(vocabulary).toHaveValue("");
+    await expect(trigger).toHaveValue("unsaved update guard");
+    await page.locator("[data-discard-snippets]").click();
+    await expect(page.locator(".snippet-row")).toHaveCount(0);
   });
   test(`${platform}: German views fit the minimum window and translate the floating timer`, async ({
     page,

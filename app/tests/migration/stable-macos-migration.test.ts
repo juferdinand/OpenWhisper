@@ -52,7 +52,7 @@ test("Mac migration retains exact archives, typed data, draft snippets, models a
     const result = await migrateStableMacosProfile(profile, context, { assertStopped() { stopped++; }, snapshot() { snapshots++; return decoded; } });
     assert.equal(result.status, "migrated"); assert.equal(result.recoveryCount, 0); assert.ok(stopped >= 3); assert.equal(snapshots, 2);
     const store = await PreferenceStore.open(profile);
-    assert.equal(store.snapshot().vocabulary, "東京 café"); assert.equal(store.snapshot().hold_to_record, true);
+    assert.deepEqual(store.snapshot().vocabulary, [{ spelling: "東京 café", misheard: [] }]); assert.equal(store.snapshot().hold_to_record, true);
     assert.equal(store.snapshot().launch_at_login, true); assert.equal(store.snapshot().snippets[0]?.expansion, "");
     assert.equal(readFileSync(profile.legacy.settings, "utf8"), ownedPlist);
     assert.equal(readFileSync(profile.legacy.snippets, "utf8"), snippets);
@@ -67,12 +67,12 @@ test("Mac migration retains exact archives, typed data, draft snippets, models a
     const model = lstatSync(join(profile.paths.models, "ggml-tiny.bin"));
     assert.equal(model.ino, originalModel.ino); assert.equal(model.mode, originalModel.mode);
     for (const path of Object.values(profile.paths)) if (path.startsWith(`${publication(profile)}/`)) assert.equal(lstatSync(path).mode & 0o7777, 0o700);
-    await store.patch({ vocabulary: "Edited current state" });
+    await store.patch({ vocabulary: [{ spelling: "Edited current state", misheard: [] }] });
     file(join(profile.paths.history, "history.json"), '["Edited history"]');
     const repeated = await migrateStableMacosProfile(profile, undefined, { assertStopped() { assert.fail("Completed state must not reimport"); },
       snapshot() { assert.fail("Completed state must not query old preferences"); } });
     assert.equal(repeated.status, "already-complete");
-    assert.equal((await PreferenceStore.open(profile)).snapshot().vocabulary, "Edited current state");
+    assert.deepEqual((await PreferenceStore.open(profile)).snapshot().vocabulary, [{ spelling: "Edited current state", misheard: [] }]);
     assert.deepEqual(JSON.parse(readFileSync(join(profile.paths.history, "history.json"), "utf8")), ["Edited history"]);
   });
 });
