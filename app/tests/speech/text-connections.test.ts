@@ -10,7 +10,7 @@ import {
 } from "../../src/contracts/text/connections.js";
 import { validateCommandInput, appStateSchema } from "../../src/contracts/ui/state.js";
 import { ensureTextProviderAvailability, LocalTextConnectionScanner, resolveTextCliExecutable,
-  validateTextConnectionChanges } from "../../src/services/text/connections.js";
+  validateTextConnectionChanges, validateTextConnectionSave } from "../../src/services/text/connections.js";
 import { boundedTextPreview } from "../../src/services/text/text-preview.js";
 import { OptionalTextProcessing } from "../../src/services/text/optional-text-processing.js";
 
@@ -357,4 +357,26 @@ process.stdin.once('data', () => process.stdout.write('{not-json}\\n'));
   assert.deepEqual(availability.find(({ provider }) => provider === "claude_code"), {
     provider: "claude_code", detected: true, usable: true, models: [], reason: null,
   });
+});
+
+test("saving connections validates against the last scan and rescans only when it cannot confirm the change", async () => {
+  const defaults = defaultTextConnectionSettings();
+  const enabled = (provider: string) => ({ ...defaults, connections: defaults.connections.map((entry) => ({
+    ...entry, enabled: entry.provider === provider, ...(entry.provider === provider ? { model: "llama3.2" } : {}),
+  })) });
+  const ollamaUp = defaultTextConnectionAvailability().map((entry) => entry.provider === "ollama"
+    ? { ...entry, detected: true, usable: true, models: ["llama3.2"], reason: null } : entry);
+  let scans = 0;
+  // Reordering or disabling with a known snapshot never scans.
+  await validateTextConnectionSave(defaults, defaults, () => ollamaUp, async () => { scans++; });
+  await validateTextConnectionSave(defaults, enabled("ollama"), () => ollamaUp, async () => { scans++; });
+  assert.equal(scans, 0);
+  // A stale snapshot is refreshed once before the change is accepted.
+  let current = defaultTextConnectionAvailability();
+  await validateTextConnectionSave(defaults, enabled("ollama"), () => current, async () => { scans++; current = ollamaUp; });
+  assert.equal(scans, 1);
+  // Still unavailable after the rescan: the save is rejected.
+  await assert.rejects(validateTextConnectionSave(defaults, enabled("ollama"), () => defaultTextConnectionAvailability(),
+    async () => { scans++; }));
+  assert.equal(scans, 2);
 });

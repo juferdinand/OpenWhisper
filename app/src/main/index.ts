@@ -28,7 +28,7 @@ import { verifyMacApplicationBundle, macosMigrationContext } from "./macos-stabl
 import { StableMigrationError } from "../contracts/migration/stable-migration.js";
 import { PrivateStateStore } from "../services/settings/private-state.js";
 import { LocalProcessingService, LocalProcessingError } from "../services/speech/local-processing.js";
-import { LocalTextConnectionScanner, resolveCustomTextCliExecutable, resolveTextCliExecutable, startLmStudioServer, validateTextConnectionChanges } from "../services/text/connections.js";
+import { LocalTextConnectionScanner, resolveCustomTextCliExecutable, resolveTextCliExecutable, startLmStudioServer, validateTextConnectionSave } from "../services/text/connections.js";
 import { runClaudeCodeText } from "../services/text/claude-code.js";
 import { runCodexText } from "../services/text/codex.js";
 import { runCustomCliText } from "../services/text/custom-cli.js";
@@ -1186,11 +1186,16 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           throw new Error("Finish the current recording before changing text connections.");
         }
         const checked = textConnectionSettingsSchema.parse(settings);
-        await textProcessor.scanConnections(checked);
-        validateTextConnectionChanges(textConnectionStore.snapshot(), checked, textProcessor.snapshot().available);
+        await validateTextConnectionSave(textConnectionStore.snapshot(), checked, () => textProcessor.snapshot().available,
+          () => textProcessor.scanConnections(checked));
         await textConnectionStore.update(() => checked);
         // Fingerprint-gated reads keep old context private if the second write fails.
         await conversationStore.syncSettings(checked);
+        // A newly added custom CLI has no availability yet; check it in the background without blocking the save.
+        const known = new Set(textProcessor.snapshot().available.map((entry) => entry.provider));
+        if (checked.connections.some((connection) => !known.has(connection.provider))) {
+          void textProcessor.scanConnections(checked).catch(() => {});
+        }
         return state();
       }),
       new_conversation: () => withRecordingControl(async () => {
