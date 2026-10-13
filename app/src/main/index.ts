@@ -232,7 +232,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let gpuDiscovery: Promise<void> | undefined;
   let gpuSelection = {
     supported: descriptor ? recordingDescriptorSupportsGpu(descriptor) && !(descriptor.platform === "darwin" && runsInMacosVirtualMachine()) : false,
-    checked: false, available: false, fallback: false, device: null as string | null,
+    checked: false, available: false, fallback: false, probeFailed: false, device: null as string | null,
   };
   const cpuName = hardwareDeviceNameSchema.safeParse(cpus()[0]?.model.trim());
   let configured = false;
@@ -512,8 +512,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     // it shares the supervised speech allocation.
     if (gpuSelection.supported) {
       const probe = host.discoverGpu().then(() => {}, () => {
-        // Eligible loader/device failures already return safe CPU fallback after cleanup.
-        // A rejected probe may have poisoned ownership; never advertise this host as ready.
+        // Only a probe whose process ownership could not be safely retired rejects.
         recordingRetired = true; notify();
       });
       // The first Metal query after an install or update compiles shaders for several seconds; keep the
@@ -584,6 +583,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       recording_shortcut: (macShortcutState?.configuring ?? false) || !!keyCapture || !!shortcut.nativeX11 && shortcut.configuring,
       paste_ready: macPaste ? accessibilityAllowed : pasteState.ready, paste_configuring: pasteState.configuring,
       gpu_available: gpuSelection.available, gpu_supported: gpuSelection.supported, gpu_checked: gpuSelection.checked,
+      gpu_probe_failed: gpuSelection.probeFailed,
       cpu_device: cpuName.success ? cpuName.data : null, gpu_device: gpuName.success ? gpuName.data : null,
       gpu_fallback: preferenceSnapshot.gpu && gpuSelection.fallback, recovery_available: recording.recoveryAvailable,
       overlay_available: !!overlay && !overlay.isDestroyed() && (!waylandOverlay || waylandOverlay.available),

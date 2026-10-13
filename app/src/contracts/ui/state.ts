@@ -278,6 +278,7 @@ export const appStateSchema = z.strictObject({
   paste_configuring: z.boolean().optional(),
   gpu_available: z.boolean(),
   gpu_checked: z.boolean().optional(),
+  gpu_probe_failed: z.boolean().optional(),
   gpu_supported: z.boolean().optional(),
   cpu_device: hardwareDeviceNameSchema.nullable().optional(),
   gpu_device: hardwareDeviceNameSchema.nullable().optional(),

@@ -58,6 +58,7 @@ test("integrity refusal retains its category and cannot be replaced by teardown 
 
 interface Controls {
   discovery: string | null;
+  discoveryFailure: "NATIVE_FAILED" | undefined;
   initial: "running" | "non-running" | "reaped" | "ambiguous";
   infer: "success" | "native-failure" | "hang";
   challenge: "normal" | "wrong-nonce" | "wrong-pid" | "wrong-epoch" | "repeat" | "extra" | "hang";
@@ -95,7 +96,8 @@ function fixture(deadlines: Partial<{ startupMs: number; requestMs: number; clea
   // Darwin hosts identify children by their start time instead of Linux start ticks.
   const birth = (index: number): BackendIdentity["birth"] => platform === "darwin"
     ? { platform: "darwin", seconds: BigInt(1_700_000_000 + index), micros: 0 } : { platform: "linux", startTicks: BigInt(1000 + index) };
-  const controls: Controls = { discovery: "Owned hardware-category fixture", initial: "running", infer: "success", challenge: "normal", discoveryReply: "normal",
+  const controls: Controls = { discovery: "Owned hardware-category fixture", discoveryFailure: undefined,
+    initial: "running", infer: "success", challenge: "normal", discoveryReply: "normal",
     changedBirth: false, changedUid: false, invalidReady: false, extraResource: false, badResourceBackend: false,
     verifyFailure: undefined, openFailure: undefined, noOwner: undefined, openGate: undefined, verifyGate: undefined,
     reapGate: undefined, readsGate: undefined, readsFailure: false, leaseFailure: false,
@@ -134,7 +136,8 @@ function fixture(deadlines: Partial<{ startupMs: number; requestMs: number; clea
           if (request.command === "discover") {
             if (controls.discoveryReply === "hang") return;
             if (controls.discoveryReply === "exit") { record.level = "reaped"; for (const listener of exits) listener(); return; }
-            emit({ version: 1, id: request.id, ok: true, value: { command: "discover", gpu: controls.discovery } });
+            emit(controls.discoveryFailure ? { version: 1, id: request.id, ok: false, code: controls.discoveryFailure }
+              : { version: 1, id: request.id, ok: true, value: { command: "discover", gpu: controls.discovery } });
           }
           else if (request.command === "shutdown") emit({ version: 1, id: request.id, ok: true, value: { command: "shutdown" } });
           else if (controls.infer === "native-failure") emit({ version: 1, id: request.id, ok: false, code: "NATIVE_FAILED" });
@@ -195,6 +198,7 @@ function fixture(deadlines: Partial<{ startupMs: number; requestMs: number; clea
 // spawning a process; it is not evidence of actual process retirement.
 type Case = "manual" | "none" | "software" | "hardware" | "startup" | "inference" | "switch" |
   "gpu-discovery" | "gpu-discovery-unavailable" | "gpu-discovery-integrity" |
+  "native-discovery-failure" | "discovery-read-retirement-failure" |
   "cancel-open" | "cancel-verify" | "hung-admitted" | "hung-unadmitted" | "birth" | "uid" | "read-timeout" |
   "late-read-failure" | "wrong-nonce" | "extra-challenge" | "resource-extra" | "resource-backend" |
   "resource-failure" | "generic-open" | "terminal-open" | "invalid-ready" | "zombie" | "absent" | "invalid-input" |
@@ -315,10 +319,34 @@ test("a failed GPU discovery integrity check cannot advertise a reusable CPU all
   assert.equal(f.owners.length, 0);
 });
 
-test("empty device metadata is an invalid reply and never a hardware or CPU fallback claim", async () => {
+test("invalid GPU device metadata falls back to CPU after the owner and readers retire", async () => {
   const f = fixture(); f.controls.discovery = "  ";
-  const main = await fresh("empty-device", f.bindings), job = main.createJob(f.lease());
-  await assert.rejects(job.prepare(), failure("INVALID_REPLY")); assert.deepEqual(f.verifies, ["vulkan"]); await job.close();
+  const main = await fresh("empty-device", f.bindings);
+  assert.ok(main.discoverGpu);
+  assert.deepEqual(await main.discoverGpu(), { backend: "cpu", requestedGpu: true, gpu: false, detection: "unavailable" });
+  assert.deepEqual(f.verifies, ["vulkan"]);
+  assert.equal(f.owners[0]?.level, "reaped"); assert.equal(f.owners[0]?.readSettled, true);
+  const job = main.createJob(f.lease(false)); assert.equal((await job.prepare()).backend, "cpu"); await job.close();
+  assert.ok(f.events.indexOf("settle-reads") < f.events.indexOf("open:cpu"));
+});
+
+test("native GPU discovery failure keeps CPU recording available after full retirement", async () => {
+  const f = fixture(); f.controls.discoveryFailure = "NATIVE_FAILED";
+  const main = await fresh("native-discovery-failure", f.bindings);
+  assert.ok(main.discoverGpu);
+  assert.deepEqual(await main.discoverGpu(), { backend: "cpu", requestedGpu: true, gpu: false, detection: "unavailable" });
+  assert.equal(f.owners[0]?.level, "reaped"); assert.equal(f.owners[0]?.readSettled, true);
+  const job = main.createJob(f.lease());
+  assert.deepEqual(await job.prepare(), { backend: "cpu", requestedGpu: true, gpu: false, detection: "unavailable" });
+  assert.deepEqual(f.verifies, ["vulkan", "vulkan", "cpu"]); await job.close();
+});
+
+test("GPU discovery does not fall back when owner or reader retirement fails", async () => {
+  const f = fixture(); f.controls.discoveryFailure = "NATIVE_FAILED"; f.controls.readsFailure = true;
+  const main = await fresh("discovery-read-retirement-failure", f.bindings);
+  assert.ok(main.discoverGpu); await assert.rejects(main.discoverGpu(), failure("TEARDOWN_FAILED"));
+  assert.deepEqual(f.verifies, ["vulkan"]); assert.equal(f.owners[0]?.readSettled, false);
+  assert.throws(() => main.createJob(f.lease(false)), failure("TEARDOWN_FAILED"));
 });
 
 test("explicit trusted no-owner startup rollback is eligible for CPU fallback", async () => {
@@ -480,10 +508,12 @@ for (const [name, cause, expected] of [["generic-open", "START_FAILED", "TEARDOW
   assert.throws(() => main.createJob(f.lease()), failure(expected));
 });
 
-test("unknown readiness keys are rejected without CPU fallback", async () => {
+test("unknown readiness keys fall back only after the GPU owner is safely retired", async () => {
   const f = fixture(); f.controls.invalidReady = true;
   const main = await fresh("invalid-ready", f.bindings), job = main.createJob(f.lease());
-  await assert.rejects(job.prepare(), failure("INVALID_REPLY")); assert.deepEqual(f.verifies, ["vulkan"]); await job.close();
+  assert.deepEqual(await job.prepare(), { backend: "cpu", requestedGpu: true, gpu: false, detection: "unavailable" });
+  assert.deepEqual(f.verifies, ["vulkan", "cpu"]); assert.equal(f.owners[0]?.level, "reaped"); assert.equal(f.owners[0]?.readSettled, true);
+  assert.ok(f.events.indexOf("settle-reads") < f.events.indexOf("open:cpu")); await job.close();
 });
 
 for (const [name, level] of [["zombie", "non-running"], ["absent", "reaped"]] as const) test(`${name} candidate never admits work or receives a signal`, async () => {

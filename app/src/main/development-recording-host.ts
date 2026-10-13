@@ -40,7 +40,7 @@ interface Owner {
   allocation?: RetirementAllocation; boundary?: RetirementBoundary; generation: number;
   closing?: Promise<void>; failed?: Error; exited: boolean;
 }
-interface GpuSelectionState { readonly supported: boolean; readonly checked: boolean; readonly available: boolean; readonly fallback: boolean; readonly device: string | null }
+interface GpuSelectionState { readonly supported: boolean; readonly checked: boolean; readonly available: boolean; readonly fallback: boolean; readonly probeFailed: boolean; readonly device: string | null }
 const fail = (code = "Recording could not complete.") => new Error(code);
 const sourceDiscoveryStages = ["checked-pulse", "artifact", "allocation-fork", "spawn-ready", "native-query", "retirement"] as const;
 const sourceDiscoveryCodeSchema = z.union([recordingHostErrorSchema, z.literal("INTEGRITY_FAILED"), z.literal("FAILED")]);
@@ -85,6 +85,7 @@ export class DevelopmentRecordingHost {
   private gpuChecked = false;
   private gpuAvailable = false;
   private gpuFallback = false;
+  private gpuProbeFailed = false;
   private gpuDevice: string | null = null;
   private constructor(private readonly root: string, private readonly descriptor: DevelopmentRecordingDescriptor,
     private readonly inventory: ModelInventory, private readonly supervisor: BackendSupervisor,
@@ -297,6 +298,7 @@ export class DevelopmentRecordingHost {
     this.gpuChecked = true;
     this.gpuAvailable = selection.gpu && selection.detection === "device";
     this.gpuFallback = false;
+    this.gpuProbeFailed = selection.detection === "unavailable";
     this.gpuDevice = selection.gpuDevice ?? null;
     this.reportGpuState();
     return selection;
@@ -305,7 +307,7 @@ export class DevelopmentRecordingHost {
   private reportGpuState(): void {
     if (!this.supportsGpu()) return;
     try { this.options.gpuSelection?.({ supported: true, checked: this.gpuChecked,
-      available: this.gpuAvailable, fallback: this.gpuFallback, device: this.gpuDevice }); }
+      available: this.gpuAvailable, fallback: this.gpuFallback, probeFailed: this.gpuProbeFailed, device: this.gpuDevice }); }
     catch { /* UI state cannot affect recording ownership. */ }
   }
   private reportGpuBackendSelection(selection: BackendSelection): void {
@@ -313,6 +315,7 @@ export class DevelopmentRecordingHost {
     this.gpuChecked = true;
     this.gpuAvailable = selection.gpu && selection.detection === "device";
     this.gpuFallback = !selection.gpu;
+    this.gpuProbeFailed = selection.detection === "unavailable";
     if (selection.gpuDevice) this.gpuDevice = selection.gpuDevice;
     this.reportGpuState();
   }

@@ -551,6 +551,7 @@ function modelDialogSemanticKey(): string {
     state.preferences.gpu,
     state.gpu_supported,
     state.gpu_checked,
+    state.gpu_probe_failed,
     state.gpu_available,
     state.gpu_device,
     state.cpu_device,
@@ -746,8 +747,10 @@ function recognitionHardwareStatus(): string {
   if (macCpuOnly()) return t("Native speech engine");
   const cpu = state.cpu_device ?? t("CPU");
   const gpu = state.gpu_device;
-  if (state.gpu_fallback)
+  if (state.preferences.gpu && state.gpu_fallback)
     return t("CPU selected after GPU fallback: {device}", { device: cpu });
+  if (state.gpu_probe_failed)
+    return t("GPU recognition failed; using CPU: {device}", { device: cpu });
   if (state.preferences.gpu && state.gpu_checked === false)
     return t("Checking GPU hardware …");
   if (state.preferences.gpu && state.gpu_supported === false)
@@ -1184,6 +1187,14 @@ function recordingUnavailableMessage(): string {
 
 function recognitionModeStatus(): string {
   const cpu = state.cpu_device ?? t("CPU processor");
+  if (state.preferences.gpu && state.gpu_fallback) {
+    return t("GPU recognition failed; this recording used the CPU: {device}", {
+      device: cpu,
+    });
+  }
+  if (state.gpu_probe_failed) {
+    return t("GPU recognition failed; using CPU: {device}", { device: cpu });
+  }
   if (!state.preferences.gpu) {
     return t("CPU selected: {device}", { device: cpu });
   }
@@ -1194,11 +1205,6 @@ function recognitionModeStatus(): string {
   }
   if (state.gpu_checked === false) {
     return t("Checking GPU hardware …");
-  }
-  if (state.gpu_fallback) {
-    return t("GPU recognition failed; this recording used the CPU: {device}", {
-      device: cpu,
-    });
   }
   if (!state.gpu_available) {
     return t(
@@ -1222,6 +1228,9 @@ function setupRecognitionModeStatus(): string {
     );
   }
   if (!state.gpu_checked) return t("Checking GPU hardware …");
+  if (state.gpu_probe_failed) {
+    return t("GPU recognition failed; using CPU: {device}", { device: cpu });
+  }
   if (state.gpu_fallback) {
     return t("GPU recognition failed; using CPU: {device}", { device: cpu });
   }
@@ -2011,6 +2020,7 @@ function renderWorkspace() {
     state.transcript_preview_omitted,
     state.gpu_supported,
     state.gpu_checked,
+    state.gpu_probe_failed,
     state.gpu_available,
     state.gpu_fallback,
     state.gpu_device,
@@ -2379,6 +2389,7 @@ function render() {
       state.overlay_unavailable_reason,
       state.gpu_supported,
       state.gpu_checked,
+      state.gpu_probe_failed,
       state.gpu_available,
       state.gpu_device,
       state.cpu_device,
