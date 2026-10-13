@@ -26,7 +26,8 @@ import { createAiModelsSettings } from "./settings/ai-models";
 import { aiRevisionMarkup, bindAiRevision } from "./settings/ai-revision";
 
 let state: State;
-type View = Tab | "dictation" | "recording" | "text" | "connections" | "permissions";
+type View =
+  Tab | "dictation" | "recording" | "text" | "connections" | "permissions";
 let tab: View = "dictation";
 let vocabularyDraft: string[] | undefined;
 let snippetDraft: Snippet[] | undefined;

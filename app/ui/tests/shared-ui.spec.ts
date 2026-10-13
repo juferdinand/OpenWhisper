@@ -2873,7 +2873,7 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(
       page.locator("#open-model-drawer .model-pill-chevron"),
     ).toBeVisible();
-    await expect(page.locator(".dictation-feature-card")).toHaveCount(0);
+    await expect(page.locator(".dictation-feature-card")).toHaveCount(3);
     await expect(page.locator(".dictation-processing-strip")).toBeHidden();
     await expect(page.locator(".record-output-label")).toHaveText("Output");
     await expect(page.locator(".record-output [data-output]")).toHaveCount(2);
@@ -3492,9 +3492,7 @@ for (const platform of ["linux", "macos"] as const) {
     ).toBeInViewport();
     await expect(page.locator("#cancel")).toBeInViewport();
     await expect(page.locator("#copy-dictation")).toBeInViewport();
-    await expect(page.locator(".record-output [data-output]")).toHaveCount(
-      platform === "macos" ? 3 : 2,
-    );
+    await expect(page.locator(".record-output [data-output]")).toHaveCount(2);
     for (const output of await page
       .locator(".record-output [data-output]")
       .all())
@@ -3522,9 +3520,10 @@ for (const platform of ["linux", "macos"] as const) {
     expect(recoveryGeometry.transcriptBottom).toBeLessThanOrEqual(
       recoveryGeometry.recordTop + 1,
     );
-    expect(recoveryGeometry.bodyBottom).toBeLessThanOrEqual(
-      recoveryGeometry.transcriptBottom + 1,
-    );
+    expect(
+      recoveryGeometry.bodyBottom,
+      JSON.stringify({ platform, recoveryGeometry }),
+    ).toBeLessThanOrEqual(recoveryGeometry.transcriptBottom + 1);
     expect(recoveryGeometry.recordBottom).toBeLessThanOrEqual(560);
   });
 }
@@ -5814,7 +5813,7 @@ for (const platform of ["linux", "macos"] as const) {
       .click();
     await expect(page.locator("dialog#settings-dialog")).toBeHidden();
     await expect(page.locator(".settings-dialog-nav [data-tab]")).toHaveCount(
-      6,
+      7,
     );
     await openSettings(page);
     await selectSettingsTab(page, "general");
@@ -6642,7 +6641,7 @@ for (const platform of ["linux", "macos"] as const) {
     }
     await expect(page.locator("dialog#settings-dialog")).toBeHidden();
     await expect(page.locator(".settings-dialog-nav [data-tab]")).toHaveCount(
-      6,
+      7,
     );
     await expect(
       page.getByRole("heading", { name: "Aufnahme", exact: true }),

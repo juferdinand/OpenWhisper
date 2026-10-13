@@ -3081,7 +3081,8 @@ dialog#update-dialog {
   }
 }
 @media (max-width: 800px) {
-  .local-recognition-badge {
+  .local-recognition-badge,
+  .dictation-feature-cards {
     display: none;
   }
   .workspace-frame {
@@ -3135,7 +3136,17 @@ dialog#update-dialog {
     gap: 9px;
   }
   .dictation-topline {
+    flex-wrap: wrap;
     gap: 8px;
+  }
+  .workspace-mode-select {
+    order: 4;
+    flex: 1 1 100%;
+    justify-content: flex-end;
+  }
+  .workspace-mode-select select {
+    min-width: 0;
+    max-width: 160px;
   }
   .dictation-topline > #open-model-drawer {
     max-width: 198px;
