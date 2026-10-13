@@ -40,6 +40,20 @@ export function validateTextConnectionChanges(previous: TextConnectionSettings, 
   }
 }
 
+/**
+ * Saving must stay fast and keep the settings usable: validate against the last scan and rescan only
+ * when that snapshot cannot confirm the change (for example a provider enabled after it appeared).
+ */
+export async function validateTextConnectionSave(previous: TextConnectionSettings, next: TextConnectionSettings,
+  current: () => readonly TextConnectionAvailability[], rescan: () => Promise<unknown>): Promise<void> {
+  try {
+    validateTextConnectionChanges(previous, next, current());
+    return;
+  } catch { /* The snapshot may be stale; confirm with one fresh scan. */ }
+  await rescan();
+  validateTextConnectionChanges(previous, next, current());
+}
+
 interface LocalScanResult { readonly detected: boolean; readonly models: readonly string[]; readonly failed: boolean }
 
 function readLocalModels(provider: "ollama" | "lm_studio", endpoint = localServer[provider]): Promise<LocalScanResult> {
