@@ -7587,3 +7587,50 @@ test("clipboard-only setup completes without optional paste capability", async (
     await page.evaluate(() => window.calls.map((call) => call.command)),
   ).not.toContain("enable_paste");
 });
+
+test("Apple Silicon setup offers Metal recognition and Intel Macs skip the hardware step", async ({
+  page,
+}) => {
+  await start(page, "macos", false, true, false, null);
+  await page.evaluate(() => {
+    Object.assign(window.testState, {
+      cpu_device: "Synthetic Apple CPU",
+      gpu_device: "Synthetic Apple GPU",
+      gpu_supported: true,
+      gpu_checked: true,
+      gpu_available: true,
+      gpu_fallback: false,
+    });
+    window.publishState();
+  });
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page.getByText("Step 1 of 7", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Choose recognition hardware" }),
+  ).toBeVisible();
+  const gpuMode = page.locator('input[name="gpu-mode"][value="true"]');
+  await expect(gpuMode).toBeEnabled();
+  await gpuMode.check();
+  await expect
+    .poll(() => page.evaluate(() => window.testState.preferences.gpu))
+    .toBe(true);
+  await expect(
+    page.getByText("GPU selected. Metal device detected: Synthetic Apple GPU", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await page.evaluate(() => {
+    Object.assign(window.testState, {
+      gpu_device: null,
+      gpu_supported: false,
+      gpu_available: false,
+    });
+    window.publishState();
+  });
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page.getByText("Step 1 of 6", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Download a speech model" }),
+  ).toBeVisible();
+});

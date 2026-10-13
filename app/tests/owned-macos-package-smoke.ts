@@ -237,6 +237,12 @@ try {
     await expect.poll(async () => (await state()).preferences.ui_language).toBe("en");
     await setupPage.locator("[data-setup-next]").click();
     const setupTitle = setupPage.locator("main.setup-main #setup-title");
+    // Apple Silicon with a Metal device shows the recognition hardware step first; keep the CPU default.
+    await expect(setupTitle).toHaveText(/^(Choose recognition hardware|Download a speech model)$/u);
+    if (await setupTitle.textContent() === "Choose recognition hardware") {
+      await expect(setupPage.locator('input[name="gpu-mode"][value="false"]')).toBeChecked();
+      await setupPage.locator("[data-setup-next]").click();
+    }
     await expect(setupTitle).toHaveText("Download a speech model");
     for (const title of ["Allow microphone access", "Choose a language", "Where should the text go?", "Allow Accessibility access"]) {
       const next = setupPage.locator("[data-setup-next]");

@@ -17,7 +17,7 @@ import { recordingHostErrorSchema, recordingHostReplySchema, recordingHostReques
   type RecordingHostReply, type RecordingHostRequest, type RecordingSource } from "../workers/recording/recording-host-protocol.js";
 import { recordingEffectRequestSchema } from "../workers/recording/recording-effects-protocol.js";
 import { createLinuxSpeechBindings, speechEnvironment } from "./linux-speech-host.js";
-import type { DevelopmentRecordingDescriptor } from "./development-recording-descriptor.js";
+import { recordingDescriptorSupportsGpu, type DevelopmentRecordingDescriptor } from "./development-recording-descriptor.js";
 import { DeliveryReceiptCache, MainRecordingEffects } from "./recording-effects.js";
 import type { DeliveryBoundary } from "../core/recording/recording.js";
 import { macRecordingHostRequestSchema } from "../workers/recording/macos-recording-host-protocol.js";
@@ -301,10 +301,7 @@ export class DevelopmentRecordingHost {
     this.reportGpuState();
     return selection;
   }
-  private supportsGpu(): boolean {
-    return this.descriptor.platform === "linux" && this.descriptor.architecture === "x64" &&
-      this.descriptor.speech.entries.some((entry) => entry.backend === "vulkan");
-  }
+  private supportsGpu(): boolean { return recordingDescriptorSupportsGpu(this.descriptor); }
   private reportGpuState(): void {
     if (!this.supportsGpu()) return;
     try { this.options.gpuSelection?.({ supported: true, checked: this.gpuChecked,

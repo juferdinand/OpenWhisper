@@ -87,11 +87,22 @@ test("the unselected V2 branch retains V1 native, speech and worker graph valida
     { ...branch, retirement: { ...artifact, bytes: 0 } },
     { ...branch, speech: { ...branch.speech, architecture: "arm64" } },
     { ...branch, speech: { ...branch.speech, platform: "linux" } },
-    { ...branch, speech: { ...branch.speech, entries: [{ backend: "cpu", ...artifact }, { backend: "metal", ...artifact }] } },
+    { ...branch, speech: { ...branch.speech, entries: [{ backend: "cpu", ...artifact }, { backend: "vulkan", ...artifact }] } },
+    { ...branch, speech: { ...branch.speech, entries: [{ backend: "metal", ...artifact }] } },
     { ...branch, speechEntryGraph: { ...branch.speechEntryGraph, entries: branch.speechEntryGraph.entries.slice(1) } },
   ]) {
     const changed = { ...input, architectures: { ...input.architectures, x64: altered } };
     assert.throws(() => selectDevelopmentRecordingDescriptor(changed, { platform: "darwin", architecture: "arm64" }));
+  }
+});
+
+test("both universal Mac slices may ship a Metal speech build next to the CPU build", () => {
+  const input = universal(), withMetal = (branch: typeof input.architectures.x64) =>
+    ({ ...branch, speech: { ...branch.speech, entries: [{ backend: "cpu", ...artifact }, { backend: "metal", ...artifact }] } });
+  const changed = { ...input, architectures: { arm64: withMetal(input.architectures.arm64), x64: withMetal(input.architectures.x64) } };
+  for (const architecture of ["arm64", "x64"] as const) {
+    const selected = selectDevelopmentRecordingDescriptor(changed, { platform: "darwin", architecture });
+    assert.deepEqual(selected.speech.entries.map((entry) => entry.backend), ["cpu", "metal"]);
   }
 });
 

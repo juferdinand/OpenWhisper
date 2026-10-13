@@ -2,6 +2,7 @@ import { z } from "zod";
 import { developmentArtifactSchema } from "../services/development/development-artifact.js";
 import { speechResourceCatalogSchema } from "../services/speech/speech-resources.js";
 import { speechEntryGraphSchema } from "../services/speech/speech-entry-graph.js";
+import { gpuBackendFor } from "../services/speech/backend-supervisor.js";
 
 const common = {
   version: z.literal(1), architecture: z.enum(["x64", "arm64"]),
@@ -19,12 +20,20 @@ export const developmentRecordingDescriptorSchema = z.discriminatedUnion("platfo
   const cpuOnly = backends.length === 1 && backends[0] === "cpu";
   const cpuVulkan = value.platform === "linux" && value.architecture === "x64" &&
     backends.length === 2 && backends[0] === "cpu" && backends[1] === "vulkan";
+  // Both Mac slices ship Metal so the universal package keeps one native inventory; only arm64 selects it.
+  const cpuMetal = value.platform === "darwin" && backends.length === 2 && backends[0] === "cpu" && backends[1] === "metal";
   if (value.speech.platform !== value.platform || value.speech.architecture !== value.architecture ||
-    !(cpuOnly || cpuVulkan)) {
-    context.addIssue({ code: "custom", message: "The development recording slice requires its matching CPU and optional Vulkan builds." });
+    !(cpuOnly || cpuVulkan || cpuMetal)) {
+    context.addIssue({ code: "custom", message: "The development recording slice requires its matching CPU and optional Vulkan or Metal builds." });
   }
 }).readonly();
 export type DevelopmentRecordingDescriptor = z.infer<typeof developmentRecordingDescriptorSchema>;
+
+/** Vulkan on Linux x64 and Metal on Apple Silicon, when the build ships that speech backend. */
+export function recordingDescriptorSupportsGpu(descriptor: Pick<DevelopmentRecordingDescriptor, "platform" | "architecture" | "speech">): boolean {
+  const backend = gpuBackendFor(descriptor);
+  return backend !== undefined && descriptor.speech.entries.some((entry) => entry.backend === backend);
+}
 
 const darwin = { ...common, platform: z.literal("darwin"), retirement: developmentArtifactSchema };
 /** Validate both original V1 branches before selecting a universal Mac runtime slice. */

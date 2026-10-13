@@ -59,9 +59,9 @@ let pendingSettingsSection = "";
 let modelDialogKey = "";
 let modelFocusRestorePending = false;
 let setupStep = -1;
-// macOS builds recognize on the CPU only (Apple Silicon has no separate GPU device to choose),
-// so the hardware step is shown on Linux only.
-const setupHasHardwareStep = () => state.platform !== "macos";
+// Apple Silicon builds offer Metal; Intel Macs recognize on the CPU only, so there is nothing to choose.
+const setupHasHardwareStep = () =>
+  state.platform !== "macos" || state.gpu_supported === true;
 const setupStepCount = () => (setupHasHardwareStep() ? 7 : 6);
 const setupModelStep = () => (setupHasHardwareStep() ? 1 : 0);
 let focusSetupTitle = false;
@@ -507,6 +507,11 @@ const languages = () => {
     .join("")}</select>`;
 };
 const isMac = () => state.platform === "macos";
+/** GPU wording follows the platform API: Vulkan on Linux, Metal on Apple Silicon. */
+const gpuText = (key: string) =>
+  isMac() ? key.replaceAll("Vulkan", "Metal") : key;
+/** Intel Macs (and builds without Metal) only recognize on the CPU; there is no mode to choose. */
+const macCpuOnly = () => isMac() && state.gpu_supported !== true;
 const macToggleOnly = () =>
   isMac() && state.macos?.shortcut_toggle_only === true;
 const microphoneControl = () => {
@@ -735,7 +740,7 @@ function bindModelActions(root: ParentNode, inDrawer = false) {
     );
 }
 function recognitionHardwareStatus(): string {
-  if (isMac()) return t("Native speech engine");
+  if (macCpuOnly()) return t("Native speech engine");
   const cpu = state.cpu_device ?? t("CPU");
   const gpu = state.gpu_device;
   if (state.gpu_fallback)
@@ -751,13 +756,13 @@ function recognitionHardwareStatus(): string {
     state.gpu_available &&
     state.gpu_supported !== false
   )
-    return t("Vulkan GPU selected: {device}", {
-      device: gpu ?? t("Vulkan GPU"),
+    return t(gpuText("Vulkan GPU selected: {device}"), {
+      device: gpu ?? t(gpuText("Vulkan GPU")),
     });
   if (state.preferences.gpu && !state.gpu_available)
     return t("GPU unavailable; using CPU: {device}", { device: cpu });
   if (state.gpu_available && gpu)
-    return t("CPU selected; Vulkan GPU available: {device}", {
+    return t(gpuText("CPU selected; Vulkan GPU available: {device}"), {
       device: gpu,
     });
   return t("CPU selected: {device}", { device: cpu });
@@ -1167,7 +1172,7 @@ function syncPreferenceControls() {
     recognition.textContent =
       tab === "setup" && setupStep === 0
         ? setupRecognitionModeStatus()
-        : isMac()
+        : macCpuOnly()
           ? recognitionHardwareStatus()
           : recognitionModeStatus();
   }
@@ -1202,7 +1207,7 @@ function recognitionModeStatus(): string {
       },
     );
   }
-  return t("GPU selected. Vulkan device detected: {device}", {
+  return t(gpuText("GPU selected. Vulkan device detected: {device}"), {
     device: state.gpu_device ?? t("GPU device"),
   });
 }
@@ -1226,18 +1231,19 @@ function setupRecognitionModeStatus(): string {
     );
   }
   if (state.preferences.gpu) {
-    return t("GPU selected. Vulkan device detected: {device}", {
+    return t(gpuText("GPU selected. Vulkan device detected: {device}"), {
       device: state.gpu_device ?? t("GPU device"),
     });
   }
-  return t("CPU selected; Vulkan GPU available: {device}", {
+  return t(gpuText("CPU selected; Vulkan GPU available: {device}"), {
     device: state.gpu_device ?? t("GPU device"),
   });
 }
 
 function recognitionModeControl(setup = false, showStatus = true): string {
   const cpu = state.cpu_device ?? t("CPU processor");
-  const gpu = state.gpu_device ?? t(setup ? "GPU device" : "Vulkan GPU");
+  const gpu =
+    state.gpu_device ?? t(setup ? "GPU device" : gpuText("Vulkan GPU"));
   const gpuAvailable =
     state.gpu_supported === true &&
     state.gpu_checked === true &&
@@ -2593,8 +2599,8 @@ function render() {
       ) +
       section(
         t("Recognition"),
-        (isMac() ? "" : recognitionModeControl(false, false)) +
-          `<div class="recognition-mode-footer"><p class="secondary" id="recognition-backend">${esc(isMac() ? recognitionHardwareStatus() : recognitionModeStatus())}</p><button type="button" id="manage-models" data-open-model-drawer>${esc(t("Manage models"))}</button></div>`,
+        (macCpuOnly() ? "" : recognitionModeControl(false, false)) +
+          `<div class="recognition-mode-footer"><p class="secondary" id="recognition-backend">${esc(macCpuOnly() ? recognitionHardwareStatus() : recognitionModeStatus())}</p><button type="button" id="manage-models" data-open-model-drawer>${esc(t("Manage models"))}</button></div>`,
       ) +
       section(t("System"), systemDetails);
   } else if (tab === "recording") {

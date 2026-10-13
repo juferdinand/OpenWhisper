@@ -47,7 +47,8 @@ import { recordingRequestSchema } from "../core/recording/recording.js";
 import type { RecordingSource } from "../workers/recording/recording-host-protocol.js";
 import { recordingSnapshotSchema } from "../workers/recording/recording-host-protocol.js";
 import { DEVELOPMENT_RECORDING_BUILD } from "./development-recording-build.js";
-import { developmentRecordingDescriptorSchema, selectDevelopmentRecordingDescriptor, type DevelopmentRecordingDescriptor } from "./development-recording-descriptor.js";
+import { runsInMacosVirtualMachine } from "./macos-virtual-machine.js";
+import { developmentRecordingDescriptorSchema, recordingDescriptorSupportsGpu, selectDevelopmentRecordingDescriptor, type DevelopmentRecordingDescriptor } from "./development-recording-descriptor.js";
 import { DevelopmentRecordingHost, developmentPulseServer, formatSourceDiscoveryFailure } from "./development-recording-host.js";
 import { saveTranscript } from "../services/development/development-transcripts.js";
 import { expandSnippets } from "../core/text/snippet-expander.js";
@@ -227,8 +228,9 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     catch (error: unknown) { console.error(formatSourceDiscoveryFailure({ stage: "checked-pulse", code: "FAILED" })); throw error; }
   };
   let host: DevelopmentRecordingHost | undefined;
+  let gpuDiscovery: Promise<void> | undefined;
   let gpuSelection = {
-    supported: descriptor?.platform === "linux" && descriptor.speech.entries.some((entry) => entry.backend === "vulkan"),
+    supported: descriptor ? recordingDescriptorSupportsGpu(descriptor) && !(descriptor.platform === "darwin" && runsInMacosVirtualMachine()) : false,
     checked: false, available: false, fallback: false, device: null as string | null,
   };
   const cpuName = hardwareDeviceNameSchema.safeParse(cpus()[0]?.model.trim());
@@ -500,15 +502,19 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     if (descriptor.platform === "linux") {
       try { audioServer = await checkedAudioServer(); sources = await host.enumerate(audioServer); }
       catch { message = "A local audio server is not available."; }
-      // Complete the no-model probe before enabling recording; it shares the supervised speech allocation.
-      if (gpuSelection.supported) {
-        try { await host.discoverGpu(); }
-        catch {
-          // Eligible loader/device failures already return safe CPU fallback after cleanup.
-          // A rejected probe may have poisoned ownership; never advertise this host as ready.
-          recordingRetired = true;
-        }
-      }
+    }
+    // Complete the no-model probe (Vulkan on Linux, Metal on Apple Silicon) before recording;
+    // it shares the supervised speech allocation.
+    if (gpuSelection.supported) {
+      const probe = host.discoverGpu().then(() => {}, () => {
+        // Eligible loader/device failures already return safe CPU fallback after cleanup.
+        // A rejected probe may have poisoned ownership; never advertise this host as ready.
+        recordingRetired = true; notify();
+      });
+      // The first Metal query after an install or update compiles shaders for several seconds; keep the
+      // window responsive and let a recording wait for the probe instead of finding the allocation busy.
+      if (descriptor.platform === "darwin") gpuDiscovery = probe.finally(() => { gpuDiscovery = undefined; });
+      else await probe;
     }
   }
   const platform = process.platform === "darwin" ? "macos" : "linux";
@@ -734,6 +740,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   };
   const recordingAction = (operation: () => Promise<void>): Promise<void> => action(() => withRecordingControl(operation));
   const configureRecording = async (): Promise<void> => {
+    await gpuDiscovery;
     if (configured && host?.isConfigured()) return;
     if (!host) throw new Error("Recording unavailable.");
     const selected = preferences.snapshot(), model = installed.find((item) => item.model.id === selected.model);

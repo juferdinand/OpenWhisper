@@ -202,6 +202,8 @@ export async function stageMacPreview(options: MacPreviewStageOptions): Promise<
     [join(root, "node_modules/@noble/hashes/LICENSE"), "noble-hashes-LICENSE"],
     ...(metadata.dependencies["tar"] ? [[join(root, "node_modules/tar/LICENSE.md"), "tar-LICENSE.md"]] : []),
     [join(root, "vendor/whisper.cpp/LICENSE"), "whisper.cpp-LICENSE"], [join(root, "native/build-cpu/build-manifest.json"), "speech-cpu-unsigned-build.json"],
+    ...(recording.speech.entries.some((entry) => entry.backend === "metal")
+      ? [[join(root, "native/build-metal/build-manifest.json"), "speech-metal-unsigned-build.json"]] : []),
     ];
   const icon = resolve(root, "resources/AppIcon.icns");
   for (const [path] of [...notices, [icon]]) { if (!path) throw new Error("Missing notice input."); await files(path); }

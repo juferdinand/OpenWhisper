@@ -47,7 +47,16 @@ macOS checks cover universal packaging and owned CPU-based capture/update workfl
 successor test updates an Apple Silicon Universal predecessor to a private arm64-thin
 build with the next patch version; it does not test an Intel successor or production HTTPS.
 These checks do not establish physical microphone/TCC behavior, all input insertion targets,
-Metal selection, or Apple notarization. Public macOS builds are self-signed and not notarized; see [signing](SIGNING.md).
+or Apple notarization. Public macOS builds are self-signed and not notarized; see [signing](SIGNING.md).
+
+macOS packages ship a Metal speech build next to the CPU build for both architectures so the
+universal package keeps one native inventory. Only Apple Silicon offers GPU recognition; Intel Macs
+recognize on the CPU. The first Metal device query after an install or update compiles the embedded
+shader library (about 15 s on an M4 Pro) while the window stays usable; later starts reuse the system
+shader cache. A local synthetic-speech benchmark on one M4 Pro (macOS 26.5.2) measured, for 107 s of
+audio: Whisper large-v3-turbo 6.9 s on the CPU and 2.5 s with Metal, Whisper small 2.3 s and 1.4 s,
+Parakeet v3 (f16) 2.2 s and 2.1 s, with matching text. Metal on Intel Macs, other Apple Silicon
+generations and recordings from a physical microphone were not measured.
 
 Linux automated update tests cover offline owned GUI upgrades to private next-patch
 Debian and AppImage packages. The original native 0.2.5 app's GUI updater has **not** been
