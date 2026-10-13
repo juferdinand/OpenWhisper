@@ -137,6 +137,7 @@ test("renderer keeps optional local processing out of the ordinary dictation wor
     "Recording & shortcuts",
     "Text processing",
     "History",
+    "Permissions",
     "About",
   ]);
 

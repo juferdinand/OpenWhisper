@@ -428,7 +428,7 @@ test("missing selected model gives a direct model download path and translates u
   });
   await expect(page.locator("#status-title")).toHaveText("Choose a model");
   await expect(page.locator("#status")).toHaveText(
-    "Choose a speech model before recording.",
+    "No speech model is installed or selected.",
   );
   await expect(page.locator("#record")).toBeDisabled();
   await openSettings(page);
@@ -452,17 +452,17 @@ test("missing selected model gives a direct model download path and translates u
     window.publishState();
   });
   await expect(page.locator("#status-title")).toHaveText(
-    "Aufnahme nicht verfügbar",
+    "Mikrofonzugriff ist nicht erlaubt.",
   );
   await expect(page.locator("#status")).toHaveText(
-    "Mikrofonzugriff ist erforderlich. Prüfe die Einstellungen unter „Aufnahme“.",
+    "Mikrofonzugriff ist nicht erlaubt.",
   );
   await expect(page.locator("#record-unavailable-action")).toHaveText(
     "Einstellungen öffnen",
   );
   await page.locator("#record-unavailable-action").click();
   await expect(
-    page.locator('.settings-dialog-nav [data-tab="recording"]'),
+    page.locator('.settings-dialog-nav [data-tab="permissions"]'),
   ).toHaveClass(/selected/);
 });
 
@@ -801,7 +801,7 @@ async function start(
         recording_generation: 7,
         model_directory: "/test/models",
         macos: {
-          microphone_allowed: false,
+          microphone_allowed: fresh ? false : true,
           recording_shortcut: false,
           shortcut_hint: "Press a key",
           editor: "TextEdit",
@@ -1506,6 +1506,7 @@ for (const platform of ["linux", "macos"] as const) {
       "Recording & shortcuts",
       "Text processing",
       "History",
+      "Permissions · 1",
       "About",
     ]);
     await closeSettings(page);
@@ -2871,6 +2872,7 @@ for (const platform of ["linux", "macos"] as const) {
       "Recording & shortcuts",
       "Text processing",
       "History",
+      "Permissions · 1",
       "About",
     ]);
     await selectSettingsTab(page, "about");
@@ -3462,13 +3464,13 @@ for (const platform of ["linux", "macos"] as const) {
       await expect(status).toBeVisible();
       await expect(page.locator("#status-title")).toHaveText(
         language === "de"
-          ? "Aufnahme nicht verfügbar"
-          : "Recording is unavailable",
+          ? "Kein Mikrofon verfügbar"
+          : "No microphone available",
       );
       await expect(page.locator("#status")).toContainText(
         language === "de"
-          ? "Audioeingang verfügbar"
-          : "audio input is available",
+          ? "Kein Mikrofon ist verfügbar"
+          : "No microphone is available",
       );
       await expect(action).toBeVisible();
       await expect(action).toBeInViewport();
@@ -4373,7 +4375,7 @@ for (const platform of ["linux", "macos"] as const) {
       .click();
     await expect(page.locator("dialog#settings-dialog")).toBeHidden();
     await expect(page.locator(".settings-dialog-nav [data-tab]")).toHaveCount(
-      5,
+      6,
     );
     await openSettings(page);
     await selectSettingsTab(page, "general");
@@ -5203,7 +5205,7 @@ for (const platform of ["linux", "macos"] as const) {
     }
     await expect(page.locator("dialog#settings-dialog")).toBeHidden();
     await expect(page.locator(".settings-dialog-nav [data-tab]")).toHaveCount(
-      5,
+      6,
     );
     await expect(
       page.getByRole("heading", { name: "Aufnahme", exact: true }),
@@ -5940,4 +5942,136 @@ test("macOS clipboard setup finishes without Accessibility access and keeps the 
     await page.evaluate(() => window.calls.map((call) => call.command)),
   ).not.toContain("enable_paste");
   expect(await page.evaluate(() => window.testState.paste_ready)).toBe(false);
+});
+
+test("permission guidance distinguishes unrequested and denied microphone access and refreshes counts", async ({
+  page,
+}) => {
+  await start(page, "macos", false, false, false, null);
+  await page.evaluate(() => {
+    window.testState.macos!.microphone_allowed = false;
+    window.testState.macos!.microphone_permission = "not-determined";
+    window.testState.recording_available = false;
+    window.testState.recording_unavailable_reason = "permission";
+    window.publishState();
+  });
+  const banner = page.locator(".permission-banner-warning");
+  await expect(banner).toContainText(
+    "Microphone access has not been requested yet.",
+  );
+  await banner.getByRole("button", { name: "Allow microphone access" }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+    .toBe("allow_microphone");
+  await selectSettingsTab(page, "permissions");
+  const nav = page.locator('.settings-dialog-nav [data-tab="permissions"]');
+  await expect(nav).toHaveText("Permissions · 2");
+  await page.evaluate(() => {
+    window.testState.macos!.microphone_permission = "denied";
+    window.testState.preferences.ui_language = "de";
+    window.publishState();
+  });
+  await expect(page.locator(".permission-list")).toContainText(
+    "entferne es und erlaube den Zugriff erneut",
+  );
+  await expect(
+    page.locator('.permission-list [data-command="allow_microphone"]'),
+  ).toHaveText("Systemeinstellungen");
+  await page.evaluate(() => {
+    window.testState.macos!.microphone_allowed = true;
+    window.testState.macos!.microphone_permission = "granted";
+    window.testState.paste_ready = true;
+    window.testState.recording_available = true;
+    delete window.testState.recording_unavailable_reason;
+    window.publishState();
+  });
+  await expect(nav).toHaveText("Berechtigungen");
+  await expect(page.locator(".permission-badge-ok")).toHaveCount(2);
+});
+
+test("audio and host guidance exposes the cause without claiming missing Linux permission", async ({
+  page,
+}) => {
+  await start(page, "linux", false, false, false, null);
+  await page.evaluate(() => {
+    window.testState.recording_available = false;
+    window.testState.recording_unavailable_reason = "audio";
+    window.publishState();
+  });
+  const banner = page.locator(".permission-banner-warning");
+  await expect(banner).toContainText("No microphone is available.");
+  await expect(banner).not.toContainText("permission");
+  await banner.getByRole("button", { name: "Microphone settings" }).click();
+  await expect(page.locator("#settings-recording-microphone")).toBeInViewport();
+  await closeSettings(page);
+  await page.evaluate(() => {
+    window.testState.recording_unavailable_reason = "host";
+    window.publishState();
+  });
+  await expect(banner).toContainText(
+    "Restart OpenWhisper. Code: HOST_UNAVAILABLE.",
+  );
+  await expect(page.locator("#record")).toBeDisabled();
+});
+
+test("lost insertion access selects Copy across repeated state events and permits explicit reauthorization", async ({
+  page,
+}) => {
+  await start(page, "macos", false, false, false, null);
+  await page.evaluate(() => {
+    window.testState.preferences.output = "paste";
+    window.testState.preferences.ui_language = "de";
+    window.publishState();
+  });
+  await expect(page.locator(".permission-banner-accessibility")).toContainText(
+    "Der Text wird stattdessen kopiert.",
+  );
+  await selectSettingsTab(page, "recording");
+  const copy = page.locator('input[name="settings-output"][value="clipboard"]');
+  await expect(copy).toBeChecked();
+  await page.evaluate(() => {
+    window.publishState();
+    window.publishState();
+  });
+  await expect(copy).toBeChecked();
+  await page.locator('input[name="settings-output"][value="paste"]').check();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.calls.filter((call) => call.command === "enable_paste").length,
+      ),
+    )
+    .toBe(1);
+  await expect(
+    page.locator('input[name="settings-output"][value="paste"]'),
+  ).toBeChecked();
+});
+
+test("clipboard-only setup completes without optional paste capability", async ({
+  page,
+}) => {
+  await start(page, "linux", false, true, false, null);
+  await page.evaluate(() => {
+    window.testState.paste_portal = false;
+    window.testState.native_paste = false;
+    window.testState.paste_ready = false;
+    window.publishState();
+  });
+  // The fixture begins with an installed selected model; no device or permission is opened.
+  for (let step = 0; step < 7; step++) {
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+  }
+  await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.testState.preferences.setup_completed),
+    )
+    .toBe(true);
+  await expect
+    .poll(() => page.evaluate(() => window.testState.preferences.output))
+    .toBe("clipboard");
+  expect(
+    await page.evaluate(() => window.calls.map((call) => call.command)),
+  ).not.toContain("enable_paste");
 });

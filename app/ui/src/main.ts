@@ -1,3 +1,4 @@
+import { recordingUnavailableTitle } from "../../src/contracts/ui/recording-guidance.js";
 import { invoke, listen } from "./bridge";
 import { setLocale, t } from "./i18n";
 import { escapeHtml as esc } from "./escape-html";
@@ -17,7 +18,7 @@ import {
 } from "../../src/contracts/ui/state.js";
 
 let state: State;
-type View = Tab | "dictation" | "recording" | "text";
+type View = Tab | "dictation" | "recording" | "text" | "permissions";
 let tab: View = "dictation";
 let dirty = false;
 const dirtyTextParts = new Set<"vocabulary" | "snippets">();
@@ -737,7 +738,7 @@ const outputs = () =>
   ]
     .map(
       ([v, l]) =>
-        `<label><input type="radio" name="output" data-pref="output" value="${v}" ${state.preferences.output === v ? "checked" : ""}>${l}</label>`,
+        `<label><input type="radio" name="output" data-pref="output" value="${v}" ${effectiveOutput() === v ? "checked" : ""} ${v === "paste" && !accessibilityPermissionGranted() ? "disabled" : ""}>${l}</label>`,
     )
     .join("")}</div>`;
 const settingOutputs = () => {
@@ -745,8 +746,77 @@ const settingOutputs = () => {
     ["paste", "Insert", "Paste at the cursor"],
     ["clipboard", "Copy", "Copy to clipboard only"],
   ];
-  return `<fieldset class="settings-output-segment" aria-label="${esc(t("Output"))}">${modes.map(([value, label, fullLabel]) => `<label><input type="radio" name="settings-output" data-pref="output" value="${value}" aria-label="${esc(t(fullLabel))}" ${state.preferences.output === value ? "checked" : ""}><span>${esc(t(label))}</span></label>`).join("")}</fieldset>`;
+  return `<fieldset class="settings-output-segment" aria-label="${esc(t("Output"))}">${modes.map(([value, label, fullLabel]) => `<label><input type="radio" name="settings-output" data-pref="output" value="${value}" aria-label="${esc(t(fullLabel))}" ${effectiveOutput() === value ? "checked" : ""} ><span>${esc(t(label))}</span></label>`).join("")}</fieldset>`;
 };
+
+function effectiveOutput(): string {
+  return state.preferences.output === "paste" &&
+    !accessibilityPermissionGranted()
+    ? "clipboard"
+    : state.preferences.output;
+}
+function microphonePermissionGranted(): boolean {
+  if (isMac()) return state.macos?.microphone_allowed === true;
+  return true;
+}
+
+function accessibilityPermissionGranted(): boolean {
+  return state.paste_ready === true;
+}
+
+function missingPermissionCount(): number {
+  return (
+    Number(!microphonePermissionGranted()) +
+    Number(pasteAvailable() && !accessibilityPermissionGranted())
+  );
+}
+
+function microphonePermissionDetail(): string {
+  if (state.macos?.microphone_permission === "not-determined")
+    return t(
+      "Microphone access has not been requested yet. Allow access to record.",
+    );
+  return t(
+    "Allow microphone access in System Settings. If OpenWhisper is already enabled, remove it and allow it again.",
+  );
+}
+
+function permissionBanner(): string {
+  const banners: string[] = [];
+  const reason =
+    state.recording_available === false
+      ? state.recording_unavailable_reason
+      : undefined;
+  if (reason || !microphonePermissionGranted()) {
+    const microphone =
+      reason === "permission" || (!reason && !microphonePermissionGranted());
+    const title = microphone
+      ? t("Microphone access is not allowed.")
+      : recordingUnavailableMessage();
+    const detail = microphone
+      ? `<p>${esc(microphonePermissionDetail())}</p>`
+      : "";
+    const action = microphone
+      ? `<button type="button" data-command="allow_microphone">${esc(t(state.macos?.microphone_permission === "not-determined" ? "Allow microphone access" : "System Settings"))}</button>`
+      : reason === "model"
+        ? `<button type="button" data-open-model-drawer>${esc(t("Open models"))}</button>`
+        : reason === "audio"
+          ? `<button type="button" data-settings-view="recording" data-settings-section="settings-recording-microphone">${esc(t("Microphone settings"))}</button>`
+          : "";
+    banners.push(
+      `<div class="permission-banner permission-banner-warning" role="status"><span class="permission-dot" aria-hidden="true"></span><div><strong>${esc(title)}</strong>${detail}</div>${action}</div>`,
+    );
+  }
+  if (
+    !accessibilityPermissionGranted() &&
+    state.preferences.output === "paste"
+  ) {
+    banners.push(
+      `<div class="permission-banner permission-banner-accessibility" role="status"><span class="permission-dot" aria-hidden="true"></span><div><strong>${esc(t(isMac() ? "Accessibility access is missing" : "Automatic insertion is unavailable"))}</strong><p>${esc(t("Text is copied instead. Allow keyboard access to insert it automatically."))}</p></div><button type="button" data-settings-view="permissions">${esc(t("Grant permission"))}</button></div>`,
+    );
+  }
+  return banners.join("");
+}
 
 function notice(text: string) {
   const el = document.querySelector<HTMLDialogElement>("#settings-dialog")?.open
@@ -924,7 +994,10 @@ function syncPreferenceControls() {
   document
     .querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-pref]")
     .forEach((input) => {
-      const value = state.preferences[input.dataset.pref as keyof Preferences];
+      const value =
+        input.dataset.pref === "output"
+          ? effectiveOutput()
+          : state.preferences[input.dataset.pref as keyof Preferences];
       if (input instanceof HTMLInputElement && input.type === "checkbox")
         input.checked = !!value;
       else if (input instanceof HTMLInputElement && input.type === "radio")
@@ -944,22 +1017,7 @@ function syncPreferenceControls() {
   }
 }
 function recordingUnavailableMessage(): string {
-  switch (state.recording_unavailable_reason) {
-    case "model":
-      return t("Choose a speech model before recording.");
-    case "audio":
-      return t(
-        "No audio input is available. Check your microphone and audio settings.",
-      );
-    case "permission":
-      return t("Microphone permission is required. Check Recording settings.");
-    case "host":
-      return t(
-        "The recording service could not start. Restart OpenWhisper and try again.",
-      );
-    default:
-      return t("Recording is unavailable. Check your settings and try again.");
-  }
+  return t(recordingUnavailableTitle(state));
 }
 
 function recognitionModeStatus(): string {
@@ -1218,9 +1276,10 @@ function renderShell() {
     ["recording", "Recording & shortcuts"],
     ["text", "Text processing"],
     ["history", "History"],
+    ["permissions", "Permissions"],
     ["about", "About"],
   ];
-  app.innerHTML = `${windowTitlebar()}<div id="notice" role="alert" hidden></div><div id="dictation-workspace" class="dictation-workspace"><div class="workspace-frame${historyRailOpen ? "" : " history-collapsed"}"><main id="dictation-content" class="dictation-main"></main><aside id="dictation-history" class="dictation-history history-rail" aria-label="${esc(t("History"))}"></aside></div><div id="record-control"></div></div><dialog id="settings-dialog" aria-labelledby="page-title"><div class="settings-dialog-shell"><nav class="settings-dialog-nav" aria-label="${esc(t("Settings"))}">${settingsTabs.map(([id, title]) => `<button type="button" data-tab="${id}">${esc(t(title))}</button>`).join("")}<small class="settings-dialog-version">OpenWhisper ${esc(state.version)}</small></nav><div class="settings-dialog-panel"><header class="settings-dialog-heading"><h1 id="page-title"></h1><button type="button" id="close-settings">${esc(t("Done"))}</button></header><div id="settings-notice" role="alert" hidden></div><div class="settings-dialog-scroll"><div class="settings-content"><div id="content"></div></div></div></div></div></dialog>${emptyModelDialog()}${emptyUpdateDialog()}`;
+  app.innerHTML = `${windowTitlebar()}<div id="notice" role="alert" hidden></div><div id="dictation-workspace" class="dictation-workspace"><div class="workspace-frame${historyRailOpen ? "" : " history-collapsed"}"><main id="dictation-content" class="dictation-main"></main><aside id="dictation-history" class="dictation-history history-rail" aria-label="${esc(t("History"))}"></aside></div><div id="record-control"></div></div><dialog id="settings-dialog" aria-labelledby="page-title"><div class="settings-dialog-shell"><nav class="settings-dialog-nav" aria-label="${esc(t("Settings"))}">${settingsTabs.map(([id, title]) => `<button type="button" data-tab="${id}">${esc(t(title))}${id === "permissions" && missingPermissionCount() > 0 ? ` · ${missingPermissionCount()}` : ""}</button>`).join("")}<small class="settings-dialog-version">OpenWhisper ${esc(state.version)}</small></nav><div class="settings-dialog-panel"><header class="settings-dialog-heading"><h1 id="page-title"></h1><button type="button" id="close-settings">${esc(t("Done"))}</button></header><div id="settings-notice" role="alert" hidden></div><div class="settings-dialog-scroll"><div class="settings-content"><div id="content"></div></div></div></div></div></dialog>${emptyModelDialog()}${emptyUpdateDialog()}`;
   bindModelDialogShell();
   bindUpdateDialogShell();
   bindSettingsDialogShell();
@@ -1328,12 +1387,20 @@ function recordingStatusTitle(): string {
   if (busy) return t("Finding your words");
   if (recovery || state.status === "error")
     return t("Something needs attention");
-  if (
-    state.recording_available === false &&
-    state.recording_unavailable_reason === "model"
-  )
-    return t("Choose a model");
-  if (state.recording_available === false) return t("Recording is unavailable");
+  if (state.recording_available === false) {
+    switch (state.recording_unavailable_reason) {
+      case "model":
+        return t("Choose a model");
+      case "permission":
+        return t("Microphone access is not allowed.");
+      case "audio":
+        return t("No microphone available");
+      case "host":
+        return t("Recording service unavailable");
+      default:
+        return t("Recording is unavailable");
+    }
+  }
   return t("Ready");
 }
 
@@ -1374,7 +1441,7 @@ function recordControl() {
       ["paste", t("Insert"), t("Paste at the cursor")],
       ["clipboard", t("Copy"), t("Copy to clipboard only")],
     ];
-    const outputControls = `<div class="record-output" role="group" aria-label="${esc(t("Output"))}"><span class="record-output-label">${esc(t("Output"))}</span>${outputModes.map(([value, label, fullLabel]) => `<button type="button" data-output="${value}" data-pref="output" aria-label="${esc(fullLabel)}" title="${esc(fullLabel)}" aria-pressed="${state.preferences.output === value}" ${recording || recovery || busy || (value === "paste" && (portalBusy || state.paste_configuring)) ? "disabled" : ""}>${esc(label)}</button>`).join("")}</div>`;
+    const outputControls = `<div class="record-output" role="group" aria-label="${esc(t("Output"))}"><span class="record-output-label">${esc(t("Output"))}</span>${outputModes.map(([value, label, fullLabel]) => `<button type="button" data-output="${value}" data-pref="output" aria-label="${esc(fullLabel)}" title="${esc(fullLabel)}" aria-pressed="${effectiveOutput() === value}" ${recording || recovery || busy || (value === "paste" && (!accessibilityPermissionGranted() || portalBusy || state.paste_configuring)) ? "disabled" : ""}>${esc(label)}</button>`).join("")}</div>`;
     const overlayBars = Array.from({ length: 5 }, () => "<i></i>").join("");
     controls.innerHTML = overlay
       ? `<div class="record-actions"><div class="record-status"><div class="audio-mark" aria-hidden="true">${overlayBars}<canvas class="live-waveform" data-waveform="overlay" aria-hidden="true"></canvas></div><div class="record-copy"><strong id="status-title"></strong><span id="status" role="status"></span></div><button id="record-unavailable-action" data-goto="recording" hidden></button></div><span id="record-label"></span><button id="cancel" aria-label="${esc(t("Discard recording"))}" hidden>${esc(t("Cancel"))}</button><button id="record" class="capsule"><span id="record-symbol"></span><span id="record-action-label" class="record-action-label"></span></button></div>`
@@ -1435,7 +1502,10 @@ function recordControl() {
           );
           return;
         }
-        tab = "recording";
+        tab =
+          state.recording_unavailable_reason === "permission"
+            ? "permissions"
+            : "recording";
         render();
       });
   }
@@ -1496,7 +1566,7 @@ function recordControl() {
     .forEach((output) => {
       output.setAttribute(
         "aria-pressed",
-        String(output.dataset.output === state.preferences.output),
+        String(output.dataset.output === effectiveOutput()),
       );
       output.disabled =
         recording ||
@@ -1512,7 +1582,11 @@ function recordControl() {
   unavailableAction.hidden =
     !unavailable || state.recording_unavailable_reason === "host";
   unavailableAction.dataset.goto =
-    state.recording_unavailable_reason === "model" ? "models" : "recording";
+    state.recording_unavailable_reason === "model"
+      ? "models"
+      : state.recording_unavailable_reason === "permission"
+        ? "permissions"
+        : "recording";
   unavailableAction.textContent = t(
     state.recording_unavailable_reason === "model"
       ? "Open models"
@@ -1631,6 +1705,9 @@ function renderWorkspace() {
     state.recommended_models,
     state.recording_available,
     state.recording_unavailable_reason,
+    state.macos,
+    state.paste_ready,
+    state.preferences.output,
     state.recovery_available,
     state.history,
     state.transcript,
@@ -1688,7 +1765,7 @@ function renderWorkspace() {
         : state.recovery_available
           ? t("Something needs attention")
           : state.recording_available === false
-            ? t("Recording is unavailable")
+            ? recordingUnavailableMessage()
             : t("Ready");
   const recordingReady = state.recording_available !== false;
   const modeTitle = recognitionHardwareStatus();
@@ -1697,7 +1774,7 @@ function renderWorkspace() {
     : t("History is not saved.");
   const retainedWaveformCanvas = mainWaveform?.canvas;
   retainedWaveformCanvas?.remove();
-  main.innerHTML = `<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true"><canvas class="live-waveform" data-waveform="main" aria-hidden="true"></canvas></div></section><section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}</div></section><section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
+  main.innerHTML = `${permissionBanner()}<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true"><canvas class="live-waveform" data-waveform="main" aria-hidden="true"></canvas></div></section><section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}</div></section><section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
   if (retainedWaveformCanvas)
     main
       .querySelector<HTMLElement>(".dictation-waveform")
@@ -1709,6 +1786,11 @@ function renderWorkspace() {
       if (selectedHistoryIndex !== null) {
         void command("copy_history", { index: selectedHistoryIndex });
       } else void command("copy_transcript");
+    });
+  main
+    .querySelector<HTMLButtonElement>('[data-command="allow_microphone"]')
+    ?.addEventListener("click", () => {
+      void command("allow_microphone");
     });
   bindHistoryActions(rail);
   rail
@@ -1758,6 +1840,8 @@ function render() {
     settingsDialog.close();
   }
   document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((b) => {
+    if (b.dataset.tab === "permissions")
+      b.textContent = `${t("Permissions")}${missingPermissionCount() ? ` · ${missingPermissionCount()}` : ""}`;
     const selected = b.dataset.tab === tab;
     b.classList.toggle("selected", selected);
     b.setAttribute("aria-current", selected ? "page" : "false");
@@ -1872,7 +1956,9 @@ function render() {
     document.querySelector<HTMLElement>("#page-title")!.textContent = t(
       tab === "recording"
         ? "Recording & shortcuts"
-        : (tabs.find(([id]) => id === tab)?.[1] ?? "Settings"),
+        : tab === "permissions"
+          ? "Permissions"
+          : (tabs.find(([id]) => id === tab)?.[1] ?? "Settings"),
     );
   }
   const content = document.querySelector<HTMLDivElement>("#content")!;
@@ -2188,6 +2274,13 @@ function render() {
         "",
         "settings-recording-permissions",
       );
+  } else if (tab === "permissions") {
+    const microphoneRow = `<div class="permission-row"><div class="permission-row-copy"><strong>${esc(t("Microphone"))}</strong><span>${esc(t("Records your voice. Audio stays on this device."))}</span>${microphonePermissionGranted() ? "" : `<small>${esc(microphonePermissionDetail())}</small>`}</div><span class="permission-badge ${microphonePermissionGranted() ? "permission-badge-ok" : "permission-badge-warning"}">${esc(t(microphonePermissionGranted() ? "Allowed" : "Required · missing"))}</span>${microphonePermissionGranted() ? `<button type="button" disabled>${esc(t("Allowed"))}</button>` : isMac() ? `<button type="button" data-command="allow_microphone">${esc(t(state.macos?.microphone_permission === "not-determined" ? "Allow microphone access" : "System Settings"))}</button>` : `<button type="button" data-command="refresh_microphones">${esc(t("Check again"))}</button>`}</div>`;
+    const accessibilityRow = `<div class="permission-row"><div class="permission-row-copy"><strong>${esc(isMac() ? t("Accessibility access") : t("Keyboard access"))}</strong><span>${esc(t("Recognizes your shortcut and inserts text into the active window."))}</span>${accessibilityPermissionGranted() ? "" : `<small>${esc(t("Text is copied instead. Allow keyboard access to insert it automatically."))}</small>`}</div><span class="permission-badge ${accessibilityPermissionGranted() ? "permission-badge-ok" : "permission-badge-accessibility"}">${esc(t(accessibilityPermissionGranted() ? "Allowed" : pasteAvailable() ? "Optional · missing" : "Unavailable"))}</span>${accessibilityPermissionGranted() ? `<button type="button" disabled>${esc(t("Allowed"))}</button>` : permissionButton()}</div>`;
+    content.innerHTML = section(
+      t("Permissions"),
+      `<div class="permission-list">${microphoneRow}${accessibilityRow}</div><p class="secondary">${esc(t("Permission status refreshes automatically when OpenWhisper returns to the foreground."))}</p>`,
+    );
   } else if (tab === "models") {
     content.innerHTML =
       section(

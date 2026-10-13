@@ -1,4 +1,5 @@
 import type { MenuItemConstructorOptions } from "electron";
+import { recordingUnavailableTitle } from "../contracts/ui/recording-guidance.js";
 import type { AppState } from "../contracts/ui/state.js";
 
 export interface TrayMenuActions {
@@ -20,6 +21,9 @@ export function buildTrayMenu(state: AppState, actions: TrayMenuActions,
     { type: "separator" },
     { id: "toggle-recording", label: translate(recording ? "Stop recording" : "Start dictation"), enabled: canToggle,
       click: () => { if (canToggle) actions.toggleRecording(); } },
+    ...(state.recording_available === false && !recording && !state.recovery_available ? [
+      { id: "recording-unavailable", label: translate(recordingUnavailableTitle(state)), enabled: false },
+    ] : []),
     { id: "cancel-recording", label: translate("Cancel"), enabled: canCancel,
       click: () => { if (canCancel) actions.cancelRecording(); } },
     { type: "separator" },

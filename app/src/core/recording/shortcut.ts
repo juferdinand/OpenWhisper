@@ -22,6 +22,7 @@ export class ShortcutRecording {
     const operation = Promise.resolve().then(async () => {
       const status = await this.capture.status();
       if (this.closed || cancellation.signal.aborted) return;
+      if (status === "unavailable") { await this.capture.unavailable?.(); return; }
       if (status === "recording" && !holding) {
         const lease = await this.capture.currentLease?.();
         if (lease && !this.closed && !cancellation.signal.aborted) {

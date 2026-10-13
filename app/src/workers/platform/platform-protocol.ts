@@ -50,6 +50,7 @@ export type PlatformReply = z.infer<typeof platformReplySchema>;
 const captureEnvelope = { ...envelope, channel: z.literal("platform-capture"), epoch: z.uuid() };
 export const platformCaptureRequestSchema = z.discriminatedUnion("command", [
   z.strictObject({ ...captureEnvelope, command: z.literal("status") }),
+  z.strictObject({ ...captureEnvelope, command: z.literal("unavailable") }),
   z.strictObject({ ...captureEnvelope, command: z.literal("wire-status") }),
   z.strictObject({ ...captureEnvelope, command: z.literal("start") }),
   z.strictObject({ ...captureEnvelope, command: z.literal("lease") }),
@@ -63,7 +64,7 @@ export const platformCaptureReplySchema = z.discriminatedUnion("ok", [
     z.strictObject({ command: z.literal("wire-status"), text: controlWireStatusTextSchema }),
     z.strictObject({ command: z.literal("start"), lease: z.uuid() }),
     z.strictObject({ command: z.literal("lease"), lease: z.uuid().nullable() }),
-    ...(["stop", "cancel", "abort-start"] as const).map((command) => z.strictObject({ command: z.literal(command) })),
+    ...(["stop", "cancel", "abort-start", "unavailable"] as const).map((command) => z.strictObject({ command: z.literal(command) })),
   ]) }),
   z.strictObject({ ...captureEnvelope, ok: z.literal(false), code: z.enum(["BUSY", "CANCELLED", "UNAVAILABLE", "INVALID_FRAME", "TEARDOWN_FAILED", "STALE_LEASE"]) }),
 ]);
@@ -119,6 +120,7 @@ export class PlatformCaptureClient implements ControlCapturePort {
     const lease = Object.freeze({ stop: () => finish("stop"), cancel: () => finish("cancel") });
     this.leases.set(id, lease); return lease;
   }
+  async unavailable(): Promise<void> { await this.begin({ command: "unavailable" }).result; }
   async status(): Promise<ControlStatus> {
     const reply = await this.begin({ command: "status" }).result;
     if (!reply.ok || reply.value.command !== "status") throw new PlatformCaptureError("INVALID_FRAME");
