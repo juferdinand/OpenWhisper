@@ -131,7 +131,8 @@ export class MacCaptureRuntime {
           return receipt;
         } }, onTextStage: (event) => { this.emit({ kind: "text-stage", event }); },
         speech: { transcribe: (audio, selected, context, onStage) => {
-          const adaptive = new AdaptiveSpeechBoundary(createUtilitySpeechEffects({ gpuAvailable: false,
+          // GPU requests reach the main speech supervisor, which uses Metal or falls back to the CPU.
+          const adaptive = new AdaptiveSpeechBoundary(createUtilitySpeechEffects({ gpuAvailable: true,
             infer: this.effects.infer(context), progress: (value) => { this.emit({ kind: "progress", ...value }); } }));
           return adaptive.transcribe(audio, selected, context, onStage);
         } },

@@ -9,7 +9,8 @@ const request = { version: z.literal(1), channel: z.literal("recording-host"), e
 export const macRecordingHostRequestSchema = z.discriminatedUnion("command", [
   z.strictObject({ ...request, command: z.literal("configure"), capture: developmentCaptureDescriptorSchema,
     source: z.union([z.literal(""), recordingSourceIdSchema]),
-    request: recordingRequestSchema.unwrap().extend({ model: speechModelSchema.refine((model) => !model.gpu),
+    // Metal requests are admitted; the main supervisor selects the GPU backend or falls back to the CPU.
+    request: recordingRequestSchema.unwrap().extend({ model: speechModelSchema,
       vocabulary: speechVocabularySchema, snippets: preferencesSchema.shape.snippets }) }),
   ...(["start", "stop", "cancel", "retry", "discard", "status", "close"] as const)
     .map((command) => z.strictObject({ ...request, command: z.literal(command) })),

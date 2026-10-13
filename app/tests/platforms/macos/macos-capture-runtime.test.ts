@@ -82,13 +82,14 @@ function fixture() {
     failedCapture: () => { captureFailed = true; }, incompleteFence: (value: boolean) => { incompleteFence = value; },
   };
 }
-test("Mac protocol admits only fixed CPU configuration and shared content-bounded control replies", () => {
+test("Mac protocol admits fixed CPU or Metal configuration and shared content-bounded control replies", () => {
   const f = fixture(), config = f.configuration(); macRecordingHostRequestSchema.parse(config);
+  // GPU (Metal) requests are admitted since the main supervisor owns the backend choice and CPU fallback.
+  macRecordingHostRequestSchema.parse({ ...config, request: { ...config.request, model: { ...config.request.model, gpu: true } } });
   // A CoreAudio device UID may be selected; malformed identifiers are refused.
   macRecordingHostRequestSchema.parse({ ...config, source: "AppleUSBAudioEngine:Synthetic Mic:1" });
   for (const changed of [{ ...config, binding: "/untrusted.node" }, { ...config, recoveryPath: "/owned/recovery" },
     { ...config, server: "unix:/owned/pulse/native" }, { ...config, source: " leading-space" }, { ...config, source: "line\nbreak" }, { ...config, selection: { mode: "synthetic" } },
-    { ...config, request: { ...config.request, model: { ...config.request.model, gpu: true } } },
     { ...config, command: "enumerate-sources" }, { ...config, samples: new Float32Array(1) }]) {
     assert.equal(macRecordingHostRequestSchema.safeParse(changed).success, false);
   }
