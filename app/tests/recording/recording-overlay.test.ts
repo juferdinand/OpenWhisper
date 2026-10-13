@@ -163,3 +163,10 @@ test(
     assert.equal(shouldShowRecordingOverlay(current, false), true);
   },
 );
+
+test("the macOS recording overlay is a non-activating panel that accepts the first click", () => {
+  const mac = overlayWindowOptions({ title: "Recording", preloadPath: "/owned/preload.cjs", platform: "darwin" });
+  assert.equal(mac.type, "panel"); assert.equal(mac.acceptFirstMouse, true); assert.equal(mac.focusable, false);
+  const linux = overlayWindowOptions({ title: "Recording", preloadPath: "/owned/preload.cjs", platform: "linux" });
+  assert.equal(linux.type, undefined); assert.equal(linux.acceptFirstMouse, undefined);
+});
