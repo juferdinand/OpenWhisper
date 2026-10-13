@@ -45,7 +45,7 @@ export const snippetSchema = z.strictObject({
 });
 export type Snippet = z.infer<typeof snippetSchema>;
 const vocabularyText = utf8(8192).refine(
-  (value) => value.length > 0 && value === value.trim() && !/\p{Cc}/u.test(value),
+  (value) => value.length > 0 && value === value.trim() && !/\p{Cc}/u.test(value.replace(/\t/gu, "")),
   { message: "Vocabulary entries must contain trimmed text" },
 );
 const vocabularyEntrySchema = z.strictObject({
@@ -53,34 +53,42 @@ const vocabularyEntrySchema = z.strictObject({
   misheard: z.array(vocabularyText).max(4096),
 });
 export type VocabEntry = z.infer<typeof vocabularyEntrySchema>;
-const vocabularyEntriesSchema = z.array(vocabularyEntrySchema).max(4096).superRefine((entries, context) => {
+function refineVocabularyEntries(entries: VocabEntry[], context: z.RefinementCtx, allowDuplicates: boolean): void {
   const spellings = new Set<string>();
-  const aliasOwners = new Map<string, number>();
+  const aliasOwners = new Map<string, string>();
   let textBytes = 0;
   let promptBytes = 0;
   for (const [index, entry] of entries.entries()) {
     const spelling = vocabularyEntryKey(entry.spelling);
-    if (spellings.has(spelling)) context.addIssue({ code: "custom", path: [index, "spelling"], message: "Duplicate spelling" });
+    if (!allowDuplicates && spellings.has(spelling)) {
+      context.addIssue({ code: "custom", path: [index, "spelling"], message: "Duplicate spelling" });
+    }
     spellings.add(spelling);
     textBytes += encoder.encode(entry.spelling).byteLength;
     promptBytes += encoder.encode(entry.spelling).byteLength + (index > 0 ? 1 : 0);
     const aliases = new Set<string>();
     for (const [aliasIndex, alias] of entry.misheard.entries()) {
       const key = vocabularyEntryKey(alias);
-      if (aliases.has(key)) context.addIssue({ code: "custom", path: [index, "misheard", aliasIndex], message: "Duplicate correction" });
+      if (!allowDuplicates && aliases.has(key)) {
+        context.addIssue({ code: "custom", path: [index, "misheard", aliasIndex], message: "Duplicate correction" });
+      }
       aliases.add(key);
       const matchKey = vocabularyMatchKey(alias);
       const owner = aliasOwners.get(matchKey);
-      if (matchKey && owner !== undefined && owner !== index) {
+      if (matchKey && owner !== undefined && owner !== spelling) {
         context.addIssue({ code: "custom", path: [index, "misheard", aliasIndex], message: "Correction is assigned to another spelling" });
-      } else if (matchKey && owner === undefined) aliasOwners.set(matchKey, index);
+      } else if (matchKey && owner === undefined) aliasOwners.set(matchKey, spelling);
       textBytes += encoder.encode(alias).byteLength;
     }
   }
   if (textBytes > 8192 || promptBytes > 8192) {
     context.addIssue({ code: "custom", message: "Vocabulary exceeds the supported size" });
   }
-});
+}
+const vocabularyEntriesSchema = z.array(vocabularyEntrySchema).max(4096)
+  .superRefine((entries, context) => refineVocabularyEntries(entries, context, true));
+const editableVocabularyEntriesSchema = z.array(vocabularyEntrySchema).max(4096)
+  .superRefine((entries, context) => refineVocabularyEntries(entries, context, false));
 function migrateVocabulary(input: unknown): unknown {
   if (typeof input !== "string") return input;
   return input.split(/[,;\n\r]/u)
@@ -153,7 +161,7 @@ export const preferencePatchSchema = preferencesSchema.omit({
   native_trigger: true,
   x11_trigger: true,
   macos_shortcut: true,
-}).partial().refine(
+}).extend({ vocabulary: editableVocabularyEntriesSchema.optional() }).partial().refine(
   (patch) => Object.values(patch).every((value) => value !== undefined),
   { message: "Preference patch values must be defined" },
 );

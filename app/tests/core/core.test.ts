@@ -87,6 +87,13 @@ test("hyphenated aliases match equivalent spaced or hyphenated transcript tokens
   assert.equal(correctVocabulary("Open Whispur, Open-Whispur", entries), "OpenWhisper, OpenWhisper");
 });
 
+test("long explicit aliases match incrementally without quadratic candidate normalization", () => {
+  const alias = Array.from({ length: 400 }, () => "term").join(" ");
+  const started = performance.now();
+  assert.equal(correctVocabulary(alias, [{ spelling: "LongAlias", misheard: [alias] }]), "LongAlias");
+  assert.ok(performance.now() - started < 1000, "400-word alias should not stall synchronous transcript processing");
+});
+
 test("snippets preserve literal expansions, Unicode boundaries, empty drafts and matching order", () => {
   const snippets = [
     { trigger: "mail", expansion: "$& $1 $` $' \\ 日本語 👩‍💻", enabled: true },

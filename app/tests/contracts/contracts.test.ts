@@ -208,13 +208,24 @@ test("structured vocabulary migrates legacy terms and rejects duplicate or malfo
   assert.deepEqual(vocabularySchema.parse([
     { spelling: "WhisperFree", misheard: ["Whisper Free", "Whisper-Free"] },
   ]), [{ spelling: "WhisperFree", misheard: ["Whisper Free", "Whisper-Free"] }]);
+  const legacyDuplicates = vocabularySchema.parse("Jira,Jira,jira,Open\tWhisper");
+  assert.deepEqual(legacyDuplicates, [
+    { spelling: "Jira", misheard: [] },
+    { spelling: "Jira", misheard: [] },
+    { spelling: "jira", misheard: [] },
+    { spelling: "Open\tWhisper", misheard: [] },
+  ]);
+  assert.equal(preferencesSchema.safeParse({ ...state().preferences, vocabulary: legacyDuplicates }).success, true);
+  assert.equal(preferencePatchSchema.safeParse({ vocabulary: legacyDuplicates }).success, false);
   for (const invalid of [
-    [{ spelling: "OpenWhisper", misheard: [] }, { spelling: "openwhisper", misheard: [] }],
-    [{ spelling: "OpenWhisper", misheard: ["Open Whispur", "open whispur"] }],
     [{ spelling: "First spelling", misheard: ["Open-Whispur"] }, { spelling: "Second spelling", misheard: ["open whispur"] }],
     [{ spelling: " OpenWhisper ", misheard: [] }],
     [{ spelling: "Open\nWhisper", misheard: [] }],
   ]) assert.equal(vocabularySchema.safeParse(invalid).success, false);
+  for (const invalid of [
+    [{ spelling: "OpenWhisper", misheard: [] }, { spelling: "openwhisper", misheard: [] }],
+    [{ spelling: "OpenWhisper", misheard: ["Open Whispur", "open whispur"] }],
+  ]) assert.equal(preferencePatchSchema.safeParse({ vocabulary: invalid }).success, false);
 });
 
 test("malformed states, nested extra fields and nonfinite/out-of-range numbers are rejected", () => {
