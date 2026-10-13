@@ -47,6 +47,7 @@ import { recordingRequestSchema } from "../core/recording/recording.js";
 import type { RecordingSource } from "../workers/recording/recording-host-protocol.js";
 import { recordingSnapshotSchema } from "../workers/recording/recording-host-protocol.js";
 import { DEVELOPMENT_RECORDING_BUILD } from "./development-recording-build.js";
+import { runsInMacosVirtualMachine } from "./macos-virtual-machine.js";
 import { developmentRecordingDescriptorSchema, recordingDescriptorSupportsGpu, selectDevelopmentRecordingDescriptor, type DevelopmentRecordingDescriptor } from "./development-recording-descriptor.js";
 import { DevelopmentRecordingHost, developmentPulseServer, formatSourceDiscoveryFailure } from "./development-recording-host.js";
 import { saveTranscript } from "../services/development/development-transcripts.js";
@@ -229,7 +230,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let host: DevelopmentRecordingHost | undefined;
   let gpuDiscovery: Promise<void> | undefined;
   let gpuSelection = {
-    supported: descriptor ? recordingDescriptorSupportsGpu(descriptor) : false,
+    supported: descriptor ? recordingDescriptorSupportsGpu(descriptor) && !(descriptor.platform === "darwin" && runsInMacosVirtualMachine()) : false,
     checked: false, available: false, fallback: false, device: null as string | null,
   };
   const cpuName = hardwareDeviceNameSchema.safeParse(cpus()[0]?.model.trim());
