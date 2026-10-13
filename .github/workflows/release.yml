@@ -69,7 +69,7 @@ jobs:
           npm run prepare-release --prefix app -- --mode preview --version "$RELEASE_VERSION" --highlights "$notes"
           npm run prepare-release --prefix app -- --mode apply --version "$RELEASE_VERSION" --highlights "$notes"
           npm run preflight --prefix app
-          node --import tsx app/scripts/release-context.ts --github-output "$GITHUB_OUTPUT"
+          ./app/node_modules/.bin/tsx app/scripts/release-context.ts --github-output "$GITHUB_OUTPUT"
           if ! git diff --quiet; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
