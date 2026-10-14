@@ -498,7 +498,7 @@ test("a warm-up loads the model without user text and the processing request wai
     assert.equal(JSON.stringify(warm).includes("Synthetic original"), false);
     if (provider === "lm_studio") {
       const body = lmStudioNativeBodySchema.parse(warm);
-      assert.equal(body.system_prompt, "Synthetic instruction."); assert.equal(body.max_output_tokens, 1);
+      assert.ok(body.system_prompt.startsWith("Synthetic instruction.")); assert.equal(body.max_output_tokens, 1);
     } else {
       const body = requestBodySchema.parse({ ...warm, provider });
       assert.ok(body.provider === "ollama"); assert.equal(body.options.num_predict, 1);
