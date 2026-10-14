@@ -9,7 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
-  appStateSchema, hardwareDeviceNameSchema, preferencesSchema, validateEvent, isSteadyRecordingUpdate,
+  appStateSchema, hardwareDeviceNameSchema, historyEntrySchema, preferencesSchema, validateEvent, isSteadyRecordingUpdate,
   MAX_USER_TEXT_BYTES, MAX_UI_REQUEST_BYTES,
   type AppState, type EventName, type EventPayload, type UpdateState,
 } from "../contracts/ui/state.js";
@@ -234,7 +234,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let gpuDiscovery: Promise<void> | undefined;
   let gpuSelection = {
     supported: descriptor ? recordingDescriptorSupportsGpu(descriptor) && !(descriptor.platform === "darwin" && runsInMacosVirtualMachine()) : false,
-    checked: false, available: false, fallback: false, device: null as string | null,
+    checked: false, available: false, fallback: false, probeFailed: false, device: null as string | null,
   };
   const cpuName = hardwareDeviceNameSchema.safeParse(cpus()[0]?.model.trim());
   let configured = false;
@@ -261,11 +261,12 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let macMouse: MacosMouseTrigger | undefined;
   let recording = recordingSnapshotSchema.parse({ phase: "idle", generation: 0, elapsedMs: 0, level: 0,
     busy: false, recoveryAvailable: false, error: null, transcript: "" });
+  let recordingStartedAt: number | undefined;
   let message = "", inferenceProgress = 0;
   let download: string | null = null, downloadProgress = 0;
   let downloading: Promise<void> | undefined, downloadAbort: AbortController | undefined;
-  const history = await PrivateStateStore.open(join(profile.paths.history, "history.json"),
-    z.array(z.string().max(MAX_USER_TEXT_BYTES)).max(20), [], 8 * 1024 * 1024, { invalidContent: "preserve-and-default" });
+  const history = await PrivateStateStore.open(join(profile.paths.history, "entries.json"),
+    z.array(historyEntrySchema).max(20), [], 8 * 1024 * 1024, { invalidContent: "preserve-and-default" });
   let notify = (): void => {};
   const retrySettingsFingerprint = (): string => JSON.stringify({
     settings: textConnectionStore.snapshot(), snippets: preferences.snapshot().snippets,
@@ -372,7 +373,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         packaged: app.isPackaged, currentVersion: version, executable: await realpath(process.execPath) });
       if (macUpdateAdmission) {
         macUpdates = createMacosUpdateCoordinator({ admission: macUpdateAdmission, identity,
-          currentVersion: version, cacheDirectory: profile.paths.cache });
+          currentVersion: version, cacheDirectory: profile.paths.cache,
+          channel: () => preferences.snapshot().update_channel });
         updates = { ...updates, configured: true };
       }
     } catch { updates = { ...updates, status: "error", error: "Update services are unavailable in this installation." }; }
@@ -420,11 +422,16 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       snapshot: (value) => {
         const previous = recording;
         if (value.generation !== previous.generation) {
+          recordingStartedAt = undefined;
           rawTranscript = "";
           textProcessing = null;
           textProcessingOwner = undefined;
           clearTextRevisionRetry();
           textProcessor.resetStatus();
+        }
+        if ((value.phase === "starting" || value.phase === "recording") &&
+            (value.generation !== previous.generation || (previous.phase !== "starting" && previous.phase !== "recording"))) {
+          recordingStartedAt = Date.now();
         }
         const hadMessage = message !== "";
         const hadDeliveryNotice = (value.phase === "starting" || value.phase === "recording") && deliveryNotice !== "";
@@ -511,7 +518,9 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         if (!oversized && preferences.snapshot().keep_history) {
           // History is secondary to the already confirmed clipboard commit.
           void history.update((current) => {
-            const next = [acceptedText, ...current].slice(0, 20);
+            const next = [{ text: acceptedText,
+              ...(recordingStartedAt === undefined ? {} : { created_at: new Date(recordingStartedAt).toISOString() }),
+              ...(recording.elapsedMs > 0 ? { duration_ms: Math.round(recording.elapsedMs) } : {}) }, ...current].slice(0, 20);
             while (next.length > 1 && Buffer.byteLength(JSON.stringify(next), "utf8") > 6 * 1024 * 1024) next.pop();
             if (Buffer.byteLength(JSON.stringify(next), "utf8") > 8 * 1024 * 1024) return current;
             return next;
@@ -538,8 +547,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     // it shares the supervised speech allocation.
     if (gpuSelection.supported) {
       const probe = host.discoverGpu().then(() => {}, () => {
-        // Eligible loader/device failures already return safe CPU fallback after cleanup.
-        // A rejected probe may have poisoned ownership; never advertise this host as ready.
+        // Only a probe whose process ownership could not be safely retired rejects.
         recordingRetired = true; notify();
       });
       // The first Metal query after an install or update compiles shaders for several seconds; keep the
@@ -587,7 +595,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       raw_transcript_preview_omitted: rawPreview.omitted,
       text_processing: stage && stagePreview ? { ...stage, text: stagePreview.text } : stage,
       text_processing_preview_omitted: stagePreview?.omitted ?? false,
-      history: history.snapshot().filter((text) => Buffer.byteLength(text, "utf8") <= MAX_USER_TEXT_BYTES),
+      history: history.snapshot().filter((entry) => Buffer.byteLength(entry.text, "utf8") <= MAX_USER_TEXT_BYTES),
       preferences: { ...preferenceSnapshot, ...(loginFact ? { launch_at_login: loginFact.requested } : {}) },
       models: [...catalog.models, ...installed.filter((item) => !catalog.models.some((model) => model.id === item.model.id)).map((item) => item.model)],
       installed: installed.map((item) => item.model.id), microphones: sources.map((source) => source.id),
@@ -610,6 +618,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       recording_shortcut: (macShortcutState?.configuring ?? false) || !!keyCapture || !!shortcut.nativeX11 && shortcut.configuring,
       paste_ready: macPaste ? accessibilityAllowed : pasteState.ready, paste_configuring: pasteState.configuring,
       gpu_available: gpuSelection.available, gpu_supported: gpuSelection.supported, gpu_checked: gpuSelection.checked,
+      gpu_probe_failed: gpuSelection.probeFailed,
       cpu_device: cpuName.success ? cpuName.data : null, gpu_device: gpuName.success ? gpuName.data : null,
       gpu_fallback: preferenceSnapshot.gpu && gpuSelection.fallback, recovery_available: recording.recoveryAvailable,
       overlay_available: !!overlay && !overlay.isDestroyed() && (!waylandOverlay || waylandOverlay.available),
@@ -1031,7 +1040,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     else if (value.status === "preparing" || value.status === "prepared") updates = { ...updates, status: "installing",
       ...(value.status === "prepared" ? { version: value.updateVersion } : {}),
       progress: 1, download: undefined, error: null };
-    else if (value.status === "idle") updates = { ...updates, status: updates.version ? "available" : "current", error: null };
+    else if (value.status === "idle") updates = { ...updates, status: "current", version: null, details: undefined,
+      progress: 0, download: undefined, error: null };
     else if (value.status === "failed") updates = { ...updates, status: "error",
       download: undefined, error: value.code === "CANCELLED" ? "The update was cancelled." : "The update could not be completed." };
     if (!["checking", "preparing", "prepared", "downloading", "verifying"].includes(value.status)) updateReserved = undefined;
@@ -1059,7 +1069,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           if (macUpdateOperation === task) macUpdateOperation = undefined;
           if (shutdownInProgress) return;
           updates = candidate ? { ...updates, status: "available", version: candidate.version, details: candidate.details, error: null }
-            : { ...updates, status: updates.version ? "available" : "current", error: null };
+            : { ...updates, status: "current", version: null, details: undefined, progress: 0, download: undefined, error: null };
           updateReserved = undefined; notify();
         } else if (kind === "download") {
           const task = macUpdates.prepareInstall(controller.signal, {
@@ -1149,6 +1159,11 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       install_update: () => requestUpdate("install"),
       save_preferences: ({ changes }) => withRecordingControl(async () => {
         if (changes.auto_check_updates === true && !updates.configured) throw new Error("Update services are not configured in this build.");
+        if (changes.update_channel !== undefined && !updates.configured) throw new Error("Update services are not configured in this build.");
+        if (changes.update_channel !== undefined && (updateReserved !== undefined ||
+          ["downloading", "verifying", "ready", "installing"].includes(updates.status))) {
+          throw new Error("Finish the current update before changing its channel.");
+        }
         if (changes.launch_at_login !== undefined && (!autostart || !loginFact)) throw new Error("Login services are unavailable in this installation.");
         if (changes.model && !catalog.models.some((model) => model.id === changes.model) && !installed.some((item) => item.model.id === changes.model)) {
           throw new Error("Unknown catalog model.");
@@ -1180,6 +1195,11 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           throw error;
         }
         if (Object.hasOwn(changes, "snippets")) { clearTextRevisionRetry(); textProcessor.cancel(); }
+        if (changes.update_channel !== undefined) {
+          updates = { ...updates, status: "idle", version: null, details: undefined, progress: 0, download: undefined, error: null };
+          notify();
+          void requestUpdate("check").catch(() => {});
+        }
         if (changes.hold_to_record !== undefined) await platformHost?.shortcut("mode", changes.hold_to_record);
         if (["model", "language", "microphone", "cleanup_enabled", "vocabulary", "snippets", "gpu"].some((key) => Object.hasOwn(changes, key))) configured = false;
         const current = state();
@@ -1388,7 +1408,7 @@ if (macRecording) { microphonePermission = systemPreferences.getMediaAccessStatu
         if (text === undefined) { clearTextRevisionRetry(); notify(); return; }
         await clipboardOutput.writeText(text);
       },
-      copy_history: async ({ index }) => { const text = history.snapshot().filter((item) => Buffer.byteLength(item, "utf8") <= MAX_USER_TEXT_BYTES)[index]; if (text !== undefined) await clipboardOutput.writeText(text); },
+      copy_history: async ({ index }) => { const text = history.snapshot().filter((item) => Buffer.byteLength(item.text, "utf8") <= MAX_USER_TEXT_BYTES)[index]?.text; if (text !== undefined) await clipboardOutput.writeText(text); },
       clear_history: () => action(async () => { await history.update(() => []); }),
       show_models_folder: () => action(async () => { if (await shell.openPath(profile.paths.models)) throw new Error("Folder unavailable."); }),
       show_transcripts_folder: () => action(async () => { if (await shell.openPath(profile.paths.transcripts)) throw new Error("Folder unavailable."); }),

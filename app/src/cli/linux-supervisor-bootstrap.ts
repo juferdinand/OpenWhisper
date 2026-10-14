@@ -14,7 +14,9 @@ import { assertCanonicalInstalledDebianVersion, prepareDebianInstalledAudit } fr
 import { admitSignedAppImageLaunch, prepareAppImageUpdate, repairSignedAppImageLaunch,
   type AppImageExecContinuation, type PreparedAppImageUpdate } from "../services/update/linux/linux-appimage-update.js";
 import { resolveStableProfile, validateStableProfile } from "../services/settings/stable-profile.js";
-import type { LinuxUpdateCandidate } from "../services/update/common/update-policy.js";
+import { PreferenceStore } from "../services/settings/preferences.js";
+import type { StableProfile } from "../services/settings/stable-profile.js";
+import type { LinuxUpdateCandidate, UpdateChannel } from "../services/update/common/update-policy.js";
 import type { OwnedUpdateDownload } from "../services/update/common/update-staging.js";
 import type { UpdateDownloadProgress } from "../contracts/update/update-download-progress.js";
 import type { LinuxUpdateAction, LinuxUpdateIntermediateState } from "../main/linux-update-channel.js";
@@ -29,9 +31,11 @@ interface DebianUpdateDependencies {
   feed: typeof readUpdateFeed;
   download: typeof downloadUpdateCandidate;
   prepare: typeof prepareDebianUpdate;
+  channel?: (profile: StableProfile) => Promise<UpdateChannel>;
 }
 const debianDependencies: DebianUpdateDependencies = { home: homedir, feed: readUpdateFeed,
-  download: downloadUpdateCandidate, prepare: prepareDebianUpdate };
+  download: downloadUpdateCandidate, prepare: prepareDebianUpdate,
+  channel: async (profile) => (await PreferenceStore.open(profile)).snapshot().update_channel };
 
 /** Trusted host seams only. All executable/source authority stays in this parent, never in a GUI frame or preference. */
 export function debianUpdates(currentVersion: string, dependencies: DebianUpdateDependencies = debianDependencies): LinuxSupervisorUpdates {
@@ -41,6 +45,7 @@ export function debianUpdates(currentVersion: string, dependencies: DebianUpdate
     ...(process.env.XDG_DATA_HOME ? { dataHome: process.env.XDG_DATA_HOME } : {}),
     ...(process.env.XDG_CACHE_HOME ? { cacheHome: process.env.XDG_CACHE_HOME } : {}) });
   let candidate: LinuxUpdateCandidate | undefined, download: Readonly<OwnedUpdateDownload> | undefined;
+  let candidateChannel: UpdateChannel | undefined;
   let prepared: Readonly<PreparedDebianUpdate> | undefined, audit: Awaited<ReturnType<typeof prepareDebianInstalledAudit>> | undefined;
   let failedCleanup: (() => Promise<void>) | undefined, installationStarted = false;
   const discardPrepared = async (): Promise<void> => {
@@ -56,36 +61,52 @@ export function debianUpdates(currentVersion: string, dependencies: DebianUpdate
       const active = (): void => { if (signal.aborted) throw new LinuxRestartError("INVALID_REQUEST"); };
       active();
       if (kind === "check" || kind === "check_auto") {
-        if (download && prepared && candidate) return { status: "ready", updateVersion: candidate.version, details: candidate.details } as const;
-        const result = await dependencies.feed({ package: "deb", currentVersion, signal }); active();
-        if (!result) return candidate
-          ? { status: "available", updateVersion: candidate.version, details: candidate.details } as const
-          : { status: "idle" } as const;
-        if (result.package !== "deb") throw new LinuxRestartError("INVALID_REQUEST");
-        candidate = result; return { status: "available", updateVersion: result.version, details: result.details } as const;
+        const channel = await (dependencies.channel?.(profile) ?? Promise.resolve("stable")); active();
+        if (candidate && candidateChannel !== channel) { await discardPrepared(); candidate = undefined; candidateChannel = undefined; }
+        if (download && prepared && candidate && candidateChannel === channel) return { status: "ready", updateVersion: candidate.version, details: candidate.details } as const;
+        const result = await dependencies.feed({ package: "deb", currentVersion, channel, signal }); active();
+        if (!result) {
+          if (candidate && candidateChannel === channel) return { status: "available", updateVersion: candidate.version, details: candidate.details } as const;
+          candidate = undefined; candidateChannel = undefined; return { status: "idle" } as const;
+        }
+        if (result.package !== "deb" || result.channel !== channel) throw new LinuxRestartError("INVALID_REQUEST");
+        candidate = result; candidateChannel = channel; return { status: "available", updateVersion: result.version, details: result.details } as const;
       }
       const selected = candidate;
       if (!selected || failedCleanup) throw new LinuxRestartError("INVALID_REQUEST");
+      const selectedChannel = candidateChannel;
+      const assertChannel = async (): Promise<void> => {
+        if (!selectedChannel || await (dependencies.channel?.(profile) ?? Promise.resolve("stable")) !== selectedChannel) {
+          candidate = undefined; candidateChannel = undefined; await discardPrepared(); throw new LinuxRestartError("UNAVAILABLE");
+        }
+      };
       if (kind === "install") {
+        await assertChannel();
         if (!download || !prepared || !audit) throw new LinuxRestartError("INVALID_REQUEST");
         return { status: "prepared", updateVersion: selected.version } as const;
       }
       if (download || prepared || failedCleanup) throw new LinuxRestartError("INVALID_REQUEST");
       try {
+        await assertChannel();
         download = await dependencies.download({ candidate: selected, currentVersion, cacheDirectory: profile.paths.cache, signal,
           onProgress: (value: UpdateDownloadProgress) => reportState({ status: "downloading", updateVersion: selected.version, download: value }) }); active();
         reportState({ status: "verifying", updateVersion: selected.version });
         prepared = await dependencies.prepare({ download, signature: selected.signature, currentVersion, expectedVersion: selected.version }); active();
+        await assertChannel();
         audit = await prepareDebianInstalledAudit({ download, signature: selected.signature, expectedVersion: selected.version, signal }); active();
+        await assertChannel();
         return { status: "ready", updateVersion: selected.version, details: selected.details } as const;
       } catch (error: unknown) {
         if (error instanceof UpdateDownloadError) failedCleanup = error.cleanup;
-        await discardPrepared(); throw error;
+        await discardPrepared(); candidate = undefined; candidateChannel = undefined; throw error;
       }
     },
     async installPrepared(version: string) {
       if (installationStarted || !candidate || !download || !prepared || !audit ||
           version !== candidate.version || version !== prepared.version) throw new LinuxRestartError("INVALID_REQUEST");
+      if (!candidateChannel || await (dependencies.channel?.(profile) ?? Promise.resolve("stable")) !== candidateChannel) {
+        await discardPrepared(); candidate = undefined; candidateChannel = undefined; throw new LinuxRestartError("UNAVAILABLE");
+      }
       installationStarted = true;
       await prepared.install();
       await audit.assertInstalled();
@@ -106,9 +127,11 @@ interface AppImageUpdateDependencies {
   feed: typeof readUpdateFeed;
   download: typeof downloadUpdateCandidate;
   prepare: typeof prepareAppImageUpdate;
+  channel?: (profile: StableProfile) => Promise<UpdateChannel>;
 }
 const appImageDependencies: AppImageUpdateDependencies = { home: homedir, admit: admitSignedAppImageLaunch, repair: repairSignedAppImageLaunch,
-  signature: readCurrentAppImageSignature, feed: readUpdateFeed, download: downloadUpdateCandidate, prepare: prepareAppImageUpdate };
+  signature: readCurrentAppImageSignature, feed: readUpdateFeed, download: downloadUpdateCandidate, prepare: prepareAppImageUpdate,
+  channel: async (profile) => (await PreferenceStore.open(profile)).snapshot().update_channel };
 
 /** An optional check channel is not installation authority. Only the signed current pair can prepare a successor. */
 export function appImageUpdates(currentVersion: string, launch: Extract<LinuxInstalledLaunch, { kind: "appimage" }>,
@@ -121,6 +144,7 @@ export function appImageUpdates(currentVersion: string, launch: Extract<LinuxIns
     ...(process.env.XDG_CACHE_HOME ? { cacheHome: process.env.XDG_CACHE_HOME } : {}) });
   let current: Awaited<ReturnType<typeof admitSignedAppImageLaunch>> | undefined;
   let candidate: LinuxUpdateCandidate | undefined, download: Readonly<OwnedUpdateDownload> | undefined;
+  let candidateChannel: UpdateChannel | undefined;
   let prepared: Readonly<PreparedAppImageUpdate> | undefined, continuation: Readonly<AppImageExecContinuation> | undefined;
   let failedCleanup: (() => Promise<void>) | undefined, installationStarted = false;
   const discardPrepared = async (): Promise<void> => {
@@ -136,7 +160,9 @@ export function appImageUpdates(currentVersion: string, launch: Extract<LinuxIns
       const active = (): void => { if (signal.aborted) throw new LinuxRestartError("INVALID_REQUEST"); };
       active();
       if (kind === "check" || kind === "check_auto") {
-        if (download && prepared && candidate) return { status: "ready", updateVersion: candidate.version, details: candidate.details } as const;
+        const channel = await (dependencies.channel?.(profile) ?? Promise.resolve("stable")); active();
+        if (candidate && candidateChannel !== channel) { await discardPrepared(); candidate = undefined; candidateChannel = undefined; }
+        if (download && prepared && candidate && candidateChannel === channel) return { status: "ready", updateVersion: candidate.version, details: candidate.details } as const;
         let admitted: Awaited<ReturnType<typeof admitSignedAppImageLaunch>>;
         try { admitted = await dependencies.admit({ home, version: currentVersion, launch }); }
         catch {
@@ -145,16 +171,24 @@ export function appImageUpdates(currentVersion: string, launch: Extract<LinuxIns
           admitted = await dependencies.repair({ home, version: currentVersion, launch, signature });
         }
         active(); admitted.assertUnchanged();
-        const result = await dependencies.feed({ package: "appimage", currentVersion, signal }); active(); admitted.assertUnchanged(); current = admitted;
-        if (!result) return candidate
-          ? { status: "available", updateVersion: candidate.version, details: candidate.details } as const
-          : { status: "idle" } as const;
-        if (result.package !== "appimage") throw new LinuxRestartError("INVALID_REQUEST");
-        candidate = result; return { status: "available", updateVersion: result.version, details: result.details } as const;
+        const result = await dependencies.feed({ package: "appimage", currentVersion, channel, signal }); active(); admitted.assertUnchanged(); current = admitted;
+        if (!result) {
+          if (candidate && candidateChannel === channel) return { status: "available", updateVersion: candidate.version, details: candidate.details } as const;
+          candidate = undefined; candidateChannel = undefined; return { status: "idle" } as const;
+        }
+        if (result.package !== "appimage" || result.channel !== channel) throw new LinuxRestartError("INVALID_REQUEST");
+        candidate = result; candidateChannel = channel; return { status: "available", updateVersion: result.version, details: result.details } as const;
       }
       const selected = candidate;
       if (!selected || !current || failedCleanup) throw new LinuxRestartError("INVALID_REQUEST");
+      const selectedChannel = candidateChannel;
+      const assertChannel = async (): Promise<void> => {
+        if (!selectedChannel || await (dependencies.channel?.(profile) ?? Promise.resolve("stable")) !== selectedChannel) {
+          candidate = undefined; candidateChannel = undefined; await discardPrepared(); throw new LinuxRestartError("UNAVAILABLE");
+        }
+      };
       if (kind === "install") {
+        await assertChannel();
         if (!download || !prepared) throw new LinuxRestartError("INVALID_REQUEST");
         current.assertUnchanged();
         return { status: "prepared", updateVersion: selected.version } as const;
@@ -162,21 +196,26 @@ export function appImageUpdates(currentVersion: string, launch: Extract<LinuxIns
       if (download || prepared) throw new LinuxRestartError("INVALID_REQUEST");
       current.assertUnchanged();
       try {
+        await assertChannel();
         download = await dependencies.download({ candidate: selected, currentVersion, cacheDirectory: profile.paths.cache, signal,
           onProgress: (value: UpdateDownloadProgress) => reportState({ status: "downloading", updateVersion: selected.version, download: value }) });
         active(); current.assertUnchanged();
         reportState({ status: "verifying", updateVersion: selected.version });
         prepared = await dependencies.prepare({ download, signature: selected.signature, expectedVersion: selected.version,
           currentVersion, home, launch }); active(); current.assertUnchanged();
+        await assertChannel();
         return { status: "ready", updateVersion: selected.version, details: selected.details } as const;
       } catch (error: unknown) {
         if (error instanceof UpdateDownloadError) failedCleanup = error.cleanup;
-        await discardPrepared(); throw error;
+        await discardPrepared(); candidate = undefined; candidateChannel = undefined; throw error;
       }
     },
     async installPrepared(version: string) {
       if (installationStarted || !current || !candidate || !download || !prepared ||
           version !== candidate.version || version !== prepared.version) throw new LinuxRestartError("INVALID_REQUEST");
+      if (!candidateChannel || await (dependencies.channel?.(profile) ?? Promise.resolve("stable")) !== candidateChannel) {
+        await discardPrepared(); candidate = undefined; candidateChannel = undefined; throw new LinuxRestartError("UNAVAILABLE");
+      }
       current.assertUnchanged(); installationStarted = true;
       let installed = false;
       try {

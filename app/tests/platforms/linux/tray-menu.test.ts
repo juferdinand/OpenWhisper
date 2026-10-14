@@ -12,7 +12,7 @@ function state(changes: Partial<AppState> = {}): AppState {
     updates: { configured: false, status: "idle", version: null, progress: 0, error: null, package: "development" },
     platform: "linux", version: "0.3.0", status: "idle", message: "", transcript: "", history: [],
     preferences: { ui_language: "en", setup_completed: true, model: "tiny", language: "auto", microphone: "",
-      vocabulary: [], snippets: [], output: "clipboard", hold_to_record: false, gpu: false, keep_history: true, cleanup_enabled: true },
+      vocabulary: [], snippets: [], output: "clipboard", hold_to_record: false, gpu: false, keep_history: true, cleanup_enabled: true, update_channel: "stable" },
     models: [], installed: [], microphones: [], session: "wayland", desktop: "Owned fixture", clipboard_available: true,
     shortcut_portal: false, paste_portal: false, shortcut: null, paste_ready: false, gpu_available: false,
     download: null, progress: 0, elapsed: 0, model_directory: "", recording_available: true, recovery_available: false,

@@ -47,7 +47,8 @@ async function fixture() {
       assert.equal(input.expectedVersion, nextVersion); assert.deepEqual(input.build, identity); events.push("prepare"); return prepared;
     },
   };
-  const create = (overrides: Partial<MacosUpdateCoordinatorEffects> = {}) => createMacosUpdateCoordinator({ admission, identity, currentVersion, cacheDirectory: root }, { ...effects, ...overrides });
+  const create = (overrides: Partial<MacosUpdateCoordinatorEffects> = {}, channel: () => "stable" | "preview" = () => "stable") => createMacosUpdateCoordinator({
+    admission, identity, currentVersion, cacheDirectory: root, channel }, { ...effects, ...overrides });
   return { root, stage, source, file, download, events, prepared, create, async cleanup() { await file.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
@@ -89,6 +90,18 @@ test("Mac checks retain a known candidate through an empty check, exclude overla
     assert.equal((await retained.check(new AbortController().signal))?.version, nextVersion);
     assert.equal((await retained.check(new AbortController().signal))?.version, nextVersion);
     assert.equal((await retained.prepareInstall(new AbortController().signal)).version, nextVersion);
+  } finally { await f.cleanup(); }
+});
+
+test("Mac channel changes invalidate a checked candidate before download", async () => {
+  const f = await fixture();
+  try {
+    let channel: "stable" | "preview" = "stable";
+    const updater = f.create({}, () => channel), signal = new AbortController().signal;
+    assert.equal((await updater.check(signal))?.channel, "stable");
+    channel = "preview";
+    await assert.rejects(updater.prepareInstall(signal), failure("UNAVAILABLE"));
+    assert.equal(f.events.includes("download"), false);
   } finally { await f.cleanup(); }
 });
 

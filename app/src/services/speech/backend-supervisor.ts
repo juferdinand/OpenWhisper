@@ -127,7 +127,9 @@ function ownerShape(value: unknown): value is ProvisionalBackendOwner {
 }
 const openResultSchema = z.discriminatedUnion("kind", [z.strictObject({ kind: z.literal("not-created"), code: z.literal("START_FAILED") }),
   z.strictObject({ kind: z.literal("owner"), owner: z.custom<ProvisionalBackendOwner>(ownerShape) })]);
-const eligible: ReadonlySet<SpeechFailureCode> = new Set(["START_FAILED", "WORKER_FAILED", "TIMEOUT"]);
+function terminalBackendFailure(error: unknown): error is SpeechWorkerError {
+  return error instanceof SpeechWorkerError && (error.code === "INTEGRITY_FAILED" || error.code === "TEARDOWN_FAILED");
+}
 
 /** The original operation is always observed and retained. Deadlines do not
  * imply effect rollback, process death, or actual descriptor closure. */
@@ -223,13 +225,13 @@ class MainBackendSupervisor implements BackendSupervisor {
               ...(gpuDevice ? { gpuDevice } : {}) }); return gpu;
           }
         } catch (error: unknown) {
-          if (error instanceof SpeechWorkerError && (error.code === "INTEGRITY_FAILED" || error.code === "TEARDOWN_FAILED")) throw error;
+          if (terminalBackendFailure(error)) throw error;
           if (error instanceof SpeechWorkerError && error.code === "CANCELLED") {
             void this.closeContext(gpu).catch(() => {}); throw error;
           }
           // No replacement is permitted until this owner and its read FDs retire.
           await this.closeContext(gpu); current = undefined;
-          if (!(error instanceof SpeechWorkerError) || !eligible.has(error.code)) throw error;
+          this.allocation.check();
           active(signal); detection = "unavailable";
         }
         if (current) { await this.closeContext(gpu); current = undefined; }
@@ -294,14 +296,16 @@ class MainBackendSupervisor implements BackendSupervisor {
       detection = device === null ? "none" : /\b(?:lavapipe|llvmpipe|swiftshader|software|cpu)\b/iu.test(device) ? "software" : "device";
       if (detection === "device" && device && device.trim().length <= 256) gpuDevice = device.trim();
     } catch (error: unknown) {
-      if (error instanceof SpeechWorkerError && (error.code === "INTEGRITY_FAILED" || error.code === "TEARDOWN_FAILED" || error.code === "CANCELLED")) {
+      if (terminalBackendFailure(error)) {
         if (context) await this.closeContext(context);
         throw error;
       }
-      if (!(error instanceof SpeechWorkerError) || !eligible.has(error.code)) {
-        if (context) await this.closeContext(context);
-        throw error;
-      }
+      // Startup discovery has no user cancellation signal. Any nonterminal
+      // query failure is an unavailable GPU only after this owner and its
+      // readers have fully retired; failed ownership remains terminal.
+      if (!context) throw error;
+      await this.closeContext(context);
+      this.allocation.check();
       detection = "unavailable";
     }
     if (context) await this.closeContext(context);

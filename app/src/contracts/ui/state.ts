@@ -38,6 +38,11 @@ const modelId = utf8(1024).min(1).refine(
 );
 const fraction = z.number().finite().min(0).max(1);
 const userText = utf8(MAX_USER_TEXT_BYTES);
+export const historyEntrySchema = z.strictObject({
+  text: userText,
+  created_at: z.string().datetime().optional(),
+  duration_ms: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+});
 export const updateDetailsSchema = z.strictObject({ highlights: z.array(utf8(512)).max(5),
   localized_highlights: z.strictObject({ en: z.array(utf8(512)).max(5).optional(), de: z.array(utf8(512)).max(5).optional() }).optional(),
   size: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional() });
@@ -46,6 +51,8 @@ export type UpdateDetails = z.infer<typeof updateDetailsSchema>;
 const tabSchema = z.enum(["setup", "general", "models", "snippets", "history", "about"]);
 export type Tab = z.infer<typeof tabSchema>;
 const uiLanguageSchema = z.enum(["en", "de"]);
+const updateChannelSchema = z.enum(["stable", "preview"]);
+export type UpdateChannel = z.infer<typeof updateChannelSchema>;
 
 export { snippetSchema };
 export type { Snippet } from "../text/snippets.js";
@@ -183,6 +190,7 @@ export const preferencesSchema = z.strictObject({
   show_idle_overlay: z.boolean().optional(),
   launch_at_login: z.boolean().optional(),
   auto_check_updates: z.boolean().optional(),
+  update_channel: updateChannelSchema.default("stable"),
 });
 export type Preferences = z.infer<typeof preferencesSchema>;
 
@@ -195,6 +203,7 @@ export const preferencePatchSchema = preferencesSchema.omit({
   x11_trigger: true,
   macos_shortcut: true,
 }).partial().extend({
+  update_channel: updateChannelSchema.optional(),
   cleanup_enabled: z.boolean().optional(),
   vocabulary: preferenceVocabularyPatchSchema.optional(),
 }).refine(
@@ -258,7 +267,7 @@ export const appStateSchema = z.strictObject({
   raw_transcript_preview_omitted: z.boolean().optional(),
   text_processing_preview_omitted: z.boolean().optional(),
   transcript_preview_omitted: z.boolean().optional(),
-  history: z.array(userText).max(20),
+  history: z.array(historyEntrySchema).max(20),
   preferences: preferencesSchema,
   models: z.array(modelSchema).max(128),
   installed: z.array(modelId).max(128),
@@ -282,6 +291,7 @@ export const appStateSchema = z.strictObject({
   paste_configuring: z.boolean().optional(),
   gpu_available: z.boolean(),
   gpu_checked: z.boolean().optional(),
+  gpu_probe_failed: z.boolean().optional(),
   gpu_supported: z.boolean().optional(),
   cpu_device: hardwareDeviceNameSchema.nullable().optional(),
   gpu_device: hardwareDeviceNameSchema.nullable().optional(),

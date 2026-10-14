@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isNewerUpdateVersion, LINUX_UPDATE_FEED_URL, LINUX_UPDATE_REPOSITORY, MACOS_UPDATE_ASSET,
   extractUpdateHighlights, macosUpdateEndpoint, nextPatchVersion, parseUpdateVersion, projectLinuxUpdateFeed, projectMacosUpdateRelease, UPDATE_POLICY_LIMITS,
-  UpdatePolicyError } from "../../../src/services/update/common/update-policy.js";
+  selectLatestPreviewRelease, UpdatePolicyError } from "../../../src/services/update/common/update-policy.js";
 
 const repository = "juferdinand/OpenWhisper", version = "0.3.1", currentVersion = "0.3.0";
 const macURL = `https://github.com/${repository}/releases/download/v${version}/${MACOS_UPDATE_ASSET}`;
@@ -49,7 +49,7 @@ test("Mac repositories are build-supplied canonical owner/repo values", () => {
 });
 test("Mac release projection remains immutable and explicitly unauthenticated", () => {
   const release = { ...macRelease(), author: { private: "not projected" } }, candidate = mac(release);
-  assert.deepEqual(candidate, { authentication: "unauthenticated", package: "macos", repository, version, notes: "Release notes",
+  assert.deepEqual(candidate, { authentication: "unauthenticated", channel: "stable", package: "macos", repository, version, notes: "Release notes",
     details: { highlights: [] }, assetName: MACOS_UPDATE_ASSET, assetURL: macURL, pageURL: macPage });
   assert.ok(Object.isFrozen(candidate)); release.body = "changed"; assert.equal(candidate.notes, "Release notes");
   assert.equal(mac({ ...macRelease(), body: null }).notes, "");
@@ -88,12 +88,24 @@ test("Mac candidates require one expected asset, stable release fields and a new
     assert.throws(() => mac({ ...macRelease(), assets }), failure("INVALID_SOURCE"));
   }
   for (const field of ["draft", "prerelease"]) {
-    assert.throws(() => mac({ ...macRelease(), [field]: true }), failure("INVALID_METADATA"));
+    assert.throws(() => mac({ ...macRelease(), [field]: true }), failure(field === "prerelease" ? "INVALID_SOURCE" : "INVALID_METADATA"));
     const missing = macRelease(); Reflect.deleteProperty(missing, field); assert.throws(() => mac(missing), failure("INVALID_METADATA"));
   }
   for (const tag_name of ["0.3.1", "v00.3.1", "v0.3.1-beta", "v0.3.1\n"]) assert.throws(() => mac({ ...macRelease(), tag_name }), failure("INVALID_VERSION"));
   for (const tag_name of ["v0.3.0", "v0.2.5"]) assert.throws(() => mac({ ...macRelease(), tag_name }), failure("NOT_NEWER"));
   assert.throws(() => mac(macRelease(), { currentVersion: "broken" }), failure("INVALID_VERSION"));
+});
+test("preview admission selects only the newest canonical prerelease and keeps stable releases excluded", () => {
+  const preview = (candidateVersion: string) => ({ tag_name: `v${candidateVersion}`, html_url: `${LINUX_UPDATE_REPOSITORY}/releases/tag/v${candidateVersion}`,
+    draft: false, prerelease: true, body: "Preview notes", assets: [{ name: MACOS_UPDATE_ASSET,
+      browser_download_url: `${LINUX_UPDATE_REPOSITORY}/releases/download/v${candidateVersion}/${MACOS_UPDATE_ASSET}` }] });
+  const selected = selectLatestPreviewRelease([macRelease(), preview("0.3.2"), preview("0.3.10")]);
+  assert.equal(selected?.version, "0.3.10");
+  assert.equal(projectMacosUpdateRelease({ repository, currentVersion, channel: "preview", release: selected?.release }).version, "0.3.10");
+  assert.throws(() => mac(preview("0.3.10")), failure("INVALID_SOURCE"));
+  assert.equal(selectLatestPreviewRelease([macRelease()]), undefined);
+  assert.throws(() => selectLatestPreviewRelease([preview("0.3.2-preview.1")]), failure("INVALID_VERSION"));
+  assert.throws(() => selectLatestPreviewRelease(new Array(100).fill(preview("0.3.2"))), failure("INVALID_METADATA"));
 });
 test("Linux projects only the selected fixed target and opaque unverified signature", () => {
   for (const packageKind of ["appimage", "deb"] as const) {
@@ -106,6 +118,13 @@ test("Linux projects only the selected fixed target and opaque unverified signat
     assert.equal(Object.hasOwn(candidate, "pub_date"), false);
   }
   const missing = linuxFeed(); Reflect.deleteProperty(missing, "notes"); assert.equal(linux(missing).notes, "");
+});
+test("Linux preview manifest is admitted only for its exact prerelease version URL", () => {
+  const previewURL = `${LINUX_UPDATE_REPOSITORY}/releases/download/v${version}/latest.json`;
+  const candidate = projectLinuxUpdateFeed({ sourceURL: previewURL, package: "deb", currentVersion, channel: "preview", feed: linuxFeed() });
+  assert.equal(candidate.feedURL, previewURL); assert.equal(candidate.version, version);
+  assert.throws(() => projectLinuxUpdateFeed({ sourceURL: LINUX_UPDATE_FEED_URL, package: "deb", currentVersion, channel: "preview", feed: linuxFeed() }), failure("INVALID_SOURCE"));
+  assert.throws(() => projectLinuxUpdateFeed({ sourceURL: `${LINUX_UPDATE_REPOSITORY}/releases/download/v0.3.2/latest.json`, package: "deb", currentVersion, channel: "preview", feed: linuxFeed() }), failure("INVALID_SOURCE"));
 });
 test("Linux rejects any alternate feed, unadmitted package and wrong package source", () => {
   for (const sourceURL of [LINUX_UPDATE_FEED_URL.replace("https:", "http:"), LINUX_UPDATE_FEED_URL.replace("juferdinand", "other"), `${LINUX_UPDATE_FEED_URL}?x=1`, `${LINUX_UPDATE_FEED_URL}#fragment`, undefined]) {

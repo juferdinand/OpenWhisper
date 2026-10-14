@@ -19,7 +19,7 @@ function state(): AppState {
     preferences: {
       ui_language: "en", setup_completed: false, model: "tiny", language: "auto", microphone: "",
       vocabulary: [], snippets: [], output: "clipboard", hold_to_record: false, gpu: false, keep_history: true,
-      cleanup_enabled: true,
+      cleanup_enabled: true, update_channel: "stable",
     },
     models: [{ id: "tiny", title: "Whisper Tiny", family: "whisper", size: "75 MB", note: "Fastest" }],
     installed: [], microphones: [], session: "X11", desktop: "Owned fixture", clipboard_available: false,
@@ -149,6 +149,9 @@ test("validated preference patches preserve text and reject host-owned fields", 
   ], keep_history: false, output: "clipboard" };
   assert.deepEqual(validateCommandInput("save_preferences", { changes: patch }), { changes: patch });
   assert.deepEqual(preferencePatchSchema.parse({}), {});
+  assert.equal(preferencesSchema.parse(state().preferences).update_channel, "stable");
+  assert.deepEqual(preferencePatchSchema.parse({ update_channel: "preview" }), { update_channel: "preview" });
+  assert.throws(() => preferencePatchSchema.parse({ update_channel: "beta" }));
   for (const language of ["auto", "de", "zh", "ja", "ko", "ar", "cs", "uk", "yue"]) {
     assert.deepEqual(preferencePatchSchema.parse({ language }), { language });
   }
@@ -251,7 +254,9 @@ test("malformed states, nested extra fields and nonfinite/out-of-range numbers a
     { ...state(), preferences: { ...state().preferences, unknown: true } },
     { ...state(), updates: { ...state().updates, executable: "/tmp/file" } },
     { ...state(), models: [{ ...state().models[0], endpoint: "https://example.com" }] },
-    { ...state(), history: Array.from({ length: 21 }, () => "text") },
+    { ...state(), history: Array.from({ length: 21 }, () => ({ text: "text", created_at: "2026-10-14T12:00:00.000Z", duration_ms: 0 })) },
+    { ...state(), history: [{ text: "text", created_at: "yesterday", duration_ms: 0 }] },
+    { ...state(), history: [{ text: "text", created_at: "2026-10-14T12:00:00.000Z", duration_ms: -1 }] },
   ]) assert.equal(appStateSchema.safeParse(invalid).success, false);
   for (const value of [NaN, Infinity, -Infinity, -1, 1.01]) {
     assert.equal(appStateSchema.safeParse({ ...state(), progress: value }).success, false);
@@ -311,11 +316,12 @@ test("only fixed state, recording telemetry, and navigation events are accepted"
 
 test("transport bounds preserve a long multilingual transcript and reject oversized frames", () => {
   const text = "Deutsch 👩‍💻 العربية\u200f 日本語\n".repeat(1000);
-  const snapshot = { ...state(), transcript: text, history: [text] };
+  const historyEntry = { text, created_at: "2026-10-14T12:00:00.000Z", duration_ms: 65_000 };
+  const snapshot = { ...state(), transcript: text, history: [historyEntry] };
   assert.deepEqual(validateCommandOutput("get_state", snapshot), snapshot);
   assert.equal(appStateSchema.safeParse({ ...state(), transcript: "x".repeat(MAX_USER_TEXT_BYTES + 1) }).success, false);
   const escaped = "\u0000".repeat(MAX_USER_TEXT_BYTES);
-  const large = { ...state(), history: [escaped, escaped] };
+  const large = { ...state(), history: [{ ...historyEntry, text: escaped }, { ...historyEntry, text: escaped }] };
   assert.ok(new TextEncoder().encode(JSON.stringify(large)).byteLength > MAX_UI_STATE_BYTES);
   assert.equal(appStateSchema.safeParse(large).success, false);
 });

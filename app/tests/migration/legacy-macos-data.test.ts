@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MAX_UI_REQUEST_BYTES, MAX_USER_TEXT_BYTES, preferencesSchema } from "../../src/contracts/ui/state.js";
+import { MAX_UI_REQUEST_BYTES, preferencesSchema } from "../../src/contracts/ui/state.js";
 import { convertLegacyMacosData } from "../../src/services/migration/legacy-macos-data.js";
 
 // Synthetic projections of native v0.2.5 Prefs/UserDefaults and Snippet JSON.
@@ -25,10 +25,10 @@ test("saved Mac settings retain ordinary values and unsupported native/editor/de
     vocabulary: ["café", "İstanbul", "東京"].map((spelling) => ({ spelling, misheard: [] })),
     cleanup_enabled: true,
     snippets, output: "editor", hold_to_record: true, gpu: false, keep_history: true, restore_clipboard: false, play_sounds: false,
-    show_idle_overlay: true, launch_at_login: true, auto_check_updates: false, macos_shortcut: null,
+    show_idle_overlay: true, launch_at_login: true, auto_check_updates: false, update_channel: "stable", macos_shortcut: null,
   });
   assert.deepEqual(preferencesSchema.parse(converted.preferences), converted.preferences);
-  assert.deepEqual(converted.history, plist.history); assert.deepEqual(converted.preserved, { plist, snippets, history: plist.history });
+  assert.deepEqual(converted.history, []); assert.deepEqual(converted.preserved, { plist, snippets, history: plist.history });
   assert.deepEqual(converted.legacy, { editorAppPath: plist.editorAppPath, trigger: { present: true, value: trigger } });
   assert.deepEqual(converted.review, ["MAC_NATIVE_TRIGGER", "MAC_EDITOR_OUTPUT", "MAC_EDITOR_PATH", "MAC_HOLD_MODE", "MAC_UNMAPPED_PREFERENCES"]);
   converted.preferences.vocabulary = [{ spelling: "Changed converted copy", misheard: [] }]; converted.preserved.history.push("Changed preserved copy");
@@ -41,7 +41,7 @@ test("absent plist follows exact Prefs defaults with explicit hardware/model/log
     ui_language: "en", setup_completed: false, model: "parakeet-v3-q8", language: "de", microphone: "", vocabulary: [], snippets: [],
     cleanup_enabled: true,
     output: "paste", hold_to_record: false, gpu: false, keep_history: true, restore_clipboard: true, play_sounds: true,
-    show_idle_overlay: false, launch_at_login: true, auto_check_updates: true, macos_shortcut: null,
+    show_idle_overlay: false, launch_at_login: true, auto_check_updates: true, update_channel: "stable", macos_shortcut: null,
   });
   assert.deepEqual(converted.preserved, { plist: null, snippets: null, history: [] });
   assert.deepEqual(converted.legacy, { editorAppPath: "/System/Applications/TextEdit.app", trigger: { present: false, value: null } });
@@ -85,14 +85,21 @@ test("editable empty Mac snippets and unknown snippet JSON remain preserved with
   assert.deepEqual(converted.preserved.snippets, originals);
 });
 
-test("saved history follows keepHistory visibility and retains every original entry beyond the current host view", () => {
+test("legacy history is preserved for migration review but never imported into active history", () => {
   const history = Array.from({ length: 24 }, (_, index) => `Synthetic history ${index}`);
   const active = convertLegacyMacosData({ ...context, plist: { history } });
-  assert.deepEqual(active.history, history.slice(0, 20)); assert.deepEqual(active.preserved.history, history);
+  assert.deepEqual(active.history, []); assert.deepEqual(active.preserved.history, history);
   assert.deepEqual(active.preserved.plist, { history }); assert.ok(active.review.includes("MAC_HISTORY_OVERFLOW"));
   const disabled = convertLegacyMacosData({ ...context, plist: { history, keepHistory: false } });
   assert.deepEqual(disabled.history, []); assert.deepEqual(disabled.preserved.history, history);
   assert.deepEqual(disabled.review, ["MAC_DEFAULT_TRIGGER", "MAC_HISTORY_DISABLED"]);
+});
+
+test("large legacy history entries remain preserved without entering active history", () => {
+  const history = ["a".repeat(4 * 1024 * 1024 + 1)];
+  const converted = convertLegacyMacosData({ ...context, plist: { history } });
+  assert.deepEqual(converted.history, []);
+  assert.deepEqual(converted.preserved.history, history);
 });
 
 test("malformed Mac ordinary settings, snippets and context fail categorically without exposing values", () => {
@@ -104,7 +111,7 @@ test("malformed Mac ordinary settings, snippets and context fail categorically w
     ...[{ uiLanguage: "PRIVATE_CONTENT" }, { language: "yue" }, { setupCompleted: 1 }, { setupShown: null },
       { recordingMode: "unsupported" }, { outputMode: "unknown" }, { selectedModel: "../PRIVATE_CONTENT" },
       { vocabulary: "界".repeat(2731) }, { history: [true] }, { editorAppPath: {} }, { autoCheckUpdates: "false" },
-      { laterFeature: undefined }, { history: ["a".repeat(MAX_USER_TEXT_BYTES + 1)] },
+      { laterFeature: undefined },
       { laterFeature: "a".repeat(MAX_UI_REQUEST_BYTES) }].map((badPlist) => ({ ...context, plist: badPlist })),
     ...[[{ id: "not-a-uuid", trigger: "", expansion: "", enabled: true }], [{ trigger: "", expansion: "", enabled: true }],
       [{ ...snippets[0], enabled: "true" }], [{ ...snippets[0], trigger: "界".repeat(43) }], Array.from({ length: 101 }, () => snippets[0])]

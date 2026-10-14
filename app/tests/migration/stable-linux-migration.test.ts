@@ -44,7 +44,7 @@ test("fresh migration publishes all config children with legacy defaults and rep
   });
 });
 
-test("migration retains raw JSON, full history, model permissions and streamed recovery identity/chronology", { skip: process.platform !== "linux" }, async () => {
+test("migration retains raw legacy history outside the empty active history and preserves model/recovery data", { skip: process.platform !== "linux" }, async () => {
   await fixture(async (profile) => {
     const rawSettings = Buffer.from('{\n "setup_completed": true, "gpu": false, "gpu_configured": true, "later_data": {"saved": "東京"}, "native_trigger": {"kind":"key","key":8205}, "hold_to_record":true\n}\n');
     const rawHistory = Buffer.from(JSON.stringify(Array.from({ length: 23 }, (_, index) => `Synthetic history ${index}`), null, 2));
@@ -63,7 +63,7 @@ test("migration retains raw JSON, full history, model permissions and streamed r
     assert.equal(readFileSync(interrupted, "utf8"), "Interrupted legacy save bytes"); assert.equal(readFileSync(unrelated, "utf8"), "Unrelated original bytes");
     assert.deepEqual(readFileSync(join(publication(profile), "legacy/settings.json")), rawSettings);
     assert.deepEqual(readFileSync(join(publication(profile), "legacy/history.json")), rawHistory);
-    assert.equal((json(join(profile.paths.history, "history.json")) as unknown[]).length, 20);
+    assert.deepEqual(json(join(profile.paths.history, "history.json")), []);
     assert.equal(lstatSync(profile.roots.config).mode & 0o7777, 0o755); assert.equal(lstatSync(profile.paths.models).mode & 0o7777, 0o755);
     assert.equal(readFileSync(join(profile.paths.models, "model.bin"), "utf8"), "Owned model sentinel");
     const store = await PreferenceStore.open(profile), inventory = await ModelInventory.open(profile,

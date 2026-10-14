@@ -37,6 +37,7 @@ const idleState: AppState = {
     gpu: false,
     keep_history: true,
     cleanup_enabled: true,
+    update_channel: "stable",
   },
   models: [],
   installed: [],

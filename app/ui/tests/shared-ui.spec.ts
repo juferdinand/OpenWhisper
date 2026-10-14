@@ -2242,6 +2242,7 @@ test("Linux recognition mode names devices and distinguishes selection, discover
     Object.assign(window.testState, {
       gpu_supported: true,
       gpu_checked: false,
+      gpu_probe_failed: false,
       gpu_available: false,
       gpu_fallback: false,
       cpu_device: "AMD Ryzen 7 5700G",
@@ -2277,18 +2278,27 @@ test("Linux recognition mode names devices and distinguishes selection, discover
     ),
   ).toBeVisible();
   await page.evaluate(() => {
-    window.testState.gpu_fallback = true;
+    window.testState.gpu_fallback = false;
+    window.testState.gpu_probe_failed = true;
     window.publishState();
   });
   await expect(
-    page.getByText(
-      "GPU recognition failed; this recording used the CPU: AMD Ryzen 7 5700G",
-      { exact: true },
-    ),
+    page.getByText("GPU recognition failed; using CPU: AMD Ryzen 7 5700G", {
+      exact: true,
+    }),
   ).toBeVisible();
   await cpu.check();
   await expect(
-    page.getByText("CPU selected: AMD Ryzen 7 5700G", { exact: true }),
+    page.getByText("CPU selected: AMD Ryzen 7 5700G", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.preferences.ui_language = "de";
+    window.publishState();
+  });
+  await expect(
+    page.getByText("CPU ausgewählt: AMD Ryzen 7 5700G", { exact: true }),
   ).toBeVisible();
 });
 
@@ -2662,6 +2672,7 @@ async function start(
           show_idle_overlay: false,
           launch_at_login: false,
           auto_check_updates: true,
+          update_channel: "stable",
         },
         models,
         recommended_models: ["base", "parakeet-v3-q4"],
@@ -3917,7 +3928,13 @@ for (const platform of ["linux", "macos"] as const) {
         transcript,
         transcript_preview_omitted: false,
         recording_generation: 10,
-        history: [transcript],
+        history: [
+          {
+            text: transcript,
+            created_at: "2026-10-14T12:00:00.000Z",
+            duration_ms: 1_000,
+          },
+        ],
       });
       window.publishState();
     }, retainedTranscript);
@@ -3946,7 +3963,7 @@ for (const platform of ["linux", "macos"] as const) {
     );
     await expect(
       page.locator(
-        '#dictation-history .history-entry[data-history-select="0"]',
+        '#dictation-history .history-entry[data-history-select="0"] .history-entry-text',
       ),
     ).toHaveText(retainedTranscript);
 
@@ -3985,9 +4002,11 @@ for (const platform of ["linux", "macos"] as const) {
     await expect
       .poll(() => page.evaluate(() => window.calls.at(-1)))
       .toEqual({ command: "copy_history", args: { index: 0 } });
-    expect(await page.evaluate(() => window.testState.history)).toEqual([
-      retainedTranscript,
-    ]);
+    expect(
+      await page.evaluate(() =>
+        window.testState.history.map((entry) => entry.text),
+      ),
+    ).toEqual([retainedTranscript]);
 
     await page.evaluate(() => {
       Object.assign(window.testState, {
@@ -4798,16 +4817,17 @@ for (const platform of ["linux", "macos"] as const) {
       (_, index) => `History entry ${index}`,
     );
     entries[1] = longEntry;
-    await page.evaluate((longEntry) => {
-      window.testState.history = Array.from(
-        { length: 14 },
-        (_, index) => `History entry ${index}`,
-      );
-      window.testState.history[1] = longEntry;
-      window.testState.transcript = longEntry;
+    const historyItems = entries.map((text, index) => ({
+      text,
+      created_at: `2026-10-14T12:0${index % 10}:00.000Z`,
+      ...(index === 0 ? {} : { duration_ms: 125_000 + index * 1_000 }),
+    }));
+    await page.evaluate((historyItems) => {
+      window.testState.history = historyItems;
+      window.testState.transcript = historyItems[1]!.text;
       window.testState.transcript_preview_omitted = false;
       window.publishState();
-    }, longEntry);
+    }, historyItems);
     const toggle = page.locator("#toggle-history");
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await expect(toggle).toHaveAttribute(
@@ -4839,7 +4859,29 @@ for (const platform of ["linux", "macos"] as const) {
           ".history-entry[data-history-select]",
         );
         await expect(historyEntries).toHaveCount(entries.length);
-        await expect(historyEntries.nth(1)).toHaveText(longEntry);
+        await expect(
+          historyEntries.nth(1).locator(".history-entry-text"),
+        ).toHaveText(longEntry);
+        await expect(history.locator("time")).toHaveCount(entries.length);
+        await expect(history.locator("time").nth(1)).toHaveAttribute(
+          "datetime",
+          historyItems[1]!.created_at,
+        );
+        await expect(
+          history.locator(".history-entry-metadata").nth(1),
+        ).toContainText("2:06");
+        const copyEntry = history.locator('[data-history-copy="1"]');
+        await expect(history.locator("[data-history-copy]")).toHaveCount(
+          entries.length,
+        );
+        await copyEntry.click();
+        await expect
+          .poll(() => page.evaluate(() => window.calls.at(-1)))
+          .toEqual({ command: "copy_history", args: { index: 1 } });
+        await expect(historyEntries.nth(1)).toHaveAttribute(
+          "aria-pressed",
+          "false",
+        );
         const historyBytes = entries.reduce(
           (total, entry) => total + new TextEncoder().encode(entry).byteLength,
           0,
@@ -4887,8 +4929,6 @@ for (const platform of ["linux", "macos"] as const) {
         expect(
           await page.evaluate(() => (window as any).historyCompromised),
         ).toBe(undefined);
-        await expect(history.locator("time")).toHaveCount(0);
-        await expect(history.locator("[data-copy]")).toHaveCount(0);
         const clearRailHistory = rail.locator("[data-clear-history]");
         await expect(page.locator("#copy-dictation")).toBeVisible();
         await expect(page.locator("#record")).toBeInViewport();
@@ -4979,6 +5019,31 @@ for (const platform of ["linux", "macos"] as const) {
     await expect(page.locator("#clear-history")).toBeDisabled();
     await expect(page.locator(".history-storage-stats")).toContainText(
       /0 (recordings|Aufnahmen)/u,
+    );
+  });
+
+  test(`${platform}: recovered history with no known date shows its available duration`, async ({
+    page,
+  }) => {
+    await start(page, platform, false, false, false, null);
+    await page.evaluate(() => {
+      window.testState.history = [
+        { text: "Recovered synthetic transcript", duration_ms: 37_500 },
+      ];
+      window.publishState();
+    });
+    const entry = page.locator(
+      '#dictation-history .history-entry[data-history-select="0"]',
+    );
+    await expect(entry.locator(".history-entry-text")).toHaveText(
+      "Recovered synthetic transcript",
+    );
+    await expect(entry.locator("time")).toHaveCount(0);
+    await expect(entry.locator(".history-entry-metadata")).toContainText(
+      "0:38",
+    );
+    await expect(entry.locator(".history-entry-metadata")).not.toContainText(
+      "Invalid Date",
     );
   });
 
@@ -5447,7 +5512,11 @@ test("workspace and General match the reference proportions in English and Germa
         status: "idle",
         elapsed: 0,
         transcript: "",
-        history: [longTranscript, secondTranscript],
+        history: [longTranscript, secondTranscript].map((text, index) => ({
+          text,
+          created_at: `2026-10-14T12:0${index}:00.000Z`,
+          duration_ms: 125_000 + index * 1_000,
+        })),
         installed: ["base"],
         recording_available: true,
         recording_unavailable_reason: undefined,
@@ -5516,12 +5585,14 @@ test("workspace and General match the reference proportions in English and Germa
     expect(geometry.transcriptInsetLeft).toBeCloseTo(40, 0);
     expect(geometry.transcriptInsetRight).toBeCloseTo(40, 0);
     expect(geometry.recordCenterOffset).toBeLessThanOrEqual(2);
-    await expect(page.locator("#dictation-history time")).toHaveCount(0);
+    await expect(page.locator("#dictation-history time")).toHaveCount(2);
     const entry = page.locator(
       '#dictation-history .history-entry[data-history-select="0"]',
     );
     await expect(entry).toBeVisible();
-    await expect(entry).toHaveText(longTranscript);
+    await expect(entry.locator(".history-entry-text")).toHaveText(
+      longTranscript,
+    );
     const entryGeometry = await entry.evaluate((element) => {
       const text = element.querySelector(".history-entry-text")!;
       const buttonStyle = getComputedStyle(element);
@@ -5548,7 +5619,7 @@ test("workspace and General match the reference proportions in English and Germa
         entryGeometry.paddingBottom -
         1,
     );
-    expect(entryGeometry.entryHeight).toBeLessThanOrEqual(64);
+    expect(entryGeometry.entryHeight).toBeLessThanOrEqual(84);
     expect(entryGeometry.textHeight).toBeCloseTo(
       2 * entryGeometry.lineHeight,
       0,
@@ -5917,7 +5988,11 @@ for (const platform of ["linux", "macos"] as const) {
       w.testState.history = [
         "Diktat / Dictation",
         "<script>private text</script>",
-      ];
+      ].map((text, index) => ({
+        text,
+        created_at: `2026-10-14T12:0${index}:00.000Z`,
+        duration_ms: 0,
+      }));
       w.publishState();
     });
     await page.getByRole("button", { name: "Deutsch", exact: true }).click();
@@ -5930,7 +6005,9 @@ for (const platform of ["linux", "macos"] as const) {
     ).toBeVisible();
     await selectSettingsTab(page, "history");
     await expect(
-      page.locator("#dictation-history .history-entry[data-history-select]"),
+      page.locator(
+        "#dictation-history .history-entry[data-history-select] .history-entry-text",
+      ),
     ).toHaveText(["Diktat / Dictation", "<script>private text</script>"]);
     await expect(page.locator("#settings-history-controls")).toBeVisible();
     await expect(page.locator("#content .history-row")).toHaveCount(0);
@@ -6119,29 +6196,44 @@ for (const platform of ["linux", "macos"] as const) {
         );
         await expect(gpuMode).toBeDisabled();
         await expect(
-          page.getByText("Checking GPU hardware …", { exact: true }),
+          page.getByText(`CPU selected: ${cpuDevice}`, { exact: true }),
         ).toBeVisible();
         await page.evaluate(() => window.publishState());
         await expect(
-          page.getByText("Checking GPU hardware …", { exact: true }),
+          page.getByText(`CPU selected: ${cpuDevice}`, { exact: true }),
         ).toBeVisible();
         await page.evaluate(() => {
           window.testState.gpu_checked = true;
           window.publishState();
         });
         await expect(
-          page.getByText(
-            `No compatible GPU was detected. Recognition uses the CPU: ${cpuDevice}`,
-            { exact: true },
-          ),
+          page.getByText(`CPU selected: ${cpuDevice}`, { exact: true }),
         ).toBeVisible();
+        await page.evaluate(() => {
+          window.testState.gpu_probe_failed = true;
+          window.publishState();
+        });
+        await expect(
+          page.getByText(`CPU selected: ${cpuDevice}`, {
+            exact: true,
+          }),
+        ).toBeVisible();
+        await page.evaluate(() => {
+          window.testState.preferences.ui_language = "de";
+          window.publishState();
+        });
+        await expect(
+          page.getByText(`CPU ausgewählt: ${cpuDevice}`, { exact: true }),
+        ).toBeVisible();
+        await page.evaluate(() => {
+          window.testState.preferences.ui_language = "en";
+          window.testState.gpu_probe_failed = false;
+          window.publishState();
+        });
         await expect(gpuMode).toBeDisabled();
         await page.evaluate(() => window.publishState());
         await expect(
-          page.getByText(
-            `No compatible GPU was detected. Recognition uses the CPU: ${cpuDevice}`,
-            { exact: true },
-          ),
+          page.getByText(`CPU selected: ${cpuDevice}`, { exact: true }),
         ).toBeVisible();
         await page.evaluate(
           ({ gpuDevice }) => {
@@ -7209,6 +7301,31 @@ for (const platform of ["linux", "macos"] as const) {
         page.evaluate(() => window.testState.preferences.auto_check_updates),
       )
       .toBe(true);
+    const updateChannel = page.locator(
+      '#about-updates [data-pref="update_channel"]',
+    );
+    await expect(updateChannel).toHaveValue("stable");
+    await expect(page.locator("#about-updates")).toContainText(
+      "Preview releases may contain unfinished changes.",
+    );
+    await updateChannel.selectOption("preview");
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)))
+      .toEqual({
+        command: "save_preferences",
+        args: { changes: { update_channel: "preview" } },
+      });
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.testState.preferences.update_channel),
+      )
+      .toBe("preview");
+    await updateChannel.selectOption("stable");
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.testState.preferences.update_channel),
+      )
+      .toBe("stable");
 
     const aboutBounds = async () =>
       aboutScroll.evaluate((element) => ({
@@ -8216,7 +8333,13 @@ test("Linux clipboard delivery failures fully translate while retaining raw dict
       host.testState.message = message;
       host.testState.recovery_available = true;
       host.testState.transcript = "Clipboard delivery timed out";
-      host.testState.history = ["Clipboard delivery timed out"];
+      host.testState.history = [
+        {
+          text: "Clipboard delivery timed out",
+          created_at: "2026-10-14T12:00:00.000Z",
+          duration_ms: 0,
+        },
+      ];
       host.publishState();
     }, message);
     await expect(page.locator("#status")).toHaveText(german[message]);
@@ -8226,7 +8349,9 @@ test("Linux clipboard delivery failures fully translate while retaining raw dict
   }
   await selectSettingsTab(page, "history");
   await expect(
-    page.locator('#dictation-history .history-entry[data-history-select="0"]'),
+    page.locator(
+      '#dictation-history .history-entry[data-history-select="0"] .history-entry-text',
+    ),
   ).toHaveText("Clipboard delivery timed out");
   expect(await page.evaluate(() => (window as any).testState.transcript)).toBe(
     "Clipboard delivery timed out",
@@ -8476,7 +8601,8 @@ test("Apple Silicon setup offers Metal recognition and Intel Macs skip the hardw
       gpu_device: "Synthetic Apple GPU",
       gpu_supported: true,
       gpu_checked: true,
-      gpu_available: true,
+      gpu_available: false,
+      gpu_probe_failed: true,
       gpu_fallback: false,
     });
     window.publishState();
@@ -8486,6 +8612,24 @@ test("Apple Silicon setup offers Metal recognition and Intel Macs skip the hardw
   await expect(
     page.getByRole("heading", { name: "Choose recognition hardware" }),
   ).toBeVisible();
+  await expect(
+    page.getByText("CPU selected: Synthetic Apple CPU", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.preferences.ui_language = "de";
+    window.publishState();
+  });
+  await expect(
+    page.getByText("CPU ausgewählt: Synthetic Apple CPU", { exact: true }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.preferences.ui_language = "en";
+    window.testState.gpu_probe_failed = false;
+    window.testState.gpu_available = true;
+    window.publishState();
+  });
   const gpuMode = page.locator('input[name="gpu-mode"][value="true"]');
   await expect(gpuMode).toBeEnabled();
   await gpuMode.check();

@@ -205,7 +205,10 @@ export class PrivateAudioRecovery implements RecoveryBoundary {
       }
       candidates.sort((left, right) => left.time < right.time ? 1 : left.time > right.time ? -1 : left.id.localeCompare(right.id));
       for (const token of candidates) {
-        try { await this.samples(token, false); return Object.freeze({ id: token.id }); }
+        try {
+          const audio = await this.samples(token, false);
+          return Object.freeze({ id: token.id, sampleCount: audio.sampleCount });
+        }
         catch (error: unknown) {
           // A damaged backup is retained, while older intact owned recordings remain recoverable.
           if (!(error instanceof RecoveryError && error.code === "INVALID_AUDIO")) throw error;

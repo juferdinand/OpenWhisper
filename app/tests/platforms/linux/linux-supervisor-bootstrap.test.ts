@@ -63,7 +63,7 @@ test("Debian parent captures host discovery authority and refuses installation w
   let discoveries = 0;
   const dependencies: NonNullable<Parameters<typeof debianUpdates>[1]> = {
     home: () => home,
-    async feed(input) { discoveries++; assert.equal(input.package, "deb"); assert.equal(input.currentVersion, "0.3.0"); return undefined; },
+    async feed(input) { discoveries++; assert.equal(input.package, "deb"); assert.equal(input.currentVersion, "0.3.0"); assert.equal(input.channel, "stable"); return undefined; },
     async download() { assert.fail("No candidate may reach a download."); },
     async prepare() { assert.fail("No candidate may reach package preparation."); },
   };
@@ -88,7 +88,7 @@ async function appImageFixture() {
   // Darwin's temporary base can contain /var aliases; production admission requires physical ancestry.
   const home = await realpath(await mkdtemp(join(tmpdir(), "openwhisper-appimage-parent-"))), events: string[] = [];
   const file = await open(join(home, "inert-download"), "wx", 0o600);
-  const selected: LinuxUpdateCandidate = { package: "appimage", authentication: "unauthenticated", version: "0.3.1", notes: "", details: { highlights: [] },
+  const selected: LinuxUpdateCandidate = { package: "appimage", authentication: "unauthenticated", channel: "stable", version: "0.3.1", notes: "", details: { highlights: [] },
     assetName: "OpenWhisper-Linux-x86_64.AppImage", assetURL: `${LINUX_UPDATE_REPOSITORY}/releases/download/v0.3.1/OpenWhisper-Linux-x86_64.AppImage`,
     pageURL: `${LINUX_UPDATE_REPOSITORY}/releases/tag/v0.3.1`, feedURL: LINUX_UPDATE_FEED_URL, target: "linux-x86_64-appimage", signature: "inert successor signature" };
   let changed = false, local = false, closed = false;
@@ -105,7 +105,7 @@ async function appImageFixture() {
     async admit() { events.push("local-current-auth"); if (!local) throw new Error("Owned stale sidecar."); return guard; },
     async signature(input) { events.push("current-signature-fetch"); assert.equal(input.currentVersion, "0.3.0"); return "inert current signature"; },
     async repair(input) { events.push("repair-current"); assert.equal(input.version, "0.3.0"); assert.equal(input.signature, "inert current signature"); return guard; },
-    async feed(input) { events.push("feed"); assert.equal(input.package, "appimage"); return selected; },
+    async feed(input) { events.push("feed"); assert.equal(input.package, "appimage"); assert.equal(input.channel, "stable"); return selected; },
     async download(input) {
       events.push("download"); assert.equal(input.candidate, selected);
       input.onProgress?.({ received: 128, total: 512 }); return download;
@@ -155,6 +155,20 @@ test("first automatic check admits a valid current pair and keeps discovered and
       { status: "ready", updateVersion: "0.3.1", details: { highlights: [] } });
     assert.equal(input.events.filter((event) => event === "feed").length, feedCalls);
     await updates.discardPrepared();
+  } finally { await input.cleanup(); }
+});
+
+test("AppImage channel changes invalidate a checked candidate before download", async () => {
+  const input = await appImageFixture(), signal = new AbortController().signal; input.local();
+  let channel: "stable" | "preview" = "stable";
+  input.dependencies.channel = async () => channel;
+  try {
+    const updates = appImageUpdates("0.3.0", input.launch, input.dependencies);
+    assert.deepEqual(await updates.action("check", signal), { status: "available", updateVersion: "0.3.1", details: { highlights: [] } });
+    channel = "preview";
+    await assert.rejects(updates.action("download", signal), { code: "UNAVAILABLE" });
+    assert.equal(input.events.includes("download"), false);
+    await assert.rejects(updates.action("install", signal), { code: "INVALID_REQUEST" });
   } finally { await input.cleanup(); }
 });
 

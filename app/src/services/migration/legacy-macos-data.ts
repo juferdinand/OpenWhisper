@@ -66,6 +66,7 @@ export function convertLegacyMacosData(input: unknown): LegacyMacosData {
       keep_history: persisted.keepHistory, restore_clipboard: persisted.restoreClipboard, play_sounds: persisted.playSounds,
       show_idle_overlay: persisted.showIdleOverlay, launch_at_login: checked.defaults.launchAtLogin,
       auto_check_updates: persisted.autoCheckUpdates,
+      update_channel: "stable",
       // A saved native keyCode/layout/CGEvent binding is not an Electron accelerator.
       macos_shortcut: null,
     });
@@ -80,7 +81,7 @@ export function convertLegacyMacosData(input: unknown): LegacyMacosData {
     // review while every original entry remains available to the migration.
     if (persisted.keepHistory && persisted.history.length > 20) review.push("MAC_HISTORY_OVERFLOW");
     if (!persisted.keepHistory && persisted.history.length > 0) review.push("MAC_HISTORY_DISABLED");
-    return { preferences, history: activeHistorySchema.parse(persisted.keepHistory ? persisted.history.slice(0, 20) : []),
+    return { preferences, history: activeHistorySchema.parse([]),
       preserved: { plist: plist ?? null, snippets: checked.snippets ?? null, history: persisted.history },
       legacy: { editorAppPath: persisted.editorAppPath, trigger: { present, value: present ? plist?.["trigger"] ?? null : null } }, review };
   } catch { throw new LegacyMacosDataError(); }

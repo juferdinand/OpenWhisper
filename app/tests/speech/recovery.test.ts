@@ -53,7 +53,7 @@ test("private recovery streams exact complete samples and survives a new store i
   assert.equal(stats.mode & 0o7777, 0o600); assert.equal(stats.uid, process.getuid?.()); assert.equal(stats.nlink, 1);
   assert.equal((await lstat(directory)).mode & 0o7777, 0o700);
   const restarted = await PrivateAudioRecovery.open(directory);
-  assert.deepEqual(await restarted.latest(), saved.token);
+  assert.deepEqual(await restarted.latest(), { ...saved.token, sampleCount: original.sampleCount });
   const restored = await restarted.read(saved.token, context(2));
   assert.equal(restored.attempt, 2); assert.equal(restored.sampleCount, original.sampleCount);
   assert.ok(restored.chunks.every((chunk) => chunk.length <= 4096));
@@ -73,7 +73,7 @@ test("damaged headers, incomplete files and nonfinite backups remain intact whil
     const contents = kind === "incomplete" ? bad.subarray(0, bad.length - 1) : bad;
     await writeFile(filename(directory, token), contents, { mode: 0o600 });
     await assert.rejects(service.read(token, context()), code("INVALID_AUDIO"));
-    assert.deepEqual(await service.latest(), good.token);
+    assert.deepEqual(await service.latest(), { ...good.token, sampleCount: audio().sampleCount });
     assert.deepEqual(await readFile(filename(directory, token)), contents);
   }
   assert.equal((await readdir(directory)).length, 4);
