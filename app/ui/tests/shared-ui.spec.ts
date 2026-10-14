@@ -1778,6 +1778,137 @@ test("completed text processing keeps a fallback notice with raw and final text"
   ).toBe(false);
 });
 
+test("AI revision retry names its provider and offers only an explicit copy action", async ({
+  page,
+}) => {
+  await start(page, "linux");
+  await page.locator("#close-settings").click();
+  await page.evaluate(() => {
+    window.testState.status = "done";
+    window.testState.transcript = "Delivered deterministic text.";
+    window.testState.raw_transcript = "Raw recognized text.";
+    window.testState.text_connections.settings.connections[0]!.enabled = true;
+    window.testState.text_connections.settings.revision!.enabled = true;
+    window.testState.text_connections.processing = {
+      status: "fallback",
+      provider: "ollama",
+      reason: "failed",
+    };
+    window.testState.text_revision_retry = {
+      status: "available",
+      provider: "ollama",
+    };
+    window.publishState();
+  });
+  await expect(page.locator("#retry-ai-revision")).toHaveText(
+    "Try again with Ollama",
+  );
+  await expect(page.locator(".text-revision-retry-notice")).toContainText(
+    "AI text processing failed; your text was kept.",
+  );
+  await page.locator("#retry-ai-revision").click();
+  await expect
+    .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+    .toBe("retry_text_revision");
+
+  await page.evaluate(() => {
+    window.testState.text_revision_retry = {
+      status: "processing",
+      provider: "ollama",
+    };
+    window.publishState();
+  });
+  await expect(page.locator("#cancel-ai-revision")).toBeVisible();
+  await expect(page.locator("#workspace-mode")).toBeDisabled();
+  await page.locator("#cancel-ai-revision").click();
+  await expect
+    .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+    .toBe("cancel_text_processing");
+
+  await page.evaluate(() => {
+    window.testState.text_revision_retry = {
+      status: "failed",
+      provider: "ollama",
+    };
+    window.publishState();
+  });
+  await expect(page.locator(".text-revision-retry-notice")).toContainText(
+    "AI text processing failed again; your original text was kept.",
+  );
+  await page.locator("#retry-ai-revision").click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.calls.filter((call) => call.command === "retry_text_revision")
+            .length,
+      ),
+    )
+    .toBe(2);
+
+  await page.evaluate(() => {
+    window.testState.text_connections.processing = {
+      status: "complete",
+      provider: "ollama",
+      reason: null,
+    };
+    window.testState.text_revision_retry = {
+      status: "complete",
+      provider: "ollama",
+      text: "AI revised text with expanded signature.",
+    };
+    window.publishState();
+  });
+  const body = page.locator(".dictation-transcript-body");
+  await expect(body.locator(":scope > .transcript")).toHaveText(
+    "Delivered deterministic text.",
+  );
+  await expect(body.locator(".raw-transcript")).toContainText(
+    "Raw recognized text.",
+  );
+  await expect(
+    page.locator(".text-revision-retry-result .transcript"),
+  ).toHaveText("AI revised text with expanded signature.");
+  await expect(page.locator(".text-revision-retry-result")).toContainText(
+    "history remain unchanged",
+  );
+  await page.locator("#copy-ai-revision").click();
+  await expect
+    .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
+    .toBe("copy_text_revision");
+  expect(
+    await page.evaluate(() =>
+      window.calls
+        .map((call) => call.command)
+        .filter((command) =>
+          [
+            "retry_text_revision",
+            "cancel_text_processing",
+            "copy_text_revision",
+            "retry_transcription",
+            "copy_transcript",
+          ].includes(command),
+        ),
+    ),
+  ).toEqual([
+    "retry_text_revision",
+    "cancel_text_processing",
+    "retry_text_revision",
+    "copy_text_revision",
+  ]);
+
+  await page.evaluate(() => {
+    window.testState.preferences.ui_language = "de";
+    window.publishState();
+  });
+  await expect(page.locator("#copy-ai-revision")).toHaveText(
+    "Überarbeiteten Text kopieren",
+  );
+  await expect(page.locator(".text-revision-retry-result h3")).toHaveText(
+    "KI-überarbeitete Version mit Ollama",
+  );
+});
+
 test("pending keyboard permission exposes translated Cancel and sends only revocation", async ({
   page,
 }) => {
@@ -2620,6 +2751,7 @@ async function start(
           processing: { status: "idle", provider: null, reason: null },
           conversation: { id: "test-conversation", provider: null, turns: [] },
         },
+        text_revision_retry: { status: "idle" },
         macos: {
           microphone_allowed: fresh ? false : true,
           recording_shortcut: false,

@@ -8,7 +8,7 @@ const utf8 = (maximum: number) => z.string().max(maximum).refine(
 const builtinTextProviderSchema = z.enum(["ollama", "lm_studio", "claude_code", "codex"]);
 const customTextProviderSchema = z.string().regex(/^custom:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu)
   .transform((value) => value as `custom:${string}`);
-const textProviderSchema = z.union([builtinTextProviderSchema, customTextProviderSchema]);
+export const textProviderSchema = z.union([builtinTextProviderSchema, customTextProviderSchema]);
 export type BuiltinTextProvider = z.infer<typeof builtinTextProviderSchema>;
 export type TextProvider = z.infer<typeof textProviderSchema>;
 

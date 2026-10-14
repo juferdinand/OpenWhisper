@@ -56,6 +56,7 @@ const idleState: AppState = {
   recording_generation: 7,
   text_connections: { settings: defaultTextConnectionSettings(), available: defaultTextConnectionAvailability(), scanning: false,
     processing: idleTextConnectionProcessing(), conversation: emptyTextConversation() },
+  text_revision_retry: { status: "idle" },
   text_processing: null,
 };
 

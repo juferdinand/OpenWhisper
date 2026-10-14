@@ -3,7 +3,7 @@ import { updateDownloadProgressSchema } from "../update/update-download-progress
 import { speechLanguageSchema } from "../speech/speech.js";
 import {
   defaultTextConnectionAvailability, defaultTextConnectionSettings, emptyTextConversation, idleTextConnectionProcessing,
-  customCliConnectionSchema, textConnectionSettingsSchema, textConnectionsStateSchema,
+  customCliConnectionSchema, textConnectionSettingsSchema, textConnectionsStateSchema, textProviderSchema,
 } from "../text/connections.js";
 import { textProcessingStageEventSchema } from "../text/processing.js";
 import { snippetSchema } from "../text/snippets.js";
@@ -238,7 +238,11 @@ const updateStateSchema = z.strictObject({
   details: updateDetailsSchema.optional(),
 });
 export type UpdateState = z.infer<typeof updateStateSchema>;
-
+const textRevisionRetrySchema = z.discriminatedUnion("status", [
+  z.strictObject({ status: z.literal("idle") }),
+  z.strictObject({ status: z.enum(["available", "processing", "failed"]), provider: textProviderSchema }),
+  z.strictObject({ status: z.literal("complete"), provider: textProviderSchema, text: userText }),
+]);
 export const appStateSchema = z.strictObject({
   updates: updateStateSchema,
   initial_tab: tabSchema.optional(),
@@ -300,6 +304,7 @@ export const appStateSchema = z.strictObject({
   text_connections: textConnectionsStateSchema.default(() => ({ settings: defaultTextConnectionSettings(),
     available: defaultTextConnectionAvailability(), scanning: false,
     processing: idleTextConnectionProcessing(), conversation: emptyTextConversation() })),
+  text_revision_retry: textRevisionRetrySchema.default({ status: "idle" }),
   text_processing: textProcessingStageEventSchema.nullable().default(null),
 }).refine(
   (state) => state.platform !== "macos" || state.macos !== undefined,
@@ -370,6 +375,8 @@ export const commandInputSchemas = {
   test_custom_cli_connection: z.strictObject({ connection: customCliConnectionSchema }),
   new_conversation: noArgs,
   cancel_text_processing: noArgs,
+  retry_text_revision: noArgs,
+  copy_text_revision: noArgs,
   toggle_recording: noArgs,
   cancel_recording: noArgs,
   retry_transcription: noArgs,
@@ -418,6 +425,8 @@ export const commandOutputSchemas = {
   ]),
   new_conversation: appStateSchema,
   cancel_text_processing: actionResult,
+  retry_text_revision: actionResult,
+  copy_text_revision: actionResult,
   toggle_recording: actionResult,
   cancel_recording: actionResult,
   retry_transcription: actionResult,

@@ -27,6 +27,7 @@ function state(): AppState {
     download: null, progress: 0, elapsed: 0, model_directory: "", profile: "development", recording_available: false,
     text_connections: { settings: defaultTextConnectionSettings(), available: defaultTextConnectionAvailability(), scanning: false,
       processing: idleTextConnectionProcessing(), conversation: emptyTextConversation() },
+    text_revision_retry: { status: "idle" },
     text_processing: null,
   };
 }
@@ -88,8 +89,9 @@ test("schema-derived command maps cover all current renderer actions", async () 
     "enable_paste", "disable_paste", "enable_shortcut", "desktop_shortcut", "clear_shortcut",
     "retry_transcription", "discard_recovery", "toggle_recording", "cancel_recording", "check_updates", "download_update", "install_update",
     "scan_connections", "start_lm_studio_server", "save_connections", "new_conversation", "cancel_text_processing",
+    "retry_text_revision", "copy_text_revision",
   ]) assert.doesNotThrow(() => validateCommandName(name));
-  assert.equal(Object.keys(commandInputSchemas).length, 41);
+  assert.equal(Object.keys(commandInputSchemas).length, 43);
   assert.deepEqual(Object.keys(commandOutputSchemas).sort(), Object.keys(commandInputSchemas).sort());
 });
 

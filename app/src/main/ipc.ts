@@ -188,6 +188,8 @@ export function createUiDispatcher(options: {
     test_custom_cli_connection: route("test_custom_cli_connection", handlers.test_custom_cli_connection),
     new_conversation: route("new_conversation", handlers.new_conversation),
     cancel_text_processing: route("cancel_text_processing", handlers.cancel_text_processing),
+    retry_text_revision: route("retry_text_revision", handlers.retry_text_revision),
+    copy_text_revision: route("copy_text_revision", handlers.copy_text_revision),
     toggle_recording: route("toggle_recording", handlers.toggle_recording),
     cancel_recording: route("cancel_recording", handlers.cancel_recording),
     retry_transcription: route("retry_transcription", handlers.retry_transcription),

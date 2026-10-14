@@ -552,6 +552,32 @@ svg {
   font-size: 12px;
   line-height: 1.45;
 }
+.text-revision-retry-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+}
+.text-revision-retry-notice span {
+  flex: 1 1 240px;
+}
+.text-revision-retry-result {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--group);
+}
+.text-revision-retry-result h3,
+.text-revision-retry-result p {
+  margin: 0;
+}
+.text-revision-retry-result .secondary {
+  font-size: 12px;
+}
 .dictation-empty {
   min-height: 100%;
   display: block;

@@ -34,6 +34,7 @@ import { runCodexText } from "../services/text/codex.js";
 import { CustomCliTextError, runCustomCliText, testCustomCliConnection } from "../services/text/custom-cli.js";
 import { boundedTextPreview } from "../services/text/text-preview.js";
 import { OptionalTextProcessing, TextProviderUnavailableError } from "../services/text/optional-text-processing.js";
+import { TextRevisionRetry } from "../services/text/text-revision-retry.js";
 import { TextConversationStore } from "../services/text/conversation.js";
 import {
   localProcessingProfileSchema, defaultLocalProcessingProfile, applyLocalProcessingProfilePatch,
@@ -217,6 +218,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   const textConnectionScanner = new LocalTextConnectionScanner();
   let textProcessing: TextProcessingStageEvent | null = null;
   let textProcessingOwner: { readonly generation: number; readonly attempt: number } | undefined;
+  const textRevisionRetry = new TextRevisionRetry();
   let rawTranscript = "";
   const rawCatalog: unknown = JSON.parse(await readFile(join(distribution, "resources/models.json"), "utf8"));
   const catalog = parseModelCatalog(rawCatalog);
@@ -265,6 +267,21 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   const history = await PrivateStateStore.open(join(profile.paths.history, "history.json"),
     z.array(z.string().max(MAX_USER_TEXT_BYTES)).max(20), [], 8 * 1024 * 1024, { invalidContent: "preserve-and-default" });
   let notify = (): void => {};
+  const retrySettingsFingerprint = (): string => JSON.stringify({
+    settings: textConnectionStore.snapshot(), snippets: preferences.snapshot().snippets,
+  });
+  const clearTextRevisionRetry = (): void => {
+    textRevisionRetry.clear();
+  };
+  const textRevisionRetryIsCurrent = (): boolean => {
+    if (recording.phase !== "done" ||
+        recording.recoveryAvailable || shutdownInProgress) return false;
+    const settings = textConnectionStore.snapshot();
+    const retry = textRevisionRetry.snapshot();
+    return settings.mode === "single" && retry.status !== "idle" &&
+      textRevisionRetry.matches(recording.generation, retrySettingsFingerprint()) &&
+      settings.connections.find((connection) => connection.enabled)?.provider === retry.provider;
+  };
   const textProcessor = new OptionalTextProcessing({
     settings: () => textConnectionStore.snapshot(),
     scan: (settings) => textConnectionScanner.scan(settings),
@@ -406,6 +423,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           rawTranscript = "";
           textProcessing = null;
           textProcessingOwner = undefined;
+          clearTextRevisionRetry();
           textProcessor.resetStatus();
         }
         const hadMessage = message !== "";
@@ -499,6 +517,14 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
             return next;
           }).then(notify, () => { message = "Text copied; history could not be saved."; notify(); });
         }
+        const failedRevision = textProcessor.snapshot().processing;
+        if (settings.mode === "single" && processingInput.length > 0 &&
+            Buffer.byteLength(processingInput, "utf8") <= MAX_USER_TEXT_BYTES &&
+            failedRevision.status === "fallback" && failedRevision.provider !== null &&
+            failedRevision.reason !== "cancelled") {
+          textRevisionRetry.offer({ generation: context.generation, attempt: context.attempt, input: processingInput, snippets,
+            provider: failedRevision.provider, settingsFingerprint: retrySettingsFingerprint() });
+        } else clearTextRevisionRetry();
         return { ...delivered, deliveredText: acceptedText };
       } },
     });
@@ -599,6 +625,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       local_processing_invalid_profile: processingProfile.invalidContent,
       text_connections: { settings: textConnectionStore.snapshot(), ...textProcessor.snapshot(),
         conversation: conversationStore.snapshotFor(textConnectionStore.snapshot()) ?? emptyTextConversation() },
+      text_revision_retry: textRevisionRetry.snapshot(),
     });
   };
   let latestSnapshot: AppState | undefined;
@@ -1152,6 +1179,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           }
           throw error;
         }
+        if (Object.hasOwn(changes, "snippets")) { clearTextRevisionRetry(); textProcessor.cancel(); }
         if (changes.hold_to_record !== undefined) await platformHost?.shortcut("mode", changes.hold_to_record);
         if (["model", "language", "microphone", "cleanup_enabled", "vocabulary", "snippets", "gpu"].some((key) => Object.hasOwn(changes, key))) configured = false;
         const current = state();
@@ -1202,6 +1230,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         await validateTextConnectionSave(textConnectionStore.snapshot(), checked, () => textProcessor.snapshot().available,
           () => textProcessor.scanConnections(checked));
         await textConnectionStore.update(() => checked);
+        clearTextRevisionRetry();
         // Fingerprint-gated reads keep old context private if the second write fails.
         await conversationStore.syncSettings(checked);
         // A newly added custom CLI has no availability yet; check it in the background without blocking the save.
@@ -1233,9 +1262,42 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         if (recording.busy || recording.recoveryAvailable || textProcessor.busy) {
           throw new Error("Finish the current recording before starting a new conversation.");
         }
+        clearTextRevisionRetry();
         await conversationStore.newConversation(textConnectionStore.snapshot());
         return state();
       }),
+      retry_text_revision: async () => {
+        if (!textRevisionRetryIsCurrent()) {
+          clearTextRevisionRetry(); notify(); return;
+        }
+        if (textProcessor.busy) throw new Error("AI text processing is already running.");
+        const fingerprint = retrySettingsFingerprint();
+        const context = textRevisionRetry.begin(recording.generation, fingerprint);
+        if (!context) { clearTextRevisionRetry(); notify(); return; }
+        notify();
+        let result: string | undefined;
+        try {
+          result = await textProcessor.process(context.input, {
+            generation: context.generation, attempt: context.attempt, signal: new AbortController().signal,
+          });
+        } catch {
+          textRevisionRetry.fail(context.generation, context.attempt, fingerprint);
+          notify(); return;
+        }
+        if (!textRevisionRetryIsCurrent()) {
+          clearTextRevisionRetry(); notify(); return;
+        }
+        const processing = textProcessor.snapshot().processing;
+        if (result !== undefined && result.trim().length > 0 && processing.status === "complete" && processing.provider === context.provider) {
+          const text = expandSnippets(result, context.snippets);
+          if (Buffer.byteLength(text, "utf8") <= MAX_USER_TEXT_BYTES) {
+            textRevisionRetry.complete(context.generation, context.attempt, fingerprint, text);
+          } else textRevisionRetry.fail(context.generation, context.attempt, fingerprint);
+        } else {
+          textRevisionRetry.fail(context.generation, context.attempt, fingerprint, processing.reason === "cancelled");
+        }
+        notify();
+      },
       cancel_text_processing: () => {
         textProcessor.cancel();
       },
@@ -1318,6 +1380,14 @@ if (macRecording) { microphonePermission = systemPreferences.getMediaAccessStatu
       },
       cancel_download: () => { downloadAbort?.abort(); },
       copy_transcript: async () => { await clipboardOutput.writeText(recording.transcript); },
+      copy_text_revision: async () => {
+        if (!textRevisionRetryIsCurrent()) {
+          clearTextRevisionRetry(); notify(); return;
+        }
+        const text = textRevisionRetry.result(recording.generation, retrySettingsFingerprint());
+        if (text === undefined) { clearTextRevisionRetry(); notify(); return; }
+        await clipboardOutput.writeText(text);
+      },
       copy_history: async ({ index }) => { const text = history.snapshot().filter((item) => Buffer.byteLength(item, "utf8") <= MAX_USER_TEXT_BYTES)[index]; if (text !== undefined) await clipboardOutput.writeText(text); },
       clear_history: () => action(async () => { await history.update(() => []); }),
       show_models_folder: () => action(async () => { if (await shell.openPath(profile.paths.models)) throw new Error("Folder unavailable."); }),
