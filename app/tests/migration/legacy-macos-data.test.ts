@@ -25,7 +25,7 @@ test("saved Mac settings retain ordinary values and unsupported native/editor/de
     vocabulary: ["café", "İstanbul", "東京"].map((spelling) => ({ spelling, misheard: [] })),
     cleanup_enabled: true,
     snippets, output: "editor", hold_to_record: true, gpu: false, keep_history: true, restore_clipboard: false, play_sounds: false,
-    show_idle_overlay: true, launch_at_login: true, auto_check_updates: false, macos_shortcut: null,
+    show_idle_overlay: true, launch_at_login: true, auto_check_updates: false, update_channel: "stable", macos_shortcut: null,
   });
   assert.deepEqual(preferencesSchema.parse(converted.preferences), converted.preferences);
   assert.deepEqual(converted.history, plist.history); assert.deepEqual(converted.preserved, { plist, snippets, history: plist.history });
@@ -41,7 +41,7 @@ test("absent plist follows exact Prefs defaults with explicit hardware/model/log
     ui_language: "en", setup_completed: false, model: "parakeet-v3-q8", language: "de", microphone: "", vocabulary: [], snippets: [],
     cleanup_enabled: true,
     output: "paste", hold_to_record: false, gpu: false, keep_history: true, restore_clipboard: true, play_sounds: true,
-    show_idle_overlay: false, launch_at_login: true, auto_check_updates: true, macos_shortcut: null,
+    show_idle_overlay: false, launch_at_login: true, auto_check_updates: true, update_channel: "stable", macos_shortcut: null,
   });
   assert.deepEqual(converted.preserved, { plist: null, snippets: null, history: [] });
   assert.deepEqual(converted.legacy, { editorAppPath: "/System/Applications/TextEdit.app", trigger: { present: false, value: null } });

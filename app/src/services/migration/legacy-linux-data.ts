@@ -80,6 +80,7 @@ export function convertLegacyLinuxData(input: unknown): LegacyLinuxData {
       gpu: original !== undefined && parsed.gpu_configured === undefined ? true : parsed.gpu,
       gpu_configured: parsed.gpu_configured ?? true,
       x11_trigger: convertedX11 && convertedX11.success ? convertedX11.data : null,
+      update_channel: "stable",
     });
     const history = checked.history ?? [];
     return { preferences, history: activeHistorySchema.parse(history.slice(0, 20)),

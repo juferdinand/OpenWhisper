@@ -66,6 +66,7 @@ export function convertLegacyMacosData(input: unknown): LegacyMacosData {
       keep_history: persisted.keepHistory, restore_clipboard: persisted.restoreClipboard, play_sounds: persisted.playSounds,
       show_idle_overlay: persisted.showIdleOverlay, launch_at_login: checked.defaults.launchAtLogin,
       auto_check_updates: persisted.autoCheckUpdates,
+      update_channel: "stable",
       // A saved native keyCode/layout/CGEvent binding is not an Electron accelerator.
       macos_shortcut: null,
     });
