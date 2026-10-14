@@ -185,6 +185,7 @@ export function createUiDispatcher(options: {
     scan_connections: route("scan_connections", handlers.scan_connections),
     start_lm_studio_server: route("start_lm_studio_server", handlers.start_lm_studio_server),
     save_connections: route("save_connections", handlers.save_connections),
+    test_custom_cli_connection: route("test_custom_cli_connection", handlers.test_custom_cli_connection),
     new_conversation: route("new_conversation", handlers.new_conversation),
     cancel_text_processing: route("cancel_text_processing", handlers.cancel_text_processing),
     toggle_recording: route("toggle_recording", handlers.toggle_recording),

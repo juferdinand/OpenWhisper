@@ -37,7 +37,9 @@ test("Codex metadata discovery performs initialized paginated model/list only", 
         } else if (message.method === 'model/list' && seen.filter(item => item === 'model/list').length === 1) {
           if (seen.join(',') !== 'initialize,initialized,model/list' || message.params.limit !== 128 || message.params.includeHidden !== false) process.exit(32);
           process.stdout.write(JSON.stringify({ id: message.id, result: { data: [
-            { id: 'codex-one', hidden: false, displayName: 'GPT-5.4 Codex' }, { id: 'hidden-model', hidden: true, displayName: 'Hidden' },
+            { id: 'codex-one', hidden: false, isDefault: true, displayName: 'GPT-5.4 Codex', defaultReasoningEffort: 'medium',
+              supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'medium' }, { reasoningEffort: 'high' }] },
+            { id: 'hidden-model', hidden: true, displayName: 'Hidden', supportedReasoningEfforts: [{ reasoningEffort: 'xhigh' }] },
           ], nextCursor: 'next-page' } }) + '\\n');
         } else if (message.method === 'model/list') {
           if (seen.join(',') !== 'initialize,initialized,model/list,model/list' || message.params.cursor !== 'next-page' ||
@@ -57,6 +59,10 @@ test("Codex metadata discovery performs initialized paginated model/list only", 
     { value: "codex-two", display_name: "codex-two", source: "cli" },
     { value: "codex-three", display_name: "codex-three", source: "cli" },
   ]);
+  assert.deepEqual(discovery.model_reasoning, [
+    { model: "codex-one", options: ["low", "medium", "high"], default: "medium" },
+    { model: "default", options: ["low", "medium", "high"], default: "medium" },
+  ]);
 });
 
 test("Codex metadata errors and repeated cursors fail closed without returning partial catalogs", async () => {
@@ -66,7 +72,7 @@ test("Codex metadata errors and repeated cursors fail closed without returning p
       process.stdout.write(JSON.stringify({ id: message.id, error: { code: -32601, message: 'unsupported' } }) + '\\n');
     });
   `);
-  assert.deepEqual(await discoverCodexModels(errorExecutable), { models: [], model_options: [] });
+  assert.deepEqual(await discoverCodexModels(errorExecutable), { models: [], model_options: [], model_reasoning: [] });
 
   const cursorExecutable = await fixtureExecutable(`
     let pending = '';
@@ -80,7 +86,7 @@ test("Codex metadata errors and repeated cursors fail closed without returning p
       }
     }});
   `);
-  assert.deepEqual(await discoverCodexModels(cursorExecutable), { models: [], model_options: [] });
+  assert.deepEqual(await discoverCodexModels(cursorExecutable), { models: [], model_options: [], model_reasoning: [] });
 });
 
 test("Claude metadata discovery preserves aliases and resolved IDs and adds bounded active-version suggestions", async () => {
@@ -128,6 +134,17 @@ test("Claude metadata discovery preserves aliases and resolved IDs and adds boun
   assert.equal(option("vendor-haiku-latest")?.display_name, "vendor-haiku-latest");
   assert.equal(option("claude-haiku-5-5"), undefined, "provider-specific IDs do not seed first-party family suggestions");
   assert.ok(discovery.model_options.every(({ value }) => !value.includes("mythos")));
+  assert.deepEqual(discovery.model_reasoning.find(({ model }) => model === "default"), {
+    model: "default", options: ["low", "medium", "high", "xhigh", "max"], default: "medium",
+  });
+  assert.deepEqual(discovery.model_reasoning.find(({ model }) => model === "claude-opus-4-7"), {
+    model: "claude-opus-4-7", options: ["low", "medium", "high", "xhigh", "max"], default: "xhigh",
+  });
+  assert.deepEqual(discovery.model_reasoning.find(({ model }) => model === "claude-sonnet-4-6"), {
+    model: "claude-sonnet-4-6", options: ["low", "medium", "high", "max"], default: "high",
+  });
+  assert.equal(discovery.model_reasoning.some(({ model }) => model === "vendor-haiku-latest"), false,
+    "unknown provider model IDs do not get guessed reasoning controls");
 });
 
 test("Claude malformed or mismatched initialize responses return an empty catalog", async () => {
@@ -136,5 +153,5 @@ test("Claude malformed or mismatched initialize responses return an empty catalo
       request_id: 'not-openwhisper-request', subtype: 'success', response: { models: [{ value: 'wrong', displayName: 'Wrong' }] },
     } }) + '\\n'));
   `);
-  assert.deepEqual(await discoverClaudeModels(executable), { models: [], model_options: [] });
+  assert.deepEqual(await discoverClaudeModels(executable), { models: [], model_options: [], model_reasoning: [] });
 });

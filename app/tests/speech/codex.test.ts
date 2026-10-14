@@ -20,7 +20,7 @@ async function fixtureExecutable(source: string): Promise<string> {
 test("Codex invocation is read-only, noninteractive and receives bounded conversation context via stdin", async () => {
   const expectedText = "current message with metacharacters ; $(do-not-run)";
   const expectedArgv = ["-a", "never", "exec", "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral", "--json", "--color", "never",
-    "--model", "gpt-5.4-codex", "-"];
+    "--config", 'model_reasoning_effort="medium"', "--model", "gpt-5.4-codex", "-"];
   const executable = await fixtureExecutable(`
     let input = ''; process.stdin.setEncoding('utf8'); process.stdin.on('data', chunk => input += chunk);
     process.stdin.on('end', () => {
@@ -45,7 +45,8 @@ test("Codex invocation is read-only, noninteractive and receives bounded convers
   process.env["LD_PRELOAD"] = "/synthetic-injection.so";
   try {
     assert.equal(await runCodexText({ executable, instruction: "Answer conversationally.", text: expectedText,
-      context: [{ user: "previous user question", assistant: "previous assistant answer" }], model: "gpt-5.4-codex", signal: controller.signal }), "codex answer");
+      context: [{ user: "previous user question", assistant: "previous assistant answer" }], model: "gpt-5.4-codex",
+      reasoning_effort: "medium", signal: controller.signal }), "codex answer");
   } finally {
     if (priorCodexHome === undefined) delete process.env["CODEX_HOME"]; else process.env["CODEX_HOME"] = priorCodexHome;
     if (priorKey === undefined) delete process.env["OPENAI_API_KEY"]; else process.env["OPENAI_API_KEY"] = priorKey;
@@ -99,5 +100,14 @@ test("Codex adapter rejects invalid direct model values before spawning", async 
       signal: new AbortController().signal }),
     (error: unknown) => error instanceof CodexTextError && error.code === "INVALID_RESPONSE");
   }
+  await assert.rejects(access(marker));
+});
+
+test("Codex adapter rejects malformed effort values before spawning", async () => {
+  const executable = await fixtureExecutable(`require('node:fs').writeFileSync(require('node:path').join(__dirname, 'spawned'), 'spawned');`);
+  const marker = join(dirname(executable), "spawned");
+  await assert.rejects(runCodexText({ executable, instruction: "instruction", text: "synthetic text",
+    reasoning_effort: 'low"\nmodel="unsafe"', signal: new AbortController().signal }),
+  (error: unknown) => error instanceof CodexTextError && error.code === "INVALID_RESPONSE");
   await assert.rejects(access(marker));
 });

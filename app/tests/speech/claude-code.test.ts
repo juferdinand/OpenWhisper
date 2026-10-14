@@ -21,7 +21,7 @@ test("Claude adapter disables model tools, uses a private cwd and stdin, and fil
   const executable = await fixtureExecutable(`
     let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', chunk => input += chunk);
     process.stdin.on('end', () => {
-      const expected = ['--print','--model','claude-sonnet-4-5','--safe-mode','--tools','','--no-session-persistence','--input-format','text','--output-format','json','--permission-prompts','none'];
+      const expected = ['--print','--effort','high','--model','claude-sonnet-4-5','--safe-mode','--tools','','--no-session-persistence','--input-format','text','--output-format','json','--permission-prompts','none'];
       const safe = JSON.stringify(process.argv.slice(2)) === JSON.stringify(expected)
         && process.env.ANTHROPIC_API_KEY === undefined && process.env.OPENAI_API_KEY === undefined
         && process.cwd().includes('openwhisper-text-') && input.includes('synthetic transcript')
@@ -35,7 +35,7 @@ test("Claude adapter disables model tools, uses a private cwd and stdin, and fil
   const controller = new AbortController();
   try {
     assert.equal(await runClaudeCodeText({ executable, instruction: "Summarize this memo into a short action-item list.", text: "synthetic transcript",
-      model: "claude-sonnet-4-5", signal: controller.signal }),
+      model: "claude-sonnet-4-5", reasoning_effort: "high", signal: controller.signal }),
       "revised transcript");
   } finally {
     if (prior === undefined) delete process.env["ANTHROPIC_API_KEY"];
@@ -101,6 +101,15 @@ test("Claude adapter rejects invalid direct model values before spawning", async
       signal: new AbortController().signal }),
     (error: unknown) => error instanceof ClaudeTextError && error.code === "INVALID_RESPONSE");
   }
+  await assert.rejects(access(marker));
+});
+
+test("Claude adapter rejects malformed effort values before spawning", async () => {
+  const executable = await fixtureExecutable(`require('node:fs').writeFileSync(require('node:path').join(__dirname, 'spawned'), 'spawned');`);
+  const marker = join(dirname(executable), "spawned");
+  await assert.rejects(runClaudeCodeText({ executable, instruction: "instruction", text: "synthetic text",
+    reasoning_effort: 'low" --tools', signal: new AbortController().signal }),
+  (error: unknown) => error instanceof ClaudeTextError && error.code === "INVALID_RESPONSE");
   await assert.rejects(access(marker));
 });
 

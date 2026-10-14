@@ -1,8 +1,8 @@
 # Optional text-model connections
 
-Start with [README.md](../README.md) for released behavior. This branch implements
-[Connections (#11)](https://github.com/juferdinand/OpenWhisper/issues/11); it is not part
-of release 0.4.2. Ordinary recording remains independent of these optional integrations.
+Start with [README.md](../README.md) for the current release. This guide describes the
+optional text-model integrations and their provider and privacy boundaries. Ordinary
+recording remains independent of these optional integrations.
 
 The [implementation plan](https://github.com/juferdinand/OpenWhisper/blob/dcbf89e/docs/LOCAL_MODELS.md#expanded-implementation-plan-for-11)
 records the expanded scope agreed before implementation.
@@ -20,9 +20,11 @@ AI models discovers running Ollama and LM Studio servers and installed CLI tools
 Discovery reads model metadata, the Claude CLI version and Codex help capabilities.
 Short-lived CLI metadata sessions supply the Claude and Codex model dropdowns without
 starting a conversation or submitting text. Discovery never launches Ollama or LM Studio,
-downloads a model, or imports authentication files. Use **Scan again** after
-changing a server or installation. Enabled saved connections are checked before their
-first processing request after launch.
+downloads a model, runs inference or imports authentication files. At app startup, saved
+connections that are enabled or already have a selected model are scanned in the background;
+otherwise, opening **AI models** starts discovery. Use **Scan again** after changing a server
+or installation. Enabled saved connections are checked before their first processing request
+after launch.
 
 All connections start disabled. Choose a local model before enabling its connection.
 The ordered list defines priority: only the first enabled connection receives text,
@@ -77,7 +79,7 @@ keep the edited page open. Incomplete snippet rows must be completed or removed.
 | Provider | Discovery | Processing |
 | --- | --- | --- |
 | Ollama | `127.0.0.1:11434/api/tags` | `POST /api/chat` |
-| LM Studio 0.4+ | `127.0.0.1:1234/api/v1/models` | `POST /v1/chat/completions` |
+| LM Studio 0.4+ | `127.0.0.1:1234/api/v1/models` | `POST /api/v1/chat` |
 | Claude Code | Installed executable, supported version and initialization model catalog | Fixed print-mode invocation using the existing CLI login |
 | Codex | Installed executable, required help capabilities and `model/list` catalog | Non-interactive JSONL invocation using the existing CLI login |
 | Custom CLI | Configured executable only | User-configured arguments and stdin; text or selected JSON-field response |
@@ -135,12 +137,33 @@ versions no newer than the resolved CLI model. Custom provider IDs do not imply 
 for Anthropic's canonical IDs. This catalog is maintained with the application; scanning
 does not download it or discover every version enabled for the account.
 
-Neither the CLI list nor the additional catalog verifies account entitlements. Claude
-checks access and applies its configured model restrictions when a request runs. If
+Neither the CLI list nor the additional catalog verifies CLI authentication or account
+entitlements. Claude checks access and applies its configured model restrictions when a request
+runs. If
 metadata discovery fails, the inherited setting and any saved model remain selectable. Saved
 models absent from the refreshed choices remain selectable. The selection persists in
 the active profile, and changing the selected connection's model starts a fresh
 conversation.
+
+## Reasoning effort
+
+The AI models page shows **Reasoning effort** only when the selected provider reports
+choices for that model. **Use model default** leaves the provider's own default in control.
+An explicit choice is saved for that connection and cleared when its model changes.
+The choices are the provider's advertised values; OpenWhisper does not invent levels for
+unknown models. Ollama and LM Studio expose model-specific settings, Codex reports
+supported levels in its model catalog, and Claude Code exposes its CLI effort choices for
+known first-party model IDs. An explicit value rejected by the provider fails that AI
+step; the app does not retry with a different reasoning level, and the deterministic text
+is retained.
+
+Some Ollama versions report that a model supports `thinking` but omit its selectable
+values and default from `/api/show`. In that case OpenWhisper follows the model default
+until the user chooses on or off; it exposes named effort levels only when Ollama reports them.
+
+Custom CLI commands have no shared reasoning-effort protocol. Add the relevant flag in
+that connection's arguments when the selected tool supports one. OpenWhisper passes those
+arguments unchanged and does not infer a level from the command name.
 
 ## Custom CLI configuration
 
@@ -207,7 +230,9 @@ for automated checks. New feature acceptance remains required before merge.
 
 Primary references: [LM Studio Chat Completions](https://lmstudio.ai/docs/developer/openai-compat/chat-completions),
 [LM Studio native model metadata](https://lmstudio.ai/docs/developer/rest/list),
+[LM Studio native chat](https://lmstudio.ai/docs/developer/rest/chat),
 [Ollama chat](https://docs.ollama.com/api/chat), [Ollama model list](https://docs.ollama.com/api/tags),
+[Ollama thinking](https://docs.ollama.com/capabilities/thinking),
 [Claude Code CLI](https://code.claude.com/docs/en/cli-usage),
 [Claude SDK model metadata](https://code.claude.com/docs/en/agent-sdk/typescript#query-object),
 [Claude model configuration](https://code.claude.com/docs/en/model-config),

@@ -92,6 +92,8 @@ const aiModelsSettings = createAiModelsSettings({
   }),
   getSettings: latestConnectionSettings,
   saveSettings: saveConnections,
+  testCustomCliConnection: (connection) =>
+    invoke("test_custom_cli_connection", { connection }),
   scan: () => void scanConnections(),
   startLmStudio: () => void startLmStudioServer(),
   requestRender: () => {
@@ -3760,6 +3762,19 @@ async function start() {
             : state.initial_tab;
     render();
     document.documentElement.dataset.ready = "true";
+    // Refresh configured providers in the background so reasoning controls are ready before the
+    // user opens AI models. This reads metadata only and never runs model inference. Keep clean
+    // dictation setups independent of optional integrations.
+    if (
+      state.text_connections.settings.connections.some(
+        (connection) =>
+          connection.enabled ||
+          ("model" in connection && connection.model.length > 0),
+      )
+    ) {
+      connectionScanStarted = true;
+      void scanConnections();
+    }
   } catch (error) {
     notice(
       t("Could not connect to the desktop backend: {error}", {

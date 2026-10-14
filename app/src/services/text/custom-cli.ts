@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { performance } from "node:perf_hooks";
 import { isAbsolute } from "node:path";
 import { localProcessingOutputSchema } from "../../contracts/speech/local-processing.js";
 import { customCliConnectionSchema, type CustomCliConnection } from "../../contracts/text/connections.js";
@@ -8,6 +9,7 @@ import { runTextCliProcess, TextCliProcessError } from "./text-cli-process.js";
 const MAX_CUSTOM_ARGUMENT_BYTES = 120 * 1024;
 const MAX_CUSTOM_ARGUMENTS_BYTES = 384 * 1024;
 const MAX_CUSTOM_TIMEOUT_MS = 120_000;
+const CUSTOM_CLI_TEST_TIMEOUT_MS = 15_000;
 
 export type CustomCliTextFailureCode = "UNAVAILABLE" | "TIMEOUT" | "CANCELLED" | "FAILED" | "INVALID_RESPONSE";
 export class CustomCliTextError extends Error {
@@ -83,4 +85,20 @@ export async function runCustomCliText(options: CustomCliTextOptions): Promise<s
     if (error instanceof TextPromptError || options.signal.aborted) throw new CustomCliTextError("INVALID_RESPONSE");
     throw new CustomCliTextError("INVALID_RESPONSE");
   }
+}
+
+/** Run a user-requested smoke test with synthetic text and report only its elapsed time. */
+export async function testCustomCliConnection(options: {
+  readonly executable: string;
+  readonly connection: CustomCliConnection;
+  readonly signal: AbortSignal;
+}): Promise<number> {
+  const started = performance.now();
+  await runCustomCliText({
+    ...options,
+    instruction: "Return a short confirmation that this connection works.",
+    text: "OpenWhisper CLI connection test.",
+    timeoutMs: CUSTOM_CLI_TEST_TIMEOUT_MS,
+  });
+  return Math.max(0, Math.min(CUSTOM_CLI_TEST_TIMEOUT_MS, Math.round(performance.now() - started)));
 }

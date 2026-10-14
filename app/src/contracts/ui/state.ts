@@ -3,7 +3,7 @@ import { updateDownloadProgressSchema } from "../update/update-download-progress
 import { speechLanguageSchema } from "../speech/speech.js";
 import {
   defaultTextConnectionAvailability, defaultTextConnectionSettings, emptyTextConversation, idleTextConnectionProcessing,
-  textConnectionSettingsSchema, textConnectionsStateSchema,
+  customCliConnectionSchema, textConnectionSettingsSchema, textConnectionsStateSchema,
 } from "../text/connections.js";
 import { textProcessingStageEventSchema } from "../text/processing.js";
 import { snippetSchema } from "../text/snippets.js";
@@ -367,6 +367,7 @@ export const commandInputSchemas = {
   scan_connections: noArgs,
   start_lm_studio_server: noArgs,
   save_connections: z.strictObject({ settings: textConnectionSettingsSchema }),
+  test_custom_cli_connection: z.strictObject({ connection: customCliConnectionSchema }),
   new_conversation: noArgs,
   cancel_text_processing: noArgs,
   toggle_recording: noArgs,
@@ -411,6 +412,10 @@ export const commandOutputSchemas = {
   scan_connections: appStateSchema,
   start_lm_studio_server: appStateSchema,
   save_connections: appStateSchema,
+  test_custom_cli_connection: z.discriminatedUnion("ok", [
+    z.strictObject({ ok: z.literal(true), elapsed_ms: z.number().int().min(0).max(15_000) }),
+    z.strictObject({ ok: z.literal(false), code: z.enum(["UNAVAILABLE", "TIMEOUT", "CANCELLED", "FAILED", "INVALID_RESPONSE", "BUSY"]) }),
+  ]),
   new_conversation: appStateSchema,
   cancel_text_processing: actionResult,
   toggle_recording: actionResult,
