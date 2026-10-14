@@ -25,6 +25,7 @@ export interface OptionalTextProcessingOptions {
   readonly scan: (settings: TextConnectionSettings) => Promise<unknown>;
   readonly runProvider: (connection: TextConnection, instruction: string, text: string, signal: AbortSignal,
     requestId: string, context?: readonly ConversationTurn[]) => Promise<string>;
+  readonly warmProvider?: (connection: TextConnection, instruction: string) => void;
   readonly isShuttingDown: () => boolean;
   readonly onChange?: () => void;
   readonly onStage?: (event: TextProcessingStageEvent | null) => void;
@@ -92,6 +93,17 @@ export class OptionalTextProcessing {
       this.emitStage(owner, "skipped");
     } else this.processing = idleTextConnectionProcessing();
     this.options.onChange?.();
+  }
+
+  /** Lets the selected model load while the user is still speaking; sends no dictated text. */
+  prepare(): void {
+    if (this.closed || this.options.isShuttingDown()) return;
+    const settings = this.options.settings();
+    const selected = settings.connections.find((connection) => connection.enabled);
+    if (!selected) return;
+    const instruction = settings.mode === "conversation" ? settings.conversationInstruction
+      : settings.revision ? compileTextRevisionPrompt(settings.revision) : undefined;
+    if (instruction !== undefined) this.options.warmProvider?.(selected, instruction);
   }
 
   async process(text: string, owner: ProcessingOwner, conversation?: TextConversation): Promise<string | undefined> {

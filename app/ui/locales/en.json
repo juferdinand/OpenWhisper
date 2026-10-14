@@ -819,6 +819,7 @@
   "Not saved · Retry": "Not saved · Retry",
   "Not saved. Complete each snippet's trigger and text.": "Not saved. Complete each snippet's trigger and text.",
   "Only the first enabled model is used.": "Only the first enabled model is used.",
+  "Local models: large dense models (e.g. 27–31B) can take 15 seconds or more per minute of dictation. Mixture-of-experts models with few active parameters (e.g. names ending in -a3b) usually answer in a few seconds.": "Local models: large dense models (e.g. 27–31B) can take 15 seconds or more per minute of dictation. Mixture-of-experts models with few active parameters (e.g. names ending in -a3b) usually answer in a few seconds.",
   "Optional": "Optional",
   "Remove rule": "Remove rule",
   "Resolve verbal corrections": "Resolve verbal corrections",
