@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  MAX_UI_REQUEST_BYTES, MAX_USER_TEXT_BYTES, nativeTriggerSchema, preferencesSchema,
+  MAX_UI_REQUEST_BYTES, nativeTriggerSchema, preferencesSchema,
   snippetSchema, x11TriggerSchema, type Preferences,
 } from "../../contracts/ui/state.js";
 import { kdeKeySchema } from "../../platforms/linux/kde/keyboard.js";
@@ -12,7 +12,8 @@ class LegacyLinuxDataError extends Error {
 }
 
 const originalSettingsSchema = z.record(z.string(), z.json());
-const inputSchema = z.strictObject({ settings: originalSettingsSchema.optional(), history: z.array(z.string()).optional() });
+const historyTextSchema = z.string();
+const inputSchema = z.strictObject({ settings: originalSettingsSchema.optional(), history: z.array(historyTextSchema).optional() });
 const modifiers = 0x3e000000;
 const specialKeys = new Set([0x20, 0x01000001, 0x01000002, 0x01000003, 0x01000004, 0x01000005,
   0x01000006, 0x01000007, 0x01000008, 0x01000009, 0x0100000a, 0x0100000b,
@@ -47,7 +48,7 @@ const legacyX11TriggerSchema = x11TriggerSchema.refine((trigger) => {
   const unicode = symbol < 0x100 ? symbol : (symbol >= 0x01000000 && symbol <= 0x0110ffff ? symbol - 0x01000000 : undefined);
   return unicode === undefined || (!(unicode >= 0xd800 && unicode <= 0xdfff) && !/\p{Cc}/u.test(String.fromCodePoint(unicode)));
 });
-const activeHistorySchema = z.array(z.string().max(MAX_USER_TEXT_BYTES).refine((text) => Buffer.byteLength(text, "utf8") <= MAX_USER_TEXT_BYTES)).max(20);
+const activeHistorySchema = z.array(historyTextSchema).max(20);
 type TriggerReview = "KDE_MOUSE_TRIGGER" | "KDE_MODIFIER_TRIGGER" | "KDE_LEGACY_SPECIAL_KEY" | "INVALID_X11_TRIGGER";
 export interface LegacyLinuxData {
   readonly preferences: Preferences;
@@ -83,7 +84,7 @@ export function convertLegacyLinuxData(input: unknown): LegacyLinuxData {
       update_channel: "stable",
     });
     const history = checked.history ?? [];
-    return { preferences, history: activeHistorySchema.parse(history.slice(0, 20)),
+    return { preferences, history: activeHistorySchema.parse([]),
       preserved: { settings: original ?? null, history }, triggerReview };
   } catch { throw new LegacyLinuxDataError("INVALID_DATA"); }
 }

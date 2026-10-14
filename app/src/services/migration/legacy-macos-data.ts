@@ -81,7 +81,7 @@ export function convertLegacyMacosData(input: unknown): LegacyMacosData {
     // review while every original entry remains available to the migration.
     if (persisted.keepHistory && persisted.history.length > 20) review.push("MAC_HISTORY_OVERFLOW");
     if (!persisted.keepHistory && persisted.history.length > 0) review.push("MAC_HISTORY_DISABLED");
-    return { preferences, history: activeHistorySchema.parse(persisted.keepHistory ? persisted.history.slice(0, 20) : []),
+    return { preferences, history: activeHistorySchema.parse([]),
       preserved: { plist: plist ?? null, snippets: checked.snippets ?? null, history: persisted.history },
       legacy: { editorAppPath: persisted.editorAppPath, trigger: { present, value: present ? plist?.["trigger"] ?? null : null } }, review };
   } catch { throw new LegacyMacosDataError(); }

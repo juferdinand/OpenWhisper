@@ -672,9 +672,30 @@ function restoreModelDialogFocus(dialog: HTMLDialogElement) {
 }
 function historyRows(): string {
   return state.history
-    .map((text, i) => {
+    .map((entry, i) => {
       const selected = selectedHistoryIndex === i;
-      return `<div class="history-row ${selected ? "selected" : ""}"><button type="button" class="history-entry" data-history-select="${i}" aria-pressed="${selected}" title="${esc(text)}"><span class="history-entry-text">${esc(text)}</span></button></div>`;
+      const date =
+        entry.created_at === undefined
+          ? ""
+          : new Intl.DateTimeFormat(
+              state.preferences.ui_language === "de" ? "de-DE" : "en-US",
+              { dateStyle: "medium", timeStyle: "short" },
+            ).format(new Date(entry.created_at));
+      const dateMarkup =
+        entry.created_at === undefined
+          ? ""
+          : `<time datetime="${esc(entry.created_at)}">${esc(date)}</time>`;
+      const duration =
+        entry.duration_ms === undefined
+          ? undefined
+          : (() => {
+              const seconds = Math.ceil(entry.duration_ms / 1000);
+              return seconds >= 3600
+                ? `${Math.floor(seconds / 3600)}:${String(Math.floor((seconds % 3600) / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`
+                : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+            })();
+      const metadata = `${dateMarkup}${duration === undefined ? "" : `<span aria-label="${esc(t("Recording duration: {duration}", { duration }))}">${esc(duration)}</span>`}`;
+      return `<div class="history-row ${selected ? "selected" : ""}"><button type="button" class="history-entry" data-history-select="${i}" aria-pressed="${selected}" title="${esc(entry.text)}"><span class="history-entry-text">${esc(entry.text)}</span><span class="history-entry-metadata">${metadata}</span></button><button type="button" class="history-copy" data-history-copy="${i}" aria-label="${esc(t("Copy history entry"))}" title="${esc(t("Copy history entry"))}">${esc(t("Copy"))}</button></div>`;
     })
     .join("");
 }
@@ -682,6 +703,15 @@ function bindHistoryActions(root: ParentNode) {
   root
     .querySelector<HTMLButtonElement>("[data-clear-history]")
     ?.addEventListener("click", () => void command("clear_history"));
+  root
+    .querySelectorAll<HTMLButtonElement>("[data-history-copy]")
+    .forEach((button) =>
+      button.addEventListener("click", () => {
+        const index = Number(button.dataset.historyCopy);
+        if (Number.isInteger(index) && index >= 0 && index < 20)
+          void command("copy_history", { index });
+      }),
+    );
 }
 function bindModelActions(root: ParentNode, inDrawer = false) {
   const errorTarget = inDrawer
@@ -2054,7 +2084,7 @@ function renderWorkspace() {
   const selectedHistoryText =
     selectedHistoryIndex === null
       ? undefined
-      : state.history[selectedHistoryIndex];
+      : state.history[selectedHistoryIndex]?.text;
   const currentTranscriptDismissed = dismissedTranscriptValue !== undefined;
   const transcriptAvailable =
     selectedHistoryText !== undefined ||
@@ -3216,7 +3246,7 @@ function render() {
     if (!connectionScanStarted) void scanConnections();
   } else if (tab === "history") {
     const historyBytes = state.history.reduce(
-      (bytes, text) => bytes + new TextEncoder().encode(text).byteLength,
+      (bytes, entry) => bytes + new TextEncoder().encode(entry.text).byteLength,
       0,
     );
     const historySize =
@@ -3227,7 +3257,7 @@ function render() {
           }).format(historyBytes / 1024)} KB`;
     content.innerHTML = section(
       "",
-      `<label class="row setting-description-row"><span><span>${esc(t("Save history"))}</span><small class="settings-row-description">${esc(t("Keep the last 20 recordings locally."))}</small></span><input class="switch" type="checkbox" data-pref="keep_history" ${p.keep_history ? "checked" : ""}></label>` +
+      `<label class="row setting-description-row"><span><span>${esc(t("Save history"))}</span><small class="settings-row-description">${esc(t("Save up to 20 new recordings on this device. Older history is not imported."))}</small></span><input class="switch" type="checkbox" data-pref="keep_history" ${p.keep_history ? "checked" : ""}></label>` +
         `<div class="row history-storage-stats" title="${esc(t("Separate transcript files are not included."))}"><span>${esc(t("Stored history text"))}</span><div class="control"><span>${esc(t("{count} recordings · {size}", { count: String(state.history.length), size: historySize }))}</span></div></div>` +
         row(
           t("Transcripts folder"),

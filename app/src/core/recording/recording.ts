@@ -85,7 +85,7 @@ export interface DeliveryBoundary {
   deliver(text: string, context: WorkContext, identity: DeliveryIdentity,
     metadata?: TranscriptDeliveryMetadata): Promise<DeliveryReceipt>;
 }
-export interface RecoveryToken { readonly id: string }
+export interface RecoveryToken { readonly id: string; readonly sampleCount?: number }
 export interface RecoverySaved extends Ownership {
   readonly token: RecoveryToken;
   /** False retains a visible committed file whose directory durability still needs confirmation. */
@@ -182,7 +182,8 @@ function owned(result: Ownership, context: Ownership): boolean {
   return result.generation === context.generation && result.attempt === context.attempt;
 }
 function tokenValid(token: RecoveryToken): boolean {
-  return typeof token.id === "string" && token.id.length > 0 && token.id.length <= 512;
+  return typeof token.id === "string" && token.id.length > 0 && token.id.length <= 512
+    && (token.sampleCount === undefined || Number.isSafeInteger(token.sampleCount) && token.sampleCount > 0);
 }
 function checkedAudio(audio: PreparedAudio, context: Ownership): PreparedAudio {
   if (!owned(audio, context)) throw new Error("OWNERSHIP_FAILED");
@@ -283,6 +284,7 @@ export class RecordingCoordinator<C extends CapturedHandle> {
         if (this.capture !== owner || owner.controller.signal.aborted) throw new Error("CALLER_INACTIVE");
         if (token !== null) {
           if (!tokenValid(token)) throw new Error("RECOVERY_READ_FAILED");
+          this.elapsedMs = token.sampleCount === undefined ? 0 : token.sampleCount / 16;
           this.pending = this.newPending(owner, undefined, undefined, token);
           this.capture = undefined; this.fail("RECOVERY_PENDING");
           const reply = this.reply(false, "RECOVERY_PENDING", owner.generation);
@@ -433,6 +435,7 @@ export class RecordingCoordinator<C extends CapturedHandle> {
 
   async restoreRecovery(input: RecordingRequestInput): Promise<boolean> {
     if (!this.recovery || !this.available()) return false;
+    this.elapsedMs = 0;
     const request = recordingRequestSchema.parse(input);
     const lookup = {}; this.lookup = lookup; this.phase = "restoring";
     try {
@@ -440,6 +443,7 @@ export class RecordingCoordinator<C extends CapturedHandle> {
       if (this.lookup !== lookup) return false;
       if (token === null) { this.phase = "idle"; this.error = null; return false; }
       if (!tokenValid(token)) throw new Error("Invalid recovery token.");
+      this.elapsedMs = token.sampleCount === undefined ? 0 : token.sampleCount / 16;
       this.pending = this.newPending({ generation: ++this.generation, request }, undefined, undefined, token);
       this.fail("RECOVERY_PENDING"); return true;
     } catch { if (this.lookup === lookup) this.fail("RECOVERY_READ_FAILED"); return false; }

@@ -8,6 +8,10 @@ identity `io.github.whisperfree` and the macOS defaults domain are unchanged.
 | macOS | `~/Library/Application Support/OpenWhisper/Config` | `~/Library/Application Support/OpenWhisper/Data` | `~/Library/Caches/OpenWhisper` |
 | Linux | `$XDG_CONFIG_HOME/openwhisper` (`~/.config/openwhisper`) | `$XDG_DATA_HOME/openwhisper` (`~/.local/share/openwhisper`) | `$XDG_CACHE_HOME/openwhisper` (`~/.cache/openwhisper`) |
 
+The optional recording history is stored in `history/entries.json` and holds up to 20 new
+recordings with their text, date and duration when available. Older `history.json` files are left
+untouched and are not loaded into the current history list.
+
 The legacy 0.2.x macOS preferences stay in `~/Library/Preferences/io.github.whisperfree.plist`.
 The Dev profile keeps its separate `io.github.whisperfree.dev` folders.
 

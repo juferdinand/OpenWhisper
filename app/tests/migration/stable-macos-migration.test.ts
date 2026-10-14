@@ -61,7 +61,7 @@ test("Mac migration retains exact archives, typed data, draft snippets, models a
     assert.equal(retained.plist["__proto__"], "Original prototype key"); assert.deepEqual(retained.nativeValues, decoded.nativeValues);
     const conversion = JSON.parse(readFileSync(join(publication(profile), "legacy/conversion.json"), "utf8")) as { context: typeof context };
     assert.equal(conversion.context.loginStatus, "requires-approval");
-    assert.deepEqual(JSON.parse(readFileSync(join(profile.paths.history, "history.json"), "utf8")), ["Original history"]);
+    assert.deepEqual(JSON.parse(readFileSync(join(profile.paths.history, "history.json"), "utf8")), []);
     const inventory = await ModelInventory.open(profile, JSON.parse(readFileSync(new URL("../../data/models.json", import.meta.url), "utf8")) as unknown);
     assert.equal((await inventory.installed())[0]?.verification, "legacy-owned-file");
     const model = lstatSync(join(profile.paths.models, "ggml-tiny.bin"));
