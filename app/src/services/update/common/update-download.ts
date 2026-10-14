@@ -41,11 +41,12 @@ function candidate(input: UpdateDownloadInput): LinuxUpdateCandidate | MacosUpda
     if (value.package === "macos") {
       if (value.repository !== input.repository) return fail("INVALID_INPUT");
       return projectMacosUpdateRelease({ repository: input.repository, currentVersion: input.currentVersion,
-        release: { tag_name: `v${value.version}`, html_url: value.pageURL, body: value.notes, draft: false, prerelease: false,
+        channel: value.channel, release: { tag_name: `v${value.version}`, html_url: value.pageURL, body: value.notes, draft: false,
+          prerelease: value.channel === "preview",
           assets: [{ name: value.assetName, browser_download_url: value.assetURL,
             ...(value.details.size === undefined ? {} : { size: value.details.size }) }] } });
     }
-    const projected = projectLinuxUpdateFeed({ sourceURL: value.feedURL, package: value.package, currentVersion: input.currentVersion,
+    const projected = projectLinuxUpdateFeed({ sourceURL: value.feedURL, package: value.package, currentVersion: input.currentVersion, channel: value.channel,
       feed: { version: value.version, notes: value.notes, platforms: { [value.target]: { url: value.assetURL, signature: value.signature,
         ...(value.details.size === undefined ? {} : { size: value.details.size }) } } } });
     if (projected.assetName !== value.assetName || projected.pageURL !== value.pageURL) return fail("INVALID_INPUT");

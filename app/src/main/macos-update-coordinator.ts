@@ -4,6 +4,7 @@ import { downloadUpdateCandidate, UpdateDownloadError } from "../services/update
 import { cleanupMacUpdateArchiveDownload, extractVerifiedMacUpdateArchive } from "../services/update/macos/macos-update-archive.js";
 import { prepareMacosUpdateInstall, type PreparedMacosUpdateInstall } from "../services/update/macos/macos-update-install.js";
 import { projectMacosUpdateRelease, type MacosUpdateCandidate } from "../services/update/common/update-policy.js";
+import type { UpdateChannel } from "../services/update/common/update-policy.js";
 import type { OwnedUpdateDownload } from "../services/update/common/update-staging.js";
 import type { ExtractedMacUpdate } from "../services/update/macos/macos-update-archive.js";
 import type { MacosUpdateAdmission } from "./macos-update-admission.js";
@@ -28,13 +29,14 @@ export interface MacosUpdateObserver {
 
 /** The caller has already admitted the running persistent publisher and owns UI/native lifetime. */
 export function createMacosUpdateCoordinator(input: Readonly<{ admission: MacosUpdateAdmission; identity: BuildIdentity;
-  currentVersion: string; cacheDirectory: string }>, effects: Partial<MacosUpdateCoordinatorEffects> = {}) {
+  currentVersion: string; cacheDirectory: string; channel?: () => UpdateChannel }>, effects: Partial<MacosUpdateCoordinatorEffects> = {}) {
   const { currentVersion, cacheDirectory } = input;
+  const selectedChannel = input.channel ?? (() => "stable");
   const identity = Object.freeze({ ...input.identity }), admission = Object.freeze({ ...input.admission });
   if (identity.kind !== "stable" || admission.repository !== "juferdinand/OpenWhisper") fail("UNAVAILABLE");
   const io: MacosUpdateCoordinatorEffects = { read: readUpdateFeed, download: downloadUpdateCandidate,
     extract: extractVerifiedMacUpdateArchive, prepare: prepareMacosUpdateInstall, cleanup: cleanupMacUpdateArchiveDownload, ...effects };
-  let candidate: MacosUpdateCandidate | undefined, busy = false;
+  let candidate: MacosUpdateCandidate | undefined, candidateChannel: UpdateChannel | undefined, busy = false;
   let failedDownloadCleanup: (() => Promise<void>) | undefined, cleanupTask: Promise<void> | undefined;
   let failedOwnersSettled: (() => boolean) | undefined;
   const active = (signal: AbortSignal): void => { if (signal.aborted) fail("CANCELLED"); };
@@ -43,29 +45,34 @@ export function createMacosUpdateCoordinator(input: Readonly<{ admission: MacosU
     try { if (failedDownloadCleanup) fail("CLEANUP_FAILED"); return await operation(); } finally { busy = false; }
   };
   const check = (signal: AbortSignal): Promise<MacosUpdateCandidate | undefined> => run(async () => {
-    const retainedCandidate = candidate; active(signal);
-    const found = await io.read({ package: "macos", repository: admission.repository, currentVersion, signal });
+    active(signal); const channel = selectedChannel();
+    const retainedCandidate = candidateChannel === channel ? candidate : undefined;
+    const found = await io.read({ package: "macos", repository: admission.repository, currentVersion, channel, signal });
     active(signal);
     if (found) {
-      if (found.package !== "macos" || found.repository !== admission.repository) fail("UNAVAILABLE");
+      if (found.package !== "macos" || found.repository !== admission.repository || found.channel !== channel) fail("UNAVAILABLE");
       // Copy through the existing exact source/version projection; retain no mutable feed object.
       candidate = projectMacosUpdateRelease({ repository: admission.repository, currentVersion,
-        release: { tag_name: `v${found.version}`, html_url: found.pageURL, body: found.notes, draft: false, prerelease: false,
+        channel, release: { tag_name: `v${found.version}`, html_url: found.pageURL, body: found.notes, draft: false, prerelease: channel === "preview",
           assets: [{ name: found.assetName, browser_download_url: found.assetURL,
             ...(found.details.size === undefined ? {} : { size: found.details.size }) }] } });
-    } else candidate = retainedCandidate;
+      candidateChannel = channel;
+    } else { candidate = retainedCandidate; candidateChannel = retainedCandidate ? channel : undefined; }
     return candidate;
   });
   const prepareInstall = (signal: AbortSignal, observer: MacosUpdateObserver = {}): Promise<Readonly<PreparedMacosUpdateInstall>> => run(async () => {
     active(signal); const selected = candidate;
-    if (!selected) return fail("UNAVAILABLE");
+    const channel = selectedChannel();
+    if (!selected || candidateChannel !== channel) { candidate = undefined; candidateChannel = undefined; return fail("UNAVAILABLE"); }
     let download: Readonly<OwnedUpdateDownload> | undefined, extracted: Readonly<ExtractedMacUpdate> | undefined;
     let prepared: Readonly<PreparedMacosUpdateInstall> | undefined, failed = false, failure: unknown;
     try {
       download = await io.download({ candidate: selected, repository: admission.repository, currentVersion, cacheDirectory, signal,
         ...(observer.onProgress ? { onProgress: observer.onProgress } : {}) }); active(signal);
+      if (selectedChannel() !== channel) fail("CANCELLED");
       observer.onVerifying?.();
       extracted = await io.extract({ download, build: identity, expectedVersion: selected.version, currentVersion }); active(signal);
+      if (selectedChannel() !== channel) fail("CANCELLED");
       prepared = await io.prepare({ download, extracted, build: identity, currentBundle: admission.bundle,
         currentVersion, expectedVersion: selected.version }); active(signal);
     } catch (error: unknown) {
@@ -92,7 +99,7 @@ export function createMacosUpdateCoordinator(input: Readonly<{ admission: MacosU
       }
       throw failure;
     }
-    candidate = undefined;
+    candidate = undefined; candidateChannel = undefined;
     return prepared!;
   });
   const finalize = (): Promise<void> => {

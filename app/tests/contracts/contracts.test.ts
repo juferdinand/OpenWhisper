@@ -19,7 +19,7 @@ function state(): AppState {
     preferences: {
       ui_language: "en", setup_completed: false, model: "tiny", language: "auto", microphone: "",
       vocabulary: [], snippets: [], output: "clipboard", hold_to_record: false, gpu: false, keep_history: true,
-      cleanup_enabled: true,
+      cleanup_enabled: true, update_channel: "stable",
     },
     models: [{ id: "tiny", title: "Whisper Tiny", family: "whisper", size: "75 MB", note: "Fastest" }],
     installed: [], microphones: [], session: "X11", desktop: "Owned fixture", clipboard_available: false,
@@ -147,6 +147,9 @@ test("validated preference patches preserve text and reject host-owned fields", 
   ], keep_history: false, output: "clipboard" };
   assert.deepEqual(validateCommandInput("save_preferences", { changes: patch }), { changes: patch });
   assert.deepEqual(preferencePatchSchema.parse({}), {});
+  assert.equal(preferencesSchema.parse(state().preferences).update_channel, "stable");
+  assert.deepEqual(preferencePatchSchema.parse({ update_channel: "preview" }), { update_channel: "preview" });
+  assert.throws(() => preferencePatchSchema.parse({ update_channel: "beta" }));
   for (const language of ["auto", "de", "zh", "ja", "ko", "ar", "cs", "uk", "yue"]) {
     assert.deepEqual(preferencePatchSchema.parse({ language }), { language });
   }

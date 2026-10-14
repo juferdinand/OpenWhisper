@@ -1,13 +1,15 @@
 import { z } from "zod";
-import { updateDetailsSchema, type UpdateDetails } from "../../../contracts/ui/state.js";
+import { updateDetailsSchema, type UpdateChannel, type UpdateDetails } from "../../../contracts/ui/state.js";
+export type { UpdateChannel } from "../../../contracts/ui/state.js";
 
 export const LINUX_UPDATE_REPOSITORY = "https://github.com/juferdinand/OpenWhisper";
 export const LINUX_UPDATE_FEED_URL = `${LINUX_UPDATE_REPOSITORY}/releases/latest/download/latest.json`;
+export const PREVIEW_RELEASES_API_URL = "https://api.github.com/repos/juferdinand/OpenWhisper/releases?per_page=100";
 export const MACOS_UPDATE_ASSET = "OpenWhisper-macOS.zip";
 export const UPDATE_POLICY_LIMITS = Object.freeze({ assets: 128, notesBytes: 64 * 1024, signatureBytes: 16 * 1024 });
 const uint64Max = 18_446_744_073_709_551_615n;
 type Version = readonly [bigint, bigint, bigint];
-type Failure = "INVALID_VERSION" | "INVALID_REPOSITORY" | "INVALID_SOURCE" | "INVALID_METADATA" | "INVALID_PACKAGE" | "NOT_NEWER";
+type Failure = "INVALID_VERSION" | "INVALID_REPOSITORY" | "INVALID_SOURCE" | "INVALID_METADATA" | "INVALID_PACKAGE" | "INVALID_CHANNEL" | "NOT_NEWER";
 export class UpdatePolicyError extends Error {
   constructor(readonly code: Failure) { super(code); this.name = "UpdatePolicyError"; }
 }
@@ -32,6 +34,12 @@ function newer(candidate: Version, current: Version): boolean {
   for (const component of [0, 1, 2] as const) if (candidate[component] !== current[component]) return candidate[component] > current[component];
   return false;
 }
+function compare(candidate: Version, current: Version): number {
+  for (const component of [0, 1, 2] as const) {
+    if (candidate[component] !== current[component]) return candidate[component] > current[component] ? 1 : -1;
+  }
+  return 0;
+}
 export function isNewerUpdateVersion(candidate: unknown, current: unknown): boolean {
   try { return newer(parseUpdateVersion(candidate), parseUpdateVersion(current)); } catch { return false; }
 }
@@ -53,8 +61,9 @@ const utf8 = (bytes: number) => z.string().max(bytes).refine((value) => Buffer.b
 const assetSchema = z.object({ name: utf8(256).min(1), browser_download_url: utf8(2048).min(1),
   size: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional() });
 const macReleaseSchema = z.object({ tag_name: utf8(63).min(1), html_url: utf8(2048).min(1), draft: z.literal(false),
-  prerelease: z.literal(false), body: utf8(UPDATE_POLICY_LIMITS.notesBytes).nullable().optional(),
+  prerelease: z.boolean(), body: utf8(UPDATE_POLICY_LIMITS.notesBytes).nullable().optional(),
   assets: z.array(assetSchema).max(UPDATE_POLICY_LIMITS.assets) });
+const releaseListSchema = z.array(macReleaseSchema).max(100);
 const linuxTargetSchema = z.object({ url: utf8(2048).min(1), signature: utf8(UPDATE_POLICY_LIMITS.signatureBytes)
   .refine((value) => value.trim().length > 0), size: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional() });
 const linuxReleaseSchema = z.object({ version: utf8(62).min(1), notes: utf8(UPDATE_POLICY_LIMITS.notesBytes).optional() });
@@ -73,8 +82,31 @@ function metadata<T>(operation: () => T): T {
     throw new UpdatePolicyError("INVALID_METADATA");
   }
 }
+/** Preview releases use the same canonical numeric version triplet as stable releases.
+ * A preview consumes its version; a later stable release must have a greater triplet. */
+export function selectLatestPreviewRelease(value: unknown): Readonly<{ version: string; release: z.infer<typeof macReleaseSchema> }> | undefined {
+  return metadata(() => {
+    const releases = releaseListSchema.parse(value);
+    // A full page cannot establish which preview is newest without following an untrusted Link URL.
+    if (releases.length === 100) throw new UpdatePolicyError("INVALID_METADATA");
+    let selected: { version: string; release: z.infer<typeof macReleaseSchema> } | undefined;
+    const versions = new Set<string>();
+    for (const release of releases) {
+      if (!release.prerelease) continue;
+      if (!release.tag_name.startsWith("v")) throw new UpdatePolicyError("INVALID_VERSION");
+      const version = release.tag_name.slice(1);
+      try { parseUpdateVersion(version); } catch { throw new UpdatePolicyError("INVALID_VERSION"); }
+      if (release.tag_name !== `v${version}` || release.html_url !== `${LINUX_UPDATE_REPOSITORY}/releases/tag/v${version}` || versions.has(version)) {
+        throw new UpdatePolicyError("INVALID_SOURCE");
+      }
+      versions.add(version);
+      if (!selected || compare(parseUpdateVersion(version), parseUpdateVersion(selected.version)) > 0) selected = { version, release };
+    }
+    return selected && Object.freeze(selected);
+  });
+}
 interface Candidate {
-  readonly authentication: "unauthenticated"; readonly details: UpdateDetails;
+  readonly authentication: "unauthenticated"; readonly channel: UpdateChannel; readonly details: UpdateDetails;
   readonly version: string; readonly notes: string; readonly assetName: string; readonly assetURL: string; readonly pageURL: string;
 }
 
@@ -121,9 +153,11 @@ export interface LinuxUpdateCandidate extends Candidate {
 
 /** Projects required API fields only. Exact source policy does not authenticate downloaded bytes. */
 export function projectMacosUpdateRelease(options: {
-  readonly repository: unknown; readonly currentVersion: unknown; readonly release: unknown;
+  readonly repository: unknown; readonly currentVersion: unknown; readonly release: unknown; readonly channel?: UpdateChannel;
 }): MacosUpdateCandidate {
   const repository = macosRepository(options.repository);
+  const channel = options.channel ?? "stable";
+  if (channel !== "stable" && channel !== "preview") throw new UpdatePolicyError("INVALID_CHANNEL");
   return metadata(() => {
     const source = record(options.release), assets = own(source, "assets");
     // Refuse excessive arrays before the schema visits their elements.
@@ -132,13 +166,14 @@ export function projectMacosUpdateRelease(options: {
       draft: own(source, "draft"), prerelease: own(source, "prerelease"), body: optional(source, "body"),
       assets: assets.map((item: unknown) => { const asset = record(item), size = optional(asset, "size"); return { name: own(asset, "name"), browser_download_url: own(asset, "browser_download_url"),
         ...(size === undefined ? {} : { size }) }; }) });
+    if (release.prerelease !== (channel === "preview")) throw new UpdatePolicyError("INVALID_SOURCE");
     if (!release.tag_name.startsWith("v")) throw new UpdatePolicyError("INVALID_VERSION");
     const version = release.tag_name.slice(1); requireNewer(version, options.currentVersion);
     const matches = release.assets.filter((asset) => asset.name === MACOS_UPDATE_ASSET);
     const assetURL = `https://github.com/${repository}/releases/download/v${version}/${MACOS_UPDATE_ASSET}`;
     const pageURL = `https://github.com/${repository}/releases/tag/v${version}`;
     if (matches.length !== 1 || matches[0]?.browser_download_url !== assetURL || release.html_url !== pageURL) throw new UpdatePolicyError("INVALID_SOURCE");
-    return Object.freeze({ authentication: "unauthenticated", package: "macos", repository, version, notes: release.body ?? "",
+    return Object.freeze({ authentication: "unauthenticated", channel, package: "macos", repository, version, notes: release.body ?? "",
       details: details(release.body ?? "", matches[0]!.size),
       assetName: MACOS_UPDATE_ASSET, assetURL, pageURL });
   });
@@ -146,13 +181,16 @@ export function projectMacosUpdateRelease(options: {
 
 /** Package kind must come from actual installation admission, not a displayed package label. */
 export function projectLinuxUpdateFeed(options: {
-  readonly sourceURL: unknown; readonly package: unknown; readonly currentVersion: unknown; readonly feed: unknown;
+  readonly sourceURL: unknown; readonly package: unknown; readonly currentVersion: unknown; readonly feed: unknown; readonly channel?: UpdateChannel;
 }): LinuxUpdateCandidate {
-  if (options.sourceURL !== LINUX_UPDATE_FEED_URL) throw new UpdatePolicyError("INVALID_SOURCE");
+  const channel = options.channel ?? "stable";
+  if (channel !== "stable" && channel !== "preview") throw new UpdatePolicyError("INVALID_CHANNEL");
   if (options.package !== "deb" && options.package !== "appimage") throw new UpdatePolicyError("INVALID_PACKAGE");
   const packageKind = options.package;
   return metadata(() => {
     const source = record(options.feed), release = linuxReleaseSchema.parse({ version: own(source, "version"), notes: optional(source, "notes") });
+    const expectedFeedURL = channel === "stable" ? LINUX_UPDATE_FEED_URL : `${LINUX_UPDATE_REPOSITORY}/releases/download/v${release.version}/latest.json`;
+    if (options.sourceURL !== expectedFeedURL) throw new UpdatePolicyError("INVALID_SOURCE");
     requireNewer(release.version, options.currentVersion);
     const target = packageKind === "deb" ? "linux-x86_64-deb" : "linux-x86_64-appimage";
     const assetName = packageKind === "deb" ? "OpenWhisper-Linux-amd64.deb" : "OpenWhisper-Linux-x86_64.AppImage";
@@ -161,9 +199,9 @@ export function projectLinuxUpdateFeed(options: {
     const artifact = linuxTargetSchema.parse({ url: own(announced, "url"), signature: own(announced, "signature"), ...(size === undefined ? {} : { size }) });
     const assetURL = `${LINUX_UPDATE_REPOSITORY}/releases/download/v${release.version}/${assetName}`;
     if (artifact.url !== assetURL) throw new UpdatePolicyError("INVALID_SOURCE");
-    return Object.freeze({ authentication: "unauthenticated", package: packageKind, version: release.version, notes: release.notes ?? "",
+    return Object.freeze({ authentication: "unauthenticated", channel, package: packageKind, version: release.version, notes: release.notes ?? "",
       details: details(release.notes ?? "", artifact.size),
-      assetName, assetURL, pageURL: `${LINUX_UPDATE_REPOSITORY}/releases/tag/v${release.version}`, feedURL: LINUX_UPDATE_FEED_URL,
+      assetName, assetURL, pageURL: `${LINUX_UPDATE_REPOSITORY}/releases/tag/v${release.version}`, feedURL: expectedFeedURL,
       target, signature: artifact.signature });
   });
 }

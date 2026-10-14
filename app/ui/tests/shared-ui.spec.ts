@@ -2531,6 +2531,7 @@ async function start(
           show_idle_overlay: false,
           launch_at_login: false,
           auto_check_updates: true,
+          update_channel: "stable",
         },
         models,
         recommended_models: ["base", "parakeet-v3-q4"],
@@ -7077,6 +7078,31 @@ for (const platform of ["linux", "macos"] as const) {
         page.evaluate(() => window.testState.preferences.auto_check_updates),
       )
       .toBe(true);
+    const updateChannel = page.locator(
+      '#about-updates [data-pref="update_channel"]',
+    );
+    await expect(updateChannel).toHaveValue("stable");
+    await expect(page.locator("#about-updates")).toContainText(
+      "Preview releases may contain unfinished changes.",
+    );
+    await updateChannel.selectOption("preview");
+    await expect
+      .poll(() => page.evaluate(() => window.calls.at(-1)))
+      .toEqual({
+        command: "save_preferences",
+        args: { changes: { update_channel: "preview" } },
+      });
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.testState.preferences.update_channel),
+      )
+      .toBe("preview");
+    await updateChannel.selectOption("stable");
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.testState.preferences.update_channel),
+      )
+      .toBe("stable");
 
     const aboutBounds = async () =>
       aboutScroll.evaluate((element) => ({

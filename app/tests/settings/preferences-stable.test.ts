@@ -30,9 +30,12 @@ for (const platform of ["linux", "darwin"] as const) test(`${platform} stable pa
   const saved = (await PreferenceStore.open(profile)).snapshot();
   assert.deepEqual(saved.vocabulary, [{ spelling: "Neue Wörter — 新語", misheard: [] }]); assert.equal(saved.ui_language, "en");
   assert.equal(saved.launch_at_login, true); assert.equal(saved.auto_check_updates, true); assert.equal(saved.gpu, false);
+  assert.equal(saved.update_channel, "stable");
   assert.equal(saved.play_sounds, true); assert.equal(saved.restore_clipboard, true); assert.equal(saved.output, "editor");
   assert.equal(saved.hold_to_record, true); assert.deepEqual(saved.native_trigger, migrated.native_trigger);
   assert.deepEqual(saved.x11_trigger, migrated.x11_trigger); assert.equal(saved.setup_completed, true);
+  await store.patch({ update_channel: "preview" });
+  assert.equal((await PreferenceStore.open(profile)).snapshot().update_channel, "preview");
   await store.patch({ auto_check_updates: false }); await store.patch({ launch_at_login: false });
   assert.equal((await PreferenceStore.open(profile)).snapshot().auto_check_updates, false);
   assert.equal((await PreferenceStore.open(profile)).snapshot().launch_at_login, false);

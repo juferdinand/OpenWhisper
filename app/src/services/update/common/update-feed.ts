@@ -1,7 +1,8 @@
 import { createUpdateFeedTransport, MODEL_DOWNLOAD_CHUNK_BYTES, type DownloadHeaders, type ModelDownloadTransport } from "../../models/model-download-transport.js";
 import { parseRawHTTPHeaders, RawHTTPHeadersError } from "../../http/raw-http-headers.js";
-import { LINUX_UPDATE_FEED_URL, LINUX_UPDATE_REPOSITORY, macosUpdateEndpoint, parseUpdateVersion,
-  projectLinuxUpdateFeed, projectMacosUpdateRelease, UPDATE_POLICY_LIMITS, UpdatePolicyError, type LinuxUpdateCandidate, type MacosUpdateCandidate } from "./update-policy.js";
+import { LINUX_UPDATE_FEED_URL, LINUX_UPDATE_REPOSITORY, macosUpdateEndpoint, parseUpdateVersion, PREVIEW_RELEASES_API_URL,
+  projectLinuxUpdateFeed, projectMacosUpdateRelease, selectLatestPreviewRelease, UPDATE_POLICY_LIMITS, UpdatePolicyError,
+  type LinuxUpdateCandidate, type MacosUpdateCandidate, type UpdateChannel } from "./update-policy.js";
 
 export const UPDATE_FEED_BYTES = 1024 * 1024;
 type Failure = "INVALID_INPUT" | "CANCELLED" | "TIMEOUT" | "INVALID_METADATA" | "INVALID_REDIRECT" | "TRANSPORT_FAILED" | "CLEANUP_FAILED";
@@ -9,8 +10,8 @@ export class UpdateFeedError extends Error {
   constructor(readonly code: Failure) { super(code); this.name = "UpdateFeedError"; }
 }
 const fail = (code: Failure): never => { throw new UpdateFeedError(code); };
-export type UpdateFeedInput = Readonly<{ package: "deb" | "appimage"; currentVersion: string; signal?: AbortSignal }> |
-  Readonly<{ package: "macos"; repository: string; currentVersion: string; signal?: AbortSignal }>;
+export type UpdateFeedInput = Readonly<{ package: "deb" | "appimage"; currentVersion: string; channel?: UpdateChannel; signal?: AbortSignal }> |
+  Readonly<{ package: "macos"; repository: string; currentVersion: string; channel?: UpdateChannel; signal?: AbortSignal }>;
 /** Host-only test seam; requests always receive endpoints projected by the reader. */
 export interface UpdateFeedEffects { transport(): ModelDownloadTransport }
 function metadataHeaders(value: DownloadHeaders): Map<string, string> {
@@ -38,6 +39,11 @@ function nextLinuxURL(location: string | undefined, previous: URL): { url: URL; 
   const version = url.href.slice(prefix.length, -suffix.length);
   try { parseUpdateVersion(version); } catch { return fail("INVALID_REDIRECT"); }
   if (url.href !== `${prefix}${version}${suffix}`) return fail("INVALID_REDIRECT");
+  return { url, version };
+}
+function nextPreviewManifestURL(location: string | undefined, previous: URL, expected: string, version: string): { url: URL; version: string } {
+  const url = redirectURL(location, previous);
+  if (url.href !== expected && url.hostname !== "release-assets.githubusercontent.com") return fail("INVALID_REDIRECT");
   return { url, version };
 }
 
@@ -108,21 +114,51 @@ async function readBoundedUpdateText(input: Readonly<{ endpoint: string; bytes: 
 
 /** Bounded public metadata only. Returned candidates still require artifact authentication and installation admission. */
 export async function readUpdateFeed(input: UpdateFeedInput, effects: UpdateFeedEffects = { transport: createUpdateFeedTransport }): Promise<LinuxUpdateCandidate | MacosUpdateCandidate | undefined> {
-  let endpoint: string;
+  let endpoint: string, channel: UpdateChannel;
   try {
     parseUpdateVersion(input.currentVersion);
-    if (input.package === "macos") endpoint = macosUpdateEndpoint(input.repository);
-    else if (input.package === "deb" || input.package === "appimage") endpoint = LINUX_UPDATE_FEED_URL;
+    channel = input.channel ?? "stable";
+    if (channel !== "stable" && channel !== "preview") return fail("INVALID_INPUT");
+    if (input.package === "macos") endpoint = channel === "stable" ? macosUpdateEndpoint(input.repository) : PREVIEW_RELEASES_API_URL;
+    else if (input.package === "deb" || input.package === "appimage") endpoint = channel === "stable" ? LINUX_UPDATE_FEED_URL : PREVIEW_RELEASES_API_URL;
     else return fail("INVALID_INPUT");
   } catch { return fail("INVALID_INPUT"); }
-  const result = await readBoundedUpdateText({ endpoint, bytes: UPDATE_FEED_BYTES, ...(input.signal ? { signal: input.signal } : {}),
-    ...(input.package === "macos" ? {} : { redirect: nextLinuxURL }) }, effects);
-  let metadata: unknown;
-  try { metadata = JSON.parse(result.text) as unknown; } catch { return fail("INVALID_METADATA"); }
-  if (result.version && (typeof metadata !== "object" || metadata === null || Reflect.get(metadata, "version") !== result.version)) fail("INVALID_METADATA");
+
+  const readJSON = async (url: string, redirect?: (location: string | undefined, previous: URL) => { url: URL; version?: string }) => {
+    const result = await readBoundedUpdateText({ endpoint: url, bytes: UPDATE_FEED_BYTES, ...(input.signal ? { signal: input.signal } : {}),
+      ...(redirect ? { redirect } : {}) }, effects);
+    let metadata: unknown;
+    try { metadata = JSON.parse(result.text) as unknown; } catch { return fail("INVALID_METADATA"); }
+    if (result.version && (typeof metadata !== "object" || metadata === null || Reflect.get(metadata, "version") !== result.version)) fail("INVALID_METADATA");
+    return metadata;
+  };
+  if (channel === "preview") {
+    const releases = await readJSON(PREVIEW_RELEASES_API_URL);
+    let selected: ReturnType<typeof selectLatestPreviewRelease>;
+    try { selected = selectLatestPreviewRelease(releases); } catch { return fail("INVALID_METADATA"); }
+    if (!selected) return undefined;
+    if (input.package === "macos") {
+      try { return projectMacosUpdateRelease({ repository: input.repository, currentVersion: input.currentVersion, release: selected.release, channel }); }
+      catch (error: unknown) {
+        if (error instanceof UpdatePolicyError && error.code === "NOT_NEWER") return undefined;
+        return fail("INVALID_METADATA");
+      }
+    }
+    const manifestName = "latest.json", manifestURL = `${LINUX_UPDATE_REPOSITORY}/releases/download/v${selected.version}/${manifestName}`;
+    const manifests = selected.release.assets.filter((asset) => asset.name === manifestName);
+    if (manifests.length !== 1 || manifests[0]?.browser_download_url !== manifestURL) return fail("INVALID_METADATA");
+    const metadata = await readJSON(manifestURL, (location, previous) => nextPreviewManifestURL(location, previous, manifestURL, selected!.version));
+    try { return projectLinuxUpdateFeed({ sourceURL: manifestURL, package: input.package, currentVersion: input.currentVersion, channel, feed: metadata }); }
+    catch (error: unknown) {
+      if (error instanceof UpdatePolicyError && error.code === "NOT_NEWER") return undefined;
+      return fail("INVALID_METADATA");
+    }
+  }
+
+  const metadata = await readJSON(endpoint, input.package === "macos" ? undefined : nextLinuxURL);
   try {
-    return input.package === "macos" ? projectMacosUpdateRelease({ repository: input.repository, currentVersion: input.currentVersion, release: metadata }) :
-      projectLinuxUpdateFeed({ sourceURL: endpoint, package: input.package, currentVersion: input.currentVersion, feed: metadata });
+    return input.package === "macos" ? projectMacosUpdateRelease({ repository: input.repository, currentVersion: input.currentVersion, release: metadata, channel }) :
+      projectLinuxUpdateFeed({ sourceURL: endpoint, package: input.package, currentVersion: input.currentVersion, channel, feed: metadata });
   } catch (error: unknown) {
     if (error instanceof UpdatePolicyError && error.code === "NOT_NEWER") return undefined;
     return fail("INVALID_METADATA");

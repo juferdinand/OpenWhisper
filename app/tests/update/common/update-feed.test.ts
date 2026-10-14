@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readCurrentAppImageSignature, readUpdateFeed, UPDATE_FEED_BYTES, UpdateFeedError } from "../../../src/services/update/common/update-feed.js";
-import { LINUX_UPDATE_FEED_URL, LINUX_UPDATE_REPOSITORY, UPDATE_POLICY_LIMITS } from "../../../src/services/update/common/update-policy.js";
+import { LINUX_UPDATE_FEED_URL, LINUX_UPDATE_REPOSITORY, PREVIEW_RELEASES_API_URL, UPDATE_POLICY_LIMITS } from "../../../src/services/update/common/update-policy.js";
 import { deferred, FakeTransport, type ResponseScript } from "../../fixtures/model-download-fixtures.js";
 
 const failure = (code: UpdateFeedError["code"]) => (error: unknown): boolean => error instanceof UpdateFeedError && error.code === code && error.message === code;
@@ -44,6 +44,57 @@ test("Mac metadata uses the admitted repository API and refuses API redirects", 
   assert.equal(transport.requests[0]?.url.href, "https://api.github.com/repos/juferdinand/OpenWhisper/releases/latest");
   const redirected = new FakeTransport([{ headers: { status: 301, raw: ["Location", "https://api.github.com/other"] } }]);
   await assert.rejects(readUpdateFeed(host, { transport: () => redirected }), failure("INVALID_REDIRECT")); assert.equal(redirected.closes, 1);
+});
+
+test("preview selection is explicit, versioned and returns to stable only for a newer stable release", async () => {
+  const previewVersion = "0.2.6", previewManifest = `${LINUX_UPDATE_REPOSITORY}/releases/download/v${previewVersion}/latest.json`;
+  const release = { tag_name: `v${previewVersion}`, html_url: `${LINUX_UPDATE_REPOSITORY}/releases/tag/v${previewVersion}`,
+    draft: false, prerelease: true, body: "Preview notes", assets: [
+      { name: "latest.json", browser_download_url: previewManifest },
+      { name: "OpenWhisper-macOS.zip", browser_download_url: `${LINUX_UPDATE_REPOSITORY}/releases/download/v${previewVersion}/OpenWhisper-macOS.zip` },
+    ] };
+  const previewFeed = { ...feed, version: previewVersion, platforms: Object.fromEntries(Object.entries(feed.platforms).map(([key, value]) =>
+    [key, { ...value, url: value.url.replace("v0.2.5", `v${previewVersion}`) }])) };
+  const linuxApi = new FakeTransport([response([{ ...release, tag_name: "v0.2.5", prerelease: false }, release])]);
+  const linuxManifest = new FakeTransport([
+    { headers: { status: 302, raw: ["Location", "https://release-assets.githubusercontent.com/preview-manifest?opaque=private"] } }, response(previewFeed),
+  ]);
+  const transports = [linuxApi, linuxManifest];
+  const preview = await readUpdateFeed({ ...input, channel: "preview" }, { transport: () => transports.shift()! });
+  assert.equal(preview?.version, previewVersion);
+  assert.ok(preview && "feedURL" in preview);
+  if (preview && "feedURL" in preview) assert.equal(preview.feedURL, previewManifest);
+  assert.deepEqual([...linuxApi.requests, ...linuxManifest.requests].map(({ url }) => url.href), [PREVIEW_RELEASES_API_URL, previewManifest,
+    "https://release-assets.githubusercontent.com/preview-manifest?opaque=private"]);
+  assert.equal(linuxApi.closes, 1); assert.equal(linuxManifest.closes, 1);
+
+  const macTransport = new FakeTransport([response([release])]);
+  const macPreview = await readUpdateFeed({ package: "macos", repository: "juferdinand/OpenWhisper", currentVersion: "0.2.5", channel: "preview" },
+    { transport: () => macTransport });
+  assert.equal(macPreview?.version, previewVersion); assert.equal(macTransport.requests[0]?.url.href, PREVIEW_RELEASES_API_URL);
+  const unavailable = new FakeTransport([response([{ ...release, tag_name: "v0.2.5", prerelease: false }])]);
+  assert.equal(await readUpdateFeed({ ...input, channel: "preview" }, { transport: () => unavailable }), undefined);
+
+  const stableAfterPreview = new FakeTransport([response({ ...feed, version: "0.2.7", platforms: Object.fromEntries(Object.entries(feed.platforms).map(([key, value]) =>
+    [key, { ...value, url: value.url.replace("v0.2.5", "v0.2.7") }])) })]);
+  const stable = await readUpdateFeed({ ...input, currentVersion: previewVersion, channel: "stable" }, { transport: () => stableAfterPreview });
+  assert.equal(stable?.version, "0.2.7"); assert.ok(stable && "feedURL" in stable);
+  if (stable && "feedURL" in stable) assert.equal(stable.feedURL, LINUX_UPDATE_FEED_URL);
+});
+
+test("preview feed rejects malformed release versions and a manifest for another release", async () => {
+  const release = { tag_name: "v0.2.6-beta.1", html_url: `${LINUX_UPDATE_REPOSITORY}/releases/tag/v0.2.6-beta.1`, draft: false,
+    prerelease: true, assets: [] };
+  const malformed = new FakeTransport([response([release])]);
+  await assert.rejects(readUpdateFeed({ ...input, channel: "preview" }, { transport: () => malformed }), failure("INVALID_METADATA"));
+  const version = "0.2.6", expected = `${LINUX_UPDATE_REPOSITORY}/releases/download/v${version}/latest.json`;
+  const exact = { ...release, tag_name: `v${version}`, html_url: `${LINUX_UPDATE_REPOSITORY}/releases/tag/v${version}`,
+    assets: [{ name: "latest.json", browser_download_url: expected }] };
+  const wrongApi = new FakeTransport([response([exact])]);
+  const wrongManifest = new FakeTransport([{ headers: { status: 302, raw: ["Location", "https://github.com/juferdinand/OpenWhisper/releases/download/v0.2.7/latest.json"] } }]);
+  const transports = [wrongApi, wrongManifest];
+  await assert.rejects(readUpdateFeed({ ...input, channel: "preview" }, { transport: () => transports.shift()! }), failure("INVALID_REDIRECT"));
+  assert.equal(wrongApi.closes, 1); assert.equal(wrongManifest.closes, 1);
 });
 
 test("Feed source refuses foreign assets, credentials, downgrade, loops and redirected version drift", async () => {
