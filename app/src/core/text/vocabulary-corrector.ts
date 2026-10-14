@@ -88,14 +88,26 @@ function explicitMatches(words: readonly Word[], aliases: readonly ExplicitAlias
 
 function similarMatches(words: readonly Word[], entries: readonly VocabEntry[]): Match[] {
   const matches: Match[] = [];
+  const prefixLengths = new Array<number>(words.length + 1).fill(0);
+  for (let index = 0; index < words.length; index++) {
+    prefixLengths[index + 1] = entry(prefixLengths, index) + entry(words, index).key.length;
+  }
   for (const { spelling: term, misheard } of entries) {
     if (misheard.length > 0) continue;
     const key = normalizeVocabularyKey(term);
-    const threshold = vocabularyThreshold(Array.from(key).length);
+    const keyLength = Array.from(key).length;
+    const threshold = vocabularyThreshold(keyLength);
     const termWordCount = Math.max(1, term.split(/[\p{White_Space}\-]+/u).filter(Boolean).length);
     const window = Math.min(3, termWordCount + 1);
     for (let start = 0; start < words.length; start++) {
       for (let length = 1; length <= Math.min(window, words.length - start); length++) {
+        const firstKeyLength = entry(prefixLengths, start);
+        const lastKeyLength = entry(prefixLengths, start + length);
+        const candidateLength = lastKeyLength - firstKeyLength;
+        const maximumLength = Math.max(candidateLength, keyLength);
+        const bestPossibleScore = maximumLength === 0 ? 0
+          : 1 - Math.abs(candidateLength - keyLength) / maximumLength;
+        if (bestPossibleScore < threshold) continue;
         const candidate = words.slice(start, start + length).map((word) => word.key.join("")).join("");
         const score = vocabularySimilarity(candidate, key);
         if (score >= threshold) matches.push({ first: start, last: start + length - 1, term, score });

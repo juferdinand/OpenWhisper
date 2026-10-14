@@ -72,6 +72,11 @@ test("vocabulary thresholds, ties, overlapping windows and original offsets matc
   assert.equal(correctVocabulary("same text", ["", "!!!"]), "same text");
 });
 
+test("vocabulary length pruning preserves the configured similarity threshold", () => {
+  assert.equal(correctVocabulary("abcdefghx", ["abcdefgh"]), "abcdefgh");
+  assert.equal(correctVocabulary("abcdeX", ["abcde"]), "abcdeX");
+});
+
 test("explicit misheard forms map case-insensitively while entries without aliases retain fuzzy matching", () => {
   const entries = [
     { spelling: "Obsidian", misheard: ["Opsidian", "OB-SIDIAN"] },
