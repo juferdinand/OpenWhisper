@@ -118,7 +118,7 @@ export class OptionalTextProcessing {
       return text;
     }
     const editReply = !conversationMode && (selected.provider === "codex" || selected.provider === "claude_code") &&
-      new TextEncoder().encode(text).byteLength >= MIN_TEXT_REVISION_EDIT_BYTES;
+      (text.length >= MIN_TEXT_REVISION_EDIT_BYTES || new TextEncoder().encode(text).byteLength >= MIN_TEXT_REVISION_EDIT_BYTES);
     const revisionInstruction = !conversationMode && settings.revision
       ? compileTextRevisionPrompt(settings.revision, editReply ? "edits" : "text") : undefined;
     if (!conversationMode && revisionInstruction === undefined) {
