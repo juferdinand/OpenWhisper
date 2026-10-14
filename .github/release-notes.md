@@ -1,16 +1,14 @@
 <!-- Prepared for the gated release workflow; repository status lives in README.md. -->
 
-## What's new in OpenWhisper 0.5.3
+## What's new in OpenWhisper 0.5.4
 
-- Fixes GPU-enabled Metal recording startup on macOS.
-- Improves local AI text processing and retries only when a model explicitly rejects the reasoning option.
-- Warns when LM Studio cannot disable reasoning and keeps dictated text when processing times out.
+- Configure model specific reasoning effort for Ollama, LM Studio, Claude Code and Codex.
+- Manage and test custom CLI connections in AI models settings, with configured provider metadata refreshed in the background.
 
-## Neu in OpenWhisper 0.5.3
+## Neu in OpenWhisper 0.5.4
 
-- Behebt den Start von GPU-Aufnahmen mit Metal unter macOS.
-- Verbessert die lokale KI-Textverarbeitung und wiederholt Anfragen nur bei ausdrücklicher Ablehnung der Reasoning-Option.
-- Warnt, wenn LM Studio Reasoning nicht abschalten kann, und behält den diktierten Text bei Zeitüberschreitungen bei.
+- Konfiguriere die Reasoning-Stufe je Modell für Ollama, LM Studio, Claude Code und Codex.
+- Verwalte und teste eigene CLI-Verbindungen in den KI-Modell-Einstellungen; eingerichtete Anbieter werden im Hintergrund aktualisiert.
 
 Recognition runs locally. Exact package, desktop and test scope is recorded in
 [Electron status](https://github.com/juferdinand/OpenWhisper/blob/main/docs/ELECTRON-STATUS.md) and
