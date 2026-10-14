@@ -63,18 +63,26 @@ test("LM Studio with its server off offers Start server and lists models afterwa
       );
     window.publishState();
   });
-  const row = page.locator('.connection-row[data-provider="lm_studio"]');
-  await expect(row.locator(".connection-state")).toHaveText("Server stopped");
-  await row.getByRole("button", { name: "Start server" }).click();
+  const row = page.locator('.ai-models-row[data-provider="lm_studio"]');
+  await row.locator("[data-select-provider]").click();
+  await expect(page.locator(".ai-models-status-line")).toHaveText(
+    "Server stopped",
+  );
+  await page
+    .locator(".ai-models-detail")
+    .getByRole("button", { name: "Start server" })
+    .click();
   await expect
     .poll(() => page.evaluate(() => window.calls.at(-1)?.command))
     .toBe("start_lm_studio_server");
-  await expect(row.locator(".connection-state")).toHaveText(
-    "Available · 1 models",
+  await expect(page.locator(".ai-models-status-line")).toHaveText(
+    "127.0.0.1:1234 · 1 model",
   );
-  await expect(row.getByRole("button", { name: "Start server" })).toHaveCount(
-    0,
-  );
+  await expect(
+    page
+      .locator(".ai-models-detail")
+      .getByRole("button", { name: "Start server" }),
+  ).toHaveCount(0);
 });
 
 test("AI models discovers providers and saves priority and model selections", async ({
@@ -86,62 +94,42 @@ test("AI models discovers providers and saves priority and model selections", as
   await expect(
     page.locator(".settings-dialog-nav [data-tab=connections]"),
   ).toHaveText("AI models");
-  await expect(page.locator(".connection-row")).toHaveCount(4);
-  await expect(page.locator(".ai-models-add-row")).toHaveCount(1);
-  await expect(
-    page.locator(
-      '.connection-row[data-provider="lm_studio"] .connection-reasoning-warning',
-    ),
-  ).toHaveText(
-    "LM Studio does not expose a setting to turn reasoning off for this model. If it reasons by default, AI revision may time out; your transcript will be kept.",
-  );
-  await expect(page.locator(".ai-models-list > li").last()).toHaveClass(
-    /ai-models-add-row/,
-  );
+  await expect(page.locator(".ai-models-row")).toHaveCount(4);
+  await expect(page.locator(".ai-models-add")).toHaveCount(1);
   await expect(
     page.locator("#connection-mode, #conversation-instruction"),
   ).toHaveCount(0);
+  await page.locator('[data-select-provider="lm_studio"]').click();
+  await expect(page.locator(".ai-models-model-warning")).toHaveText(
+    "LM Studio does not expose a setting to turn reasoning off for this model. If it reasons by default, AI revision may time out; your transcript will be kept.",
+  );
+  await page.locator('[data-select-provider="ollama"]').click();
   await expect
     .poll(() =>
       page
-        .locator(".connection-switch")
-        .first()
-        .evaluate((input) => {
-          const style = getComputedStyle(input);
-          const rect = input.getBoundingClientRect();
+        .locator('.ai-models-switch[data-connection-enabled="ollama"]')
+        .evaluate((button) => {
+          const style = getComputedStyle(button);
+          const rect = button.getBoundingClientRect();
           return {
             width: rect.width,
             height: rect.height,
             background: style.backgroundColor,
-            thumb: getComputedStyle(input, "::before").content,
+            thumbWidth: button.querySelector("span")?.getBoundingClientRect()
+              .width,
           };
         }),
     )
-    .toMatchObject({ width: 38, height: 22 });
-  await expect(page.locator(".connection-switch").first()).toHaveCSS(
-    "appearance",
-    "none",
-  );
-  expect(
-    await page
-      .locator(".connection-switch")
-      .first()
-      .evaluate((input) => getComputedStyle(input, "::before").content),
-  ).toBe('""');
-  expect(
-    await page
-      .locator(".connection-switch")
-      .first()
-      .evaluate((input) => getComputedStyle(input).backgroundColor),
-  ).not.toBe("rgba(0, 0, 0, 0)");
-  await expect(page.locator(".connection-default")).toHaveCount(0);
+    .toMatchObject({ width: 38, height: 22, thumbWidth: 18 });
+  await expect(page.locator(".ai-models-status-dot.primary")).toHaveCount(0);
   await page.getByRole("button", { name: "Scan again" }).click();
-  await expect(page.locator('li[data-provider="ollama"]')).toContainText(
-    "Available",
-  );
-  await expect(page.locator('li[data-provider="codex"]')).toContainText(
-    "Available",
-  );
+  await expect(page.getByRole("button", { name: "Scan again" })).toBeEnabled();
+  await expect(
+    page.locator('.ai-models-row[data-provider="ollama"]'),
+  ).toContainText("Off");
+  await expect(
+    page.locator('.ai-models-row[data-provider="codex"]'),
+  ).toContainText("Off");
   await page.screenshot({
     path: resolve(modelConnectionsScreenshots, "connections-en-normal.png"),
   });
@@ -151,42 +139,25 @@ test("AI models discovers providers and saves priority and model selections", as
       .locator(".settings-content")
       .evaluate((element) => element.scrollWidth <= element.clientWidth),
   ).toBe(true);
-  const narrowRowGeometry = await page
-    .locator(".connection-row")
-    .evaluateAll((rows) =>
-      rows.map((row) => {
-        const identity = row
-          .querySelector(".connection-identity")!
-          .getBoundingClientRect();
-        const model = row
-          .querySelector(".connection-model select")!
-          .getBoundingClientRect();
-        return {
-          identityWidth: identity.width,
-          identityBottom: identity.bottom,
-          modelTop: model.top,
-        };
-      }),
-    );
   expect(
-    narrowRowGeometry.every(
-      (row) => row.identityWidth >= 80 && row.modelTop >= row.identityBottom,
-    ),
+    await page
+      .locator(".ai-models-workspace")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth),
   ).toBe(true);
   await page.screenshot({
     path: resolve(modelConnectionsScreenshots, "connections-en-minimum.png"),
   });
   await page.setViewportSize({ width: 960, height: 680 });
-  await expect(page.locator('li[data-provider="claude_code"]')).toContainText(
-    "Available",
-  );
+  await page.locator('[data-select-provider="ollama"]').click();
   await page
     .locator('[data-connection-model="ollama"]')
     .selectOption("llama3.2");
+  await page.locator('[data-select-provider="claude_code"]').click();
   await page.locator('[data-cli-model="claude_code"]').selectOption("sonnet");
-  await page.locator("label.connection-toggle").nth(0).click();
-  await page.locator("label.connection-toggle").nth(2).click();
-  await page.getByRole("button", { name: "Move LM Studio up" }).click();
+  await page.locator('[data-connection-enabled="claude_code"]').click();
+  await page.locator('[data-select-provider="ollama"]').click();
+  await page.locator('[data-connection-enabled="ollama"]').click();
+  await page.locator('[data-connection-grip="lm_studio"]').press("Alt+ArrowUp");
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -216,7 +187,7 @@ test("AI models discovers providers and saves priority and model selections", as
   await expect(
     page.locator(".settings-dialog-nav [data-tab=connections]"),
   ).toHaveText("KI-Modelle");
-  await expect(page.locator(".connection-privacy")).toContainText(
+  await expect(page.locator(".ai-models-privacy")).toContainText(
     "Cloud-Dienste",
   );
   await page.setViewportSize({ width: 960, height: 680 });
@@ -255,6 +226,64 @@ test("AI models discovers providers and saves priority and model selections", as
   });
 });
 
+test("AI models can reprioritize and disable an enabled offline connection", async ({
+  page,
+}) => {
+  await start(page, "linux");
+  await selectSettingsTab(page, "connections");
+  await page.getByRole("button", { name: "Scan again" }).click();
+  await page.evaluate(() => {
+    const state = window.testState.text_connections;
+    state.settings.connections = state.settings.connections.map((connection) =>
+      connection.provider === "ollama" || connection.provider === "lm_studio"
+        ? { ...connection, enabled: true }
+        : connection,
+    );
+    state.available = state.available.map((connection) =>
+      connection.provider === "ollama"
+        ? { ...connection, usable: false, reason: "server_stopped", models: [] }
+        : connection,
+    );
+    window.publishState();
+  });
+
+  const ollamaRow = page.locator('.ai-models-row[data-provider="ollama"]');
+  await expect(ollamaRow).toHaveAttribute("data-row-state", "primary");
+  await expect(
+    page.locator('.ai-models-switch[data-connection-enabled="ollama"]'),
+  ).toBeEnabled();
+  await expect(
+    page.locator('.ai-models-switch[data-connection-enabled="ollama"]'),
+  ).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator('[data-connection-grip="ollama"]')).toBeEnabled();
+
+  await page.locator('[data-connection-grip="ollama"]').press("Alt+ArrowDown");
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.testState.text_connections.settings.connections.map(
+          (connection) => connection.provider,
+        ),
+      ),
+    )
+    .toEqual(["lm_studio", "ollama", "claude_code", "codex"]);
+  await expect(
+    page.locator('.ai-models-row[data-provider="lm_studio"]'),
+  ).toHaveAttribute("data-row-state", "primary");
+
+  await page.locator('[data-connection-enabled="ollama"]').click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.testState.text_connections.settings.connections.find(
+            (connection) => connection.provider === "ollama",
+          )?.enabled,
+      ),
+    )
+    .toBe(false);
+});
+
 test("built-in CLI model catalogs refresh and save by provider identity", async ({
   page,
 }) => {
@@ -263,6 +292,7 @@ test("built-in CLI model catalogs refresh and save by provider identity", async 
   await page.getByRole("button", { name: "Scan again" }).click();
   await expect(page.getByRole("button", { name: "Scan again" })).toBeEnabled();
 
+  await page.locator('[data-select-provider="codex"]').click();
   const codexModel = page.locator('[data-cli-model="codex"]');
   await expect(codexModel).toBeEnabled();
   await expect(codexModel.locator("option").first()).toHaveText(
@@ -283,6 +313,7 @@ test("built-in CLI model catalogs refresh and save by provider identity", async 
     )
     .toMatchObject({ provider: "codex", model: "codex-fast" });
 
+  await page.locator('[data-select-provider="ollama"]').click();
   const ollamaModel = page.locator('[data-connection-model="ollama"]');
   await expect(ollamaModel.locator("option")).toHaveText([
     "Llama 3.2",
@@ -290,8 +321,7 @@ test("built-in CLI model catalogs refresh and save by provider identity", async 
     "Qwen 3 · 8b",
   ]);
 
-  await page.getByRole("button", { name: "Move Claude Code up" }).click();
-
+  await page.locator('[data-select-provider="claude_code"]').click();
   const claudeModel = page.locator('[data-cli-model="claude_code"]');
   await expect(claudeModel.locator("option")).toHaveText([
     "Use tool settings",
@@ -341,6 +371,7 @@ test("built-in CLI model catalogs refresh and save by provider identity", async 
   });
   await page.getByRole("button", { name: "Scan again" }).click();
   await expect(page.getByRole("button", { name: "Scan again" })).toBeEnabled();
+  await page.locator('[data-select-provider="claude_code"]').click();
   await expect(claudeModel.locator("option")).toHaveText([
     "Use tool settings",
     "Sonnet",
@@ -349,12 +380,14 @@ test("built-in CLI model catalogs refresh and save by provider identity", async 
   ]);
   await expect(claudeModel).toHaveValue("claude-opus-5");
   await expect(claudeModel.locator("optgroup")).toHaveCount(0);
+  await page.locator('[data-select-provider="codex"]').click();
   await expect(codexModel.locator("option")).toHaveText([
     "Use tool settings",
     "Codex Fast",
     "GPT-6.1 Sol",
   ]);
   await expect(codexModel).toHaveValue("codex-fast");
+  await page.locator('[data-select-provider="claude_code"]').click();
 
   await claudeModel.selectOption("");
   await expect
@@ -400,6 +433,353 @@ test("built-in CLI model catalogs refresh and save by provider identity", async 
     .toBe("");
 });
 
+test("AI model reasoning controls follow advertised capabilities and save provider values", async ({
+  page,
+}) => {
+  await start(page, "linux");
+  await page.setViewportSize({ width: 640, height: 680 });
+  await selectSettingsTab(page, "connections");
+  await page.getByRole("button", { name: "Scan again" }).click();
+  await expect(page.getByRole("button", { name: "Scan again" })).toBeEnabled();
+  await page.evaluate(() => {
+    window.testState.text_connections.available =
+      window.testState.text_connections.available.map((entry: any) => {
+        if (entry.provider === "ollama")
+          return {
+            ...entry,
+            model_reasoning: [
+              {
+                model: "llama3.2",
+                options: [
+                  "off",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra",
+                ],
+                default: "medium",
+              },
+            ],
+          };
+        if (entry.provider === "lm_studio")
+          return {
+            ...entry,
+            models_without_reasoning_control: [],
+            model_reasoning: [
+              {
+                model: "local-model",
+                options: ["off", "low", "high"],
+                default: "low",
+              },
+            ],
+          };
+        if (entry.provider === "claude_code")
+          return {
+            ...entry,
+            model_reasoning: [
+              {
+                model: "sonnet",
+                options: ["low", "medium", "high"],
+                default: "high",
+              },
+            ],
+          };
+        if (entry.provider === "codex")
+          return {
+            ...entry,
+            model_reasoning: [
+              {
+                model: "codex-fast",
+                options: [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra",
+                ],
+                default: "medium",
+              },
+            ],
+          };
+        return entry;
+      });
+    window.publishState();
+  });
+
+  await page.locator('[data-select-provider="ollama"]').click();
+  const ollama = page.locator('[data-effort-slider="ollama"]');
+  await expect(page.locator(".ai-models-slider-labels span")).toHaveText([
+    "Off",
+    "Low",
+    "Medium",
+    "High",
+    "xhigh",
+    "max",
+    "Ultra",
+  ]);
+  await expect(ollama).toHaveRole("slider");
+  await expect(ollama).toHaveAttribute("aria-valuetext", "Medium");
+  const sliderBox = await ollama.boundingBox();
+  expect(sliderBox && sliderBox.width >= 240 && sliderBox.height >= 24).toBe(
+    true,
+  );
+  const stopGeometry = await page.evaluate(() => {
+    const control = document
+      .querySelector<HTMLElement>('[data-effort-slider="ollama"]')
+      ?.closest(".ai-models-slider-control");
+    const track = control?.querySelector(".ai-models-slider-track");
+    if (!track) return [];
+    const bounds = track.getBoundingClientRect();
+    return [...track.querySelectorAll(".ai-models-slider-tick")].map(
+      (tick, index, ticks) => {
+        const tickBounds = tick.getBoundingClientRect();
+        return {
+          actual: tickBounds.left + tickBounds.width / 2,
+          expected: bounds.left + (index / (ticks.length - 1)) * bounds.width,
+        };
+      },
+    );
+  });
+  expect(stopGeometry.length).toBe(7);
+  for (const stop of stopGeometry)
+    expect(Math.abs(stop.actual - stop.expected)).toBeLessThan(1);
+  await ollama.focus();
+  await ollama.press("ArrowLeft");
+  await expect(ollama).toHaveAttribute("aria-valuetext", "Low");
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        "reasoning_effort" in
+        window.testState.text_connections.settings.connections[0]!
+          ? window.testState.text_connections.settings.connections[0]
+              .reasoning_effort
+          : undefined,
+      ),
+    )
+    .toBe("low");
+  await ollama.evaluate((slider) => {
+    const input = slider as HTMLInputElement;
+    input.value = "2.5";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await expect(ollama).toHaveValue("2.5");
+  await expect(ollama).toHaveAttribute("aria-valuetext", "High");
+  await expect(page.locator(".ai-models-slider-fill")).toHaveAttribute(
+    "style",
+    /width: .*%;/,
+  );
+  await ollama.evaluate((slider) =>
+    slider.dispatchEvent(new Event("change", { bubbles: true })),
+  );
+  await expect(ollama).toHaveValue("3");
+  await ollama.focus();
+  await ollama.press("ArrowLeft");
+  await expect(ollama).toHaveAttribute("aria-valuetext", "Medium");
+
+  await page.locator('[data-select-provider="lm_studio"]').click();
+  const lmStudio = page.locator('[data-effort-slider="lm_studio"]');
+  await expect(page.locator(".ai-models-slider-labels span")).toHaveText([
+    "Off",
+    "Low",
+    "High",
+  ]);
+  await lmStudio.focus();
+  await lmStudio.press("End");
+  await expect(lmStudio).toHaveAttribute("aria-valuetext", "High");
+
+  await page.locator('[data-select-provider="claude_code"]').click();
+  const claudeModel = page.locator('[data-cli-model="claude_code"]');
+  await claudeModel.selectOption("sonnet");
+  const claude = page.locator('[data-effort-slider="claude_code"]');
+  await expect(page.locator(".ai-models-slider-labels span")).toHaveText([
+    "Low",
+    "Medium",
+    "High",
+  ]);
+  await claude.focus();
+  await claude.press("Home");
+  await expect(claude).toHaveAttribute("aria-valuetext", "Low");
+
+  await page.locator('[data-select-provider="codex"]').click();
+  const codexModel = page.locator('[data-cli-model="codex"]');
+  await codexModel.selectOption("codex-fast");
+  const codex = page.locator('[data-effort-slider="codex"]');
+  await expect(page.locator(".ai-models-slider-labels span")).toHaveText([
+    "No reasoning",
+    "Minimal",
+    "Low",
+    "Medium",
+    "High",
+    "xhigh",
+    "max",
+    "Ultra",
+  ]);
+  await codex.focus();
+  await codex.press("Home");
+  await expect(codex).toHaveAttribute("aria-valuetext", "No reasoning");
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.testState.text_connections.settings.connections.map(
+          (entry: any) =>
+            "reasoning_effort" in entry ? entry.reasoning_effort : null,
+        ),
+      ),
+    )
+    .toEqual([null, "high", "low", "none"]);
+
+  await page.evaluate(() => {
+    window.testState.preferences.ui_language = "de";
+    window.publishState();
+  });
+  await page.locator('[data-select-provider="ollama"]').click();
+  await expect(ollama).toHaveAttribute("aria-label", "Reasoning für Ollama");
+  await expect(ollama).toHaveAttribute("aria-valuetext", "Mittel");
+
+  await page
+    .locator('[data-connection-model="ollama"]')
+    .selectOption("qwen2.5");
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const ollamaConnection =
+          window.testState.text_connections.settings.connections[0];
+        return {
+          model: ollamaConnection.model,
+          hasReasoning: "reasoning_effort" in ollamaConnection,
+        };
+      }),
+    )
+    .toEqual({ model: "qwen2.5", hasReasoning: false });
+});
+
+test("AI model controls are locked during recording and processing", async ({
+  page,
+}) => {
+  await start(page, "linux");
+  await selectSettingsTab(page, "connections");
+  await page.evaluate(() => {
+    window.testState.status = "recording";
+    window.testState.recording_generation = 1;
+    window.testState.elapsed = 2;
+    window.testState.level = 0.5;
+    window.publishState();
+  });
+  await expect(page.locator(".ai-models-lock")).toHaveText(
+    "Locked during recording or processing",
+  );
+  await expect(page.locator(".ai-models-workspace")).toHaveAttribute(
+    "inert",
+    "",
+  );
+  await expect(page.locator(".ai-models-workspace")).toHaveCSS(
+    "opacity",
+    "0.5",
+  );
+  await expect(page.locator("#add-custom-connection")).toBeDisabled();
+  await expect(page.locator('[data-select-provider="ollama"]')).toBeDisabled();
+});
+
+test("binary reasoning capabilities use the slider and can return to the model default", async ({
+  page,
+}) => {
+  await start(page, "linux");
+  await selectSettingsTab(page, "connections");
+  await page.getByRole("button", { name: "Scan again" }).click();
+  await expect(page.getByRole("button", { name: "Scan again" })).toBeEnabled();
+  await page.evaluate(() => {
+    window.testState.text_connections.available =
+      window.testState.text_connections.available.map((entry: any) =>
+        entry.provider === "ollama"
+          ? {
+              ...entry,
+              model_reasoning: [
+                { model: "llama3.2", options: ["off", "on"], default: "on" },
+              ],
+            }
+          : entry,
+      );
+    window.publishState();
+  });
+  await page.locator('[data-select-provider="ollama"]').click();
+  const reasoning = page.locator('[data-effort-slider="ollama"]');
+  await expect(page.locator(".ai-models-slider-labels span")).toHaveText([
+    "Off",
+    "On",
+  ]);
+  await expect(reasoning).toHaveAttribute("aria-valuetext", "On");
+  await reasoning.focus();
+  await reasoning.press("Home");
+  await expect(reasoning).toHaveAttribute("aria-valuetext", "Off");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.testState.text_connections.settings.connections[0],
+      ),
+    )
+    .toMatchObject({ reasoning_effort: "off" });
+  await page.getByRole("button", { name: "Use model default" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          "reasoning_effort" in
+          window.testState.text_connections.settings.connections[0]!,
+      ),
+    )
+    .toBe(false);
+  await expect(reasoning).toHaveAttribute("aria-valuetext", "On");
+  await page.evaluate(() => {
+    window.testState.text_connections.available =
+      window.testState.text_connections.available.map((entry: any) =>
+        entry.provider === "ollama"
+          ? {
+              ...entry,
+              model_reasoning: [{ model: "llama3.2", options: ["off", "on"] }],
+            }
+          : entry,
+      );
+    window.publishState();
+  });
+  const slider = page.locator('[data-effort-slider="ollama"]');
+  await expect(page.locator(".ai-models-slider-labels span")).toHaveText([
+    "Standard",
+    "Off",
+    "On",
+  ]);
+  await slider.focus();
+  await slider.press("End");
+  await expect(slider).toHaveAttribute("aria-valuetext", "On");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.testState.text_connections.settings.connections[0],
+      ),
+    )
+    .toMatchObject({ reasoning_effort: "on" });
+  await page.evaluate(() => {
+    window.testState.text_connections.available =
+      window.testState.text_connections.available.map((entry: any) =>
+        entry.provider === "ollama"
+          ? {
+              ...entry,
+              model_reasoning: [
+                { model: "llama3.2", options: ["on"], default: "on" },
+              ],
+            }
+          : entry,
+      );
+    window.publishState();
+  });
+  await expect(page.locator('[data-effort-slider="ollama"]')).toHaveCount(0);
+  await expect(page.locator(".ai-models-effort-current")).toHaveText("On");
+});
+
 test("rapid CLI model edits and reorder serialize without losing pending settings", async ({
   page,
 }) => {
@@ -411,9 +791,14 @@ test("rapid CLI model edits and reorder serialize without losing pending setting
     (window as any).connectionSaveDelay = 500;
   });
 
+  await page.locator('[data-select-provider="claude_code"]').click();
   await page.locator('[data-cli-model="claude_code"]').selectOption("sonnet");
+  await page.locator('[data-select-provider="codex"]').click();
   await page.locator('[data-cli-model="codex"]').selectOption("codex-fast");
-  await page.getByRole("button", { name: "Move Claude Code up" }).click();
+  await page.locator('[data-select-provider="claude_code"]').click();
+  await page
+    .locator('[data-connection-grip="claude_code"]')
+    .press("Alt+ArrowUp");
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -528,7 +913,8 @@ test("first local enable saves the discovered default model", async ({
   await expect(page.locator('[data-connection-model="ollama"]')).toHaveValue(
     "llama3.2",
   );
-  await page.locator(".connection-toggle").nth(0).click();
+  await page.locator('[data-select-provider="ollama"]').click();
+  await page.locator('[data-connection-enabled="ollama"]').click();
   await expect
     .poll(() =>
       page.evaluate(
@@ -536,52 +922,194 @@ test("first local enable saves the discovered default model", async ({
       ),
     )
     .toMatchObject({ provider: "ollama", enabled: true, model: "llama3.2" });
-  await expect(page.locator(".connection-default")).toHaveText("Standard");
+  await expect(page.locator(".ai-models-status-dot.primary")).toHaveCount(1);
 });
 
-test("custom CLI subpage saves stdin-based text and conditional JSON output", async ({
+test("custom CLI editor tests, saves and edits stdin-based text and JSON output", async ({
   page,
 }) => {
   await start(page, "linux");
   await selectSettingsTab(page, "connections");
   await page.getByRole("button", { name: "Scan again" }).click();
+  const connectionCount = await page.locator(".ai-models-row").count();
+  expect(connectionCount).toBeGreaterThan(0);
+  await page.locator(".ai-models-row").evaluateAll((rows) => {
+    rows.forEach((row, index) => {
+      (row as HTMLElement).dataset.testRowIdentity = `row-${index}`;
+    });
+  });
+  await page
+    .locator(".ai-models-settings")
+    .evaluate(
+      (root) => ((root as HTMLElement).dataset.testRootIdentity = "same"),
+    );
   await page.getByRole("button", { name: "Add CLI connection" }).click();
   await expect(page.locator(".ai-models-editor")).toBeVisible();
-  await page.setViewportSize({ width: 740, height: 560 });
-  await page
-    .locator("#custom-args")
-    .fill(
-      Array.from({ length: 24 }, (_, index) => `--argument-${index}`).join(
-        "\n",
-      ),
+  await expect(page.locator("#settings-dialog")).toHaveCount(1);
+  await expect(page.locator(".ai-models-preview")).toHaveCount(0);
+  await expect(page.locator(".ai-models-list-pane")).toBeVisible();
+  await expect(page.locator(".ai-models-row")).toHaveCount(connectionCount);
+  await expect
+    .poll(() =>
+      page
+        .locator(".ai-models-row")
+        .evaluateAll((rows) =>
+          rows.map((row) => (row as HTMLElement).dataset.testRowIdentity),
+        ),
+    )
+    .toEqual(
+      Array.from({ length: connectionCount }, (_, index) => `row-${index}`),
     );
-  const editorBody = page.locator(".ai-models-editor-body");
-  const editorFooter = page.locator(".ai-models-editor-footer");
-  const footerBeforeScroll = await editorFooter.boundingBox();
-  await editorBody.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
+  const initialWorkspace = await page
+    .locator(".ai-models-workspace")
+    .boundingBox();
+  const initialEditor = await page.locator(".ai-models-editor").boundingBox();
+  expect(
+    initialWorkspace &&
+      initialEditor &&
+      initialEditor.width < initialWorkspace.width * 0.8,
+  ).toBe(true);
+  await page.screenshot({
+    path: resolve(modelConnectionsScreenshots, "connections-cli-editor-en.png"),
   });
-  await expect(editorFooter).toBeInViewport();
-  const footerAfterScroll = await editorFooter.boundingBox();
-  expect(footerAfterScroll?.y).toBeCloseTo(footerBeforeScroll?.y ?? -1, 0);
+  const editorBody = page.locator(".ai-models-editor-body");
+  await expect(page.locator("#custom-name")).toBeInViewport();
+  await expect(page.locator("#custom-command")).toBeInViewport();
+  await expect(page.locator("#custom-args")).toBeInViewport();
+  await expect(page.getByText("Read response as")).toBeInViewport();
+  await expect(page.locator(".ai-models-editor-footer")).toBeInViewport();
+  for (const viewport of [
+    { width: 960, height: 680 },
+    { width: 900, height: 650 },
+    { width: 740, height: 560 },
+    { width: 683, height: 553 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const layoutMetrics = await page.evaluate(() => {
+      const editor = document.querySelector(".ai-models-editor-body")!;
+      const dialog = document.querySelector(".settings-dialog-scroll")!;
+      const settingsDialog = document.querySelector("#settings-dialog")!;
+      const workspace = document.querySelector(".ai-models-workspace")!;
+      const addingDialogHeight = settingsDialog.getBoundingClientRect().height;
+      workspace.classList.remove("is-adding");
+      const normalDialogHeight = settingsDialog.getBoundingClientRect().height;
+      workspace.classList.add("is-adding");
+      return {
+        editorClient: editor.clientHeight,
+        editorScroll: editor.scrollHeight,
+        dialogClient: dialog.clientHeight,
+        dialogScroll: dialog.scrollHeight,
+        addingDialogHeight,
+        normalDialogHeight,
+      };
+    });
+    expect(
+      layoutMetrics.editorScroll,
+      `editor must fit at ${viewport.width}x${viewport.height}`,
+    ).toBeLessThanOrEqual(layoutMetrics.editorClient + 1);
+    expect(
+      layoutMetrics.dialogScroll,
+      `settings content must fit at ${viewport.width}x${viewport.height}`,
+    ).toBeLessThanOrEqual(layoutMetrics.dialogClient + 1);
+    expect(layoutMetrics.addingDialogHeight).toBeCloseTo(
+      layoutMetrics.normalDialogHeight,
+      0,
+    );
+    await expect(page.locator("#custom-name")).toBeInViewport();
+    await expect(page.locator("#custom-command")).toBeInViewport();
+    await expect(page.locator("#custom-args")).toBeInViewport();
+    await expect(page.getByText("Read response as")).toBeInViewport();
+    await expect(page.locator(".ai-models-editor-footer")).toBeInViewport();
+    await expect(page.locator(".ai-models-privacy")).toBeInViewport();
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const largeViewportMetrics = await page
+    .locator(".settings-dialog-scroll")
+    .evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+  expect(largeViewportMetrics.scrollHeight).toBeLessThanOrEqual(
+    largeViewportMetrics.clientHeight + 1,
+  );
+  await expect(page.getByText("Read response as")).toBeInViewport();
+  await expect(page.locator(".ai-models-editor-footer")).toBeInViewport();
+  for (const selector of ["#custom-name", "#custom-command"]) {
+    const inset = await page.locator(selector).evaluate((element) => {
+      const body = element.closest(".ai-models-editor-body")!;
+      const fieldBounds = element.getBoundingClientRect();
+      const bodyBounds = body.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        left: fieldBounds.left - bodyBounds.left,
+        right: bodyBounds.right - fieldBounds.right,
+        required:
+          Number.parseFloat(style.outlineOffset) +
+          Number.parseFloat(style.outlineWidth),
+      };
+    });
+    expect(inset.left).toBeGreaterThanOrEqual(inset.required);
+    expect(inset.right).toBeGreaterThanOrEqual(inset.required);
+  }
+  await page.locator("#custom-args").fill("--output-format\njson");
+  const argsMetrics = await page
+    .locator("#custom-args")
+    .evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+  expect(argsMetrics.scrollHeight).toBeLessThanOrEqual(
+    argsMetrics.clientHeight + 1,
+  );
   await expect(
-    page.getByRole("button", { name: "Save CLI connection" }),
+    page.getByRole("button", { name: "Add", exact: true }),
   ).toBeDisabled();
   await page.locator("#custom-name").fill("Gemini CLI");
   await page.locator("#custom-command").fill("gemini");
   await page.locator("#custom-args").fill("--output-format\njson");
   await expect(
-    page.getByRole("button", { name: "Save CLI connection" }),
+    page.getByRole("button", { name: "Add", exact: true }),
   ).toBeEnabled();
   await expect(page.locator("#custom-stdin")).toHaveCount(0);
   await expect(page.locator("#custom-response-path")).toHaveCount(0);
-  await page.locator("#custom-output").selectOption("json");
+  await page.locator('[data-cli-format="json"]').click();
   await expect(page.locator("#custom-response-path")).toBeVisible();
   await page.locator("#custom-response-path").fill("response");
-  await page.getByRole("button", { name: "Save CLI connection" }).click();
-  const customRow = page.locator('.connection-row[data-provider^="custom:"]');
+  await page.locator("#ai-models-test").click();
+  await expect(page.locator(".ai-models-test-result")).toHaveText(
+    "Responded · 0.9 s",
+  );
+  expect(
+    await page.evaluate(() =>
+      window.calls.some(
+        (call) => call.command === "test_custom_cli_connection",
+      ),
+    ),
+  ).toBe(true);
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.locator(".ai-models-settings")).toHaveAttribute(
+    "data-test-root-identity",
+    "same",
+  );
+  await expect
+    .poll(() =>
+      page
+        .locator(".ai-models-row")
+        .evaluateAll((rows) =>
+          rows
+            .filter(
+              (row) =>
+                !(row as HTMLElement).dataset.provider?.startsWith("custom:"),
+            )
+            .map((row) => (row as HTMLElement).dataset.testRowIdentity),
+        ),
+    )
+    .toEqual(
+      Array.from({ length: connectionCount }, (_, index) => `row-${index}`),
+    );
+  const customRow = page.locator('.ai-models-row[data-provider^="custom:"]');
   await expect(customRow).toHaveCount(1);
-  await expect(customRow.locator(".connection-switch")).not.toBeChecked();
+  await expect(customRow).toContainText("Custom command");
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -592,8 +1120,13 @@ test("custom CLI subpage saves stdin-based text and conditional JSON output", as
       ),
     )
     .toBe(true);
-  await expect(customRow).toContainText("Available");
-  await customRow.locator(".connection-switch").check();
+  await customRow.locator("[data-select-provider]").click();
+  await expect(page.locator(".ai-models-status-line")).toContainText(
+    "Available",
+  );
+  await expect(
+    page.locator('[data-connection-enabled^="custom:"]'),
+  ).toHaveAttribute("aria-checked", "true");
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -609,14 +1142,14 @@ test("custom CLI subpage saves stdin-based text and conditional JSON output", as
       output: "json",
       responsePath: "response",
     });
-  await customRow.getByRole("button", { name: "Edit" }).click();
+  await page.locator('[data-connection-edit^="custom:"]').click();
   await expect(page.locator(".ai-models-editor")).toBeVisible();
   await page.locator("#custom-name").fill("Gemini");
   await page.getByRole("button", { name: "Save CLI connection" }).click();
   await expect(customRow).toContainText("Gemini");
-  await customRow.getByRole("button", { name: "Remove Gemini" }).click();
+  await page.locator('[data-connection-remove^="custom:"]').click();
   await expect(
-    page.locator('.connection-row[data-provider^="custom:"]'),
+    page.locator('.ai-models-row[data-provider^="custom:"]'),
   ).toHaveCount(0);
   await page.getByRole("button", { name: "Add CLI connection" }).click();
   await page.locator("#custom-name").fill("Discarded");
@@ -624,7 +1157,7 @@ test("custom CLI subpage saves stdin-based text and conditional JSON output", as
   await page.getByRole("button", { name: "Cancel" }).click();
   await expect(page.locator(".ai-models-editor")).toHaveCount(0);
   await expect(
-    page.locator('.connection-row[data-provider^="custom:"]'),
+    page.locator('.ai-models-row[data-provider^="custom:"]'),
   ).toHaveCount(0);
 });
 
@@ -2269,6 +2802,8 @@ async function start(
           throw new Error("Could not save connections");
         if (command === "save_connections")
           state.text_connections.settings = args.settings;
+        if (command === "test_custom_cli_connection")
+          return { ok: true, elapsed_ms: 900 };
         if (command === "new_conversation") {
           state.text_connections.conversation = {
             id: "new-test-conversation",

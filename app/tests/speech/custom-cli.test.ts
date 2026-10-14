@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 import { customCliConnectionSchema, type CustomCliConnection } from "../../src/contracts/text/connections.js";
-import { CustomCliTextError, runCustomCliText } from "../../src/services/text/custom-cli.js";
+import { CustomCliTextError, runCustomCliText, testCustomCliConnection } from "../../src/services/text/custom-cli.js";
 
 const directories: string[] = [];
 afterEach(async () => Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))));
@@ -66,6 +66,24 @@ test("custom CLI supports plain text and rejects unsafe or missing JSON response
       instruction: "Clean text", text: "synthetic", signal: controller.signal }),
     (error: unknown) => error instanceof CustomCliTextError && error.code === "INVALID_RESPONSE");
   }
+});
+
+test("custom CLI smoke test uses synthetic input and returns only elapsed time", async () => {
+  const executable = await fixtureExecutable(`
+    let input = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', chunk => input += chunk);
+    process.stdin.on('end', () => process.stdout.write(
+      input.includes('OpenWhisper CLI connection test.') ? 'synthetic test reply' : ''
+    ));
+  `);
+  const elapsed = await testCustomCliConnection({
+    executable,
+    connection: connection(),
+    signal: new AbortController().signal,
+  });
+  assert.equal(Number.isInteger(elapsed), true);
+  assert.ok(elapsed >= 0 && elapsed <= 15_000);
 });
 
 test("custom CLI requires transcript placeholders and explicit prompt delivery for conversation history", async () => {

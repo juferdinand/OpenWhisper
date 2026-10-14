@@ -41,10 +41,11 @@ vocabulary correction, snippets, history, a shared settings interface, and Engli
 interface translations. Platform integrations and validation differ; consult the applicable
 [Linux evidence](docs/LINUX.md) and [platform overview](docs/PLATFORMS.md).
 
-The unreleased [Connections increment](docs/LOCAL_MODELS.md) adds optional Ollama, LM Studio
-and Claude Code text processing. Connections start disabled; Codex is detected but execution
-remains unavailable. Release 0.4.2 does not include this interface. Speech output and structured
-Obsidian notes follow the prerequisites and delivery order in the [roadmap](docs/ROADMAP.md).
+Optional text-model connections support Ollama, LM Studio, Claude Code, Codex and custom CLI
+tools. Choose a model and its available reasoning effort in Settings → AI models; connections
+start disabled. See [model connections](docs/LOCAL_MODELS.md) for provider behavior and privacy
+details. Speech output and structured Obsidian notes follow the prerequisites and delivery order
+in the [roadmap](docs/ROADMAP.md).
 
 Recording continues until you stop or cancel it. Audio remains in memory while recording, so
 longer sessions use more RAM. Model downloads require a network connection. Recognition runs

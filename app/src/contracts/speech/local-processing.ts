@@ -17,6 +17,7 @@ const profileFields = {
   endpoint: utf8(256),
   model: utf8(256).refine((value) => !/[\u0000-\u001f\u007f-\u009f]/u.test(value)),
   instruction: utf8(8192).refine((value) => trimWhitespace(value).length > 0),
+  reasoning_effort: utf8(32).refine((value) => value === value.trim() && /^[A-Za-z][A-Za-z0-9._-]*$/u.test(value)).optional(),
   max_tokens: z.number().int().min(32).max(4096),
   timeout_seconds: z.number().int().min(1).max(120),
 };

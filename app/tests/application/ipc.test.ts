@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { test } from "node:test";
-import { defaultTextConnectionAvailability, defaultTextConnectionSettings, emptyTextConversation, idleTextConnectionProcessing } from "../../src/contracts/text/connections.js";
+import { customCliConnectionSchema, defaultTextConnectionAvailability, defaultTextConnectionSettings, emptyTextConversation, idleTextConnectionProcessing } from "../../src/contracts/text/connections.js";
 import { MAX_USER_TEXT_BYTES } from "../../src/contracts/ui/state.js";
 import type { AppState, PreferencePatch } from "../../src/contracts/ui/state.js";
 import {
@@ -114,6 +114,35 @@ test("typed preference handler receives only the validated patch", async () => {
   const result = await bridge.dispatch({ sender: main, serializedRequest: request("save_preferences", { changes: { ui_language: "de" } }) });
   assert.equal(result.ok, true);
   assert.deepEqual(received, { ui_language: "de" });
+});
+
+test("custom CLI smoke test accepts a validated connection and returns bounded status", async () => {
+  let received: unknown;
+  const connection = customCliConnectionSchema.parse({
+    provider: "custom:8b6ee8c9-b1eb-4c13-9eac-53a07e17c362",
+    enabled: true,
+    name: "Synthetic CLI",
+    command: "synthetic-cli",
+    args: [],
+    stdin: "{prompt}",
+    output: "text",
+    responsePath: "",
+  });
+  const bridge = dispatcher({
+    test_custom_cli_connection: ({ connection: checked }) => {
+      received = checked;
+      return { ok: true, elapsed_ms: 321 };
+    },
+  });
+  assert.deepEqual(
+    await bridge.dispatch({ sender: main, serializedRequest: request("test_custom_cli_connection", { connection }) }),
+    { ok: true, value: { ok: true, elapsed_ms: 321 } },
+  );
+  assert.deepEqual(received, connection);
+  failure(
+    await bridge.dispatch({ sender: main, serializedRequest: request("test_custom_cli_connection", { connection, text: "User transcript" }) }),
+    "INVALID_REQUEST",
+  );
 });
 
 test("wrong origin URL query hash ID or subframe rejects before parsing or handler", async () => {

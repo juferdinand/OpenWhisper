@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { localProcessingOutputSchema } from "../../contracts/speech/local-processing.js";
-import { cliTextModelSchema } from "../../contracts/text/connections.js";
+import { cliTextModelSchema, textReasoningEffortSchema } from "../../contracts/text/connections.js";
 import { buildTextPrompt, TextPromptError, type TextConversationTurn } from "./text-prompt.js";
 import { runTextCliProcess, TextCliProcessError } from "./text-cli-process.js";
 
@@ -22,6 +22,7 @@ export interface ClaudeTextOptions {
   readonly instruction: string;
   readonly text: string;
   readonly model?: string;
+  readonly reasoning_effort?: string;
   readonly context?: readonly TextConversationTurn[];
   readonly signal: AbortSignal;
   readonly timeoutMs?: number;
@@ -35,9 +36,11 @@ export async function runClaudeCodeText(options: ClaudeTextOptions): Promise<str
   }
   try {
     const model = cliTextModelSchema.parse(options.model ?? "");
+    const reasoningEffort = options.reasoning_effort === undefined ? undefined : textReasoningEffortSchema.parse(options.reasoning_effort);
     const input = buildTextPrompt(options.instruction, options.text, options.context);
     const stdout = await runTextCliProcess({ executable: options.executable,
-      args: ["--print", ...(model ? ["--model", model] : []), "--safe-mode", "--tools", "", "--no-session-persistence",
+      args: ["--print", ...(reasoningEffort ? ["--effort", reasoningEffort] : []), ...(model ? ["--model", model] : []),
+        "--safe-mode", "--tools", "", "--no-session-persistence",
         "--input-format", "text", "--output-format", "json", "--permission-prompts", "none"],
       input, signal: options.signal, timeoutMs });
     const envelope: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(stdout));

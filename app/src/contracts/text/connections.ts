@@ -16,6 +16,7 @@ const connectionName = utf8(128).min(1).refine((value) => value.trim() === value
 const cliCommand = utf8(1024).min(1).refine((value) => value === value.trim() && !/[\u0000-\u001f\u007f-\u009f]/u.test(value) &&
   (value.startsWith("/") || /^[A-Za-z0-9][A-Za-z0-9._+-]*$/u.test(value)));
 const cliArgument = utf8(4096).refine((value) => !/[\u0000]/u.test(value));
+export const textReasoningEffortSchema = utf8(32).refine((value) => value === value.trim() && /^[A-Za-z][A-Za-z0-9._-]*$/u.test(value));
 export const cliTextModelSchema = utf8(256).refine((value) => value === value.trim() &&
   !value.startsWith("-") && !/[\u0000-\u001f\u007f-\u009f]/u.test(value));
 export const customCliConnectionSchema = z.strictObject({
@@ -70,11 +71,13 @@ const localConnectionSchema = z.strictObject({
   provider: localProviderSchema,
   enabled: z.boolean(),
   model: utf8(256).refine((value) => !/[\u0000-\u001f\u007f-\u009f]/u.test(value)),
+  reasoning_effort: textReasoningEffortSchema.optional(),
 });
 const cliConnectionSchema = z.strictObject({
   provider: z.enum(["claude_code", "codex"]),
   enabled: z.boolean(),
   model: cliTextModelSchema.default(""),
+  reasoning_effort: textReasoningEffortSchema.optional(),
 });
 const textConnectionSchema = z.union([
   localConnectionSchema,
@@ -155,6 +158,15 @@ export const textModelOptionSchema = z.strictObject({
   source: z.enum(["cli", "catalog"]),
 });
 export type TextModelOption = z.infer<typeof textModelOptionSchema>;
+const reasoningValueSchema = utf8(32).min(1).refine((value) => value === value.trim() &&
+  !/[\u0000-\u001f\u007f-\u009f]/u.test(value));
+export const textModelReasoningSchema = z.strictObject({
+  model: utf8(256).min(1),
+  options: z.array(reasoningValueSchema).min(1).max(16).refine((values) => new Set(values).size === values.length),
+  default: reasoningValueSchema.optional(),
+}).refine(({ options, default: defaultValue }) => defaultValue === undefined || options.includes(defaultValue),
+{ message: "The model default must be one of its supported reasoning settings" });
+export type TextModelReasoning = z.infer<typeof textModelReasoningSchema>;
 export const textConnectionAvailabilitySchema = z.strictObject({
   provider: textProviderSchema,
   detected: z.boolean(),
@@ -163,6 +175,7 @@ export const textConnectionAvailabilitySchema = z.strictObject({
   // LM Studio omits its reasoning capability when it cannot expose a public control.
   models_without_reasoning_control: z.array(utf8(256).min(1)).max(128).optional(),
   model_options: z.array(textModelOptionSchema).max(128).optional(),
+  model_reasoning: z.array(textModelReasoningSchema).max(128).optional(),
   reason: textConnectionAvailabilityReasonSchema.nullable(),
 });
 export type TextConnectionAvailability = z.infer<typeof textConnectionAvailabilitySchema>;

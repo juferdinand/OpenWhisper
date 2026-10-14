@@ -14,7 +14,7 @@ import {
   type AppState, type EventName, type EventPayload, type UpdateState,
 } from "../contracts/ui/state.js";
 import {
-  defaultTextConnectionSettings, emptyTextConversation, textConnectionSettingsSchema,
+  customCliConnectionSchema, defaultTextConnectionSettings, emptyTextConversation, textConnectionSettingsSchema,
 } from "../contracts/text/connections.js";
 import { textProcessingStageEventSchema, type TextProcessingStageEvent } from "../contracts/text/processing.js";
 import { PreferenceStore } from "../services/settings/preferences.js";
@@ -31,7 +31,7 @@ import { LocalProcessingService, LocalProcessingError } from "../services/speech
 import { LocalTextConnectionScanner, resolveCustomTextCliExecutable, resolveTextCliExecutable, startLmStudioServer, validateTextConnectionSave } from "../services/text/connections.js";
 import { runClaudeCodeText } from "../services/text/claude-code.js";
 import { runCodexText } from "../services/text/codex.js";
-import { runCustomCliText } from "../services/text/custom-cli.js";
+import { CustomCliTextError, runCustomCliText, testCustomCliConnection } from "../services/text/custom-cli.js";
 import { boundedTextPreview } from "../services/text/text-preview.js";
 import { OptionalTextProcessing, TextProviderUnavailableError } from "../services/text/optional-text-processing.js";
 import { TextConversationStore } from "../services/text/conversation.js";
@@ -284,21 +284,23 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         return processing.preview({ requestId, text }, {
           enabled: true, provider: selected.provider,
           endpoint: selected.provider === "ollama" ? "http://127.0.0.1:11434" : "http://127.0.0.1:1234/v1",
-          // Reasoning models spend most tokens and time thinking before the answer (measured: 46 s and
-          // 474 of 622 tokens for one minute of dictation), so allow the profile's maximum.
+          // An empty setting preserves the model's default; explicit values follow provider discovery.
           model: selected.model, instruction, max_tokens: 4096, timeout_seconds: 120,
+          ...(selected.reasoning_effort ? { reasoning_effort: selected.reasoning_effort } : {}),
         }, signal, context);
       }
       if (selected.provider === "claude_code") {
         const executable = await resolveTextCliExecutable("claude");
         if (!executable) throw new TextProviderUnavailableError();
-        return runClaudeCodeText({ executable, instruction, text, model: selected.model, signal,
+        return runClaudeCodeText({ executable, instruction, text, model: selected.model,
+          ...(selected.reasoning_effort ? { reasoning_effort: selected.reasoning_effort } : {}), signal,
           ...(context === undefined ? {} : { context }) });
       }
       if (selected.provider === "codex") {
         const executable = await resolveTextCliExecutable("codex");
         if (!executable) throw new TextProviderUnavailableError();
-        return runCodexText({ executable, instruction, text, model: selected.model, signal,
+        return runCodexText({ executable, instruction, text, model: selected.model,
+          ...(selected.reasoning_effort ? { reasoning_effort: selected.reasoning_effort } : {}), signal,
           ...(context === undefined ? {} : { context }) });
       }
       if ("command" in selected) {
@@ -1209,6 +1211,24 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         }
         return state();
       }),
+      test_custom_cli_connection: async ({ connection }) => {
+        if (recording.busy || recording.recoveryAvailable || textProcessor.busy) {
+          return { ok: false, code: "BUSY" };
+        }
+        const checked = customCliConnectionSchema.parse(connection);
+        const executable = await resolveCustomTextCliExecutable(checked);
+        if (!executable) return { ok: false, code: "UNAVAILABLE" };
+        try {
+          const elapsed_ms = await testCustomCliConnection({
+            executable,
+            connection: checked,
+            signal: AbortSignal.timeout(15_000),
+          });
+          return { ok: true, elapsed_ms };
+        } catch (error: unknown) {
+          return { ok: false, code: error instanceof CustomCliTextError ? error.code : "FAILED" };
+        }
+      },
       new_conversation: () => withRecordingControl(async () => {
         if (recording.busy || recording.recoveryAvailable || textProcessor.busy) {
           throw new Error("Finish the current recording before starting a new conversation.");

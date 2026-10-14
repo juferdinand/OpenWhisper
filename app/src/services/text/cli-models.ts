@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { cliTextModelSchema, textModelOptionSchema, type TextModelOption } from "../../contracts/text/connections.js";
+import { cliTextModelSchema, textModelOptionSchema, textModelReasoningSchema,
+  type TextModelOption, type TextModelReasoning } from "../../contracts/text/connections.js";
 import { runTextCliProcess } from "./text-cli-process.js";
 
 const MODEL_LIMIT = 128;
@@ -8,38 +9,52 @@ const MODEL_OUTPUT_BYTES = 1024 * 1024;
 const MAX_MODEL_PAGES = 8;
 const requestRecord = z.record(z.string(), z.unknown());
 const codexPageSchema = z.object({
-  data: z.array(z.object({ id: z.string().max(1024), hidden: z.boolean(), displayName: z.unknown().optional() })).max(MODEL_LIMIT),
+  data: z.array(z.object({
+    id: z.string().max(1024), hidden: z.boolean(), displayName: z.unknown().optional(), isDefault: z.boolean().optional(),
+    supportedReasoningEfforts: z.array(z.object({ reasoningEffort: z.string().max(32) })).max(16).optional(),
+    defaultReasoningEffort: z.string().max(32).nullable().optional(),
+  })).max(MODEL_LIMIT),
   nextCursor: z.string().max(1024).nullable().optional(),
 });
 const claudeModelsSchema = z.array(z.object({ value: z.string().max(1024), resolvedModel: z.string().max(1024).optional(),
   displayName: z.string().max(1024) })).max(MODEL_LIMIT);
 
-interface ClaudeCatalogModel { readonly value: string; readonly displayName: string; readonly family: string }
+interface ClaudeCatalogModel {
+  readonly value: string;
+  readonly displayName: string;
+  readonly family: string;
+  readonly effortOptions?: readonly string[];
+  readonly defaultEffort?: string;
+}
+
+const commonClaudeEfforts = ["low", "medium", "high", "xhigh", "max"] as const;
+const legacyClaudeEfforts = ["low", "medium", "high", "max"] as const;
 
 // Active first-party Anthropic IDs checked 2026-10-12 against https://platform.claude.com/docs/en/about-claude/model-deprecations.
 // Suggestions are not entitlement claims.
 const activeClaudeModels: readonly ClaudeCatalogModel[] = [
-  { value: "claude-opus-5-5", displayName: "Opus 5.5", family: "opus" },
-  { value: "claude-opus-5", displayName: "Opus 5", family: "opus" },
-  { value: "claude-opus-4-8", displayName: "Opus 4.8", family: "opus" },
-  { value: "claude-opus-4-7", displayName: "Opus 4.7", family: "opus" },
-  { value: "claude-opus-4-6", displayName: "Opus 4.6", family: "opus" },
+  { value: "claude-opus-5-5", displayName: "Opus 5.5", family: "opus", effortOptions: commonClaudeEfforts, defaultEffort: "medium" },
+  { value: "claude-opus-5", displayName: "Opus 5", family: "opus", effortOptions: commonClaudeEfforts, defaultEffort: "high" },
+  { value: "claude-opus-4-8", displayName: "Opus 4.8", family: "opus", effortOptions: commonClaudeEfforts, defaultEffort: "high" },
+  { value: "claude-opus-4-7", displayName: "Opus 4.7", family: "opus", effortOptions: commonClaudeEfforts, defaultEffort: "xhigh" },
+  { value: "claude-opus-4-6", displayName: "Opus 4.6", family: "opus", effortOptions: legacyClaudeEfforts, defaultEffort: "high" },
   { value: "claude-opus-4-5-20251101", displayName: "Opus 4.5", family: "opus" },
-  { value: "claude-fable-5-1", displayName: "Fable 5.1", family: "fable" },
-  { value: "claude-fable-5", displayName: "Fable 5", family: "fable" },
-  { value: "claude-sonnet-5-5", displayName: "Sonnet 5.5", family: "sonnet" },
-  { value: "claude-sonnet-5", displayName: "Sonnet 5", family: "sonnet" },
-  { value: "claude-sonnet-4-6", displayName: "Sonnet 4.6", family: "sonnet" },
-  { value: "claude-haiku-5-5", displayName: "Haiku 5.5", family: "haiku" },
+  { value: "claude-fable-5-1", displayName: "Fable 5.1", family: "fable", effortOptions: commonClaudeEfforts, defaultEffort: "high" },
+  { value: "claude-fable-5", displayName: "Fable 5", family: "fable", effortOptions: commonClaudeEfforts, defaultEffort: "high" },
+  { value: "claude-sonnet-5-5", displayName: "Sonnet 5.5", family: "sonnet", effortOptions: commonClaudeEfforts, defaultEffort: "medium" },
+  { value: "claude-sonnet-5", displayName: "Sonnet 5", family: "sonnet", effortOptions: commonClaudeEfforts, defaultEffort: "high" },
+  { value: "claude-sonnet-4-6", displayName: "Sonnet 4.6", family: "sonnet", effortOptions: legacyClaudeEfforts, defaultEffort: "high" },
+  { value: "claude-haiku-5-5", displayName: "Haiku 5.5", family: "haiku", effortOptions: commonClaudeEfforts, defaultEffort: "medium" },
   { value: "claude-haiku-4-5-20251001", displayName: "Haiku 4.5", family: "haiku" },
 ];
 
 export interface CliModelDiscovery {
   readonly models: readonly string[];
   readonly model_options: readonly TextModelOption[];
+  readonly model_reasoning: readonly TextModelReasoning[];
 }
 
-const emptyCliModelDiscovery = (): CliModelDiscovery => ({ models: [], model_options: [] });
+const emptyCliModelDiscovery = (): CliModelDiscovery => ({ models: [], model_options: [], model_reasoning: [] });
 
 function lineJson(line: string): Record<string, unknown> {
   return requestRecord.parse(JSON.parse(line));
@@ -49,6 +64,7 @@ function lineJson(line: string): Record<string, unknown> {
 export async function discoverCodexModels(executable: string): Promise<CliModelDiscovery> {
   const models = new Set<string>();
   const options = new Map<string, TextModelOption>();
+  const reasoning = new Map<string, TextModelReasoning>();
   const seenCursors = new Set<string>();
   let stage: "initialize" | "models" | "done" = "initialize";
   let completed = false;
@@ -85,6 +101,17 @@ export async function discoverCodexModels(executable: string): Promise<CliModelD
           const option = textModelOptionSchema.safeParse({ value: parsed.data, display_name: displayName, source: "cli" });
           const fallback = textModelOptionSchema.parse({ value: parsed.data, display_name: parsed.data, source: "cli" });
           if (!options.has(parsed.data)) options.set(parsed.data, option.success ? option.data : fallback);
+          const effortOptions = model.supportedReasoningEfforts?.map(({ reasoningEffort }) => reasoningEffort) ?? [];
+          const capability = textModelReasoningSchema.safeParse({
+            model: parsed.data,
+            options: effortOptions,
+            ...(model.defaultReasoningEffort ? { default: model.defaultReasoningEffort } : {}),
+          });
+          if (capability.success) reasoning.set(parsed.data, capability.data);
+          if (model.isDefault && capability.success) {
+            const defaultModel = textModelReasoningSchema.safeParse({ ...capability.data, model: "default" });
+            if (defaultModel.success) reasoning.set("default", defaultModel.data);
+          }
         }
         const cursor = page.nextCursor;
         if (models.size >= MODEL_LIMIT || cursor === undefined || cursor === null) {
@@ -102,13 +129,15 @@ export async function discoverCodexModels(executable: string): Promise<CliModelD
       },
     });
     if (!completed) return emptyCliModelDiscovery();
-    return { models: [...models].slice(0, MODEL_LIMIT), model_options: [...options.values()].slice(0, MODEL_LIMIT) };
+    return { models: [...models].slice(0, MODEL_LIMIT), model_options: [...options.values()].slice(0, MODEL_LIMIT),
+      model_reasoning: [...reasoning.values()].slice(0, MODEL_LIMIT) };
   } catch { return emptyCliModelDiscovery(); }
 }
 
 function discoverClaudeOptions(metadata: readonly z.infer<typeof claudeModelsSchema>[number][]): CliModelDiscovery {
   const models = new Set<string>();
   const options = new Map<string, TextModelOption>();
+  const reasoning = new Map<string, TextModelReasoning>();
   const validId = (value: string): string | undefined => {
     if (value.length === 0) return undefined;
     const parsed = cliTextModelSchema.safeParse(value);
@@ -127,10 +156,17 @@ function discoverClaudeOptions(metadata: readonly z.infer<typeof claudeModelsSch
     if (contextualVersion && value === `${resolvedModel}[1m]`) return `${contextualVersion} 1M`;
     return value || displayName.trim();
   };
-  const addOption = (value: string, displayName: string, source: TextModelOption["source"]): void => {
+  const addReasoning = (value: string, resolvedModel?: string): void => {
+    const known = activeClaudeModels.find((model) => model.value === (resolvedModel ?? value));
+    if (!known?.effortOptions || !known.defaultEffort) return;
+    const parsed = textModelReasoningSchema.safeParse({ model: value, options: known.effortOptions, default: known.defaultEffort });
+    if (parsed.success) reasoning.set(value, parsed.data);
+  };
+  const addOption = (value: string, displayName: string, source: TextModelOption["source"], resolvedModel?: string): void => {
     const parsedValue = validId(value);
     if (!parsedValue) return;
     if (source === "cli") models.add(parsedValue);
+    addReasoning(parsedValue, resolvedModel);
     const label = displayName.length > 0 && new TextEncoder().encode(displayName).byteLength <= 256 &&
       displayName.trim() === displayName && !/[\u0000-\u001f\u007f-\u009f]/u.test(displayName) ? displayName : parsedValue;
     const parsed = textModelOptionSchema.safeParse({ value: parsedValue, display_name: label, source });
@@ -144,19 +180,20 @@ function discoverClaudeOptions(metadata: readonly z.infer<typeof claudeModelsSch
     if (!value) continue;
     const resolvedModel = entry.resolvedModel === undefined ? undefined : validId(entry.resolvedModel);
     const label = modelLabel(value, resolvedModel, entry.displayName);
-    addOption(value, label, "cli");
+    addOption(value, label, "cli", resolvedModel);
     if (!resolvedModel) continue;
-    addOption(resolvedModel, catalogLabel(resolvedModel) ?? resolvedModel, "cli");
+    addOption(resolvedModel, catalogLabel(resolvedModel) ?? resolvedModel, "cli", resolvedModel);
 
     const latestIndex = activeClaudeModels.findIndex((model) => model.value === resolvedModel);
     if (latestIndex < 0) continue;
     const family = activeClaudeModels[latestIndex]!.family;
     for (const model of activeClaudeModels.slice(latestIndex).filter((candidate) => candidate.family === family)) {
-      addOption(model.value, model.displayName, "catalog");
+      addOption(model.value, model.displayName, "catalog", model.value);
     }
   }
 
-  return { models: [...models].slice(0, MODEL_LIMIT), model_options: [...options.values()].slice(0, MODEL_LIMIT) };
+  return { models: [...models].slice(0, MODEL_LIMIT), model_options: [...options.values()].slice(0, MODEL_LIMIT),
+    model_reasoning: [...reasoning.values()].slice(0, MODEL_LIMIT) };
 }
 
 /** Read the installed Claude CLI's initialize metadata only; no user prompt or turn is sent. */
