@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MAX_UI_REQUEST_BYTES, MAX_USER_TEXT_BYTES, preferencesSchema } from "../../src/contracts/ui/state.js";
+import { MAX_UI_REQUEST_BYTES, preferencesSchema } from "../../src/contracts/ui/state.js";
 import { convertLegacyMacosData } from "../../src/services/migration/legacy-macos-data.js";
 
 // Synthetic projections of native v0.2.5 Prefs/UserDefaults and Snippet JSON.
@@ -95,6 +95,13 @@ test("legacy history is preserved for migration review but never imported into a
   assert.deepEqual(disabled.review, ["MAC_DEFAULT_TRIGGER", "MAC_HISTORY_DISABLED"]);
 });
 
+test("large legacy history entries remain preserved without entering active history", () => {
+  const history = ["a".repeat(4 * 1024 * 1024 + 1)];
+  const converted = convertLegacyMacosData({ ...context, plist: { history } });
+  assert.deepEqual(converted.history, []);
+  assert.deepEqual(converted.preserved.history, history);
+});
+
 test("malformed Mac ordinary settings, snippets and context fail categorically without exposing values", () => {
   const invalid = [null, [], {}, { ...context, extra: true }, { ...context, plist: null }, { ...context, systemLanguage: true },
     { ...context, defaults: { ...context.defaults, appleSilicon: "true" } },
@@ -104,7 +111,7 @@ test("malformed Mac ordinary settings, snippets and context fail categorically w
     ...[{ uiLanguage: "PRIVATE_CONTENT" }, { language: "yue" }, { setupCompleted: 1 }, { setupShown: null },
       { recordingMode: "unsupported" }, { outputMode: "unknown" }, { selectedModel: "../PRIVATE_CONTENT" },
       { vocabulary: "界".repeat(2731) }, { history: [true] }, { editorAppPath: {} }, { autoCheckUpdates: "false" },
-      { laterFeature: undefined }, { history: ["a".repeat(MAX_USER_TEXT_BYTES + 1)] },
+      { laterFeature: undefined },
       { laterFeature: "a".repeat(MAX_UI_REQUEST_BYTES) }].map((badPlist) => ({ ...context, plist: badPlist })),
     ...[[{ id: "not-a-uuid", trigger: "", expansion: "", enabled: true }], [{ trigger: "", expansion: "", enabled: true }],
       [{ ...snippets[0], enabled: "true" }], [{ ...snippets[0], trigger: "界".repeat(43) }], Array.from({ length: 101 }, () => snippets[0])]

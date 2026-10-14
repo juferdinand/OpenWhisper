@@ -404,6 +404,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       snapshot: (value) => {
         const previous = recording;
         if (value.generation !== previous.generation) {
+          recordingStartedAt = undefined;
           rawTranscript = "";
           textProcessing = null;
           textProcessingOwner = undefined;
@@ -498,7 +499,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         if (!oversized && preferences.snapshot().keep_history) {
           // History is secondary to the already confirmed clipboard commit.
           void history.update((current) => {
-            const next = [{ text: acceptedText, created_at: new Date(recordingStartedAt ?? Date.now()).toISOString(),
+            const next = [{ text: acceptedText,
+              ...(recordingStartedAt === undefined ? {} : { created_at: new Date(recordingStartedAt).toISOString() }),
               ...(recording.elapsedMs > 0 ? { duration_ms: Math.round(recording.elapsedMs) } : {}) }, ...current].slice(0, 20);
             while (next.length > 1 && Buffer.byteLength(JSON.stringify(next), "utf8") > 6 * 1024 * 1024) next.pop();
             if (Buffer.byteLength(JSON.stringify(next), "utf8") > 8 * 1024 * 1024) return current;

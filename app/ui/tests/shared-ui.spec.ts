@@ -4879,6 +4879,31 @@ for (const platform of ["linux", "macos"] as const) {
     );
   });
 
+  test(`${platform}: recovered history with no known date shows its available duration`, async ({
+    page,
+  }) => {
+    await start(page, platform, false, false, false, null);
+    await page.evaluate(() => {
+      window.testState.history = [
+        { text: "Recovered synthetic transcript", duration_ms: 37_500 },
+      ];
+      window.publishState();
+    });
+    const entry = page.locator(
+      '#dictation-history .history-entry[data-history-select="0"]',
+    );
+    await expect(entry.locator(".history-entry-text")).toHaveText(
+      "Recovered synthetic transcript",
+    );
+    await expect(entry.locator("time")).toHaveCount(0);
+    await expect(entry.locator(".history-entry-metadata")).toContainText(
+      "0:38",
+    );
+    await expect(entry.locator(".history-entry-metadata")).not.toContainText(
+      "Invalid Date",
+    );
+  });
+
   test(`${platform}: Text processing adds structured vocabulary entries and saves them automatically`, async ({
     page,
   }) => {

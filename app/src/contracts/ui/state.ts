@@ -40,7 +40,7 @@ const fraction = z.number().finite().min(0).max(1);
 const userText = utf8(MAX_USER_TEXT_BYTES);
 export const historyEntrySchema = z.strictObject({
   text: userText,
-  created_at: z.string().datetime(),
+  created_at: z.string().datetime().optional(),
   duration_ms: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
 });
 export const updateDetailsSchema = z.strictObject({ highlights: z.array(utf8(512)).max(5),

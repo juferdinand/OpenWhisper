@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  MAX_UI_REQUEST_BYTES, MAX_USER_TEXT_BYTES, nativeTriggerSchema, preferencesSchema,
+  MAX_UI_REQUEST_BYTES, nativeTriggerSchema, preferencesSchema,
   snippetSchema, x11TriggerSchema, type Preferences,
 } from "../../contracts/ui/state.js";
 import { kdeKeySchema } from "../../platforms/linux/kde/keyboard.js";
@@ -12,8 +12,7 @@ class LegacyLinuxDataError extends Error {
 }
 
 const originalSettingsSchema = z.record(z.string(), z.json());
-const historyTextSchema = z.string().max(MAX_USER_TEXT_BYTES)
-  .refine((text) => Buffer.byteLength(text, "utf8") <= MAX_USER_TEXT_BYTES);
+const historyTextSchema = z.string();
 const inputSchema = z.strictObject({ settings: originalSettingsSchema.optional(), history: z.array(historyTextSchema).optional() });
 const modifiers = 0x3e000000;
 const specialKeys = new Set([0x20, 0x01000001, 0x01000002, 0x01000003, 0x01000004, 0x01000005,

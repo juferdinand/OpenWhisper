@@ -91,7 +91,8 @@ class OwnedRecovery implements RecoveryBoundary {
   constructor(private readonly events: string[]) {}
   async latest(): Promise<RecoveryToken | null> {
     const id = this.records.keys().next().value;
-    return id === undefined ? null : { id };
+    const audio = id === undefined ? undefined : this.records.get(id);
+    return id === undefined ? null : { id, ...(audio === undefined ? {} : { sampleCount: audio.sampleCount }) };
   }
   async save(samples: PreparedAudio, context: WorkContext): Promise<RecoverySaved> {
     this.saves++; this.events.push("save");
@@ -678,8 +679,9 @@ test("Linux restart finds retained audio before opening capture and retries from
 });
 
 test("restored read or explicit discard failure never erases the recovery record", async () => {
-  const f = fixture(); f.recovery.records.set("owned-existing", audio([new Float32Array([0.5])], { generation: 99, attempt: 1 }));
+  const f = fixture(); f.recovery.records.set("owned-existing", audio([new Float32Array(16000).fill(0.5)], { generation: 99, attempt: 1 }));
   assert.equal(await f.coordinator.restoreRecovery(request), true);
+  assert.equal(f.coordinator.snapshot().elapsedMs, 1000);
   f.recovery.readGate = async () => { throw new Error("Owned read failure"); };
   f.coordinator.retry(); await f.coordinator.completion();
   assert.equal(f.coordinator.snapshot().error, "RECOVERY_READ_FAILED"); assert.equal(f.recovery.records.size, 1);

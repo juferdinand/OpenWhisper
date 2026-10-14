@@ -16,7 +16,7 @@ const persistedSchema = z.object({
   editorAppPath: text(4096).default("/System/Applications/TextEdit.app"),
   restoreClipboard: z.boolean().default(true), playSounds: z.boolean().default(true), showIdleOverlay: z.boolean().default(false),
   vocabulary: z.string().max(8192).default(""), keepHistory: z.boolean().default(true),
-  autoCheckUpdates: z.boolean().default(true), history: z.array(text(MAX_USER_TEXT_BYTES)).default([]),
+  autoCheckUpdates: z.boolean().default(true), history: z.array(z.string()).default([]),
 }).strip();
 const legacySnippetSchema = snippetSchema.extend({
   // Foundation UUID decoding accepts uppercase and nil UUIDs; preserve spelling.

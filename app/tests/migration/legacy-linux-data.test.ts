@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MAX_UI_REQUEST_BYTES, MAX_USER_TEXT_BYTES, preferencesSchema } from "../../src/contracts/ui/state.js";
+import { MAX_UI_REQUEST_BYTES, preferencesSchema } from "../../src/contracts/ui/state.js";
 import { convertLegacyLinuxData, convertLegacyLinuxRecoveryNames } from "../../src/services/migration/legacy-linux-data.js";
 import { kdeKeySchema } from "../../src/platforms/linux/kde/keyboard.js";
 
@@ -108,9 +108,16 @@ test("invalid ordinary data is rejected without coercion, trimming or error text
     { settings: { ...legacy, setup_completed: "false" } }, { settings: { ...legacy, native_trigger: { kind: "mouse", button: 1 } } },
     { settings: { ...legacy, native_trigger: { kind: "key", key: 0x01000000 } } },
     { settings: { ...legacy, snippets: [{ trigger: "  ", expansion: "PRIVATE_CONTENT", enabled: true }] } },
-    { settings: { ...legacy, later_feature: undefined } }, { history: ["a".repeat(MAX_USER_TEXT_BYTES + 1)] },
+    { settings: { ...legacy, later_feature: undefined } },
     { settings: { ...legacy, later_feature: "a".repeat(MAX_UI_REQUEST_BYTES) } }];
   for (const input of invalid) assert.throws(() => convertLegacyLinuxData(input), { name: "LegacyLinuxDataError", message: "INVALID_DATA" });
+});
+
+test("large legacy history entries remain preserved without entering active history", () => {
+  const history = ["a".repeat(4 * 1024 * 1024 + 1)];
+  const converted = convertLegacyLinuxData({ history });
+  assert.deepEqual(converted.history, []);
+  assert.deepEqual(converted.preserved.history, history);
 });
 
 const id1 = "12345678-1234-4567-8123-123456789abc", id2 = "abcdef12-1234-4567-9123-123456789abc";

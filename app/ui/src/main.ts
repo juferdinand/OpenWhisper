@@ -673,13 +673,17 @@ function historyRows(): string {
   return state.history
     .map((entry, i) => {
       const selected = selectedHistoryIndex === i;
-      const date = new Intl.DateTimeFormat(
-        state.preferences.ui_language === "de" ? "de-DE" : "en-US",
-        {
-          dateStyle: "medium",
-          timeStyle: "short",
-        },
-      ).format(new Date(entry.created_at));
+      const date =
+        entry.created_at === undefined
+          ? ""
+          : new Intl.DateTimeFormat(
+              state.preferences.ui_language === "de" ? "de-DE" : "en-US",
+              { dateStyle: "medium", timeStyle: "short" },
+            ).format(new Date(entry.created_at));
+      const dateMarkup =
+        entry.created_at === undefined
+          ? ""
+          : `<time datetime="${esc(entry.created_at)}">${esc(date)}</time>`;
       const duration =
         entry.duration_ms === undefined
           ? undefined
@@ -689,7 +693,7 @@ function historyRows(): string {
                 ? `${Math.floor(seconds / 3600)}:${String(Math.floor((seconds % 3600) / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`
                 : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
             })();
-      const metadata = `<time datetime="${esc(entry.created_at)}">${esc(date)}</time>${duration === undefined ? "" : `<span aria-label="${esc(t("Recording duration: {duration}", { duration }))}">${esc(duration)}</span>`}`;
+      const metadata = `${dateMarkup}${duration === undefined ? "" : `<span aria-label="${esc(t("Recording duration: {duration}", { duration }))}">${esc(duration)}</span>`}`;
       return `<div class="history-row ${selected ? "selected" : ""}"><button type="button" class="history-entry" data-history-select="${i}" aria-pressed="${selected}" title="${esc(entry.text)}"><span class="history-entry-text">${esc(entry.text)}</span><span class="history-entry-metadata">${metadata}</span></button><button type="button" class="history-copy" data-history-copy="${i}" aria-label="${esc(t("Copy history entry"))}" title="${esc(t("Copy history entry"))}">${esc(t("Copy"))}</button></div>`;
     })
     .join("");
