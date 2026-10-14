@@ -28,7 +28,7 @@ test("saved Mac settings retain ordinary values and unsupported native/editor/de
     show_idle_overlay: true, launch_at_login: true, auto_check_updates: false, macos_shortcut: null,
   });
   assert.deepEqual(preferencesSchema.parse(converted.preferences), converted.preferences);
-  assert.deepEqual(converted.history, plist.history); assert.deepEqual(converted.preserved, { plist, snippets, history: plist.history });
+  assert.deepEqual(converted.history, []); assert.deepEqual(converted.preserved, { plist, snippets, history: plist.history });
   assert.deepEqual(converted.legacy, { editorAppPath: plist.editorAppPath, trigger: { present: true, value: trigger } });
   assert.deepEqual(converted.review, ["MAC_NATIVE_TRIGGER", "MAC_EDITOR_OUTPUT", "MAC_EDITOR_PATH", "MAC_HOLD_MODE", "MAC_UNMAPPED_PREFERENCES"]);
   converted.preferences.vocabulary = [{ spelling: "Changed converted copy", misheard: [] }]; converted.preserved.history.push("Changed preserved copy");
@@ -85,10 +85,10 @@ test("editable empty Mac snippets and unknown snippet JSON remain preserved with
   assert.deepEqual(converted.preserved.snippets, originals);
 });
 
-test("saved history follows keepHistory visibility and retains every original entry beyond the current host view", () => {
+test("legacy history is preserved for migration review but never imported into active history", () => {
   const history = Array.from({ length: 24 }, (_, index) => `Synthetic history ${index}`);
   const active = convertLegacyMacosData({ ...context, plist: { history } });
-  assert.deepEqual(active.history, history.slice(0, 20)); assert.deepEqual(active.preserved.history, history);
+  assert.deepEqual(active.history, []); assert.deepEqual(active.preserved.history, history);
   assert.deepEqual(active.preserved.plist, { history }); assert.ok(active.review.includes("MAC_HISTORY_OVERFLOW"));
   const disabled = convertLegacyMacosData({ ...context, plist: { history, keepHistory: false } });
   assert.deepEqual(disabled.history, []); assert.deepEqual(disabled.preserved.history, history);

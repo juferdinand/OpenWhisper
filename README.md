@@ -103,9 +103,12 @@ Model downloads require an internet connection; recognition can run offline once
 Keep confidential audio and transcripts out of issue reports and logs. Do not use a real
 microphone or physical input in unattended tests.
 
-An in-app history is local and can be disabled. Model files, preferences, recordings, and
-application data remain on the user's machine. Finish active recordings and model downloads
-before installing updates. Do not install a development candidate over a working release.
+An in-app history is local and can be disabled. It saves only new recordings, keeps up to 20
+entries with their date and duration when available, and lets you copy an entry or clear the
+history. Older history is not imported. Model files,
+preferences, recordings, and application data remain on the user's machine. Finish active
+recordings and model downloads before installing updates. Do not install a development candidate
+over a working release.
 
 ## Development
 

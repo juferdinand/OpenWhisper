@@ -9,7 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
-  appStateSchema, hardwareDeviceNameSchema, preferencesSchema, validateEvent, isSteadyRecordingUpdate,
+  appStateSchema, hardwareDeviceNameSchema, historyEntrySchema, preferencesSchema, validateEvent, isSteadyRecordingUpdate,
   MAX_USER_TEXT_BYTES, MAX_UI_REQUEST_BYTES,
   type AppState, type EventName, type EventPayload, type UpdateState,
 } from "../contracts/ui/state.js";
@@ -259,11 +259,12 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let macMouse: MacosMouseTrigger | undefined;
   let recording = recordingSnapshotSchema.parse({ phase: "idle", generation: 0, elapsedMs: 0, level: 0,
     busy: false, recoveryAvailable: false, error: null, transcript: "" });
+  let recordingStartedAt: number | undefined;
   let message = "", inferenceProgress = 0;
   let download: string | null = null, downloadProgress = 0;
   let downloading: Promise<void> | undefined, downloadAbort: AbortController | undefined;
-  const history = await PrivateStateStore.open(join(profile.paths.history, "history.json"),
-    z.array(z.string().max(MAX_USER_TEXT_BYTES)).max(20), [], 8 * 1024 * 1024, { invalidContent: "preserve-and-default" });
+  const history = await PrivateStateStore.open(join(profile.paths.history, "entries.json"),
+    z.array(historyEntrySchema).max(20), [], 8 * 1024 * 1024, { invalidContent: "preserve-and-default" });
   let notify = (): void => {};
   const textProcessor = new OptionalTextProcessing({
     settings: () => textConnectionStore.snapshot(),
@@ -408,6 +409,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           textProcessingOwner = undefined;
           textProcessor.resetStatus();
         }
+        if ((value.phase === "starting" || value.phase === "recording") &&
+            (value.generation !== previous.generation || (previous.phase !== "starting" && previous.phase !== "recording"))) {
+          recordingStartedAt = Date.now();
+        }
         const hadMessage = message !== "";
         const hadDeliveryNotice = (value.phase === "starting" || value.phase === "recording") && deliveryNotice !== "";
         recording = value;
@@ -493,7 +498,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         if (!oversized && preferences.snapshot().keep_history) {
           // History is secondary to the already confirmed clipboard commit.
           void history.update((current) => {
-            const next = [acceptedText, ...current].slice(0, 20);
+            const next = [{ text: acceptedText, created_at: new Date(recordingStartedAt ?? Date.now()).toISOString(),
+              ...(recording.elapsedMs > 0 ? { duration_ms: Math.round(recording.elapsedMs) } : {}) }, ...current].slice(0, 20);
             while (next.length > 1 && Buffer.byteLength(JSON.stringify(next), "utf8") > 6 * 1024 * 1024) next.pop();
             if (Buffer.byteLength(JSON.stringify(next), "utf8") > 8 * 1024 * 1024) return current;
             return next;
@@ -561,7 +567,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       raw_transcript_preview_omitted: rawPreview.omitted,
       text_processing: stage && stagePreview ? { ...stage, text: stagePreview.text } : stage,
       text_processing_preview_omitted: stagePreview?.omitted ?? false,
-      history: history.snapshot().filter((text) => Buffer.byteLength(text, "utf8") <= MAX_USER_TEXT_BYTES),
+      history: history.snapshot().filter((entry) => Buffer.byteLength(entry.text, "utf8") <= MAX_USER_TEXT_BYTES),
       preferences: { ...preferenceSnapshot, ...(loginFact ? { launch_at_login: loginFact.requested } : {}) },
       models: [...catalog.models, ...installed.filter((item) => !catalog.models.some((model) => model.id === item.model.id)).map((item) => item.model)],
       installed: installed.map((item) => item.model.id), microphones: sources.map((source) => source.id),
@@ -1318,7 +1324,7 @@ if (macRecording) { microphonePermission = systemPreferences.getMediaAccessStatu
       },
       cancel_download: () => { downloadAbort?.abort(); },
       copy_transcript: async () => { await clipboardOutput.writeText(recording.transcript); },
-      copy_history: async ({ index }) => { const text = history.snapshot().filter((item) => Buffer.byteLength(item, "utf8") <= MAX_USER_TEXT_BYTES)[index]; if (text !== undefined) await clipboardOutput.writeText(text); },
+      copy_history: async ({ index }) => { const text = history.snapshot().filter((item) => Buffer.byteLength(item.text, "utf8") <= MAX_USER_TEXT_BYTES)[index]?.text; if (text !== undefined) await clipboardOutput.writeText(text); },
       clear_history: () => action(async () => { await history.update(() => []); }),
       show_models_folder: () => action(async () => { if (await shell.openPath(profile.paths.models)) throw new Error("Folder unavailable."); }),
       show_transcripts_folder: () => action(async () => { if (await shell.openPath(profile.paths.transcripts)) throw new Error("Folder unavailable."); }),

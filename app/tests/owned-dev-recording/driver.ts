@@ -722,7 +722,7 @@ async function main(): Promise<void> {
   }
   if (stablePackage) {
     assert.equal(initial.development_build, undefined); assert.equal(initial.preferences.setup_completed, true);
-    assert.deepEqual(initial.history, legacyHistory); assert.equal(initial.recovery_available, true); await assertStableOriginals();
+    assert.deepEqual(initial.history, []); assert.equal(initial.recovery_available, true); await assertStableOriginals();
   }
   if (installedDebian && supervisedLaunch) {
     await checkpoint("installed-supervisor-legacy-autostart-read-only-startup");
@@ -1015,7 +1015,7 @@ async function main(): Promise<void> {
     await until(async () => (await state()).status === "done", 120_000); const retried = await state();
     assert.match(retried.transcript.toLowerCase(), /country/u); assert.equal(retried.preferences.gpu, true); assert.equal(retried.gpu_available, false);
     assert.equal(await application.evaluate(async ({ clipboard }, expected) => await clipboard.readText() === expected, retried.transcript), true);
-    assert.equal(retried.history[0], retried.transcript); assert.equal(retried.history.at(-1), legacyHistory[0]);
+    assert.equal(retried.history[0]?.text, retried.transcript); assert.equal(retried.history.some((entry) => entry.text === legacyHistory[0]), false);
     assert.equal(retried.recovery_available, false); assert.deepEqual(await readdir(profile.paths.recovery), []);
     assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), ""); await assertStableOriginals(); await assertNoDevControl();
     checks.push("normal stable startup migrates before private paths/services; UI Retry uses in-place Tiny CPU with saved GPU opt-in, clipboard/history and no capture stream; originals retained");
@@ -1365,7 +1365,7 @@ async function main(): Promise<void> {
         }, 120_000);
         const result = await state(); assert.match(result.transcript.toLowerCase(), /country/u);
         const clipboard = await execute("/usr/bin/wl-paste", ["--no-newline"], { env, timeout: 3000, maxBuffer: 1024 * 1024 });
-        assert.equal(clipboard.stdout, result.transcript); assert.equal(result.history[0], result.transcript);
+        assert.equal(clipboard.stdout, result.transcript); assert.equal(result.history[0]?.text, result.transcript);
         assert.equal(result.recovery_available, false); assert.deepEqual(await readdir(profile.paths.recovery), []);
         assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
         await assertFocusRetained();
@@ -1525,14 +1525,14 @@ async function main(): Promise<void> {
       await writeFile(join(evidence, kdeXwaylandPaste ? "paste-readback-xwayland.json" : "paste-readback.json"), JSON.stringify({
         expectedLength: Buffer.byteLength(result.transcript), expectedHash: sha(Buffer.from(result.transcript)),
         targetLength: Buffer.byteLength(targetText), targetHash: sha(Buffer.from(targetText)), targetMatches: targetText === result.transcript,
-        historyMatches: readbackState.history[0] === result.transcript,
+        historyMatches: readbackState.history[0]?.text === result.transcript,
         applicationFocused: await application.evaluate(({ BrowserWindow }) => !!BrowserWindow.getAllWindows()[0]?.isFocused()),
         applicationClipboardMatches, pasteReady: readbackState.paste_ready, pasteConfiguring: readbackState.paste_configuring ?? false,
         output: readbackState.preferences.output, waylandClipboard,
       }, null, 2), { mode: 0o600 });
       await until(async () => await readFile(pasted, "utf8") === result.transcript, 5000);
       await checkpoint("actual-history-readback");
-      await until(async () => (await state()).history[0] === result.transcript, 5000);
+      await until(async () => (await state()).history[0]?.text === result.transcript, 5000);
       await checkpoint("actual-cross-client-clipboard-readback");
       // Background Wayland publication is proved by another client; Electron's
       // local cache read remains diagnostic and cannot substitute for this check.
@@ -1799,7 +1799,7 @@ async function main(): Promise<void> {
   const result = await state(); assert.match(result.transcript.toLowerCase(), /country/u);
   assert.equal(result.gpu_available, false); assert.equal(result.preferences.gpu, stablePackage); assert.equal(result.recovery_available, false);
   assert.equal(await application.evaluate(async ({ clipboard }, expected) => await clipboard.readText() === expected, result.transcript), true);
-  await until(async () => (await state()).history[0] === result.transcript);
+  await until(async () => (await state()).history[0]?.text === result.transcript);
   assert.deepEqual(await readdir(profile.paths.recovery), []);
   assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
   assert.equal(sha(await readFile(join(stable, "sentinel"))), stableBefore);
