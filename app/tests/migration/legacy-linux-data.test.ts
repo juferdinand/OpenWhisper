@@ -25,7 +25,7 @@ test("legacy stable preferences retain ordinary values, both independent profile
   assert.equal(converted.preferences.auto_check_updates, true); assert.equal(converted.preferences.launch_at_login, true);
   assert.equal(converted.preferences.gpu, false); assert.equal(converted.preferences.hold_to_record, true);
   assert.deepEqual(preferencesSchema.parse(converted.preferences), converted.preferences);
-  assert.deepEqual(converted.history, input.history); assert.deepEqual(converted.preserved, input); assert.deepEqual(converted.triggerReview, []);
+  assert.deepEqual(converted.history, []); assert.deepEqual(converted.preserved, input); assert.deepEqual(converted.triggerReview, []);
   converted.preferences.vocabulary = [{ spelling: "Edited converted text", misheard: [] }]; converted.preserved.history.push("Later edited copy");
   assert.deepEqual(input, before);
 });
@@ -91,12 +91,12 @@ test("malformed optional X11 bindings preserve their source instead of resetting
   }
 });
 
-test("unknown JSON and full history survive preservation while active history matches the legacy first20", () => {
+test("unknown JSON and full history survive preservation while old history is not imported", () => {
   const history = Array.from({ length: 23 }, (_, index) => `Synthetic history ${index}`);
   const settings = { ...legacy, later_feature: { enabled: true, labels: ["東京", null, 123] },
     snippets: [{ ...legacy.snippets[0], later_snippet_field: "retained" }] };
   const converted = convertLegacyLinuxData({ settings, history });
-  assert.deepEqual(converted.history, history.slice(0, 20)); assert.deepEqual(converted.preserved.history, history);
+  assert.deepEqual(converted.history, []); assert.deepEqual(converted.preserved.history, history);
   assert.deepEqual(converted.preserved.settings, settings);
   assert.deepEqual(converted.preferences.snippets, [legacy.snippets[0]]);
 });

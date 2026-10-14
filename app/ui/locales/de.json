@@ -70,6 +70,7 @@
   "German": "Deutsch",
   "Global shortcuts portal": "Portal für Tastenkürzel",
   "History": "Verlauf",
+  "Duration: {duration}": "Dauer: {duration}",
   "Import a model …": "Modell importieren …",
   "Insert": "Einfügen",
   "Install wl-clipboard (Wayland) or xclip (X11)": "wl-clipboard (Wayland) oder xclip (X11) installieren",

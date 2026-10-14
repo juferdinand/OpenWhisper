@@ -27,6 +27,7 @@ import { formatBootstrapFailure, formatStartFailure, initializeStableLinuxProfil
 import { verifyMacApplicationBundle, macosMigrationContext } from "./macos-stable-admission.js";
 import { StableMigrationError } from "../contracts/migration/stable-migration.js";
 import { PrivateStateStore } from "../services/settings/private-state.js";
+import { DictationHistory } from "../services/history/dictation-history.js";
 import { LocalProcessingService, LocalProcessingError } from "../services/speech/local-processing.js";
 import { LocalTextConnectionScanner, resolveCustomTextCliExecutable, resolveTextCliExecutable, startLmStudioServer, validateTextConnectionSave } from "../services/text/connections.js";
 import { runClaudeCodeText } from "../services/text/claude-code.js";
@@ -262,8 +263,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let message = "", inferenceProgress = 0;
   let download: string | null = null, downloadProgress = 0;
   let downloading: Promise<void> | undefined, downloadAbort: AbortController | undefined;
-  const history = await PrivateStateStore.open(join(profile.paths.history, "history.json"),
-    z.array(z.string().max(MAX_USER_TEXT_BYTES)).max(20), [], 8 * 1024 * 1024, { invalidContent: "preserve-and-default" });
+  const history = await DictationHistory.open(join(profile.paths.history, "history.json"));
   let notify = (): void => {};
   const textProcessor = new OptionalTextProcessing({
     settings: () => textConnectionStore.snapshot(),
@@ -492,12 +492,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         if (wantsPaste && delivered.outcome === "clipboard") deliveryNotice = "Text copied; automatic paste is unavailable. Paste it from the clipboard.";
         if (!oversized && preferences.snapshot().keep_history) {
           // History is secondary to the already confirmed clipboard commit.
-          void history.update((current) => {
-            const next = [acceptedText, ...current].slice(0, 20);
-            while (next.length > 1 && Buffer.byteLength(JSON.stringify(next), "utf8") > 6 * 1024 * 1024) next.pop();
-            if (Buffer.byteLength(JSON.stringify(next), "utf8") > 8 * 1024 * 1024) return current;
-            return next;
-          }).then(notify, () => { message = "Text copied; history could not be saved."; notify(); });
+          void history.add(acceptedText, recording.elapsedMs)
+            .then(notify, () => { message = "Text copied; history could not be saved."; notify(); });
         }
         return { ...delivered, deliveredText: acceptedText };
       } },
@@ -561,7 +557,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       raw_transcript_preview_omitted: rawPreview.omitted,
       text_processing: stage && stagePreview ? { ...stage, text: stagePreview.text } : stage,
       text_processing_preview_omitted: stagePreview?.omitted ?? false,
-      history: history.snapshot().filter((text) => Buffer.byteLength(text, "utf8") <= MAX_USER_TEXT_BYTES),
+      history: history.snapshot().filter((entry) => Buffer.byteLength(entry.text, "utf8") <= MAX_USER_TEXT_BYTES),
       preferences: { ...preferenceSnapshot, ...(loginFact ? { launch_at_login: loginFact.requested } : {}) },
       models: [...catalog.models, ...installed.filter((item) => !catalog.models.some((model) => model.id === item.model.id)).map((item) => item.model)],
       installed: installed.map((item) => item.model.id), microphones: sources.map((source) => source.id),
@@ -1318,8 +1314,8 @@ if (macRecording) { microphonePermission = systemPreferences.getMediaAccessStatu
       },
       cancel_download: () => { downloadAbort?.abort(); },
       copy_transcript: async () => { await clipboardOutput.writeText(recording.transcript); },
-      copy_history: async ({ index }) => { const text = history.snapshot().filter((item) => Buffer.byteLength(item, "utf8") <= MAX_USER_TEXT_BYTES)[index]; if (text !== undefined) await clipboardOutput.writeText(text); },
-      clear_history: () => action(async () => { await history.update(() => []); }),
+      copy_history: async ({ index }) => { const text = history.snapshot().filter((item) => Buffer.byteLength(item.text, "utf8") <= MAX_USER_TEXT_BYTES)[index]?.text; if (text !== undefined) await clipboardOutput.writeText(text); },
+      clear_history: () => action(async () => { await history.clear(); }),
       show_models_folder: () => action(async () => { if (await shell.openPath(profile.paths.models)) throw new Error("Folder unavailable."); }),
       show_transcripts_folder: () => action(async () => { if (await shell.openPath(profile.paths.transcripts)) throw new Error("Folder unavailable."); }),
     },

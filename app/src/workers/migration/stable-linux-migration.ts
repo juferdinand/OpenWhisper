@@ -4,7 +4,7 @@ import { lstat, mkdir, open, readdir, type FileHandle } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename, join, relative, sep } from "node:path";
 import { z } from "zod";
-import { MAX_UI_REQUEST_BYTES, MAX_USER_TEXT_BYTES, preferencesSchema } from "../../contracts/ui/state.js";
+import { MAX_UI_REQUEST_BYTES, preferencesSchema, storedHistorySchema } from "../../contracts/ui/state.js";
 import { convertLegacyLinuxData, convertLegacyLinuxRecoveryNames } from "../../services/migration/legacy-linux-data.js";
 import { prepareStableProfileStorage, validateStableProfile, type StableProfile } from "../../services/settings/stable-profile.js";
 import { StableMigrationError as StableLinuxMigrationError } from "../../contracts/migration/stable-migration.js";
@@ -19,7 +19,6 @@ const completionSchema = z.strictObject({ version: z.literal(1), appId: z.litera
   triggerReview: z.array(z.enum(["KDE_MOUSE_TRIGGER", "KDE_MODIFIER_TRIGGER", "KDE_LEGACY_SPECIAL_KEY", "INVALID_X11_TRIGGER"])).max(4),
   recovery: z.array(z.strictObject({ source: z.string().max(128), target: z.string().max(128), id: z.string(),
     timestampMs: z.string().regex(/^[0-9]{20}$/u), bytes: decimal, sha256: digest })).max(100_000) });
-const historySchema = z.array(z.string().max(MAX_USER_TEXT_BYTES).refine((text) => Buffer.byteLength(text, "utf8") <= MAX_USER_TEXT_BYTES)).max(20);
 function timestamp(value: string): number {
   const milliseconds = BigInt(value);
   if (milliseconds > 8_640_000_000_000_000n || milliseconds > BigInt(Number.MAX_SAFE_INTEGER)) fail("INVALID_TIMESTAMP");
@@ -65,7 +64,7 @@ async function completed(profile: StableProfile, publication: string): Promise<n
       if (!raw.bytes || raw.bytes.length !== expected.bytes || sha256(raw.bytes) !== expected.sha256) fail("INVALID_COMPLETION");
     }
     preferencesSchema.parse((await jsonSource(join(profile.paths.settings, "preferences.json"), true)).value);
-    historySchema.parse((await jsonSource(join(profile.paths.history, "history.json"), true)).value);
+    storedHistorySchema.parse((await jsonSource(join(profile.paths.history, "history.json"), true)).value);
     for (const path of Object.values(profile.paths)) if (path.startsWith(`${publication}${sep}`)) {
       const stats = await lstat(path, { bigint: true }); safeDirectory(stats, true);
     }

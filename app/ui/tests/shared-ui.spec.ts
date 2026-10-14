@@ -3785,7 +3785,13 @@ for (const platform of ["linux", "macos"] as const) {
         transcript,
         transcript_preview_omitted: false,
         recording_generation: 10,
-        history: [transcript],
+        history: [
+          {
+            text: transcript,
+            recorded_at: "2026-10-14T12:34:56.000Z",
+            duration_ms: 1_234,
+          },
+        ],
       });
       window.publishState();
     }, retainedTranscript);
@@ -3814,9 +3820,14 @@ for (const platform of ["linux", "macos"] as const) {
     );
     await expect(
       page.locator(
-        '#dictation-history .history-entry[data-history-select="0"]',
+        '#dictation-history .history-entry[data-history-select="0"] .history-entry-text',
       ),
     ).toHaveText(retainedTranscript);
+    await expect(
+      page.locator(
+        '#dictation-history .history-entry[data-history-select="0"] .history-entry-meta',
+      ),
+    ).toContainText("0:01");
 
     for (const status of ["recording", "transcribing"] as const) {
       await page.evaluate(
@@ -3854,7 +3865,11 @@ for (const platform of ["linux", "macos"] as const) {
       .poll(() => page.evaluate(() => window.calls.at(-1)))
       .toEqual({ command: "copy_history", args: { index: 0 } });
     expect(await page.evaluate(() => window.testState.history)).toEqual([
-      retainedTranscript,
+      {
+        text: retainedTranscript,
+        recorded_at: "2026-10-14T12:34:56.000Z",
+        duration_ms: 1_234,
+      },
     ]);
 
     await page.evaluate(() => {
@@ -4667,11 +4682,12 @@ for (const platform of ["linux", "macos"] as const) {
     );
     entries[1] = longEntry;
     await page.evaluate((longEntry) => {
-      window.testState.history = Array.from(
-        { length: 14 },
-        (_, index) => `History entry ${index}`,
-      );
-      window.testState.history[1] = longEntry;
+      window.testState.history = Array.from({ length: 14 }, (_, index) => ({
+        text: `History entry ${index}`,
+        recorded_at: "2026-10-14T12:34:56.000Z",
+        duration_ms: 1_000,
+      }));
+      window.testState.history[1]!.text = longEntry;
       window.testState.transcript = longEntry;
       window.testState.transcript_preview_omitted = false;
       window.publishState();
@@ -4707,7 +4723,9 @@ for (const platform of ["linux", "macos"] as const) {
           ".history-entry[data-history-select]",
         );
         await expect(historyEntries).toHaveCount(entries.length);
-        await expect(historyEntries.nth(1)).toHaveText(longEntry);
+        await expect(
+          historyEntries.nth(1).locator(".history-entry-text"),
+        ).toHaveText(longEntry);
         const historyBytes = entries.reduce(
           (total, entry) => total + new TextEncoder().encode(entry).byteLength,
           0,
@@ -5315,7 +5333,11 @@ test("workspace and General match the reference proportions in English and Germa
         status: "idle",
         elapsed: 0,
         transcript: "",
-        history: [longTranscript, secondTranscript],
+        history: [longTranscript, secondTranscript].map((text) => ({
+          text,
+          recorded_at: "2026-10-14T12:34:56.000Z",
+          duration_ms: 62_000,
+        })),
         installed: ["base"],
         recording_available: true,
         recording_unavailable_reason: undefined,
@@ -5384,12 +5406,17 @@ test("workspace and General match the reference proportions in English and Germa
     expect(geometry.transcriptInsetLeft).toBeCloseTo(40, 0);
     expect(geometry.transcriptInsetRight).toBeCloseTo(40, 0);
     expect(geometry.recordCenterOffset).toBeLessThanOrEqual(2);
-    await expect(page.locator("#dictation-history time")).toHaveCount(0);
+    await expect(
+      page.locator("#dictation-history .history-entry-meta"),
+    ).toHaveCount(2);
     const entry = page.locator(
       '#dictation-history .history-entry[data-history-select="0"]',
     );
     await expect(entry).toBeVisible();
-    await expect(entry).toHaveText(longTranscript);
+    await expect(entry.locator(".history-entry-text")).toHaveText(
+      longTranscript,
+    );
+    await expect(entry.locator(".history-entry-meta")).toContainText("1:02");
     const entryGeometry = await entry.evaluate((element) => {
       const text = element.querySelector(".history-entry-text")!;
       const buttonStyle = getComputedStyle(element);
@@ -5408,7 +5435,7 @@ test("workspace and General match the reference proportions in English and Germa
       };
     });
     expect(entryGeometry.fontSize).toBeCloseTo(13.5, 1);
-    expect(entryGeometry.lineHeight).toBeCloseTo(18.9, 1);
+    expect(entryGeometry.lineHeight).toBeCloseTo(16.9, 1);
     expect(entryGeometry.lineClamp).toBe(2);
     expect(entryGeometry.entryHeight).toBeGreaterThanOrEqual(
       2 * entryGeometry.lineHeight +
@@ -5785,7 +5812,11 @@ for (const platform of ["linux", "macos"] as const) {
       w.testState.history = [
         "Diktat / Dictation",
         "<script>private text</script>",
-      ];
+      ].map((text) => ({
+        text,
+        recorded_at: "2026-10-14T12:34:56.000Z",
+        duration_ms: 1_000,
+      }));
       w.publishState();
     });
     await page.getByRole("button", { name: "Deutsch", exact: true }).click();
@@ -5798,7 +5829,7 @@ for (const platform of ["linux", "macos"] as const) {
     ).toBeVisible();
     await selectSettingsTab(page, "history");
     await expect(
-      page.locator("#dictation-history .history-entry[data-history-select]"),
+      page.locator("#dictation-history .history-entry-text"),
     ).toHaveText(["Diktat / Dictation", "<script>private text</script>"]);
     await expect(page.locator("#settings-history-controls")).toBeVisible();
     await expect(page.locator("#content .history-row")).toHaveCount(0);
@@ -8084,7 +8115,13 @@ test("Linux clipboard delivery failures fully translate while retaining raw dict
       host.testState.message = message;
       host.testState.recovery_available = true;
       host.testState.transcript = "Clipboard delivery timed out";
-      host.testState.history = ["Clipboard delivery timed out"];
+      host.testState.history = [
+        {
+          text: "Clipboard delivery timed out",
+          recorded_at: "2026-10-14T12:34:56.000Z",
+          duration_ms: 1_000,
+        },
+      ];
       host.publishState();
     }, message);
     await expect(page.locator("#status")).toHaveText(german[message]);
@@ -8094,7 +8131,9 @@ test("Linux clipboard delivery failures fully translate while retaining raw dict
   }
   await selectSettingsTab(page, "history");
   await expect(
-    page.locator('#dictation-history .history-entry[data-history-select="0"]'),
+    page.locator(
+      '#dictation-history .history-entry[data-history-select="0"] .history-entry-text',
+    ),
   ).toHaveText("Clipboard delivery timed out");
   expect(await page.evaluate(() => (window as any).testState.transcript)).toBe(
     "Clipboard delivery timed out",

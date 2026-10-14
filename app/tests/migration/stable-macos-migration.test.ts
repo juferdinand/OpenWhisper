@@ -61,19 +61,20 @@ test("Mac migration retains exact archives, typed data, draft snippets, models a
     assert.equal(retained.plist["__proto__"], "Original prototype key"); assert.deepEqual(retained.nativeValues, decoded.nativeValues);
     const conversion = JSON.parse(readFileSync(join(publication(profile), "legacy/conversion.json"), "utf8")) as { context: typeof context };
     assert.equal(conversion.context.loginStatus, "requires-approval");
-    assert.deepEqual(JSON.parse(readFileSync(join(profile.paths.history, "history.json"), "utf8")), ["Original history"]);
+    assert.deepEqual(JSON.parse(readFileSync(join(profile.paths.history, "history.json"), "utf8")), []);
     const inventory = await ModelInventory.open(profile, JSON.parse(readFileSync(new URL("../../data/models.json", import.meta.url), "utf8")) as unknown);
     assert.equal((await inventory.installed())[0]?.verification, "legacy-owned-file");
     const model = lstatSync(join(profile.paths.models, "ggml-tiny.bin"));
     assert.equal(model.ino, originalModel.ino); assert.equal(model.mode, originalModel.mode);
     for (const path of Object.values(profile.paths)) if (path.startsWith(`${publication(profile)}/`)) assert.equal(lstatSync(path).mode & 0o7777, 0o700);
     await store.patch({ vocabulary: [{ spelling: "Edited current state", misheard: [] }] });
-    file(join(profile.paths.history, "history.json"), '["Edited history"]');
+    const updatedHistory = [{ text: "Edited history", recorded_at: "2026-10-14T12:34:56.000Z", duration_ms: 2_345 }];
+    file(join(profile.paths.history, "history.json"), JSON.stringify(updatedHistory));
     const repeated = await migrateStableMacosProfile(profile, undefined, { assertStopped() { assert.fail("Completed state must not reimport"); },
       snapshot() { assert.fail("Completed state must not query old preferences"); } });
     assert.equal(repeated.status, "already-complete");
     assert.deepEqual((await PreferenceStore.open(profile)).snapshot().vocabulary, [{ spelling: "Edited current state", misheard: [] }]);
-    assert.deepEqual(JSON.parse(readFileSync(join(profile.paths.history, "history.json"), "utf8")), ["Edited history"]);
+    assert.deepEqual(JSON.parse(readFileSync(join(profile.paths.history, "history.json"), "utf8")), updatedHistory);
   });
 });
 

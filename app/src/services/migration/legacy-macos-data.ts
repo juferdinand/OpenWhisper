@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MAX_UI_REQUEST_BYTES, MAX_USER_TEXT_BYTES, preferencesSchema, snippetSchema, type Preferences } from "../../contracts/ui/state.js";
+import { MAX_UI_REQUEST_BYTES, MAX_USER_TEXT_BYTES, legacyHistoryTextSchema, preferencesSchema, snippetSchema, type Preferences } from "../../contracts/ui/state.js";
 
 class LegacyMacosDataError extends Error {
   constructor() { super("INVALID_DATA"); this.name = "LegacyMacosDataError"; }
@@ -16,7 +16,7 @@ const persistedSchema = z.object({
   editorAppPath: text(4096).default("/System/Applications/TextEdit.app"),
   restoreClipboard: z.boolean().default(true), playSounds: z.boolean().default(true), showIdleOverlay: z.boolean().default(false),
   vocabulary: z.string().max(8192).default(""), keepHistory: z.boolean().default(true),
-  autoCheckUpdates: z.boolean().default(true), history: z.array(z.string()).default([]),
+  autoCheckUpdates: z.boolean().default(true), history: z.array(legacyHistoryTextSchema).default([]),
 }).strip();
 const legacySnippetSchema = snippetSchema.extend({
   // Foundation UUID decoding accepts uppercase and nil UUIDs; preserve spelling.
@@ -80,7 +80,7 @@ export function convertLegacyMacosData(input: unknown): LegacyMacosData {
     // review while every original entry remains available to the migration.
     if (persisted.keepHistory && persisted.history.length > 20) review.push("MAC_HISTORY_OVERFLOW");
     if (!persisted.keepHistory && persisted.history.length > 0) review.push("MAC_HISTORY_DISABLED");
-    return { preferences, history: activeHistorySchema.parse(persisted.keepHistory ? persisted.history.slice(0, 20) : []),
+    return { preferences, history: activeHistorySchema.parse([]),
       preserved: { plist: plist ?? null, snippets: checked.snippets ?? null, history: persisted.history },
       legacy: { editorAppPath: persisted.editorAppPath, trigger: { present, value: present ? plist?.["trigger"] ?? null : null } }, review };
   } catch { throw new LegacyMacosDataError(); }

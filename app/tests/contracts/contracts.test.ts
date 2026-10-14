@@ -309,11 +309,13 @@ test("only fixed state, recording telemetry, and navigation events are accepted"
 
 test("transport bounds preserve a long multilingual transcript and reject oversized frames", () => {
   const text = "Deutsch 👩‍💻 العربية\u200f 日本語\n".repeat(1000);
-  const snapshot = { ...state(), transcript: text, history: [text] };
+  const snapshot = { ...state(), transcript: text, history: [{ text, recorded_at: "2026-10-14T12:34:56.000Z", duration_ms: 1_000 }] };
   assert.deepEqual(validateCommandOutput("get_state", snapshot), snapshot);
   assert.equal(appStateSchema.safeParse({ ...state(), transcript: "x".repeat(MAX_USER_TEXT_BYTES + 1) }).success, false);
   const escaped = "\u0000".repeat(MAX_USER_TEXT_BYTES);
-  const large = { ...state(), history: [escaped, escaped] };
+  const large = { ...state(), history: [escaped, escaped].map((entry) => ({
+    text: entry, recorded_at: "2026-10-14T12:34:56.000Z", duration_ms: 1_000,
+  })) };
   assert.ok(new TextEncoder().encode(JSON.stringify(large)).byteLength > MAX_UI_STATE_BYTES);
   assert.equal(appStateSchema.safeParse(large).success, false);
 });

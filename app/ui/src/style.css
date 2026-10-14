@@ -796,7 +796,7 @@ svg {
   min-height: 0;
   flex: 1 1 auto;
   display: block;
-  padding: 12px;
+  padding: 6px 12px;
   border: 0;
   border-radius: 12px;
   background: transparent;
@@ -810,9 +810,16 @@ svg {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-  line-height: 1.4;
+  line-height: 1.25;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+.dictation-history .history-entry-meta {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.2;
 }
 .dictation-history .history-entry:hover:not(:disabled) {
   background: transparent;

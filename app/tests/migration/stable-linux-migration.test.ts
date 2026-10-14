@@ -35,12 +35,13 @@ test("fresh migration publishes all config children with legacy defaults and rep
     assert.equal(preferences["auto_check_updates"], true); assert.deepEqual(json(join(profile.paths.history, "history.json")), []);
     for (const path of Object.values(profile.paths)) if (path.startsWith(`${publication(profile)}/`)) assert.equal(lstatSync(path).mode & 0o7777, 0o700);
     file(join(profile.paths.settings, "preferences.json"), JSON.stringify({ ...preferences, setup_completed: true, vocabulary: "Edited current state" }));
-    file(join(profile.paths.history, "history.json"), JSON.stringify(["Edited current history"]));
+    const updatedHistory = [{ text: "Edited current history", recorded_at: "2026-10-14T12:34:56.000Z", duration_ms: 2_345 }];
+    file(join(profile.paths.history, "history.json"), JSON.stringify(updatedHistory));
     file(profile.legacy.settings, JSON.stringify({ vocabulary: "Old state must not replay" }));
     const repeated = await migrateStableLinuxProfile(profile);
     assert.equal(repeated.status, "already-complete"); assert.equal(stages(profile).length, 0);
     assert.equal((json(join(profile.paths.settings, "preferences.json")) as Record<string, unknown>)["vocabulary"], "Edited current state");
-    assert.deepEqual(json(join(profile.paths.history, "history.json")), ["Edited current history"]);
+    assert.deepEqual(json(join(profile.paths.history, "history.json")), updatedHistory);
   });
 });
 
@@ -63,7 +64,7 @@ test("migration retains raw JSON, full history, model permissions and streamed r
     assert.equal(readFileSync(interrupted, "utf8"), "Interrupted legacy save bytes"); assert.equal(readFileSync(unrelated, "utf8"), "Unrelated original bytes");
     assert.deepEqual(readFileSync(join(publication(profile), "legacy/settings.json")), rawSettings);
     assert.deepEqual(readFileSync(join(publication(profile), "legacy/history.json")), rawHistory);
-    assert.equal((json(join(profile.paths.history, "history.json")) as unknown[]).length, 20);
+    assert.deepEqual(json(join(profile.paths.history, "history.json")), []);
     assert.equal(lstatSync(profile.roots.config).mode & 0o7777, 0o755); assert.equal(lstatSync(profile.paths.models).mode & 0o7777, 0o755);
     assert.equal(readFileSync(join(profile.paths.models, "model.bin"), "utf8"), "Owned model sentinel");
     const store = await PreferenceStore.open(profile), inventory = await ModelInventory.open(profile,

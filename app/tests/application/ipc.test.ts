@@ -23,7 +23,7 @@ function state(): AppState {
     status: "idle",
     message: "Ready",
     transcript: "Public fixture text",
-    history: ["Public fixture text"],
+    history: [{ text: "Public fixture text", recorded_at: "2026-10-14T12:34:56.000Z", duration_ms: 1_000 }],
     preferences: {
       ui_language: "en", setup_completed: false, model: "tiny", language: "auto",
       microphone: "", vocabulary: [], snippets: [], output: "clipboard",
@@ -314,13 +314,14 @@ test("oversize individual and aggregate state fail without mutating original tex
   const individual = state();
   individual.transcript = oversizedText;
   const aggregate = state();
-  aggregate.history = Array.from({ length: 9 }, () => "x".repeat(MAX_USER_TEXT_BYTES));
+  aggregate.history = Array.from({ length: 9 }, () => ({ text: "x".repeat(MAX_USER_TEXT_BYTES),
+    recorded_at: "2026-10-14T12:34:56.000Z", duration_ms: 1_000 }));
   for (const original of [individual, aggregate]) {
     failure(await dispatcher({ get_state: () => original }).dispatch({ sender: main, serializedRequest: request("get_state") }), "INVALID_RESPONSE");
   }
   assert.equal(individual.transcript, oversizedText);
   assert.equal(aggregate.history.length, 9);
-  assert.ok(aggregate.history.every((text) => text.length === MAX_USER_TEXT_BYTES));
+  assert.ok(aggregate.history.every((entry) => entry.text.length === MAX_USER_TEXT_BYTES));
 });
 
 test("thrown and rejected handler failures return only fixed safe messages", async () => {

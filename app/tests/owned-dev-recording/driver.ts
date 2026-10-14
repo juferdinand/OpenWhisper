@@ -1525,14 +1525,14 @@ async function main(): Promise<void> {
       await writeFile(join(evidence, kdeXwaylandPaste ? "paste-readback-xwayland.json" : "paste-readback.json"), JSON.stringify({
         expectedLength: Buffer.byteLength(result.transcript), expectedHash: sha(Buffer.from(result.transcript)),
         targetLength: Buffer.byteLength(targetText), targetHash: sha(Buffer.from(targetText)), targetMatches: targetText === result.transcript,
-        historyMatches: readbackState.history[0] === result.transcript,
+        historyMatches: readbackState.history[0]?.text === result.transcript,
         applicationFocused: await application.evaluate(({ BrowserWindow }) => !!BrowserWindow.getAllWindows()[0]?.isFocused()),
         applicationClipboardMatches, pasteReady: readbackState.paste_ready, pasteConfiguring: readbackState.paste_configuring ?? false,
         output: readbackState.preferences.output, waylandClipboard,
       }, null, 2), { mode: 0o600 });
       await until(async () => await readFile(pasted, "utf8") === result.transcript, 5000);
       await checkpoint("actual-history-readback");
-      await until(async () => (await state()).history[0] === result.transcript, 5000);
+      await until(async () => (await state()).history[0]?.text === result.transcript, 5000);
       await checkpoint("actual-cross-client-clipboard-readback");
       // Background Wayland publication is proved by another client; Electron's
       // local cache read remains diagnostic and cannot substitute for this check.
@@ -1799,7 +1799,7 @@ async function main(): Promise<void> {
   const result = await state(); assert.match(result.transcript.toLowerCase(), /country/u);
   assert.equal(result.gpu_available, false); assert.equal(result.preferences.gpu, stablePackage); assert.equal(result.recovery_available, false);
   assert.equal(await application.evaluate(async ({ clipboard }, expected) => await clipboard.readText() === expected, result.transcript), true);
-  await until(async () => (await state()).history[0] === result.transcript);
+  await until(async () => (await state()).history[0]?.text === result.transcript);
   assert.deepEqual(await readdir(profile.paths.recovery), []);
   assert.equal((await pactl(["list", "short", "source-outputs"])).trim(), "");
   assert.equal(sha(await readFile(join(stable, "sentinel"))), stableBefore);

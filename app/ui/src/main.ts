@@ -671,11 +671,32 @@ function restoreModelDialogFocus(dialog: HTMLDialogElement) {
 }
 function historyRows(): string {
   return state.history
-    .map((text, i) => {
+    .map((entry, i) => {
       const selected = selectedHistoryIndex === i;
-      return `<div class="history-row ${selected ? "selected" : ""}"><button type="button" class="history-entry" data-history-select="${i}" aria-pressed="${selected}" title="${esc(text)}"><span class="history-entry-text">${esc(text)}</span></button></div>`;
+      const recordedAt = new Intl.DateTimeFormat(
+        state.preferences.ui_language,
+        { dateStyle: "medium", timeStyle: "short" },
+      ).format(new Date(entry.recorded_at));
+      const duration =
+        entry.duration_ms === undefined
+          ? ""
+          : t("Duration: {duration}", {
+              duration: formatHistoryDuration(entry.duration_ms),
+            });
+      const metadata = [recordedAt, duration].filter(Boolean).join(" · ");
+      return `<div class="history-row ${selected ? "selected" : ""}"><button type="button" class="history-entry" data-history-select="${i}" aria-pressed="${selected}" title="${esc(entry.text)}"><span class="history-entry-text">${esc(entry.text)}</span><span class="history-entry-meta">${esc(metadata)}</span></button></div>`;
     })
     .join("");
+}
+function formatHistoryDuration(durationMs: number): string {
+  const totalSeconds = Math.floor(durationMs / 1000);
+  const seconds = String(totalSeconds % 60).padStart(2, "0");
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = String(totalMinutes % 60).padStart(2, "0");
+  const hours = Math.floor(totalMinutes / 60);
+  return hours > 0
+    ? `${hours}:${minutes}:${seconds}`
+    : `${totalMinutes}:${seconds}`;
 }
 function bindHistoryActions(root: ParentNode) {
   root
@@ -2043,7 +2064,7 @@ function renderWorkspace() {
   const selectedHistoryText =
     selectedHistoryIndex === null
       ? undefined
-      : state.history[selectedHistoryIndex];
+      : state.history[selectedHistoryIndex]?.text;
   const currentTranscriptDismissed = dismissedTranscriptValue !== undefined;
   const transcriptAvailable =
     selectedHistoryText !== undefined ||
@@ -3204,7 +3225,7 @@ function render() {
     if (!connectionScanStarted) void scanConnections();
   } else if (tab === "history") {
     const historyBytes = state.history.reduce(
-      (bytes, text) => bytes + new TextEncoder().encode(text).byteLength,
+      (bytes, entry) => bytes + new TextEncoder().encode(entry.text).byteLength,
       0,
     );
     const historySize =

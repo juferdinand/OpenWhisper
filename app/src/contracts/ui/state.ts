@@ -16,6 +16,7 @@ import {
 export const MAX_UI_REQUEST_BYTES = 8 * 1024 * 1024;
 export const MAX_UI_STATE_BYTES = 32 * 1024 * 1024;
 export const MAX_USER_TEXT_BYTES = 4 * 1024 * 1024;
+export const MAX_HISTORY_ENTRIES = 20;
 const encoder = new TextEncoder();
 const utf8 = (limit: number) => z.string().max(limit).refine(
   (value) => encoder.encode(value).byteLength <= limit,
@@ -38,6 +39,17 @@ const modelId = utf8(1024).min(1).refine(
 );
 const fraction = z.number().finite().min(0).max(1);
 const userText = utf8(MAX_USER_TEXT_BYTES);
+export const historyEntrySchema = z.strictObject({
+  text: userText,
+  recorded_at: z.string().datetime(),
+  duration_ms: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+});
+export const historyEntriesSchema = z.array(historyEntrySchema).max(MAX_HISTORY_ENTRIES);
+export const legacyHistoryTextSchema = userText;
+const legacyHistoryEntriesSchema = z.array(legacyHistoryTextSchema).max(MAX_HISTORY_ENTRIES);
+/** Readable by migration verification until installed histories move from transcript-only rows. */
+export const storedHistorySchema = z.union([historyEntriesSchema, legacyHistoryEntriesSchema]);
+export type HistoryEntry = z.infer<typeof historyEntrySchema>;
 export const updateDetailsSchema = z.strictObject({ highlights: z.array(utf8(512)).max(5),
   localized_highlights: z.strictObject({ en: z.array(utf8(512)).max(5).optional(), de: z.array(utf8(512)).max(5).optional() }).optional(),
   size: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional() });
@@ -254,7 +266,7 @@ export const appStateSchema = z.strictObject({
   raw_transcript_preview_omitted: z.boolean().optional(),
   text_processing_preview_omitted: z.boolean().optional(),
   transcript_preview_omitted: z.boolean().optional(),
-  history: z.array(userText).max(20),
+  history: historyEntriesSchema,
   preferences: preferencesSchema,
   models: z.array(modelSchema).max(128),
   installed: z.array(modelId).max(128),
@@ -377,7 +389,7 @@ export const commandInputSchemas = {
   complete_setup: noArgs,
   refresh_microphones: noArgs,
   copy_transcript: noArgs,
-  copy_history: z.strictObject({ index: z.number().int().min(0).max(19) }),
+  copy_history: z.strictObject({ index: z.number().int().min(0).max(MAX_HISTORY_ENTRIES - 1) }),
   clear_history: noArgs,
   show_models_folder: noArgs,
   download_model: modelArgs,

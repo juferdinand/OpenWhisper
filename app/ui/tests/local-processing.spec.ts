@@ -31,7 +31,13 @@ class RendererFixture {
     status: "idle",
     message: "Synthetic ready state",
     transcript: "Synthetic dictation text",
-    history: ["Synthetic previous dictation"],
+    history: [
+      {
+        text: "Synthetic previous dictation",
+        recorded_at: "2026-10-14T12:34:56.000Z",
+        duration_ms: 1_000,
+      },
+    ],
     preferences: {
       ui_language: "en",
       setup_completed: true,

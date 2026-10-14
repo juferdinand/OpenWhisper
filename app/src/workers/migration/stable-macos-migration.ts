@@ -4,7 +4,7 @@ import { lstat, mkdir, open, type FileHandle } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename, join, relative, sep } from "node:path";
 import { z } from "zod";
-import { MAX_UI_REQUEST_BYTES, MAX_USER_TEXT_BYTES, preferencesSchema } from "../../contracts/ui/state.js";
+import { MAX_UI_REQUEST_BYTES, preferencesSchema, storedHistorySchema } from "../../contracts/ui/state.js";
 import { StableMigrationError } from "../../contracts/migration/stable-migration.js";
 import { convertLegacyMacosData, legacyMacosMigrationContextSchema } from "../../services/migration/legacy-macos-data.js";
 import { prepareStableProfileStorage, validateStableProfile, type StableProfile } from "../../services/settings/stable-profile.js";
@@ -19,7 +19,6 @@ const reviewSchema = z.array(z.enum(["MAC_NATIVE_TRIGGER", "MAC_DEFAULT_TRIGGER"
 const completionSchema = z.strictObject({ version: z.literal(1), appId: z.literal("io.github.whisperfree"),
   sourceFormat: z.literal("macos-v0.2.5"), preferences: backupSchema.nullable(), snippets: backupSchema.nullable(),
   decoded: backupSchema, conversion: backupSchema, review: reviewSchema });
-const historySchema = z.array(z.string().max(MAX_USER_TEXT_BYTES).refine((text) => Buffer.byteLength(text, "utf8") <= MAX_USER_TEXT_BYTES)).max(20);
 
 /** Native preference access stays outside filesystem policy; owned fixtures use explicit synthetic snapshots. */
 export interface MacosMigrationAccess {
@@ -67,7 +66,7 @@ async function completed(profile: StableProfile, publication: string): Promise<v
     }
     decodedLegacyMacosPlistSchema.parse((await jsonSource(join(publication, "legacy/decoded.json"), true)).value);
     preferencesSchema.parse((await jsonSource(join(profile.paths.settings, "preferences.json"), true)).value);
-    historySchema.parse((await jsonSource(join(profile.paths.history, "history.json"), true)).value);
+    storedHistorySchema.parse((await jsonSource(join(profile.paths.history, "history.json"), true)).value);
     for (const path of Object.values(profile.paths)) if (path.startsWith(`${publication}${sep}`)) safeDirectory(await lstat(path, { bigint: true }), true);
   } catch { fail("INVALID_COMPLETION"); }
 }
