@@ -513,6 +513,65 @@ test("a warm-up loads the model without user text and the processing request wai
   }
 });
 
+test("warm-up throttling is tracked separately for each model profile", async (t) => {
+  const server = await ownedServer(t, (request, response) => {
+    const body = z.record(z.string(), z.unknown()).parse(request.body);
+    response.end(JSON.stringify(responseValue("ollama", body["model"] === "model-a" ? "A" : "B")));
+  });
+  const service = new LocalProcessingService();
+  t.after(() => service.close());
+  const first = profile({ provider: "ollama", endpoint: server.endpoint, model: "model-a" });
+  const second = profile({ provider: "ollama", endpoint: server.endpoint, model: "model-b" });
+
+  service.warm(first, 1_000);
+  const firstRun = service.preview({ requestId: "warm-model-a", text: "Synthetic input" }, first);
+  await server.nextRequest();
+  await server.nextRequest();
+  assert.equal(await firstRun, "A");
+
+  service.warm(second, 2_000);
+  const secondRun = service.preview({ requestId: "warm-model-b", text: "Synthetic input" }, second);
+  await server.nextRequest();
+  await server.nextRequest();
+  assert.equal(await secondRun, "B");
+  assert.equal(server.requestCount, 4);
+
+  // Returning to A within a minute does not repeat its warm-up after B was selected.
+  service.warm(first, 3_000);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(server.requestCount, 4);
+
+  service.warm(first, 61_001);
+  await server.nextRequest();
+  assert.equal(server.requestCount, 5);
+});
+
+test("processing does not wait for a different model's warm-up", async (t) => {
+  let releaseWarm!: () => void;
+  const server = await ownedServer(t, (request, response) => {
+    const body = z.record(z.string(), z.unknown()).parse(request.body);
+    if (body["model"] === "model-a" && JSON.stringify(body).includes('"OK"')) {
+      releaseWarm = () => response.end(JSON.stringify(responseValue("ollama", "Warm.")));
+      return;
+    }
+    response.end(JSON.stringify(responseValue("ollama", "Processed.")));
+  });
+  const service = new LocalProcessingService();
+  t.after(() => service.close());
+  const warmingProfile = profile({ provider: "ollama", endpoint: server.endpoint, model: "model-a" });
+  const processingProfile = profile({ provider: "ollama", endpoint: server.endpoint, model: "model-b" });
+  service.warm(warmingProfile, 1_000);
+  await server.nextRequest();
+
+  const processing = service.preview({ requestId: "other-model", text: "Synthetic input" }, processingProfile);
+  let request: CapturedRequest | undefined;
+  try { request = await server.nextRequest(); } catch { /* Release the fixture below before asserting. */ }
+  releaseWarm();
+  assert.equal(await processing, "Processed.");
+  assert.ok(request, "processing must start without waiting for another model to warm");
+  assert.equal(z.record(z.string(), z.unknown()).parse(request.body)["model"], "model-b");
+});
+
 test("a failed warm-up is ignored and does not block processing", async (t) => {
   const server = await ownedServer(t, (request, response) => {
     if (JSON.stringify(request.body).includes('"OK"')) { response.writeHead(500); response.end("{}"); return; }

@@ -58,6 +58,10 @@ const WARM_INTERVAL_MS = 60_000;
 
 function nativeLmStudio(profile: LocalProcessingProfile): boolean { return profile.provider === "lm_studio"; }
 
+function warmKey(profile: LocalProcessingProfile): string {
+  return JSON.stringify([profile.provider, profile.endpoint, profile.model, profile.instruction, profile.reasoning_effort ?? null]);
+}
+
 function requestBody(profile: LocalProcessingProfile, text: string, context: readonly ConversationTurn[] = []): Buffer {
   if (nativeLmStudio(profile)) {
     const input = context.length === 0 ? text : `Prior conversation turns, oldest first (JSON data):\n${JSON.stringify(context)}\n\nCurrent user message (JSON string):\n${JSON.stringify(text)}`;
@@ -190,7 +194,6 @@ function settledOrAborted(task: Promise<void>, signal: AbortSignal): Promise<voi
 }
 
 interface Warming {
-  readonly key: string;
   readonly startedAt: number;
   readonly task: Promise<void>;
   settled: boolean;
@@ -207,25 +210,28 @@ export class LocalProcessingService {
   private active: ActivePreview | undefined;
   private generation = 0;
   private closed = false;
-  private warming: Warming | undefined;
+  private readonly warmings = new Map<string, Warming>();
   private readonly warmController = new AbortController();
 
   /**
    * Loads the model while the user is still speaking. It sends no user text, and failures are ignored:
    * the processing request reports its own errors.
    */
-  warm(profileInput: unknown, now = Date.now()): void {
+  warm(profileInput: unknown, now = performance.now()): void {
     if (this.closed) return;
     let profile: LocalProcessingProfile;
     try { profile = decodeLocalProcessingProfile(profileInput); }
     catch { return; }
     if (!profile.enabled || profile.model.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, "").length === 0) return;
-    const key = JSON.stringify([profile.provider, profile.endpoint, profile.model, profile.instruction, profile.reasoning_effort ?? null]);
-    const previous = this.warming;
-    if (previous?.key === key && (!previous.settled || now - previous.startedAt < WARM_INTERVAL_MS)) return;
-    const warming: Warming = { key, startedAt: now, settled: false,
+    for (const [previousKey, warming] of this.warmings) {
+      if (warming.settled && now - warming.startedAt >= WARM_INTERVAL_MS) this.warmings.delete(previousKey);
+    }
+    const key = warmKey(profile);
+    const previous = this.warmings.get(key);
+    if (previous && (!previous.settled || now - previous.startedAt < WARM_INTERVAL_MS)) return;
+    const warming: Warming = { startedAt: now, settled: false,
       task: warmModel(profile, this.warmController.signal).catch(() => {}).finally(() => { warming.settled = true; }) };
-    this.warming = warming;
+    this.warmings.set(key, warming);
   }
 
   async preview(input: unknown, profileInput: unknown, signal?: AbortSignal, context: readonly ConversationTurn[] = []): Promise<string> {
@@ -250,7 +256,7 @@ export class LocalProcessingService {
     signal?.addEventListener("abort", abort, { once: true });
     try {
       // LM Studio answers HTTP 500 to a request that arrives while it is still loading the model.
-      const warming = this.warming;
+      const warming = this.warmings.get(warmKey(profile));
       if (warming && !warming.settled) await settledOrAborted(warming.task, active.controller.signal);
       if (active.controller.signal.aborted) throw new LocalProcessingError("CANCELLED");
       const output = await send(profile, parsed.text, active.controller.signal, context);
@@ -279,6 +285,7 @@ export class LocalProcessingService {
   close(): void {
     this.closed = true;
     this.warmController.abort();
+    this.warmings.clear();
     if (this.active) this.cancel(this.active.requestId);
   }
 }
