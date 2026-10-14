@@ -819,6 +819,7 @@
   "Not saved · Retry": "Nicht gespeichert · Erneut versuchen",
   "Not saved. Complete each snippet's trigger and text.": "Nicht gespeichert. Vervollständige Auslöser und Text jedes Snippets.",
   "Only the first enabled model is used.": "Das oberste eingeschaltete Modell wird verwendet.",
+  "Local models: large dense models (e.g. 27–31B) can take 15 seconds or more per minute of dictation. Mixture-of-experts models with few active parameters (e.g. names ending in -a3b) usually answer in a few seconds.": "Lokale Modelle: Große dichte Modelle (z. B. 27–31B) brauchen pro Minute Diktat oft 15 Sekunden oder länger. Mixture-of-Experts-Modelle mit wenigen aktiven Parametern (z. B. Namen mit -a3b) antworten meist in wenigen Sekunden.",
   "Optional": "Optional",
   "Remove rule": "Regel entfernen",
   "Resolve verbal corrections": "Versprecher auflösen",

@@ -209,6 +209,14 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     1024 * 1024, { invalidContent: "preserve-and-default" },
   );
   const processing = new LocalProcessingService();
+  const localTextProfile = (selected: { provider: "ollama" | "lm_studio"; model: string; reasoning_effort?: string | undefined },
+    instruction: string) => ({
+    enabled: true, provider: selected.provider,
+    endpoint: selected.provider === "ollama" ? "http://127.0.0.1:11434" : "http://127.0.0.1:1234/v1",
+    // An empty setting preserves the model's default; explicit values follow provider discovery.
+    model: selected.model, instruction, max_tokens: 4096, timeout_seconds: 120,
+    ...(selected.reasoning_effort ? { reasoning_effort: selected.reasoning_effort } : {}),
+  });
   const textConnectionStore = await PrivateStateStore.open(
     join(profile.paths.settings, "text-connections.json"), textConnectionSettingsSchema, defaultTextConnectionSettings(),
     1024 * 1024, { invalidContent: "preserve-and-default" },
@@ -297,15 +305,12 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       textProcessingOwner = { generation: event.generation, attempt: event.attempt };
       textProcessing = event;
     },
+    warmProvider: (selected, instruction) => {
+      if (selected.provider === "ollama" || selected.provider === "lm_studio") processing.warm(localTextProfile(selected, instruction));
+    },
     runProvider: async (selected, instruction, text, signal, requestId, context) => {
       if (selected.provider === "ollama" || selected.provider === "lm_studio") {
-        return processing.preview({ requestId, text }, {
-          enabled: true, provider: selected.provider,
-          endpoint: selected.provider === "ollama" ? "http://127.0.0.1:11434" : "http://127.0.0.1:1234/v1",
-          // An empty setting preserves the model's default; explicit values follow provider discovery.
-          model: selected.model, instruction, max_tokens: 4096, timeout_seconds: 120,
-          ...(selected.reasoning_effort ? { reasoning_effort: selected.reasoning_effort } : {}),
-        }, signal, context);
+        return processing.preview({ requestId, text }, localTextProfile(selected, instruction), signal, context);
       }
       if (selected.provider === "claude_code") {
         const executable = await resolveTextCliExecutable("claude");
@@ -432,6 +437,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         if ((value.phase === "starting" || value.phase === "recording") &&
             (value.generation !== previous.generation || (previous.phase !== "starting" && previous.phase !== "recording"))) {
           recordingStartedAt = Date.now();
+          textProcessor.prepare();
         }
         const hadMessage = message !== "";
         const hadDeliveryNotice = (value.phase === "starting" || value.phase === "recording") && deliveryNotice !== "";

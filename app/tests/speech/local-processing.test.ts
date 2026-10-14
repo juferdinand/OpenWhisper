@@ -172,7 +172,7 @@ test("profile patches, Unicode byte bounds and IPC inputs reject malformed value
 
 const requestBodySchema = z.discriminatedUnion("provider", [
   z.strictObject({ provider: z.literal("ollama"), model: z.string(), stream: z.literal(false), think: z.union([z.boolean(), z.string()]).optional(),
-    options: z.strictObject({ temperature: z.literal(0), num_predict: z.number().int() }),
+    keep_alive: z.literal("30m"), options: z.strictObject({ temperature: z.literal(0), num_predict: z.number().int() }),
     messages: z.array(z.strictObject({ role: z.enum(["system", "user", "assistant"]), content: z.string() })).min(2) }),
 ]);
 const lmStudioNativeBodySchema = z.strictObject({ model: z.string(), system_prompt: z.string(), input: z.string(),
@@ -474,4 +474,53 @@ test("a rejected explicit reasoning choice is terminal and is never silently rep
     await server.nextRequest();
     assert.equal(server.requestCount, 1);
   }
+});
+
+test("a warm-up loads the model without user text and the processing request waits for it", async (t) => {
+  for (const provider of ["lm_studio", "ollama"] as const) {
+    const order: string[] = [];
+    const server = await ownedServer(t, (request, response, later) => {
+      const body = z.record(z.string(), z.unknown()).parse(request.body);
+      const warm = JSON.stringify(body).includes('"OK"');
+      order.push(warm ? "warm" : "process");
+      // Models load slowly; LM Studio fails requests that arrive meanwhile, so the fixture delays the warm-up.
+      if (warm) later(() => response.end(JSON.stringify(responseValue(provider, "O"))), 150);
+      else response.end(JSON.stringify(responseValue(provider, "Processed.")));
+    });
+    const service = new LocalProcessingService();
+    t.after(() => service.close());
+    const p = profile({ provider, endpoint: server.endpoint + (provider === "lm_studio" ? "/v1" : ""), instruction: "Synthetic instruction." });
+    service.warm(p, 1_000);
+    service.warm(p, 2_000);
+    assert.equal(await service.preview({ requestId: `warm-${provider}`, text: "Synthetic original" }, p), "Processed.");
+    assert.deepEqual(order, ["warm", "process"]);
+    const warm = z.record(z.string(), z.unknown()).parse((await server.nextRequest()).body);
+    assert.equal(JSON.stringify(warm).includes("Synthetic original"), false);
+    if (provider === "lm_studio") {
+      const body = lmStudioNativeBodySchema.parse(warm);
+      assert.equal(body.system_prompt, "Synthetic instruction."); assert.equal(body.max_output_tokens, 1);
+    } else {
+      const body = requestBodySchema.parse({ ...warm, provider });
+      assert.ok(body.provider === "ollama"); assert.equal(body.options.num_predict, 1);
+      assert.equal(body.messages[0]!.content, "Synthetic instruction.");
+    }
+    // A loaded model is not warmed again within a minute; afterwards it is.
+    service.warm(p, 30_000);
+    assert.equal(server.requestCount, 2);
+    service.warm(p, 61_001);
+    await server.nextRequest(); await server.nextRequest();
+    assert.equal(server.requestCount, 3);
+  }
+});
+
+test("a failed warm-up is ignored and does not block processing", async (t) => {
+  const server = await ownedServer(t, (request, response) => {
+    if (JSON.stringify(request.body).includes('"OK"')) { response.writeHead(500); response.end("{}"); return; }
+    response.end(JSON.stringify(responseValue("ollama", "Processed.")));
+  });
+  const service = new LocalProcessingService();
+  t.after(() => service.close());
+  const p = profile({ provider: "ollama", endpoint: server.endpoint });
+  service.warm(p);
+  assert.equal(await service.preview({ requestId: "warm-failed", text: "Synthetic original" }, p), "Processed.");
 });
