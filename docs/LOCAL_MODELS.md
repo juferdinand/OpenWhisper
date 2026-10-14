@@ -62,6 +62,16 @@ Only enabled rules are compiled into the fixed revision instruction, which prese
 facts, details and wording and prohibits summaries, translations, added facts, answers,
 or actions. These are instructions to the chosen model, not guarantees of output quality.
 
+For single-recording revision with Codex or Claude Code, transcripts of at least 512 UTF-8
+bytes request only literal edits instead of regenerating all unchanged text. The app matches
+each source span exactly once against the original and applies the complete edit set atomically.
+Unchanged spans retain their exact text and whitespace. Missing, ambiguous, overlapping, malformed
+or oversized edits keep the deterministic result and show the existing AI fallback notice;
+there is no automatic second model request. Valid replacement text still depends on the model's
+quality. Shorter transcripts retain plain-text replies because an edit envelope can be larger
+than the revised text. Local servers, custom CLI commands and conversation replies use their
+existing text response format. Snippets still run after revision.
+
 With the master switch off, or no active rules, single recordings skip provider discovery
 and inference and retain the deterministic result. Existing saved custom instructions and
 legacy linguistic settings remain stored but are not used for single-recording revision;
@@ -227,6 +237,24 @@ stage ownership, byte bounds and transparent overlay margins. They do not establ
 live model quality or physical desktop/device coverage. Live local-model trials use
 synthetic text only and are reported separately. Cloud-account calls are not required
 for automated checks. New feature acceptance remains required before merge.
+
+To compare the former full-text revision with the current Cloud CLI path, run the opt-in
+synthetic quality and latency benchmark from the repository root:
+
+```bash
+app/node_modules/.bin/tsx app/scripts/benchmark-text-revision.ts \
+  --provider codex --model gpt-6-luna --reasoning-effort low --rounds 2
+```
+
+The command uses the selected CLI's existing account and can consume its quota. It does not
+change application settings. Use `--provider claude_code --model MODEL` for Claude Code, or
+`--case long-sparse` for one fixture. It alternates baseline/candidate order and reports elapsed
+time, reply bytes and exact matches against independently specified synthetic expectations;
+it never prints the submitted text or model replies. Any mismatch or request failure returns a
+nonzero status. Exact matches cover these fixtures only; semantic alternatives require review.
+Provider failures stop remaining account calls. Timings depend on the tested model, effort,
+CLI configuration, account, network and machine. Recording, recognition and desktop delivery
+are outside this text-stage benchmark.
 
 Primary references: [LM Studio Chat Completions](https://lmstudio.ai/docs/developer/openai-compat/chat-completions),
 [LM Studio native model metadata](https://lmstudio.ai/docs/developer/rest/list),

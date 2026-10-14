@@ -42,9 +42,12 @@ function processor(options: {
     scan: options.scan ?? (async () => options.availability ?? available("qwen-local")),
     isShuttingDown: options.shuttingDown ?? (() => false),
     onStage: (event) => options.stage?.(event),
-    runProvider: async (connection, _instruction, _text, signal) => {
+    runProvider: async (connection, _instruction, text, signal) => {
       calls.push(connection.provider);
-      return options.run ? options.run(connection.provider, signal, "model" in connection ? connection.model : undefined) : "processed text";
+      const result = options.run ? await options.run(connection.provider, signal, "model" in connection ? connection.model : undefined) : "processed text";
+      return (connection.provider === "codex" || connection.provider === "claude_code") &&
+        options.settings?.mode !== "conversation" && new TextEncoder().encode(text).byteLength >= 512
+        ? JSON.stringify([{ find: text, replace: result }]) : result;
     },
   });
   return { instance, calls };
@@ -136,6 +139,105 @@ test("CLI providers run with empty model catalogs and forward blank or explicit 
       assert.deepEqual(forwarded, [model]);
     }
   }
+});
+
+test("cloud revision reconstructs text before publishing stages and rejects invalid edits without a second call", async () => {
+  const prefix = "Unchanged detail. ".repeat(32);
+  const source = prefix + "Grüße 🙂. Das Team haben die Unterlagen geschickt. Kosten: 350 Euro.";
+  for (const provider of ["codex", "claude_code"] as const) {
+    const settings = configured([provider]);
+    const stages: Array<TextProcessingStageEvent | null> = [];
+    let reply = '[{"find":"Das Team haben","replace":"Das Team hat"}]';
+    let calls = 0;
+    const instance = new OptionalTextProcessing({
+      settings: () => settings, scan: async () => availableCli(provider), isShuttingDown: () => false,
+      onStage: (event) => stages.push(event),
+      runProvider: async (connection, instruction, text, _signal, _requestId, context) => {
+        calls += 1;
+        assert.equal(connection.provider, provider);
+        assert.equal(text, source);
+        assert.equal(context, undefined);
+        assert.match(instruction, /JSON array/u);
+        return reply;
+      },
+    });
+    assert.equal(await instance.process(source, owner()),
+      prefix + "Grüße 🙂. Das Team hat die Unterlagen geschickt. Kosten: 350 Euro.");
+    assert.equal(stages.at(-1)?.text, prefix + "Grüße 🙂. Das Team hat die Unterlagen geschickt. Kosten: 350 Euro.");
+    reply = "[]";
+    assert.equal(await instance.process(source, { ...owner(), attempt: 3 }), source);
+    assert.equal(instance.snapshot().processing.status, "complete");
+    reply = '[{"find":"Das Team haben","replace":"Das Team hat"},{"find":"missing","replace":"partial"}]';
+    assert.equal(await instance.process(source, { ...owner(), attempt: 4 }), source);
+    assert.deepEqual(instance.snapshot().processing, { status: "fallback", provider, reason: "failed" });
+    assert.equal(stages.at(-1)?.status, "skipped");
+    assert.equal(calls, 3);
+    reply = '[{"find":"Das Team haben","replace":"Das Team hat"}]';
+    assert.equal(await instance.process(source, { ...owner(), attempt: 5 }),
+      prefix + "Grüße 🙂. Das Team hat die Unterlagen geschickt. Kosten: 350 Euro.");
+    assert.equal(instance.snapshot().processing.status, "complete");
+    assert.equal(calls, 4);
+  }
+});
+
+test("cloud conversations retain plain-text answers and context instead of the revision edit protocol", async () => {
+  for (const provider of ["codex", "claude_code"] as const) {
+    const settings: TextConnectionSettings = { ...configured([provider]), mode: "conversation" };
+    const conversation: TextConversation = { id: "chat-id", provider, turns: [{ user: "prior", assistant: "reply" }] };
+    const instance = new OptionalTextProcessing({
+      settings: () => settings, scan: async () => availableCli(provider), isShuttingDown: () => false,
+      runProvider: async (_connection, instruction, _text, _signal, _requestId, context) => {
+        assert.equal(instruction, settings.conversationInstruction);
+        assert.deepEqual(context, conversation.turns);
+        return "A plain-text answer.";
+      },
+    });
+    assert.equal(await instance.process("question", owner(), conversation), "A plain-text answer.");
+    assert.deepEqual(instance.takeAcceptedConversationTurn(8, 2), { user: "question", assistant: "A plain-text answer." });
+  }
+});
+
+test("short cloud revisions avoid edit overhead and select the longer-text path by UTF-8 bytes", async () => {
+  for (const provider of ["codex", "claude_code"] as const) {
+    for (const source of ["x".repeat(511), "x".repeat(512), "ä".repeat(256)]) {
+      const edits = source !== "x".repeat(511);
+      const instance = new OptionalTextProcessing({
+        settings: () => configured([provider]), scan: async () => availableCli(provider), isShuttingDown: () => false,
+        runProvider: async (_connection, instruction) => {
+          assert.equal(instruction.includes("JSON array"), edits);
+          return edits ? "[]" : source;
+        },
+      });
+      assert.equal(await instance.process(source, owner()), source);
+      assert.equal(instance.snapshot().processing.status, "complete");
+    }
+  }
+});
+
+test("late cloud edits cannot publish after cancellation or supersession", async () => {
+  const settings = configured(["codex"]);
+  const stages: Array<TextProcessingStageEvent | null> = [];
+  let release!: (response: string) => void;
+  let requests = 0;
+  const instance = new OptionalTextProcessing({
+    settings: () => settings, scan: async () => availableCli("codex"), isShuttingDown: () => false,
+    onStage: (event) => stages.push(event),
+    runProvider: async () => {
+      requests += 1;
+      if (requests === 1) return new Promise<string>((resolve) => { release = resolve; });
+      return "[]";
+    },
+  });
+  const oldInput = "old input ".repeat(64), currentInput = "current input ".repeat(64);
+  const pending = instance.process(oldInput, owner());
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  instance.cancel();
+  assert.equal(await instance.process(currentInput, { ...owner(), attempt: 3 }), currentInput);
+  const count = stages.length;
+  release(JSON.stringify([{ find: oldInput, replace: "stale result" }]));
+  assert.equal(await pending, undefined);
+  assert.equal(stages.length, count);
+  assert.equal(instance.snapshot().processing.status, "complete");
 });
 
 test("local providers still refuse a selected model absent from the discovered catalog", async () => {

@@ -45,10 +45,24 @@ test("settings reject aggregate custom rules that cannot fit the compiled provid
     builtins: { spelling_grammar: true, resolve_verbal_corrections: true, paragraphs: true, numbers_times: true },
     custom_rules: [{ id: "123e4567-e89b-42d3-a456-426614174000", text: "x".repeat(7_000), enabled: true }] };
   const accepted = textConnectionSettingsSchema.parse({ ...defaults, revision });
-  const prompt = compileTextRevisionPrompt(accepted.revision!);
-  assert.ok(prompt);
-  assert.ok(new TextEncoder().encode(prompt).byteLength <= 8192);
+  for (const reply of ["text", "edits"] as const) {
+    const prompt = compileTextRevisionPrompt(accepted.revision!, reply);
+    assert.ok(prompt);
+    assert.ok(new TextEncoder().encode(prompt).byteLength <= 8192);
+  }
   assert.equal(textConnectionSettingsSchema.safeParse({ ...defaults,
     revision: { ...revision, custom_rules: [{ ...revision.custom_rules[0]!, text: "x".repeat(7_001) }] },
   }).success, false);
+});
+
+test("edit replies request only minimal literal changes without weakening revision rules", () => {
+  const prompt = compileTextRevisionPrompt({ ...defaultTextRevisionSettings(), enabled: true }, "edits");
+  assert.ok(prompt);
+  assert.match(prompt, /JSON array/u);
+  assert.match(prompt, /\[\] if unchanged/u);
+  assert.match(prompt, /exactly once in the original/u);
+  assert.match(prompt, /minimal, non-overlapping edits/u);
+  assert.doesNotMatch(prompt, /Return only the revised transcript/u);
+  assert.match(prompt, /Preserve its language, meaning, facts, details, and wording/u);
+  assert.match(prompt, /Do not summarize, translate, add facts, answer questions, or take actions/u);
 });
