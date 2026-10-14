@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GpuSelectionStatus } from "../../src/core/speech/gpu-selection-status.js";
 import type { BackendSelection } from "../../src/services/speech/backend-supervisor.js";
+import { GpuSelectionStatus } from "../../src/services/speech/gpu-selection-status.js";
 
 const cpuAfterProbeFailure: BackendSelection = {
   backend: "cpu", requestedGpu: true, gpu: false, detection: "unavailable",
