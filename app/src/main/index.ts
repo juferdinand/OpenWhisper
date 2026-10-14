@@ -30,7 +30,7 @@ import { PrivateStateStore } from "../services/settings/private-state.js";
 import { LocalProcessingService, LocalProcessingError } from "../services/speech/local-processing.js";
 import { LocalTextConnectionScanner, resolveCustomTextCliExecutable, resolveTextCliExecutable, startLmStudioServer, validateTextConnectionSave } from "../services/text/connections.js";
 import { runClaudeCodeText } from "../services/text/claude-code.js";
-import { runCodexText } from "../services/text/codex.js";
+import { CodexTextPreparation } from "../services/text/codex-preparation.js";
 import { CustomCliTextError, runCustomCliText, testCustomCliConnection } from "../services/text/custom-cli.js";
 import { boundedTextPreview } from "../services/text/text-preview.js";
 import { OptionalTextProcessing, TextProviderUnavailableError } from "../services/text/optional-text-processing.js";
@@ -291,6 +291,9 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       textRevisionRetry.matches(recording.generation, retrySettingsFingerprint()) &&
       settings.connections.find((connection) => connection.enabled)?.provider === retry.provider;
   };
+  const codexPreparation = new CodexTextPreparation();
+  let preparationEpoch = 0;
+  const retireTextPreparation = (): void => { preparationEpoch += 1; codexPreparation.retire(); };
   const textProcessor = new OptionalTextProcessing({
     settings: () => textConnectionStore.snapshot(),
     scan: (settings) => textConnectionScanner.scan(settings),
@@ -305,10 +308,20 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       textProcessingOwner = { generation: event.generation, attempt: event.attempt };
       textProcessing = event;
     },
-    warmProvider: (selected, instruction) => {
+    warmProvider: (selected, instruction, generation) => {
       if (selected.provider === "ollama" || selected.provider === "lm_studio") processing.warm(localTextProfile(selected, instruction));
+      if (selected.provider === "codex" && textConnectionStore.snapshot().mode === "single") {
+        const epoch = preparationEpoch;
+        void resolveTextCliExecutable("codex").then(async (executable) => {
+          if (!executable || epoch !== preparationEpoch || shutdownInProgress || recording.generation !== generation ||
+              recording.phase !== "starting" && recording.phase !== "recording") return;
+          await codexPreparation.prepare(generation, { executable, model: selected.model,
+            ...(selected.reasoning_effort ? { reasoning_effort: selected.reasoning_effort } : {}) });
+        }).catch(() => {});
+      }
     },
     runProvider: async (selected, instruction, text, signal, requestId, context) => {
+      const generation = recording.generation;
       if (selected.provider === "ollama" || selected.provider === "lm_studio") {
         return processing.preview({ requestId, text }, localTextProfile(selected, instruction), signal, context);
       }
@@ -322,7 +335,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       if (selected.provider === "codex") {
         const executable = await resolveTextCliExecutable("codex");
         if (!executable) throw new TextProviderUnavailableError();
-        return runCodexText({ executable, instruction, text, model: selected.model,
+        return codexPreparation.run(generation, { executable, instruction, text, model: selected.model,
           ...(selected.reasoning_effort ? { reasoning_effort: selected.reasoning_effort } : {}), signal,
           ...(context === undefined ? {} : { context }) });
       }
@@ -427,6 +440,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       snapshot: (value) => {
         const previous = recording;
         if (value.generation !== previous.generation) {
+          retireTextPreparation();
           recordingStartedAt = undefined;
           rawTranscript = "";
           textProcessing = null;
@@ -437,12 +451,12 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         if ((value.phase === "starting" || value.phase === "recording") &&
             (value.generation !== previous.generation || (previous.phase !== "starting" && previous.phase !== "recording"))) {
           recordingStartedAt = Date.now();
-          textProcessor.prepare();
+          textProcessor.prepare(value.generation);
         }
         const hadMessage = message !== "";
         const hadDeliveryNotice = (value.phase === "starting" || value.phase === "recording") && deliveryNotice !== "";
         recording = value;
-        if (["done", "error", "idle"].includes(value.phase)) textProcessing = null;
+        if (["done", "error", "idle"].includes(value.phase)) { textProcessing = null; retireTextPreparation(); }
         if (value.phase !== "error") message = "";
         if (value.phase === "starting" || value.phase === "recording") deliveryNotice = "";
         if (isSteadyRecordingUpdate(previous, value) && !hadMessage && !hadDeliveryNotice) {
@@ -973,6 +987,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   function finishShutdown(retiring: boolean, macHandoff?: Readonly<PreparedMacosUpdateInstall>): Promise<void> {
     if (shutdownTask) return retiring || macHandoff ? Promise.reject(new Error("Shutdown already started.")) : shutdownTask;
     shutdownInProgress = true; cancelRequested = true; textProcessor.close();
+    retireTextPreparation();
+    const closeTextPreparation = codexPreparation.close();
     processing.close(); downloadAbort?.abort();
     if (!macHandoff) macUpdateAbort?.abort();
     updateCheckScheduler?.close(); updateCheckScheduler = undefined;
@@ -980,6 +996,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     keyCapture = undefined; contents.setIgnoreMenuShortcuts(false);
     let nativeCleanupStarted = false;
     const closeOwners = async (): Promise<void> => {
+      await closeTextPreparation;
       await recordingOperation?.catch(() => {}); await downloading; await downloads.finalize();
       nativeCleanupStarted = true;
       await macShortcut?.close(); macMouse?.close(); macPaste?.close(); await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); await waylandOverlay?.close();
@@ -1256,6 +1273,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         await validateTextConnectionSave(textConnectionStore.snapshot(), checked, () => textProcessor.snapshot().available,
           () => textProcessor.scanConnections(checked));
         await textConnectionStore.update(() => checked);
+        retireTextPreparation();
         clearTextRevisionRetry();
         // Fingerprint-gated reads keep old context private if the second write fails.
         await conversationStore.syncSettings(checked);
@@ -1463,7 +1481,7 @@ if (macRecording) { microphonePermission = systemPreferences.getMediaAccessStatu
     target.on("will-attach-webview", (event) => { event.preventDefault(); });
   }
   window.on("close", (event) => { if (!shutdownComplete) { event.preventDefault(); window?.hide(); } });
-  window.on("closed", () => { processing.close(); ipcMain.removeHandler("openwhisper:invoke"); window = undefined; syncOverlayAfterWindowEvent(); });
+  window.on("closed", () => { retireTextPreparation(); processing.close(); ipcMain.removeHandler("openwhisper:invoke"); window = undefined; syncOverlayAfterWindowEvent(); });
   window.once("ready-to-show", () => { window?.show(); });
   window.on("focus", syncOverlayAfterWindowEvent);
   window.on("blur", syncOverlayAfterWindowEvent);

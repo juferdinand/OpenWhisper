@@ -106,15 +106,27 @@ a claim that the installed CLI executes no code. Input goes through stdin, with 
 from a private empty working directory. Output and total time are bounded; cancellation
 terminates the owned process group. Authentication files are not read or copied by the app.
 
-Codex uses `-a never exec --sandbox read-only --skip-git-repo-check --ephemeral --json
---color never -`. It retains the CLI's configured login. Read-only mode
-does not remove agent tools, and configured CLI policy still applies. Only a completed
-successful turn's assistant answer is accepted; progress and commentary are excluded.
+Codex prepares a fresh ephemeral app-server thread when a single recording starts,
+using `approvalPolicy: never` and a read-only sandbox. Preparation sends no transcript
+and starts no model turn. Once recognition finishes, an already ready session receives
+the same complete revision prompt and returns the complete revised text. Missing,
+pending, expired or incompatible preparation uses `-a never exec --sandbox read-only
+--skip-git-repo-check --ephemeral --json --color never -` immediately. Conversation mode
+uses that ordinary invocation. No request is automatically repeated after a turn write
+has been attempted.
+
+Preparation has an eight-second startup deadline and a thirty-minute standby lifetime;
+expiry only discards preparation and never limits a recording. Inference retains its
+separate 120-second deadline. Cancellation, recording replacement and shutdown retire
+owned sessions and their process groups. Codex retains its configured login, model,
+reasoning effort and policy unless a model or effort is explicitly selected in the app.
+Read-only mode does not remove agent tools. Only a completed successful turn's final
+assistant answer is accepted; progress and commentary are excluded.
 
 Choose Claude Code and Codex models from the dropdowns in **Settings → AI models**.
 **Use tool settings** omits `--model`, leaving model selection to the CLI's configuration
 and policy. This does not resume the model or chat from an unrelated CLI process.
-An explicit selection is passed as `--model` without changing global CLI settings.
+An explicit selection is passed to the CLI or app-server without changing global CLI settings.
 Discovered choices come from the installed CLI:
 Codex's app-server `model/list` and Claude's initialization control response. Metadata
 sessions use private pipes and the existing owned process boundary, then close; no
@@ -243,8 +255,12 @@ Use `--provider claude_code --model MODEL` for Claude Code or `--case long-spars
 fixture. A mismatch or request failure returns nonzero; provider failures stop remaining
 account calls. Exact matches cover these fixtures only, and semantic alternatives require
 review. Recording, recognition, audio silence and desktop delivery are outside this benchmark.
-For Codex, `--compare-baseline` alternates the app adapter with the fixed former `exec`
-invocation so transport changes can be compared without changing the text prompt or model.
+For Codex, `--compare-baseline` alternates a prepared app-server session with the ordinary
+`exec` invocation, preserving the full text prompt, model and reasoning effort. Preparation
+starts a fresh ephemeral thread without a model turn. `--prepare-ms` (default 3000, maximum
+30000) simulates time spent recording before input is sent. `preparation_ms` is reported
+separately; `elapsed_ms` measures the text stage after that simulated stop. A preparation
+failure can select `exec`; the `transport` field identifies the path actually measured.
 
 Primary references: [LM Studio Chat Completions](https://lmstudio.ai/docs/developer/openai-compat/chat-completions),
 [LM Studio native model metadata](https://lmstudio.ai/docs/developer/rest/list),

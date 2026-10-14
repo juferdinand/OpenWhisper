@@ -104,3 +104,63 @@ test("abort shortly before the operation deadline preserves CANCELLED during SIG
     (error: unknown) => error instanceof TextCliProcessError && error.code === "CANCELLED");
   } finally { clearTimeout(abortTimer); }
 });
+
+test("prepared dialogue separates startup, standby and inference deadlines and cannot restart a request", async () => {
+  const executable = await fixtureExecutable(`
+    require('node:readline').createInterface({input:process.stdin}).on('line', line => {
+      if (line === 'start') process.stdout.write('ready\\n');
+      else setTimeout(() => process.stdout.write('done\\n'), 30);
+    });
+  `);
+  let control: import("../../src/services/text/text-cli-process.js").TextCliDialogueControl | undefined;
+  let ready!: () => void;
+  const waiting = new Promise<void>((accept) => { ready = accept; });
+  const running = runTextCliProcess({ executable, args: [], input: "start\n", signal: new AbortController().signal,
+    timeoutMs: 150, startupTimeoutMs: 1_000, idleTimeoutMs: 1_000, keepStdinOpen: true, collectStdout: false,
+    onControl: (value) => { control = value; }, onLine: (line) => {
+      if (line === "ready") { control!.waitForInput(); ready(); }
+      else control!.finishRequest();
+      return undefined;
+    } });
+  await waiting;
+  await new Promise<void>((accept) => setTimeout(accept, 220));
+  control!.beginRequest(); control!.write("request\n");
+  assert.equal((await running).byteLength, 0);
+  assert.throws(() => control!.beginRequest(), TextCliProcessError);
+  assert.throws(() => control!.write("late\n"), TextCliProcessError);
+});
+
+test("prepared dialogue expires standby without borrowing a new inference deadline", async () => {
+  const executable = await fixtureExecutable("process.stdin.once('data', () => process.stdout.write('ready\\n')); process.stdin.resume();");
+  let control: import("../../src/services/text/text-cli-process.js").TextCliDialogueControl | undefined;
+  await assert.rejects(runTextCliProcess({ executable, args: [], input: "start\n", signal: new AbortController().signal,
+    timeoutMs: 1_000, startupTimeoutMs: 1_000, idleTimeoutMs: 100, keepStdinOpen: true,
+    onControl: (value) => { control = value; }, onLine: () => { control!.waitForInput(); return undefined; } }),
+  (error: unknown) => error instanceof TextCliProcessError && error.code === "TIMEOUT");
+  assert.throws(() => control!.beginRequest(), TextCliProcessError);
+});
+
+test("completed and unexpectedly exited standby dialogues retire same-group descendants", { skip: process.platform === "win32" }, async () => {
+  for (const phase of ["idle", "complete"]) {
+    const executable = await fixtureExecutable("");
+    const marker = join(dirname(executable), "survived-successful-dialogue");
+    await writeFile(executable, `#!/usr/bin/env node
+      const { spawn } = require('node:child_process');
+      spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); setTimeout(() => require('node:fs').writeFileSync(" + ${JSON.stringify(JSON.stringify(marker))} + ", 'survived'), 2600)"], {stdio:'ignore'});
+      process.stdin.once('data', () => { process.stdout.write('ready\\n'); if (${JSON.stringify(phase)} === 'idle') setTimeout(() => process.exit(0), 25); });
+      process.stdin.on('end', () => process.exit(0));
+    `, { mode: 0o700 });
+    let control: import("../../src/services/text/text-cli-process.js").TextCliDialogueControl | undefined;
+    const started = performance.now();
+    await runTextCliProcess({ executable, args: [], input: "start\n", signal: new AbortController().signal,
+      timeoutMs: 1_000, idleTimeoutMs: 1_000, keepStdinOpen: true,
+      onControl: (value) => { control = value; }, onLine: () => {
+        control!.waitForInput();
+        if (phase === "complete") { control!.beginRequest(); control!.finishRequest(); }
+        return undefined;
+      } });
+    assert.ok(performance.now() - started >= 1400);
+    await new Promise<void>((accept) => setTimeout(accept, Math.max(0, 2800 - (performance.now() - started))));
+    await assert.rejects(readFile(marker), { code: "ENOENT" });
+  }
+});
