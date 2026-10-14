@@ -108,6 +108,20 @@ test("only the highest enabled provider is attempted", async () => {
   assert.deepEqual(calls, ["ollama"]);
 });
 
+test("an explicit text retry can reuse the selected provider after a failed revision", async () => {
+  let requests = 0;
+  const { instance, calls } = processor({ enabled: ["ollama", "lm_studio"], run: async () => {
+    requests += 1;
+    if (requests === 1) throw new Error("synthetic provider failure");
+    return "revised text";
+  } });
+  assert.equal(await instance.process("post-vocabulary input", owner()), "post-vocabulary input");
+  assert.deepEqual(instance.snapshot().processing, { status: "fallback", provider: "ollama", reason: "failed" });
+  assert.equal(await instance.process("post-vocabulary input", { ...owner(), attempt: 3 }), "revised text");
+  assert.deepEqual(calls, ["ollama", "ollama"]);
+  assert.deepEqual(instance.snapshot().processing, { status: "complete", provider: "ollama", reason: null });
+});
+
 test("CLI providers run with empty model catalogs and forward blank or explicit model selections", async () => {
   const defaults = defaultTextConnectionSettings();
   for (const provider of ["claude_code", "codex"] as const) {

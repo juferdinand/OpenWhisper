@@ -35,6 +35,7 @@ function state(): AppState {
     model_directory: "/fixture/models",
     text_connections: { settings: defaultTextConnectionSettings(), available: defaultTextConnectionAvailability(), scanning: false,
       processing: idleTextConnectionProcessing(), conversation: emptyTextConversation() },
+    text_revision_retry: { status: "idle" },
     text_processing: null,
   };
 }
@@ -255,7 +256,8 @@ test("overlay permits only state recording and recovery actions", async () => {
     const result = await bridge.dispatch({ sender: overlay, serializedRequest: request(command) });
     assert.equal(result.ok, true);
   }
-  for (const command of ["save_preferences", "install_update", "enable_paste", "complete_setup", "copy_history"]) {
+  for (const command of ["save_preferences", "install_update", "enable_paste", "complete_setup", "copy_history",
+    "retry_text_revision", "copy_text_revision"]) {
     // Even invalid arguments or absent handlers cannot bypass the role policy.
     failure(await bridge.dispatch({ sender: overlay, serializedRequest: request(command) }), "FORBIDDEN_COMMAND");
   }

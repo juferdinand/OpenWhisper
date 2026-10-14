@@ -18,6 +18,7 @@ function state(): AppState {
     download: null, progress: 0, elapsed: 0, model_directory: "", recording_available: true,
     text_connections: { settings: defaultTextConnectionSettings(), available: defaultTextConnectionAvailability(), scanning: false,
       processing: idleTextConnectionProcessing(), conversation: emptyTextConversation() },
+    text_revision_retry: { status: "idle" },
     text_processing: null,
   };
 }

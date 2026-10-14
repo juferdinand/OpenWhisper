@@ -22,6 +22,7 @@ import {
 import type {
   BuiltinTextProvider,
   CustomCliConnection,
+  TextProvider,
   TextConnectionSettings,
 } from "../../src/contracts/text/connections.js";
 import { SettingsAutosave, type SettingsSaveStatus } from "./settings-autosave";
@@ -2045,6 +2046,7 @@ function renderWorkspace() {
     state.raw_transcript_preview_omitted,
     state.text_processing,
     state.text_connections.processing,
+    state.text_revision_retry,
     state.text_connections.settings.mode,
     state.text_connections.settings.connections,
     state.text_connections.conversation,
@@ -2109,12 +2111,55 @@ function renderWorkspace() {
     "timeout_without_reasoning_control"
       ? "AI text processing timed out. LM Studio does not expose a setting to turn reasoning off for this model; try a model that does. Your original text was kept."
       : "AI text processing was skipped; your text was kept.";
+  const revisionRetryFallbackMessage =
+    state.text_connections.processing.reason ===
+    "timeout_without_reasoning_control"
+      ? processingFallbackMessage
+      : state.text_connections.processing.reason === "unavailable"
+        ? "The selected AI connection is unavailable; your text was kept."
+        : "AI text processing failed; your text was kept.";
+  const revisionRetry = state.text_revision_retry;
+  const retryProviderName = (provider: TextProvider): string => {
+    const connection = state.text_connections.settings.connections.find(
+      (item) => item.provider === provider,
+    );
+    if (connection?.provider.startsWith("custom:") && "name" in connection)
+      return connection.name;
+    if (provider.startsWith("custom:")) return provider;
+    return (
+      {
+        ollama: "Ollama",
+        lm_studio: "LM Studio",
+        claude_code: "Claude Code",
+        codex: "Codex",
+      } as Record<BuiltinTextProvider, string>
+    )[provider as BuiltinTextProvider];
+  };
+  const retryProviderLabel =
+    revisionRetry.status === "idle"
+      ? ""
+      : retryProviderName(revisionRetry.provider);
   const processingFallbackNotice =
     selectedHistoryText === undefined &&
     transcriptAvailable &&
     state.status !== "transcribing" &&
-    state.text_connections.processing.status === "fallback"
+    state.text_connections.processing.status === "fallback" &&
+    revisionRetry.status === "idle"
       ? `<p class="processing-fallback-notice" role="status">${esc(t(processingFallbackMessage))}</p>`
+      : "";
+  const textRevisionRetryMarkup =
+    selectedHistoryText === undefined &&
+    transcriptAvailable &&
+    !conversationMode
+      ? revisionRetry.status === "available"
+        ? `<div class="processing-fallback-notice text-revision-retry-notice" role="status"><span>${esc(t(revisionRetryFallbackMessage))}</span><button id="retry-ai-revision" type="button">${esc(t("Try again with {provider}", { provider: retryProviderLabel }))}</button></div>`
+        : revisionRetry.status === "failed"
+          ? `<div class="processing-fallback-notice text-revision-retry-notice" role="status"><span>${esc(t("AI text processing failed again; your original text was kept."))}</span><button id="retry-ai-revision" type="button">${esc(t("Try again with {provider}", { provider: retryProviderLabel }))}</button></div>`
+          : revisionRetry.status === "processing"
+            ? `<div class="processing-fallback-notice text-revision-retry-notice" role="status"><span>${esc(t("Retrying AI revision with {provider}…", { provider: retryProviderLabel }))}</span><button id="cancel-ai-revision" type="button">${esc(t("Cancel"))}</button></div>`
+            : revisionRetry.status === "complete"
+              ? `<section class="text-revision-retry-result" aria-labelledby="revision-retry-heading"><h3 id="revision-retry-heading">${esc(t("AI revised version with {provider}", { provider: retryProviderLabel }))}</h3><p class="transcript">${esc(revisionRetry.text)}</p><p class="secondary">${esc(t("This is a preview. Your delivered transcript and history remain unchanged."))}</p><button id="copy-ai-revision" type="button">${esc(t("Copy revised text"))}</button></section>`
+              : ""
       : "";
   const selectedConnection = state.text_connections.settings.connections.find(
     (item) => item.enabled,
@@ -2177,7 +2222,7 @@ function renderWorkspace() {
     : t("History is not saved.");
   const retainedWaveformCanvas = mainWaveform?.canvas;
   retainedWaveformCanvas?.remove();
-  main.innerHTML = `${permissionBanner()}<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><label class="workspace-mode-select">${esc(t("Processing mode"))}<select id="workspace-mode" aria-label="${esc(t("Processing mode"))}" ${state.status === "recording" || state.status === "transcribing" ? "disabled" : ""}><option value="single" ${!conversationMode ? "selected" : ""}>${esc(t("Single recording"))}</option><option value="conversation" ${conversationMode ? "selected" : ""}>${esc(t("Voice conversation"))}</option></select></label><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true"><canvas class="live-waveform" data-waveform="main" aria-hidden="true"></canvas></div></section>${conversationNotice}<section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(conversationMode ? t("Conversation") : t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}${processingFallbackNotice}${contextFullNotice}</div></section>${processingMarkup}<section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
+  main.innerHTML = `${permissionBanner()}<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><label class="workspace-mode-select">${esc(t("Processing mode"))}<select id="workspace-mode" aria-label="${esc(t("Processing mode"))}" ${state.status === "recording" || state.status === "transcribing" || revisionRetry.status === "processing" ? "disabled" : ""}><option value="single" ${!conversationMode ? "selected" : ""}>${esc(t("Single recording"))}</option><option value="conversation" ${conversationMode ? "selected" : ""}>${esc(t("Voice conversation"))}</option></select></label><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true"><canvas class="live-waveform" data-waveform="main" aria-hidden="true"></canvas></div></section>${conversationNotice}<section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(conversationMode ? t("Conversation") : t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}${processingFallbackNotice}${textRevisionRetryMarkup}${contextFullNotice}</div></section>${processingMarkup}<section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
   bindVocabularyContextActions(main);
   if (retainedWaveformCanvas)
     main
@@ -2191,6 +2236,15 @@ function renderWorkspace() {
         void command("copy_history", { index: selectedHistoryIndex });
       } else void command("copy_transcript");
     });
+  main
+    .querySelector<HTMLButtonElement>("#retry-ai-revision")
+    ?.addEventListener("click", () => void command("retry_text_revision"));
+  main
+    .querySelector<HTMLButtonElement>("#cancel-ai-revision")
+    ?.addEventListener("click", () => void command("cancel_text_processing"));
+  main
+    .querySelector<HTMLButtonElement>("#copy-ai-revision")
+    ?.addEventListener("click", () => void command("copy_text_revision"));
   main
     .querySelector<HTMLButtonElement>("#cancel-processing")
     ?.addEventListener("click", () => void command("cancel_recording"));
