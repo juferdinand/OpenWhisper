@@ -2,6 +2,8 @@ import type { TextRevisionSettings } from "../../../src/contracts/text/connectio
 
 const paragraph = "Bitte schicke den Bericht morgen an das Team. Wir treffen uns um 14:30 Uhr im großen Besprechungsraum. Die Unterlagen liegen bereits im gemeinsamen Ordner. Am Freitag prüfen wir die Ergebnisse und besprechen die nächsten Schritte. Für den ersten Entwurf brauchen wir keine zusätzlichen Grafiken. Die vorhandenen Zahlen reichen aus. Bitte behalte die Reihenfolge der Abschnitte bei und ändere keine Produktnamen. Der Kunde wartet auf eine Rückmeldung bis Dienstag. Danach können wir den Termin verbindlich bestätigen. Die Kosten betragen insgesamt 350 Euro. Das Angebot gilt für drei Monate. Wir beginnen mit dem kleinen Paket und erweitern es bei Bedarf. Ich schicke die endgültige Fassung später an alle Beteiligten. Vielen Dank für deine Unterstützung bei der Vorbereitung.";
 const longText = Array.from({ length: 5 }, (_, index) => `Abschnitt ${index + 1}. ${paragraph}`).join(" ");
+const denseSource = "Der Bericht liegen im Ordner. Die Unterlagen ist vollständig. Das Team haben den Termin bestätigt. Wir hat drei Aufgaben. Die Zahlen wurde geprüft.";
+const denseExpected = "Der Bericht liegt im Ordner. Die Unterlagen sind vollständig. Das Team hat den Termin bestätigt. Wir haben drei Aufgaben. Die Zahlen wurden geprüft.";
 
 interface RevisionQualityCase {
   readonly id: string;
@@ -30,8 +32,13 @@ export const revisionQualityCases: readonly RevisionQualityCase[] = [
   },
   {
     id: "german-dense",
-    source: "Der Bericht liegen im Ordner. Die Unterlagen ist vollständig. Das Team haben den Termin bestätigt. Wir hat drei Aufgaben. Die Zahlen wurde geprüft.",
-    expected: "Der Bericht liegt im Ordner. Die Unterlagen sind vollständig. Das Team hat den Termin bestätigt. Wir haben drei Aufgaben. Die Zahlen wurden geprüft.",
+    source: denseSource,
+    expected: denseExpected,
+  },
+  {
+    id: "long-dense-repeated",
+    source: Array.from({ length: 5 }, (_, index) => `Abschnitt ${index + 1}. ${denseSource}`).join("\n\n"),
+    expected: Array.from({ length: 5 }, (_, index) => `Abschnitt ${index + 1}. ${denseExpected}`).join("\n\n"),
   },
   {
     id: "multilingual",

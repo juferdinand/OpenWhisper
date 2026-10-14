@@ -7,7 +7,6 @@ import {
 } from "../../contracts/text/connections.js";
 import type { TextProcessingStageEvent } from "../../contracts/text/processing.js";
 import { compileTextRevisionPrompt } from "../../core/text/text-revision-prompt.js";
-import { applyTextRevisionEdits, MIN_TEXT_REVISION_EDIT_BYTES } from "../../core/text/text-revision-edits.js";
 import { LocalProcessingError } from "../speech/local-processing.js";
 import { ensureTextProviderAvailability, safeAvailabilityFallback } from "./connections.js";
 
@@ -117,10 +116,8 @@ export class OptionalTextProcessing {
       this.options.onChange?.();
       return text;
     }
-    const editReply = !conversationMode && (selected.provider === "codex" || selected.provider === "claude_code") &&
-      (text.length >= MIN_TEXT_REVISION_EDIT_BYTES || new TextEncoder().encode(text).byteLength >= MIN_TEXT_REVISION_EDIT_BYTES);
     const revisionInstruction = !conversationMode && settings.revision
-      ? compileTextRevisionPrompt(settings.revision, editReply ? "edits" : "text") : undefined;
+      ? compileTextRevisionPrompt(settings.revision) : undefined;
     if (!conversationMode && revisionInstruction === undefined) {
       this.active?.controller.abort();
       this.active = undefined;
@@ -159,10 +156,9 @@ export class OptionalTextProcessing {
         return this.fallback(text, owner, selected.provider, "context_full");
       }
       const instruction = conversationMode ? settings.conversationInstruction : revisionInstruction!;
-      const reply = await this.options.runProvider(selected, instruction, text, signal, active.requestId, turns);
+      const result = await this.options.runProvider(selected, instruction, text, signal, active.requestId, turns);
       if (this.parentCancelled(owner) || this.active !== active) return undefined;
       if (this.userCancelled(active)) return this.fallback(text, owner, selected.provider, "cancelled");
-      const result = editReply ? applyTextRevisionEdits(text, reply) : reply;
       if (turns && !this.fitsConversation(conversation, selected.provider, { user: text, assistant: result })) {
         return this.fallback(text, owner, selected.provider, "context_full");
       }
