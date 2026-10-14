@@ -355,7 +355,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         packaged: app.isPackaged, currentVersion: version, executable: await realpath(process.execPath) });
       if (macUpdateAdmission) {
         macUpdates = createMacosUpdateCoordinator({ admission: macUpdateAdmission, identity,
-          currentVersion: version, cacheDirectory: profile.paths.cache });
+          currentVersion: version, cacheDirectory: profile.paths.cache,
+          channel: () => preferences.snapshot().update_channel });
         updates = { ...updates, configured: true };
       }
     } catch { updates = { ...updates, status: "error", error: "Update services are unavailable in this installation." }; }
@@ -1004,7 +1005,8 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     else if (value.status === "preparing" || value.status === "prepared") updates = { ...updates, status: "installing",
       ...(value.status === "prepared" ? { version: value.updateVersion } : {}),
       progress: 1, download: undefined, error: null };
-    else if (value.status === "idle") updates = { ...updates, status: updates.version ? "available" : "current", error: null };
+    else if (value.status === "idle") updates = { ...updates, status: "current", version: null, details: undefined,
+      progress: 0, download: undefined, error: null };
     else if (value.status === "failed") updates = { ...updates, status: "error",
       download: undefined, error: value.code === "CANCELLED" ? "The update was cancelled." : "The update could not be completed." };
     if (!["checking", "preparing", "prepared", "downloading", "verifying"].includes(value.status)) updateReserved = undefined;
@@ -1032,7 +1034,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           if (macUpdateOperation === task) macUpdateOperation = undefined;
           if (shutdownInProgress) return;
           updates = candidate ? { ...updates, status: "available", version: candidate.version, details: candidate.details, error: null }
-            : { ...updates, status: updates.version ? "available" : "current", error: null };
+            : { ...updates, status: "current", version: null, details: undefined, progress: 0, download: undefined, error: null };
           updateReserved = undefined; notify();
         } else if (kind === "download") {
           const task = macUpdates.prepareInstall(controller.signal, {
@@ -1122,6 +1124,11 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       install_update: () => requestUpdate("install"),
       save_preferences: ({ changes }) => withRecordingControl(async () => {
         if (changes.auto_check_updates === true && !updates.configured) throw new Error("Update services are not configured in this build.");
+        if (changes.update_channel !== undefined && !updates.configured) throw new Error("Update services are not configured in this build.");
+        if (changes.update_channel !== undefined && (updateReserved !== undefined ||
+          ["downloading", "verifying", "ready", "installing"].includes(updates.status))) {
+          throw new Error("Finish the current update before changing its channel.");
+        }
         if (changes.launch_at_login !== undefined && (!autostart || !loginFact)) throw new Error("Login services are unavailable in this installation.");
         if (changes.model && !catalog.models.some((model) => model.id === changes.model) && !installed.some((item) => item.model.id === changes.model)) {
           throw new Error("Unknown catalog model.");
@@ -1151,6 +1158,11 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
             await refreshLogin(); notify();
           }
           throw error;
+        }
+        if (changes.update_channel !== undefined) {
+          updates = { ...updates, status: "idle", version: null, details: undefined, progress: 0, download: undefined, error: null };
+          notify();
+          void requestUpdate("check").catch(() => {});
         }
         if (changes.hold_to_record !== undefined) await platformHost?.shortcut("mode", changes.hold_to_record);
         if (["model", "language", "microphone", "cleanup_enabled", "vocabulary", "snippets", "gpu"].some((key) => Object.hasOwn(changes, key))) configured = false;

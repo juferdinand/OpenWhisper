@@ -156,6 +156,7 @@ export all keychain identities or commit signing material.
 - [Linux implementation and acceptance](docs/LINUX.md)
 - [Platform architecture](docs/PLATFORMS.md)
 - [Release signing](docs/SIGNING.md)
+- [Update channels and preview version policy](docs/UPDATE-CHANNELS.md)
 - [Data locations](docs/DATA-LOCATIONS.md)
 - [Security policy](SECURITY.md)
 - [Optional text-model connections](docs/LOCAL_MODELS.md)

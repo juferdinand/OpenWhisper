@@ -27,7 +27,7 @@ function state(): AppState {
     preferences: {
       ui_language: "en", setup_completed: false, model: "tiny", language: "auto",
       microphone: "", vocabulary: [], snippets: [], output: "clipboard",
-      hold_to_record: false, gpu: false, keep_history: true, cleanup_enabled: true,
+      hold_to_record: false, gpu: false, keep_history: true, cleanup_enabled: true, update_channel: "stable",
     },
     models: [], installed: [], microphones: [], session: "Owned fixture", desktop: "Owned fixture",
     clipboard_available: true, shortcut_portal: false, paste_portal: false, shortcut: null,

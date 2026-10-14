@@ -46,6 +46,8 @@ export type UpdateDetails = z.infer<typeof updateDetailsSchema>;
 const tabSchema = z.enum(["setup", "general", "models", "snippets", "history", "about"]);
 export type Tab = z.infer<typeof tabSchema>;
 const uiLanguageSchema = z.enum(["en", "de"]);
+const updateChannelSchema = z.enum(["stable", "preview"]);
+export type UpdateChannel = z.infer<typeof updateChannelSchema>;
 
 export { snippetSchema };
 export type { Snippet } from "../text/snippets.js";
@@ -183,6 +185,7 @@ export const preferencesSchema = z.strictObject({
   show_idle_overlay: z.boolean().optional(),
   launch_at_login: z.boolean().optional(),
   auto_check_updates: z.boolean().optional(),
+  update_channel: updateChannelSchema.default("stable"),
 });
 export type Preferences = z.infer<typeof preferencesSchema>;
 
@@ -195,6 +198,7 @@ export const preferencePatchSchema = preferencesSchema.omit({
   x11_trigger: true,
   macos_shortcut: true,
 }).partial().extend({
+  update_channel: updateChannelSchema.optional(),
   cleanup_enabled: z.boolean().optional(),
   vocabulary: preferenceVocabularyPatchSchema.optional(),
 }).refine(
