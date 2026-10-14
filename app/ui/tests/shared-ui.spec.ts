@@ -2147,17 +2147,7 @@ test("Linux recognition mode names devices and distinguishes selection, discover
     ),
   ).toBeVisible();
   await page.evaluate(() => {
-    window.testState.gpu_fallback = true;
-    window.publishState();
-  });
-  await expect(
-    page.getByText(
-      "GPU recognition failed; this recording used the CPU: AMD Ryzen 7 5700G",
-      { exact: true },
-    ),
-  ).toBeVisible();
-  await cpu.check();
-  await page.evaluate(() => {
+    window.testState.gpu_fallback = false;
     window.testState.gpu_probe_failed = true;
     window.publishState();
   });
@@ -2166,15 +2156,18 @@ test("Linux recognition mode names devices and distinguishes selection, discover
       exact: true,
     }),
   ).toBeVisible();
+  await cpu.check();
+  await expect(
+    page.getByText("CPU selected: AMD Ryzen 7 5700G", {
+      exact: true,
+    }),
+  ).toBeVisible();
   await page.evaluate(() => {
     window.testState.preferences.ui_language = "de";
     window.publishState();
   });
   await expect(
-    page.getByText(
-      "GPU-Erkennung fehlgeschlagen; die CPU wird verwendet: AMD Ryzen 7 5700G",
-      { exact: true },
-    ),
+    page.getByText("CPU ausgewählt: AMD Ryzen 7 5700G", { exact: true }),
   ).toBeVisible();
 });
 
@@ -6004,28 +5997,25 @@ for (const platform of ["linux", "macos"] as const) {
         );
         await expect(gpuMode).toBeDisabled();
         await expect(
-          page.getByText("Checking GPU hardware …", { exact: true }),
+          page.getByText(`CPU selected: ${cpuDevice}`, { exact: true }),
         ).toBeVisible();
         await page.evaluate(() => window.publishState());
         await expect(
-          page.getByText("Checking GPU hardware …", { exact: true }),
+          page.getByText(`CPU selected: ${cpuDevice}`, { exact: true }),
         ).toBeVisible();
         await page.evaluate(() => {
           window.testState.gpu_checked = true;
           window.publishState();
         });
         await expect(
-          page.getByText(
-            `No compatible GPU was detected. Recognition uses the CPU: ${cpuDevice}`,
-            { exact: true },
-          ),
+          page.getByText(`CPU selected: ${cpuDevice}`, { exact: true }),
         ).toBeVisible();
         await page.evaluate(() => {
           window.testState.gpu_probe_failed = true;
           window.publishState();
         });
         await expect(
-          page.getByText(`GPU recognition failed; using CPU: ${cpuDevice}`, {
+          page.getByText(`CPU selected: ${cpuDevice}`, {
             exact: true,
           }),
         ).toBeVisible();
@@ -6034,10 +6024,7 @@ for (const platform of ["linux", "macos"] as const) {
           window.publishState();
         });
         await expect(
-          page.getByText(
-            `GPU-Erkennung fehlgeschlagen; die CPU wird verwendet: ${cpuDevice}`,
-            { exact: true },
-          ),
+          page.getByText(`CPU ausgewählt: ${cpuDevice}`, { exact: true }),
         ).toBeVisible();
         await page.evaluate(() => {
           window.testState.preferences.ui_language = "en";
@@ -6047,10 +6034,7 @@ for (const platform of ["linux", "macos"] as const) {
         await expect(gpuMode).toBeDisabled();
         await page.evaluate(() => window.publishState());
         await expect(
-          page.getByText(
-            `No compatible GPU was detected. Recognition uses the CPU: ${cpuDevice}`,
-            { exact: true },
-          ),
+          page.getByText(`CPU selected: ${cpuDevice}`, { exact: true }),
         ).toBeVisible();
         await page.evaluate(
           ({ gpuDevice }) => {
@@ -8397,7 +8381,7 @@ test("Apple Silicon setup offers Metal recognition and Intel Macs skip the hardw
     page.getByRole("heading", { name: "Choose recognition hardware" }),
   ).toBeVisible();
   await expect(
-    page.getByText("GPU recognition failed; using CPU: Synthetic Apple CPU", {
+    page.getByText("CPU selected: Synthetic Apple CPU", {
       exact: true,
     }),
   ).toBeVisible();
@@ -8406,10 +8390,7 @@ test("Apple Silicon setup offers Metal recognition and Intel Macs skip the hardw
     window.publishState();
   });
   await expect(
-    page.getByText(
-      "GPU-Erkennung fehlgeschlagen; die CPU wird verwendet: Synthetic Apple CPU",
-      { exact: true },
-    ),
+    page.getByText("CPU ausgewählt: Synthetic Apple CPU", { exact: true }),
   ).toBeVisible();
   await page.evaluate(() => {
     window.testState.preferences.ui_language = "en";

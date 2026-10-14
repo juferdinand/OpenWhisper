@@ -749,7 +749,7 @@ function recognitionHardwareStatus(): string {
   const gpu = state.gpu_device;
   if (state.preferences.gpu && state.gpu_fallback)
     return t("CPU selected after GPU fallback: {device}", { device: cpu });
-  if (state.gpu_probe_failed)
+  if (state.preferences.gpu && state.gpu_probe_failed)
     return t("GPU recognition failed; using CPU: {device}", { device: cpu });
   if (state.preferences.gpu && state.gpu_checked === false)
     return t("Checking GPU hardware …");
@@ -1192,7 +1192,7 @@ function recognitionModeStatus(): string {
       device: cpu,
     });
   }
-  if (state.gpu_probe_failed) {
+  if (state.preferences.gpu && state.gpu_probe_failed) {
     return t("GPU recognition failed; using CPU: {device}", { device: cpu });
   }
   if (!state.preferences.gpu) {
@@ -1227,8 +1227,9 @@ function setupRecognitionModeStatus(): string {
       { device: cpu },
     );
   }
+  if (!state.preferences.gpu) return recognitionHardwareStatus();
   if (!state.gpu_checked) return t("Checking GPU hardware …");
-  if (state.gpu_probe_failed) {
+  if (state.preferences.gpu && state.gpu_probe_failed) {
     return t("GPU recognition failed; using CPU: {device}", { device: cpu });
   }
   if (state.gpu_fallback) {
