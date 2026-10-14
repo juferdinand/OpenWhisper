@@ -1,14 +1,20 @@
 <!-- Prepared for the gated release workflow; repository status lives in README.md. -->
 
-## What's new in OpenWhisper 0.5.4
+## What's new in OpenWhisper 0.5.5
 
-- Configure model specific reasoning effort for Ollama, LM Studio, Claude Code and Codex.
-- Manage and test custom CLI connections in AI models settings, with configured provider metadata refreshed in the background.
+- Warm up enabled local Ollama and LM Studio models during dictation to reduce the wait after recording.
+- Keep a timestamped, copyable history for new recordings, and opt in to preview updates.
+- Retry failed AI text revisions without recording again.
+- Fall back to CPU when the optional GPU check fails.
+- Speed up vocabulary matching on long transcripts without changing results.
 
-## Neu in OpenWhisper 0.5.4
+## Neu in OpenWhisper 0.5.5
 
-- Konfiguriere die Reasoning-Stufe je Modell für Ollama, LM Studio, Claude Code und Codex.
-- Verwalte und teste eigene CLI-Verbindungen in den KI-Modell-Einstellungen; eingerichtete Anbieter werden im Hintergrund aktualisiert.
+- Wärme aktivierte lokale Ollama- und LM-Studio-Modelle bereits während des Diktats vor, um die Wartezeit nach der Aufnahme zu verkürzen.
+- Führe neue Aufnahmen mit Zeitangabe und Kopierfunktion im Verlauf; Vorschau-Updates lassen sich optional aktivieren.
+- Starte fehlgeschlagene KI-Textüberarbeitungen erneut, ohne noch einmal aufzunehmen.
+- Wechsle zur CPU, wenn die optionale GPU-Prüfung fehlschlägt.
+- Beschleunige den Wortschatzabgleich bei langen Transkripten, ohne die Ergebnisse zu verändern.
 
 Recognition runs locally. Exact package, desktop and test scope is recorded in
 [Electron status](https://github.com/juferdinand/OpenWhisper/blob/main/docs/ELECTRON-STATUS.md) and

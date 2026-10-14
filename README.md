@@ -11,7 +11,7 @@ German; dictation can use multiple languages.
 
 ## Project status
 
-The current release is **0.5.4**, a shared Electron app for macOS and Linux. Automated package,
+The current release is **0.5.5**, a shared Electron app for macOS and Linux. Automated package,
 update, and owned-runtime checks cover the scopes listed in [release status](docs/ELECTRON-STATUS.md);
 they do not establish every desktop, device, or distribution combination. The older native 0.2.5
 source and evidence remain available as an immutable reference.
