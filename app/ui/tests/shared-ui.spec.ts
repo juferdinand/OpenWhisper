@@ -2111,6 +2111,7 @@ test("Linux recognition mode names devices and distinguishes selection, discover
     Object.assign(window.testState, {
       gpu_supported: true,
       gpu_checked: false,
+      gpu_probe_failed: false,
       gpu_available: false,
       gpu_fallback: false,
       cpu_device: "AMD Ryzen 7 5700G",
@@ -2146,18 +2147,27 @@ test("Linux recognition mode names devices and distinguishes selection, discover
     ),
   ).toBeVisible();
   await page.evaluate(() => {
-    window.testState.gpu_fallback = true;
+    window.testState.gpu_fallback = false;
+    window.testState.gpu_probe_failed = true;
     window.publishState();
   });
   await expect(
-    page.getByText(
-      "GPU recognition failed; this recording used the CPU: AMD Ryzen 7 5700G",
-      { exact: true },
-    ),
+    page.getByText("GPU recognition failed; using CPU: AMD Ryzen 7 5700G", {
+      exact: true,
+    }),
   ).toBeVisible();
   await cpu.check();
   await expect(
-    page.getByText("CPU selected: AMD Ryzen 7 5700G", { exact: true }),
+    page.getByText("CPU selected: AMD Ryzen 7 5700G", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.preferences.ui_language = "de";
+    window.publishState();
+  });
+  await expect(
+    page.getByText("CPU ausgewählt: AMD Ryzen 7 5700G", { exact: true }),
   ).toBeVisible();
 });
 
@@ -5988,29 +5998,44 @@ for (const platform of ["linux", "macos"] as const) {
         );
         await expect(gpuMode).toBeDisabled();
         await expect(
-          page.getByText("Checking GPU hardware …", { exact: true }),
+          page.getByText(`CPU selected: ${cpuDevice}`, { exact: true }),
         ).toBeVisible();
         await page.evaluate(() => window.publishState());
         await expect(
-          page.getByText("Checking GPU hardware …", { exact: true }),
+          page.getByText(`CPU selected: ${cpuDevice}`, { exact: true }),
         ).toBeVisible();
         await page.evaluate(() => {
           window.testState.gpu_checked = true;
           window.publishState();
         });
         await expect(
-          page.getByText(
-            `No compatible GPU was detected. Recognition uses the CPU: ${cpuDevice}`,
-            { exact: true },
-          ),
+          page.getByText(`CPU selected: ${cpuDevice}`, { exact: true }),
         ).toBeVisible();
+        await page.evaluate(() => {
+          window.testState.gpu_probe_failed = true;
+          window.publishState();
+        });
+        await expect(
+          page.getByText(`CPU selected: ${cpuDevice}`, {
+            exact: true,
+          }),
+        ).toBeVisible();
+        await page.evaluate(() => {
+          window.testState.preferences.ui_language = "de";
+          window.publishState();
+        });
+        await expect(
+          page.getByText(`CPU ausgewählt: ${cpuDevice}`, { exact: true }),
+        ).toBeVisible();
+        await page.evaluate(() => {
+          window.testState.preferences.ui_language = "en";
+          window.testState.gpu_probe_failed = false;
+          window.publishState();
+        });
         await expect(gpuMode).toBeDisabled();
         await page.evaluate(() => window.publishState());
         await expect(
-          page.getByText(
-            `No compatible GPU was detected. Recognition uses the CPU: ${cpuDevice}`,
-            { exact: true },
-          ),
+          page.getByText(`CPU selected: ${cpuDevice}`, { exact: true }),
         ).toBeVisible();
         await page.evaluate(
           ({ gpuDevice }) => {
@@ -8370,7 +8395,8 @@ test("Apple Silicon setup offers Metal recognition and Intel Macs skip the hardw
       gpu_device: "Synthetic Apple GPU",
       gpu_supported: true,
       gpu_checked: true,
-      gpu_available: true,
+      gpu_available: false,
+      gpu_probe_failed: true,
       gpu_fallback: false,
     });
     window.publishState();
@@ -8380,6 +8406,24 @@ test("Apple Silicon setup offers Metal recognition and Intel Macs skip the hardw
   await expect(
     page.getByRole("heading", { name: "Choose recognition hardware" }),
   ).toBeVisible();
+  await expect(
+    page.getByText("CPU selected: Synthetic Apple CPU", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.preferences.ui_language = "de";
+    window.publishState();
+  });
+  await expect(
+    page.getByText("CPU ausgewählt: Synthetic Apple CPU", { exact: true }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.testState.preferences.ui_language = "en";
+    window.testState.gpu_probe_failed = false;
+    window.testState.gpu_available = true;
+    window.publishState();
+  });
   const gpuMode = page.locator('input[name="gpu-mode"][value="true"]');
   await expect(gpuMode).toBeEnabled();
   await gpuMode.check();
