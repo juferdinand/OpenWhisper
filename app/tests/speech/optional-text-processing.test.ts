@@ -345,17 +345,18 @@ test("changed custom command scans do not reuse an in-flight availability snapsh
 });
 
 test("recording start warms only the highest enabled provider with the processing instruction", () => {
-  const warmed: Array<{ provider: string; instruction: string }> = [];
-  const warmProvider = (connection: { provider: string }, instruction: string) => { warmed.push({ provider: connection.provider, instruction }); };
+  const warmed: Array<{ provider: string; instruction: string; generation: number }> = [];
+  const warmProvider = (connection: { provider: string }, instruction: string, generation: number) => { warmed.push({ provider: connection.provider, instruction, generation }); };
   const base = { scan: async () => available("qwen-local"), isShuttingDown: () => false,
     runProvider: async () => "unused", warmProvider };
-  new OptionalTextProcessing({ ...base, settings: () => configured(["ollama", "lm_studio"]) }).prepare();
+  new OptionalTextProcessing({ ...base, settings: () => configured(["ollama", "lm_studio"]) }).prepare(7);
   assert.equal(warmed.length, 1);
   assert.equal(warmed[0]!.provider, "ollama");
+  assert.equal(warmed[0]!.generation, 7);
   assert.ok(warmed[0]!.instruction.length > 0);
   // Without an enabled provider or with linguistic processing off, nothing is warmed.
-  new OptionalTextProcessing({ ...base, settings: () => configured([]) }).prepare();
+  new OptionalTextProcessing({ ...base, settings: () => configured([]) }).prepare(7);
   const off = configured(["ollama"]);
-  new OptionalTextProcessing({ ...base, settings: () => ({ ...off, revision: { ...off.revision, enabled: false } }) }).prepare();
+  new OptionalTextProcessing({ ...base, settings: () => ({ ...off, revision: { ...off.revision, enabled: false } }) }).prepare(7);
   assert.equal(warmed.length, 1);
 });
