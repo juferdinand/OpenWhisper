@@ -820,3 +820,97 @@ test("macOS discards quick, silent and empty-recognition recordings and returns 
   assert.equal(spoken.coordinator.snapshot().recoveryAvailable, false); assert.equal(spoken.capture().released, true);
   assert.deepEqual(spoken.counts(), { speech: 1, delivery: 0 });
 });
+
+for (const platform of ["linux", "macos"] as const) {
+  test(`${platform} quality hints preserve delivery, reset for a new recording and never turn into a recording error`, async () => {
+    const f = fixture(platform, undefined, new SilenceSpeechGate());
+    f.configure((capture) => { capture.chunks = [Float32Array.from({ length: 32000 }, (_, i) => 0.001 * Math.sin(2 * Math.PI * 220 * i / 16000))]; });
+    await f.coordinator.start(request); await f.coordinator.stop();
+    const result = await f.coordinator.completion();
+    assert.equal(result.phase, "done"); assert.equal(result.audioQuality, "very_quiet");
+    assert.equal(result.error, null); assert.equal(result.transcript, "  Unchanged fixture 日本語 👩‍💻  ");
+    assert.equal(f.counts().delivery, 1);
+    await f.coordinator.start(request);
+    assert.equal(f.coordinator.snapshot().audioQuality, undefined);
+    await f.coordinator.cancel();
+  });
+
+  test(`${platform} discarded silence keeps only a quiet hint and remains ready for another recording`, async () => {
+    const f = fixture(platform, undefined, new SilenceSpeechGate());
+    f.configure((capture) => { capture.chunks = [new Float32Array(32000)]; });
+    await f.coordinator.start(request); await f.coordinator.stop();
+    const result = await f.coordinator.completion();
+    assert.equal(result.phase, "idle"); assert.equal(result.audioQuality, "very_quiet");
+    assert.equal(result.recoveryAvailable, false); assert.deepEqual(f.counts(), { speech: 0, delivery: 0 });
+    assert.equal(f.recovery.saves, 0);
+    await f.coordinator.start(request); assert.equal(f.coordinator.snapshot().audioQuality, undefined);
+    await f.coordinator.cancel();
+  });
+}
+
+test("restored private audio is assessed without changing recovery silence or delivery policy", async () => {
+  const f = fixture("linux", undefined, new SilenceSpeechGate());
+  f.recovery.records.set("restored", audio([new Float32Array(32000)], { generation: 99, attempt: 99 }));
+  assert.equal(await f.coordinator.restoreRecovery(request), true);
+  assert.equal(f.coordinator.retry().ok, true);
+  const result = await f.coordinator.completion();
+  assert.equal(result.phase, "done"); assert.equal(result.audioQuality, "very_quiet");
+  assert.equal(f.recovery.removals, 1); assert.equal(f.counts().delivery, 1);
+});
+
+test("rejected quality and foreign gate ownership do not partially cache a classification before retry", async () => {
+  for (const foreign of [false, true]) {
+    let calls = 0;
+    const f = fixture("linux", undefined, { classify: async (_audio, context) => {
+      calls += 1;
+      if (calls === 1) return { ...ownership(context), generation: foreign ? context.generation + 1 : context.generation,
+        hasSpeech: true, audioQuality: "untrusted" } as unknown as import("../../src/core/recording/recording.js").SpeechDisposition;
+      return { ...ownership(context), hasSpeech: true, audioQuality: "very_quiet" };
+    } });
+    await f.coordinator.start(request); await f.coordinator.stop();
+    assert.equal((await f.coordinator.completion()).error, foreign ? "OWNERSHIP_FAILED" : "PREPARATION_FAILED");
+    assert.equal(f.coordinator.snapshot().audioQuality, undefined);
+    assert.equal(f.coordinator.retry().ok, true);
+    assert.equal((await f.coordinator.completion()).audioQuality, "very_quiet");
+    assert.equal(calls, 2); assert.equal(f.counts().delivery, 1);
+  }
+});
+
+test("a late quality assessment cannot publish into a cancelled or replacement recording", async () => {
+  const assessment = deferred<import("../../src/core/recording/recording.js").SpeechDisposition>();
+  let issued: Ownership | undefined;
+  const f = fixture("macos", undefined, { classify: async (_audio, context) => { issued = ownership(context); return assessment.promise; } });
+  await f.coordinator.start(request); await f.coordinator.stop();
+  const completion = f.coordinator.completion();
+  await until(() => issued !== undefined);
+  await f.coordinator.cancel(); await f.coordinator.discardRecovery();
+  await f.coordinator.start(request);
+  assert.ok(issued); assessment.resolve({ ...issued, hasSpeech: true, audioQuality: "clipping" });
+  await completion;
+  assert.equal(f.coordinator.snapshot().phase, "recording");
+  assert.equal(f.coordinator.snapshot().audioQuality, undefined); assert.equal(f.counts().delivery, 0);
+  await f.coordinator.cancel();
+});
+
+test("a cached quality hint survives inference retry and clears after explicit discard", async () => {
+  let assessments = 0, transcriptions = 0;
+  const f = fixture("linux", undefined, { classify: async (_audio, context) => {
+    assessments += 1; return { ...ownership(context), hasSpeech: true, audioQuality: "clipping" };
+  } });
+  f.speech(async (_audio, _request, context) => {
+    transcriptions += 1;
+    if (transcriptions === 1) throw new Error("Synthetic inference failure");
+    return { ...ownership(context), text: "Unchanged retry result" };
+  });
+  await f.coordinator.start(request); await f.coordinator.stop();
+  assert.equal((await f.coordinator.completion()).audioQuality, "clipping");
+  assert.equal(f.coordinator.retry().ok, true);
+  assert.equal((await f.coordinator.completion()).audioQuality, "clipping");
+  assert.equal(assessments, 1); assert.equal(f.counts().delivery, 1);
+  await f.coordinator.start(request); await f.coordinator.stop(); await f.coordinator.completion();
+  // A new retained failure is explicitly discarded, removing its advisory with the audio owner.
+  f.speech(async () => { throw new Error("Synthetic retained failure"); });
+  await f.coordinator.start(request); await f.coordinator.stop(); await f.coordinator.completion();
+  assert.equal((await f.coordinator.discardRecovery()).ok, true);
+  assert.equal(f.coordinator.snapshot().audioQuality, undefined);
+});

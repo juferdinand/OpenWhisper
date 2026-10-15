@@ -626,7 +626,6 @@
   "{count} model": "{count} model",
   "AI connections": "AI connections",
   "Add": "Add",
-  "Available": "Available",
   "Command": "Command",
   "Custom command": "Custom command",
   "Custom commands cannot set reasoning": "Custom commands cannot set reasoning",
@@ -794,7 +793,6 @@
   "AI models": "AI models",
   "AI revision": "AI revision",
   "AI revision is off or has no active rules.": "AI revision is off or has no active rules.",
-  "Add": "Add",
   "Add paragraphs": "Add paragraphs",
   "An AI model corrects your text using your rules. Content and wording are preserved.": "An AI model corrects your text using your rules. Content and wording are preserved.",
   "Arguments are passed directly, without a shell. The transcript is sent through standard input.": "Arguments are passed directly, without a shell. The transcript is sent through standard input.",
@@ -837,5 +835,11 @@
   "CPU selected; Metal GPU available: {device}": "CPU selected; Metal GPU available: {device}",
   "Use Metal acceleration (experimental)": "Use Metal acceleration (experimental)",
   "Metal GPU": "Metal GPU",
-  "GPU selected. Metal device detected: {device}": "GPU selected. Metal device detected: {device}"
+  "GPU selected. Metal device detected: {device}": "GPU selected. Metal device detected: {device}",
+  "Check audio quality": "Check audio quality",
+  "Dismiss audio hint": "Dismiss audio hint",
+  "The recording is very quiet; recognition may be less accurate. Check the microphone level or distance.": "The recording is very quiet; recognition may be less accurate. Check the microphone level or distance.",
+  "The recording may be clipped and recognition less accurate. Lower the microphone level.": "The recording may be clipped and recognition less accurate. Lower the microphone level.",
+  "Strong noise in this recording may reduce recognition accuracy. Try a quieter place or another microphone.": "Strong noise in this recording may reduce recognition accuracy. Try a quieter place or another microphone.",
+  "The recording appears to have a limited frequency range; recognition may be less accurate. Try another microphone.": "The recording appears to have a limited frequency range; recognition may be less accurate. Try another microphone."
 }

@@ -162,6 +162,7 @@ export all keychain identities or commit signing material.
 - [Update channels and preview version policy](docs/UPDATE-CHANNELS.md)
 - [Data locations](docs/DATA-LOCATIONS.md)
 - [Security policy](SECURITY.md)
+- [Audio quality hints](docs/AUDIO-QUALITY.md)
 - [Optional text-model connections](docs/LOCAL_MODELS.md)
 - [Frontend redesign plan](docs/UI-REDESIGN.md)
 - [Roadmap](docs/ROADMAP.md)

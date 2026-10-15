@@ -629,7 +629,6 @@
   "{count} model": "{count} Modell",
   "AI connections": "KI-Verbindungen",
   "Add": "Hinzufügen",
-  "Available": "Verfügbar",
   "Command": "Befehl",
   "Custom command": "Eigener Befehl",
   "Custom commands cannot set reasoning": "Eigene Befehle können keine Reasoning-Stufe festlegen",
@@ -794,7 +793,6 @@
   "AI models": "KI-Modelle",
   "AI revision": "KI-Überarbeitung",
   "AI revision is off or has no active rules.": "KI-Überarbeitung ist aus oder hat keine aktiven Regeln.",
-  "Add": "Hinzufügen",
   "Add paragraphs": "Absätze setzen",
   "An AI model corrects your text using your rules. Content and wording are preserved.": "Ein KI-Modell korrigiert deinen Text nach deinen Regeln. Inhalt und Wortwahl bleiben erhalten.",
   "Arguments are passed directly, without a shell. The transcript is sent through standard input.": "Argumente werden direkt und ohne Shell übergeben. Das Transkript wird über die Standardeingabe gesendet.",
@@ -837,5 +835,11 @@
   "CPU selected; Metal GPU available: {device}": "CPU ausgewählt; Metal-GPU verfügbar: {device}",
   "Use Metal acceleration (experimental)": "Metal-Beschleunigung nutzen (experimentell)",
   "Metal GPU": "Metal-GPU",
-  "GPU selected. Metal device detected: {device}": "GPU ausgewählt. Metal-Gerät erkannt: {device}"
+  "GPU selected. Metal device detected: {device}": "GPU ausgewählt. Metal-Gerät erkannt: {device}",
+  "Check audio quality": "Audioqualität prüfen",
+  "Dismiss audio hint": "Audiohinweis ausblenden",
+  "The recording is very quiet; recognition may be less accurate. Check the microphone level or distance.": "Die Aufnahme ist sehr leise; die Erkennung kann ungenauer sein. Prüfe Mikrofonpegel oder Abstand.",
+  "The recording may be clipped and recognition less accurate. Lower the microphone level.": "Die Aufnahme ist möglicherweise übersteuert; die Erkennung kann ungenauer sein. Senke den Mikrofonpegel.",
+  "Strong noise in this recording may reduce recognition accuracy. Try a quieter place or another microphone.": "Starkes Rauschen in dieser Aufnahme kann die Erkennung beeinträchtigen. Probiere eine ruhigere Umgebung oder ein anderes Mikrofon.",
+  "The recording appears to have a limited frequency range; recognition may be less accurate. Try another microphone.": "Der Frequenzbereich der Aufnahme scheint eingeschränkt; die Erkennung kann ungenauer sein. Probiere ein anderes Mikrofon."
 }

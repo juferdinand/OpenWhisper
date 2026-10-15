@@ -4366,3 +4366,28 @@ html.setup-mode #record-control {
     margin-left: 20px;
   }
 }
+
+.audio-quality-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-left: 3px solid #c98b32;
+  border-radius: 10px;
+  background: var(--group);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.audio-quality-notice p {
+  margin: 0 0 6px;
+}
+
+.audio-quality-dismiss {
+  margin-left: auto;
+  flex-shrink: 0;
+}

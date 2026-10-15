@@ -3,6 +3,7 @@ import { z } from "zod";
 import { recordingRequestSchema } from "../../core/recording/recording.js";
 import { preferencesSchema, recordingSourceIdSchema } from "../../contracts/ui/state.js";
 import { speechModelSchema, speechVocabularySchema } from "../speech/native-speech.js";
+import { audioQualityNoticeSchema } from "../../contracts/recording/audio-quality.js";
 import { textProcessingStageEventSchema } from "../../contracts/text/processing.js";
 
 const sequence = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -33,7 +34,7 @@ export const recordingSnapshotSchema = z.strictObject({
   generation: sequence, elapsedMs: z.number().finite().nonnegative(), level: z.number().finite().min(0).max(1),
   busy: z.boolean(), recoveryAvailable: z.boolean(), error: recordingHostErrorSchema.nullable(),
   // Complete final output is not an inference window; no recording/text cutoff is introduced.
-  transcript: z.string(),
+  transcript: z.string(), audioQuality: audioQualityNoticeSchema.optional(),
 });
 const control = z.discriminatedUnion("ok", [z.strictObject({ ok: z.literal(true), generation: sequence }),
   z.strictObject({ ok: z.literal(false), generation: sequence, error: recordingHostErrorSchema })]);

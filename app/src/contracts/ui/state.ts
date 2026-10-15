@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { updateDownloadProgressSchema } from "../update/update-download-progress.js";
+import { audioQualityNoticeSchema } from "../recording/audio-quality.js";
 import { speechLanguageSchema } from "../speech/speech.js";
 import {
   defaultTextConnectionAvailability, defaultTextConnectionSettings, emptyTextConversation, idleTextConnectionProcessing,
@@ -263,6 +264,7 @@ export const appStateSchema = z.strictObject({
   status: z.enum(["idle", "recording", "transcribing", "done", "error"]),
   message: userText,
   transcript: userText,
+  audio_quality: audioQualityNoticeSchema.nullable().optional(),
   raw_transcript: userText.optional(),
   raw_transcript_preview_omitted: z.boolean().optional(),
   text_processing_preview_omitted: z.boolean().optional(),
