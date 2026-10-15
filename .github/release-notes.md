@@ -1,14 +1,14 @@
 <!-- Prepared for the gated release workflow; repository status lives in README.md. -->
 
-## What's new in OpenWhisper 0.5.6
+## What's new in OpenWhisper 0.5.7
 
-- Reduce the wait for optional Codex text revision by preparing its connection during dictation.
-- Keep full-text revision and retire prepared sessions safely when recordings are cancelled or replaced.
+- Get audio-quality hints for very quiet, clipped, noisy or bandwidth-limited recordings from any microphone.
+- Open microphone settings directly from a hint. Dictation and recovery keep working, and you can dismiss each hint.
 
-## Neu in OpenWhisper 0.5.6
+## Neu in OpenWhisper 0.5.7
 
-- Verkürze die Wartezeit bei optionaler Codex-Textüberarbeitung, indem die Verbindung bereits während des Diktats vorbereitet wird.
-- Behalte die vollständige Textüberarbeitung bei und beende vorbereitete Sitzungen zuverlässig beim Abbruch oder Wechsel einer Aufnahme.
+- Erhalte bei sehr leisen, übersteuerten, verrauschten oder in der Bandbreite eingeschränkten Aufnahmen Hinweise zur Audioqualität – mit jedem Mikrofon.
+- Öffne die Mikrofoneinstellungen direkt aus einem Hinweis. Diktat und Wiederherstellung funktionieren weiter; jeden Hinweis kannst du schließen.
 
 Recognition runs locally. Exact package, desktop and test scope is recorded in
 [Electron status](https://github.com/juferdinand/OpenWhisper/blob/main/docs/ELECTRON-STATUS.md) and
