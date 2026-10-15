@@ -73,7 +73,7 @@ export async function buildOwnedRecordingPool(directory: string, inputs: OwnedRe
   assert.ok(!compiler.error && compiler.status === 0);
   const production = await localClosure(temporary); assert.deepEqual(await sourceRecords(names), before);
   for (const name of production) { const destination = join(payload, "dist", name); await mkdir(dirname(destination), { recursive: true, mode: 0o700 }); await cp(join(temporary, name), destination, { errorOnExist: true, force: false }); }
-  await mkdir(join(payload, "node_modules"), { mode: 0o700 }); await cp(join(root, "node_modules/zod"), join(payload, "node_modules/zod"), { recursive: true, errorOnExist: true, force: false });
+  await mkdir(join(payload, "node_modules"), { mode: 0o700 }); for (const dependency of ["zod", "fft.js"]) await cp(join(root, "node_modules", dependency), join(payload, "node_modules", dependency), { recursive: true, errorOnExist: true, force: false });
   await cp(join(root, "package.json"), join(payload, "package.json"), { errorOnExist: true, force: false });
   await mkdir(join(payload, "dist/resources"), { recursive: true, mode: 0o700 });
   await cp(join(root, "data/models.json"), join(payload, "dist/resources/models.json"), { errorOnExist: true, force: false });

@@ -611,6 +611,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
         : recording.error ? `Recording failed: ${recording.error}.` : descriptor ? "" : "Recording is not available in this development preview."),
       transcript: Buffer.byteLength(recording.transcript, "utf8") <= MAX_USER_TEXT_BYTES ? recording.transcript : "",
       transcript_preview_omitted: Buffer.byteLength(recording.transcript, "utf8") > MAX_USER_TEXT_BYTES,
+      audio_quality: recording.audioQuality ?? null,
       raw_transcript: rawPreview.text,
       raw_transcript_preview_omitted: rawPreview.omitted,
       text_processing: stage && stagePreview ? { ...stage, text: stagePreview.text } : stage,

@@ -8656,3 +8656,138 @@ test("Apple Silicon setup offers Metal recognition and Intel Macs skip the hardw
     page.getByRole("heading", { name: "Download a speech model" }),
   ).toBeVisible();
 });
+
+for (const platform of ["linux", "macos"] as const) {
+  test(`${platform}: audio hints are localizable, non-blocking and scoped to the current recording`, async ({
+    page,
+  }) => {
+    await start(page, platform, false, false, false, null);
+    await page.evaluate(() => {
+      Object.assign(window.testState, {
+        status: "done",
+        recording_generation: 7,
+        transcript: "Synthetic unchanged transcript",
+        audio_quality: "very_quiet",
+      });
+      window.publishState();
+    });
+    const notice = page.locator(".audio-quality-notice");
+    await expect(notice).toContainText("The recording is very quiet;");
+    await expect(
+      page.locator(".dictation-transcript-body > .transcript"),
+    ).toHaveText("Synthetic unchanged transcript");
+    await expect(page.locator("#record")).toBeEnabled();
+    await page.setViewportSize({ width: 740, height: 560 });
+    await setWorkspaceLanguage(page, "de");
+    await expect(notice).toContainText("Die Aufnahme ist sehr leise;");
+    await expect(
+      page.locator(".dictation-transcript-body > .transcript"),
+    ).toBeInViewport();
+    expect(
+      await page
+        .locator(".dictation-transcript-body")
+        .evaluate((element) => element.clientHeight),
+    ).toBeGreaterThan(25);
+    expect(
+      await notice.evaluate(
+        (element) => element.scrollWidth <= element.clientWidth,
+      ),
+    ).toBe(true);
+    const screenshotDirectory = resolve(
+      "../../.local/validation/audio-quality",
+    );
+    mkdirSync(screenshotDirectory, { recursive: true });
+    await page.screenshot({
+      path: resolve(screenshotDirectory, `${platform}-quiet-de-minimum.png`),
+    });
+    await page.getByRole("button", { name: "Audiohinweis ausblenden" }).click();
+    await expect(notice).toHaveCount(0);
+    await expect(page.locator("#record")).toBeFocused();
+    await page.evaluate(() => window.publishState());
+    await expect(notice).toHaveCount(0);
+    await page.evaluate(() => {
+      window.testState.recording_generation = 8;
+      window.testState.audio_quality = "clipping";
+      window.publishState();
+    });
+    await expect(notice).toContainText("möglicherweise übersteuert");
+    await page
+      .getByRole("button", { name: "Mikrofoneinstellungen", exact: true })
+      .click();
+    await expect(page.locator("#settings-recording-microphone")).toBeVisible();
+  });
+
+  test(`${platform}: audio hints follow silence and recovery but stay out of live recording and historical entries`, async ({
+    page,
+  }) => {
+    await start(page, platform, false, false, false, null);
+    const notice = page.locator(".audio-quality-notice");
+    for (const status of ["recording", "transcribing"] as const) {
+      await page.evaluate((status) => {
+        Object.assign(window.testState, {
+          status,
+          recording_generation: 9,
+          audio_quality: "background_noise",
+        });
+        window.publishState();
+      }, status);
+      await expect(notice).toHaveCount(0);
+    }
+    await page.evaluate(() => {
+      Object.assign(window.testState, {
+        status: "error",
+        recovery_available: true,
+      });
+      window.publishState();
+    });
+    await expect(notice).toContainText("Strong noise");
+    await page.evaluate(() => {
+      Object.assign(window.testState, {
+        status: "idle",
+        recovery_available: false,
+        transcript: "",
+        audio_quality: "very_quiet",
+      });
+      window.publishState();
+    });
+    await expect(notice).toContainText("very quiet");
+    await page.evaluate(() => {
+      Object.assign(window.testState, {
+        status: "done",
+        transcript: "Synthetic current text",
+        audio_quality: "limited_bandwidth",
+        history: [{ text: "Synthetic previous text" }],
+      });
+      window.publishState();
+    });
+    await expect(notice).toContainText("limited frequency range");
+    await page.locator('[data-history-select="0"]').click();
+    await expect(notice).toHaveCount(0);
+    await page.locator('[data-history-select="0"]').click();
+    await expect(notice).toBeVisible();
+    await page.locator("#discard-result").click();
+    await expect(notice).toHaveCount(0);
+    await page.evaluate(() => {
+      Object.assign(window.testState, {
+        recording_generation: 10,
+        status: "idle",
+        audio_quality: "very_quiet",
+      });
+      window.publishState();
+    });
+    await expect(notice).toContainText("very quiet");
+    await expect(
+      page.locator(".dictation-transcript-body > .transcript"),
+    ).toHaveCount(0);
+    await page.evaluate(() => {
+      Object.assign(window.testState, {
+        recording_generation: 11,
+        status: "done",
+        transcript: "Synthetic next text",
+        audio_quality: null,
+      });
+      window.publishState();
+    });
+    await expect(notice).toHaveCount(0);
+  });
+}

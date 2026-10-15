@@ -70,21 +70,32 @@ test("timeout still escalates the owned process group after its CLI leader close
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const marker = ${JSON.stringify(marker)};
-const descendant = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); setTimeout(() => require('node:fs').writeFileSync(" + JSON.stringify(marker) + ", 'survived'), 2600)"], { stdio: 'ignore' });
-fs.writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify({ group: process.pid, descendant: descendant.pid }));
+const descendant = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); process.stdout.write('ready'); setTimeout(() => require('node:fs').writeFileSync(" + JSON.stringify(marker) + ", 'survived'), 2600)"], { stdio: ['ignore', 'pipe', 'ignore'] });
+descendant.stdout.once('data', () => {
+  fs.writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify({ group: process.pid, descendant: descendant.pid }));
+  process.stdout.write('ready\\n');
+});
 process.on('SIGTERM', () => process.exit(0));
 process.stdin.resume();
 `, { mode: 0o700 });
   let group: number | undefined;
   try {
-    const started = performance.now();
+    let readyAt: number | undefined;
+    let control: import("../../src/services/text/text-cli-process.js").TextCliDialogueControl | undefined;
     await assert.rejects(runTextCliProcess({ executable, args: [], input: "", signal: new AbortController().signal,
-      timeoutMs: 100, keepStdinOpen: true, onLine: () => undefined }),
+      timeoutMs: 100, startupTimeoutMs: 5_000, idleTimeoutMs: 1_000, keepStdinOpen: true,
+      onControl: (value) => { control = value; }, onLine: (line) => {
+        assert.equal(line, "ready");
+        readyAt = performance.now();
+        control!.waitForInput(); control!.beginRequest();
+        return undefined;
+      } }),
     (error: unknown) => error instanceof TextCliProcessError && error.code === "TIMEOUT");
-    assert.ok(performance.now() - started >= 1400, "CLI close must not cancel the pending SIGKILL escalation");
+    assert.notEqual(readyAt, undefined, "both fixture processes must install their signal handlers before the request deadline");
+    assert.ok(performance.now() - readyAt! >= 1400, "CLI close must not cancel the pending SIGKILL escalation");
     const owners = JSON.parse(await readFile(pidFile, "utf8")) as { group: number; descendant: number };
     group = owners.group;
-    await new Promise<void>((accept) => setTimeout(accept, Math.max(0, 2900 - (performance.now() - started))));
+    await new Promise<void>((accept) => setTimeout(accept, Math.max(0, 2900 - (performance.now() - readyAt!))));
     await assert.rejects(readFile(marker), { code: "ENOENT" }, "descendant must not survive the process-group SIGKILL");
   } finally {
     if (group !== undefined) { try { process.kill(-group, "SIGKILL"); } catch { /* The owned fixture group has already exited. */ } }

@@ -3,6 +3,7 @@ import { setImmediate } from "node:timers";
 import { z } from "zod";
 import { snippetSchema, vocabularySchema } from "../../contracts/ui/state.js";
 import { speechLanguageSchema } from "../../contracts/speech/speech.js";
+import { audioQualityNoticeSchema, type AudioQualityNotice } from "../../contracts/recording/audio-quality.js";
 import type { TextProcessingStageEvent, TranscriptDeliveryMetadata } from "../../contracts/text/processing.js";
 
 export const recordingRequestSchema = z.strictObject({
@@ -66,7 +67,7 @@ export interface SpeechBoundary {
   transcribe(audio: PreparedAudio, request: RecordingRequest, context: WorkContext,
     onStage?: (event: TextProcessingStageEvent) => void): Promise<SpeechResult>;
 }
-export interface SpeechDisposition extends Ownership { readonly hasSpeech: boolean }
+export interface SpeechDisposition extends Ownership { readonly hasSpeech: boolean; readonly audioQuality?: AudioQualityNotice }
 export interface SpeechGate {
   /** Scan only in the capture utility. No duration-heavy work belongs on main or renderer. */
   classify(audio: PreparedAudio, context: WorkContext): Promise<SpeechDisposition>;
@@ -123,6 +124,7 @@ export interface RecordingSnapshot {
   readonly recoveryAvailable: boolean;
   readonly error: RecordingError | null;
   readonly transcript: string;
+  readonly audioQuality?: AudioQualityNotice;
 }
 interface CommonOptions<C extends CapturedHandle> {
   readonly capture: CaptureBoundary<C>;
@@ -153,6 +155,7 @@ interface Pending<C extends CapturedHandle> {
   prepared: PreparedAudio | undefined;
   preparing: Promise<PreparedAudio> | undefined;
   speechDetected: boolean | undefined;
+  audioQuality: AudioQualityNotice | undefined;
   releasing: Promise<void> | undefined;
   released: boolean;
   token: RecoveryToken | undefined;
@@ -210,6 +213,7 @@ export class RecordingCoordinator<C extends CapturedHandle> {
   private error: RecordingError | null = null;
   private level = 0;
   private transcript = "";
+  private audioQuality: AudioQualityNotice | undefined;
   private startedAt: number | undefined;
   private elapsedMs = 0;
   private capture: CaptureOwner<C> | undefined;
@@ -238,6 +242,7 @@ export class RecordingCoordinator<C extends CapturedHandle> {
       level: this.level, busy: this.capture !== undefined || this.job !== undefined
         || this.lookup !== undefined || this.discarding,
       recoveryAvailable: this.pending !== undefined, error: this.error, transcript: this.transcript,
+      ...(this.audioQuality === undefined ? {} : { audioQuality: this.audioQuality }),
     });
   }
 
@@ -256,7 +261,7 @@ export class RecordingCoordinator<C extends CapturedHandle> {
   private newPending(owner: { generation: number; request: RecordingRequest },
     session?: CaptureSession<C>, captured?: C, token?: RecoveryToken): Pending<C> {
     return { generation: owner.generation, request: owner.request, session, captured, token,
-      prepared: undefined, preparing: undefined, speechDetected: undefined, releasing: undefined,
+      prepared: undefined, preparing: undefined, speechDetected: undefined, audioQuality: undefined, releasing: undefined,
       released: false, text: undefined, receipt: undefined, saving: undefined,
       delivering: undefined, removing: undefined, discarded: false, durabilityPending: false, captureFailed: false,
       rawText: undefined };
@@ -274,7 +279,7 @@ export class RecordingCoordinator<C extends CapturedHandle> {
       generation: ++this.generation, request, controller: new AbortController(), session: undefined,
       startDone: Promise.resolve(), closing: undefined, failed: false, discarding: false,
     };
-    this.capture = owner; this.phase = "starting"; this.error = null;
+    this.capture = owner; this.phase = "starting"; this.error = null; this.audioQuality = undefined;
     const expire = (): void => { owner.controller.abort(); };
     control.signal?.addEventListener("abort", expire, { once: true });
     if (control.signal?.aborted) expire();
@@ -394,6 +399,7 @@ export class RecordingCoordinator<C extends CapturedHandle> {
   }
 
   async cancel(sink: Acknowledge = accepted): Promise<ControlReply> {
+    this.audioQuality = undefined;
     if (this.lookup) { this.lookup = undefined; this.phase = "idle"; }
     const owner = this.capture;
     if (owner) {
@@ -435,7 +441,7 @@ export class RecordingCoordinator<C extends CapturedHandle> {
 
   async restoreRecovery(input: RecordingRequestInput): Promise<boolean> {
     if (!this.recovery || !this.available()) return false;
-    this.elapsedMs = 0;
+    this.elapsedMs = 0; this.audioQuality = undefined;
     const request = recordingRequestSchema.parse(input);
     const lookup = {}; this.lookup = lookup; this.phase = "restoring";
     try {
@@ -474,7 +480,7 @@ export class RecordingCoordinator<C extends CapturedHandle> {
       await pending.delivering?.catch(() => {});
       await this.remove(pending, context);
       stage = "CAPTURE_RELEASE_FAILED"; await this.release(pending);
-      if (this.pending === pending) { this.pending = undefined; this.phase = "idle"; this.error = null; }
+      if (this.pending === pending) { this.pending = undefined; this.phase = "idle"; this.error = null; this.audioQuality = undefined; }
       return this.reply(true, "BUSY", pending.generation);
     } catch {
       pending.discarded = false; this.fail(stage);
@@ -603,16 +609,19 @@ export class RecordingCoordinator<C extends CapturedHandle> {
       if (!this.current(job)) return;
       const audio: PreparedAudio = { ...pending.prepared, generation: context.generation, attempt: context.attempt };
       const gate = this.options.speechGate;
-      if (gate && !pending.token && !pending.captureFailed) {
+      if (gate && !pending.captureFailed) {
         if (pending.speechDetected === undefined) {
           const disposition = await gate.classify(audio, context);
           if (!this.current(job)) return;
           if (!owned(disposition, context) || typeof disposition.hasSpeech !== "boolean") {
             stage = "OWNERSHIP_FAILED"; throw new Error("Invalid silence classification ownership.");
           }
+          const audioQuality = disposition.audioQuality === undefined ? undefined : audioQualityNoticeSchema.parse(disposition.audioQuality);
           pending.speechDetected = disposition.hasSpeech;
+          pending.audioQuality = audioQuality;
         }
-        if (!pending.speechDetected) {
+        this.audioQuality = pending.audioQuality;
+        if (!pending.token && !pending.speechDetected) {
           stage = "CAPTURE_RELEASE_FAILED"; await this.release(pending);
           if (!this.current(job)) return;
           this.pending = undefined; this.phase = "idle"; this.error = null; return;

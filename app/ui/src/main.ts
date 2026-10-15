@@ -2,6 +2,7 @@ import { recordingUnavailableTitle } from "../../src/contracts/ui/recording-guid
 import { invoke, listen } from "./bridge";
 import { setLocale, t } from "./i18n";
 import { escapeHtml as esc } from "./escape-html";
+import { audioQualityMarkup } from "./audio-quality";
 import { LiveWaveform } from "./live-waveform";
 import "./style.css";
 import {
@@ -41,6 +42,8 @@ let insertPermissionActionPending = false;
 let insertPermissionSawConfiguring = false;
 let contentKey = "";
 let workspaceKey = "";
+let dismissedAudioQualityGeneration: number | null = null;
+let observedAudioQualityGeneration: number | undefined;
 let shellKey = "";
 let renderedTab: View | undefined;
 // The setup card body scrolls; keep its position when the same step re-renders (for example on download progress).
@@ -1766,6 +1769,7 @@ function recordControl() {
       ?.addEventListener("click", () => {
         dismissedTranscriptValue = state.transcript;
         dismissedTranscriptGeneration = state.recording_generation;
+        dismissedAudioQualityGeneration = state.recording_generation ?? 0;
         selectedHistoryIndex = null;
         workspaceKey = "";
         renderWorkspace();
@@ -1996,6 +2000,10 @@ function syncDiscardResult() {
 }
 
 function renderWorkspace() {
+  if (state.recording_generation !== observedAudioQualityGeneration) {
+    observedAudioQualityGeneration = state.recording_generation;
+    dismissedAudioQualityGeneration = null;
+  }
   const main = document.querySelector<HTMLElement>("#dictation-content");
   const rail = document.querySelector<HTMLElement>("#dictation-history");
   if (!main || !rail) return;
@@ -2043,6 +2051,8 @@ function renderWorkspace() {
     state.history,
     state.transcript,
     state.raw_transcript,
+    state.audio_quality,
+    dismissedAudioQualityGeneration,
     state.raw_transcript_preview_omitted,
     state.text_processing,
     state.text_connections.processing,
@@ -2190,9 +2200,17 @@ function renderWorkspace() {
     state.text_connections.processing.reason === "context_full"
       ? `<p class="processing-fallback-notice context-full-notice" role="status">${esc(t("Conversation context is full. Start a new chat to continue with a fresh context."))} <button type="button" data-new-chat>${esc(t("New chat"))}</button></p>`
       : "";
+  const audioQualityNotice =
+    state.audio_quality &&
+    dismissedAudioQualityGeneration !== (state.recording_generation ?? 0) &&
+    selectedHistoryIndex === null &&
+    state.status !== "recording" &&
+    state.status !== "transcribing"
+      ? audioQualityMarkup(state.audio_quality)
+      : "";
   const processingView = processingProgressView();
   const progressValue = Math.round(processingView.fraction * 100);
-  const processingMarkup = `<div class="dictation-processing-slot"><section class="dictation-processing-strip" aria-label="${esc(t("Text processing progress"))}" ${state.status !== "transcribing" || !processingView.visible ? "hidden" : ""}><span class="processing-progress-copy" role="status" aria-live="polite">${esc(t("Processing…"))}</span><div class="processing-progress-row"><div class="processing-bar" role="progressbar" aria-label="${esc(t("Text processing progress"))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progressValue}" style="--processing-fill:${progressValue}%"><span aria-hidden="true"></span></div><button id="cancel-processing" type="button" aria-label="${esc(t("Cancel processing"))}">×</button></div></section><section class="dictation-processing-error" role="alert" style="--processing-fill:${progressValue}%" ${processingView.recoverable ? "" : "hidden"}><span class="processing-error-dot" aria-hidden="true"></span><span class="processing-error-copy">${esc(t("Processing failed"))}</span><button id="retry-processing" type="button">${esc(t("Retry transcription"))}</button></section></div>`;
+  const processingMarkup = `<div class="dictation-processing-slot"><section class="dictation-processing-strip" aria-label="${esc(t("Text processing progress"))}" ${state.status !== "transcribing" || !processingView.visible ? "hidden" : ""}><span class="processing-progress-copy" role="status" aria-live="polite">${esc(t("Processing…"))}</span><div class="processing-progress-row"><div class="processing-bar" role="progressbar" aria-label="${esc(t("Text processing progress"))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progressValue}" style="--processing-fill:${progressValue}%"><span aria-hidden="true"></span></div><button id="cancel-processing" type="button" aria-label="${esc(t("Cancel processing"))}">×</button></div></section><section class="dictation-processing-error" role="alert" style="--processing-fill:${progressValue}%" ${processingView.recoverable ? "" : "hidden"}><span class="processing-error-dot" aria-hidden="true"></span><span class="processing-error-copy">${esc(t("Processing failed"))}</span><button id="retry-processing" type="button">${esc(t("Retry transcription"))}</button></section>${audioQualityNotice}</div>`;
   const mode = isMac()
     ? t("Native")
     : state.preferences.gpu && state.gpu_checked === false
@@ -2224,6 +2242,13 @@ function renderWorkspace() {
   retainedWaveformCanvas?.remove();
   main.innerHTML = `${permissionBanner()}<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><label class="workspace-mode-select">${esc(t("Processing mode"))}<select id="workspace-mode" aria-label="${esc(t("Processing mode"))}" ${state.status === "recording" || state.status === "transcribing" || revisionRetry.status === "processing" ? "disabled" : ""}><option value="single" ${!conversationMode ? "selected" : ""}>${esc(t("Single recording"))}</option><option value="conversation" ${conversationMode ? "selected" : ""}>${esc(t("Voice conversation"))}</option></select></label><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true"><canvas class="live-waveform" data-waveform="main" aria-hidden="true"></canvas></div></section>${conversationNotice}<section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(conversationMode ? t("Conversation") : t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}${processingFallbackNotice}${textRevisionRetryMarkup}${contextFullNotice}</div></section>${processingMarkup}<section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
   bindVocabularyContextActions(main);
+  main
+    .querySelector<HTMLButtonElement>("#dismiss-audio-quality")
+    ?.addEventListener("click", () => {
+      dismissedAudioQualityGeneration = state.recording_generation ?? 0;
+      renderWorkspace();
+      document.getElementById("record")?.focus();
+    });
   if (retainedWaveformCanvas)
     main
       .querySelector<HTMLElement>(".dictation-waveform")

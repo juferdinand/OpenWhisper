@@ -51,7 +51,7 @@ export class MacCaptureRuntime {
     const old = this.previous;
     if (old && old.phase === snapshot.phase && old.generation === snapshot.generation && old.elapsedMs === snapshot.elapsedMs
       && old.level === snapshot.level && old.busy === snapshot.busy && old.recoveryAvailable === snapshot.recoveryAvailable
-      && old.error === snapshot.error && old.transcript === snapshot.transcript) return;
+      && old.error === snapshot.error && old.transcript === snapshot.transcript && old.audioQuality === snapshot.audioQuality) return;
     this.emit({ kind: "snapshot", snapshot }); this.previous = snapshot;
   }
   private control(request: MacRecordingHostRequest, reply: ControlReply): boolean {
