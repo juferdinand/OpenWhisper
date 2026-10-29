@@ -164,6 +164,7 @@ export all keychain identities or commit signing material.
 - [Security policy](SECURITY.md)
 - [Audio quality hints](docs/AUDIO-QUALITY.md)
 - [Optional text-model connections](docs/LOCAL_MODELS.md)
+- [Experimental meeting transcription](docs/MEETING-TRANSCRIPTION.md)
 - [Frontend redesign plan](docs/UI-REDESIGN.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Report an issue](https://github.com/juferdinand/OpenWhisper/issues)

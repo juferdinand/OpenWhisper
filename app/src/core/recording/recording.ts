@@ -7,6 +7,7 @@ import { audioQualityNoticeSchema, type AudioQualityNotice } from "../../contrac
 import type { TextProcessingStageEvent, TranscriptDeliveryMetadata } from "../../contracts/text/processing.js";
 
 export const recordingRequestSchema = z.strictObject({
+  mode: z.enum(["dictation", "meeting"]).optional(),
   model: z.strictObject({
     path: z.string().min(1).refine((path) => isAbsolute(path) && !path.includes("\0")),
     family: z.enum(["whisper", "parakeet"]), gpu: z.boolean(),

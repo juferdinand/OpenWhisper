@@ -2033,7 +2033,9 @@ function renderWorkspace() {
   ) {
     selectedHistoryIndex = null;
   }
+  const meetingMode = state.preferences.recording_mode === "meeting";
   const key = JSON.stringify([
+    state.preferences.recording_mode,
     state.preferences.model,
     state.preferences.gpu,
     state.preferences.output,
@@ -2105,9 +2107,17 @@ function renderWorkspace() {
     (!currentTranscriptDismissed &&
       (!!state.transcript || state.transcript_preview_omitted));
   const conversationMode =
-    state.text_connections.settings.mode === "conversation";
+    !meetingMode && state.text_connections.settings.mode === "conversation";
   const conversationTurns = state.text_connections.conversation.turns;
-  const transcriptMarkup = conversationMode
+  const transcriptMarkup = meetingMode
+    ? selectedHistoryText !== undefined
+      ? `<p class="transcript">${esc(selectedHistoryText)}</p>`
+      : state.status === "transcribing" || state.recovery_available
+        ? ""
+        : transcriptAvailable
+          ? `<pre class="transcript meeting-transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</pre>`
+          : `<div class="dictation-empty"><p>${esc(t("Start a meeting to create a local transcript with speaker suggestions."))}</p></div>`
+    : conversationMode
     ? `${conversationTurns.map((turn) => `<article class="conversation-turn"><h3>${esc(t("You"))}</h3><p class="transcript">${esc(turn.user)}</p><h3>${esc(t("Assistant"))}</h3><p class="transcript">${esc(turn.assistant)}</p></article>`).join("")}${state.status !== "transcribing" && state.transcript && conversationTurns.at(-1)?.assistant !== state.transcript ? `<article class="conversation-pending"><h3>${esc(t("Latest recording"))}</h3><p class="transcript">${esc(state.transcript_preview_omitted ? t("The complete transcript is available with Copy; its preview is too large.") : state.transcript)}</p></article>` : ""}${state.raw_transcript && state.status !== "transcribing" ? `<details class="raw-transcript"><summary>${esc(t("Raw recognition"))}</summary><p class="transcript">${esc(state.raw_transcript_preview_omitted ? t("The raw transcript is too large to preview.") : state.raw_transcript)}</p></details>` : ""}${conversationTurns.length === 0 && !state.transcript && state.status !== "transcribing" ? `<div class="dictation-empty"><p>${esc(t("Record a message to start this conversation."))}</p></div>` : ""}`
     : selectedHistoryText !== undefined
       ? `<p class="transcript">${esc(selectedHistoryText)}</p>`
@@ -2194,6 +2204,9 @@ function renderWorkspace() {
   const conversationNotice = conversationMode
     ? `<section class="conversation-bar"><div><strong>${esc(t("Voice conversation"))}</strong><span>${esc(selectedConnectionName && selectedConnectionUsable ? t("Using {provider}", { provider: selectedConnectionName }) : selectedConnectionName ? t("Selected connection is unavailable; recording still works without assistant replies.") : t("Recording still works without assistant replies."))}</span></div><div class="conversation-actions"><button id="new-chat" type="button" ${state.status === "recording" || state.status === "transcribing" || state.text_connections.processing.status === "processing" ? "disabled" : ""}>${esc(t("New chat"))}</button>${selectedConnectionUsable ? "" : `<button id="manage-connections" type="button">${esc(t("Choose connection"))}</button>`}</div></section>`
     : "";
+  const meetingNotice = meetingMode
+    ? `<section class="meeting-notice" role="note"><strong>${esc(t("Local meeting transcript"))}</strong><span>${esc(t("After you stop, OpenWhisper transcribes the selected audio locally and copies the transcript. Speaker A/B labels are estimates; select an input that captures every participant. With headphones, a microphone may miss remote voices."))}</span></section>`
+    : "";
   const contextFullNotice =
     conversationMode &&
     state.text_connections.processing.status === "fallback" &&
@@ -2223,7 +2236,7 @@ function renderWorkspace() {
         : t("CPU");
   const statusLabel =
     state.status === "recording"
-      ? t("Listening to you")
+      ? t(meetingMode ? "Recording meeting" : "Listening to you")
       : state.status === "transcribing"
         ? processingVisible
           ? t("Processing…")
@@ -2240,7 +2253,7 @@ function renderWorkspace() {
     : t("History is not saved.");
   const retainedWaveformCanvas = mainWaveform?.canvas;
   retainedWaveformCanvas?.remove();
-  main.innerHTML = `${permissionBanner()}<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t("Dictation"))}</h1></div><label class="workspace-mode-select">${esc(t("Processing mode"))}<select id="workspace-mode" aria-label="${esc(t("Processing mode"))}" ${state.status === "recording" || state.status === "transcribing" || revisionRetry.status === "processing" ? "disabled" : ""}><option value="single" ${!conversationMode ? "selected" : ""}>${esc(t("Single recording"))}</option><option value="conversation" ${conversationMode ? "selected" : ""}>${esc(t("Voice conversation"))}</option></select></label><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true"><canvas class="live-waveform" data-waveform="main" aria-hidden="true"></canvas></div></section>${conversationNotice}<section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(conversationMode ? t("Conversation") : t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}${processingFallbackNotice}${textRevisionRetryMarkup}${contextFullNotice}</div></section>${processingMarkup}<section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
+  main.innerHTML = `${permissionBanner()}<div class="dictation-topline"><div class="dictation-title"><h1>${esc(t(meetingMode ? "Meeting" : "Dictation"))}</h1></div><label class="workspace-mode-select"><span>${esc(t("Session type"))}</span><select id="session-kind" aria-label="${esc(t("Session type"))}" ${state.status === "recording" || state.status === "transcribing" || state.recovery_available ? "disabled" : ""}><option value="dictation" ${!meetingMode ? "selected" : ""}>${esc(t("Dictation"))}</option><option value="meeting" ${meetingMode ? "selected" : ""}>${esc(t("Meeting"))}</option></select></label><label class="workspace-mode-select" ${meetingMode ? "hidden" : ""}><span>${esc(t("Processing mode"))}</span><select id="workspace-mode" aria-label="${esc(t("Processing mode"))}" ${state.status === "recording" || state.status === "transcribing" || revisionRetry.status === "processing" ? "disabled" : ""}><option value="single" ${!conversationMode ? "selected" : ""}>${esc(t("Single recording"))}</option><option value="conversation" ${conversationMode ? "selected" : ""}>${esc(t("Voice conversation"))}</option></select></label><button id="open-model-drawer" type="button" class="dictation-change-model" data-open-model-drawer aria-label="${esc(`${model?.title ?? t("Choose a model")}, ${mode}. ${modeTitle}`)}" title="${esc(modeTitle)}"><span class="model-pill-status ${recordingReady ? "ready" : "unavailable"}" aria-hidden="true"></span><span class="model-pill-name">${esc(model?.title ?? t("Choose a model"))}</span><span class="model-pill-mode">${esc(mode)}</span><span class="model-pill-chevron" aria-hidden="true"></span></button><div class="dictation-status-pill" role="status">${esc(statusLabel)}</div></div><section class="dictation-activity" aria-label="${esc(t("Recording activity"))}"><strong id="dictation-timer" aria-label="${esc(t("Recording time"))}">0:00</strong><div class="dictation-waveform" aria-hidden="true"><canvas class="live-waveform" data-waveform="main" aria-hidden="true"></canvas></div></section>${meetingNotice}${conversationNotice}<section class="dictation-transcript" aria-labelledby="transcript-heading"><header class="dictation-transcript-heading"><h2 id="transcript-heading">${esc(meetingMode ? t("Meeting transcript") : conversationMode ? t("Conversation") : t("Transcript"))}</h2><button id="copy-dictation" type="button" ${transcriptAvailable ? "" : "hidden"}>${esc(t("Copy"))}</button></header><div class="dictation-transcript-body">${transcriptMarkup}${processingFallbackNotice}${textRevisionRetryMarkup}${contextFullNotice}</div></section>${processingMarkup}<section class="dictation-feature-cards" aria-label="${esc(t("Dictation settings"))}"><button type="button" data-open-model-drawer class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot recognition"></i><strong>${esc(t("Recognition"))}</strong></span><span class="dictation-feature-description">${esc(`${model?.title ?? t("Choose a model")} · ${mode}`)}</span></button><button type="button" data-settings-view="text" data-settings-section="settings-vocabulary" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot vocabulary"></i><strong>${esc(t("Vocabulary"))}</strong></span><span class="dictation-feature-description">${esc(t("Names and technical terms"))}</span></button><button type="button" data-settings-view="text" class="dictation-feature-card"><span class="dictation-feature-heading"><i class="dictation-feature-dot snippets"></i><strong>${esc(t("Snippets"))}</strong></span><span class="dictation-feature-description">${esc(t("Expand spoken phrases"))}</span></button></section>`;
   bindVocabularyContextActions(main);
   main
     .querySelector<HTMLButtonElement>("#dismiss-audio-quality")
@@ -2270,6 +2283,10 @@ function renderWorkspace() {
   main
     .querySelector<HTMLButtonElement>("#copy-ai-revision")
     ?.addEventListener("click", () => void command("copy_text_revision"));
+  main.querySelector<HTMLSelectElement>("#session-kind")?.addEventListener("change", (event) => {
+    const select = event.currentTarget as HTMLSelectElement;
+    void savePreferences({ recording_mode: select.value as "dictation" | "meeting" });
+  });
   main
     .querySelector<HTMLButtonElement>("#cancel-processing")
     ?.addEventListener("click", () => void command("cancel_recording"));

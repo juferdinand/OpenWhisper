@@ -246,6 +246,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   };
   const cpuName = hardwareDeviceNameSchema.safeParse(cpus()[0]?.model.trim());
   let configured = false;
+  let recordingMode: "dictation" | "meeting" = preferences.snapshot().recording_mode ?? "dictation";
   let recordingControl = false, cancelRequested = false;
   let recordingOperation: Promise<unknown> | undefined;
   let shutdownInProgress = false, shutdownComplete = false;
@@ -486,8 +487,10 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       delivery: { deliver: async (text, context, _identity, metadata) => {
         if (context.signal.aborted) return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
         if (metadata?.rawText !== undefined) rawTranscript = metadata.rawText;
-        const settings = textConnectionStore.snapshot();
-        const snippets = metadata?.snippets ?? [];
+        const settings = recordingMode === "meeting"
+          ? { ...textConnectionStore.snapshot(), mode: "single" as const }
+          : textConnectionStore.snapshot();
+        const snippets = recordingMode === "meeting" ? [] : metadata?.snippets ?? [];
         const processingInput = settings.mode === "conversation" ? expandSnippets(text, snippets) : text;
         if (settings.mode === "conversation") textProcessor.reportSnippetsStage(context, processingInput);
         let conversation: ReturnType<TextConversationStore["snapshot"]> | undefined;
@@ -503,20 +506,22 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
             textProcessor.skipForStorageFailure(context);
           }
         }
-        const processedText = conversationReady ? await textProcessor.process(processingInput, context, conversation) : processingInput;
+        const processedText = recordingMode === "meeting" ? processingInput
+          : conversationReady ? await textProcessor.process(processingInput, context, conversation) : processingInput;
         if (processedText === undefined || context.signal.aborted || shutdownInProgress) {
           textProcessor.discardConversationTurn(context.generation, context.attempt);
           return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
         }
-        const acceptedText = settings.mode === "conversation" ? processedText : expandSnippets(processedText, snippets);
-        if (settings.mode !== "conversation") textProcessor.reportSnippetsStage(context, acceptedText);
+        const acceptedText = settings.mode === "conversation" || recordingMode === "meeting"
+          ? processedText : expandSnippets(processedText, snippets);
+        if (settings.mode !== "conversation" && recordingMode !== "meeting") textProcessor.reportSnippetsStage(context, acceptedText);
         const oversized = Buffer.byteLength(acceptedText, "utf8") > MAX_USER_TEXT_BYTES;
         if (oversized && preferences.snapshot().keep_history) {
           try { await saveTranscript(profile, acceptedText); }
           catch { return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false }; }
         }
         if (context.signal.aborted) return { generation: context.generation, attempt: context.attempt, outcome: "failed", clipboardConfirmed: false };
-        const wantsPaste = preferences.snapshot().output === "paste";
+        const wantsPaste = recordingMode !== "meeting" && preferences.snapshot().output === "paste";
         const delivered = await deliverClipboard(acceptedText, context, { writeText: (text) => clipboardOutput.writeText(text), readText: () => clipboardOutput.readText(),
           ...(wantsPaste ? { paste: async () => {
             try {
@@ -806,12 +811,14 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     if (configured && host?.isConfigured()) return;
     if (!host) throw new Error("Recording unavailable.");
     const selected = preferences.snapshot(), model = installed.find((item) => item.model.id === selected.model);
-    if (!model || selected.output !== "clipboard" && !(selected.output === "paste" && (descriptor?.platform === "linux" || macPaste))) {
+    if (!model || recordingMode !== "meeting" && selected.output !== "clipboard" &&
+        !(selected.output === "paste" && (descriptor?.platform === "linux" || macPaste))) {
       throw new Error("Choose an installed model and supported output.");
     }
     // Recovery may be transcribed with the microphone disconnected; resolve sources only on Start.
     const request = recordingRequestSchema.parse({ model: { path: join(profile.paths.models, model.model.file), family: model.model.family,
       gpu: selected.gpu && gpuSelection.supported },
+      mode: recordingMode,
       language: selected.language, vocabulary: vocabularyPrompt(selected.vocabulary),
       cleanup_enabled: selected.cleanup_enabled, vocabulary_entries: selected.vocabulary,
       snippets: selected.snippets });
@@ -1193,7 +1200,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           throw new Error("Unknown catalog model.");
         }
         if ((recording.busy || recording.recoveryAvailable) &&
-          ["model", "language", "microphone", "cleanup_enabled", "vocabulary", "snippets", "gpu", "output", "hold_to_record"].some((key) => Object.hasOwn(changes, key))) {
+          ["model", "language", "microphone", "recording_mode", "cleanup_enabled", "vocabulary", "snippets", "gpu", "output", "hold_to_record"].some((key) => Object.hasOwn(changes, key))) {
           throw new Error("Finish or discard the current recording before changing its request.");
         }
         if (changes.output && changes.output !== "clipboard" && !(changes.output === "paste" && (descriptor?.platform === "linux" || macPaste))) {
@@ -1218,6 +1225,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           }
           throw error;
         }
+        if (changes.recording_mode !== undefined) { recordingMode = changes.recording_mode; configured = false; }
         if (Object.hasOwn(changes, "snippets")) { clearTextRevisionRetry(); textProcessor.cancel(); }
         if (changes.update_channel !== undefined) {
           updates = { ...updates, status: "idle", version: null, details: undefined, progress: 0, download: undefined, error: null };
@@ -1225,7 +1233,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           void requestUpdate("check").catch(() => {});
         }
         if (changes.hold_to_record !== undefined) await platformHost?.shortcut("mode", changes.hold_to_record);
-        if (["model", "language", "microphone", "cleanup_enabled", "vocabulary", "snippets", "gpu"].some((key) => Object.hasOwn(changes, key))) configured = false;
+        if (["model", "language", "microphone", "recording_mode", "cleanup_enabled", "vocabulary", "snippets", "gpu"].some((key) => Object.hasOwn(changes, key))) configured = false;
         const current = state();
         emit("state", current);
         return current;

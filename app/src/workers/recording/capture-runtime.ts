@@ -2,6 +2,7 @@ import { z } from "zod";
 import { RecordingCoordinator, type CaptureBoundary, type ControlReply, type DeliveryBoundary,
   type RecordingSnapshot, type RecoveryBoundary, type WorkContext } from "../../core/recording/recording.js";
 import { AdaptiveSpeechBoundary, createUtilitySpeechEffects } from "../../services/speech/adaptive-speech.js";
+import { transcribeMeeting } from "../../services/speech/meeting-speech.js";
 import type { NativeCapturedHandle } from "../../services/recording/capture.js";
 import type { SpeechClient } from "../../services/speech/speech-client.js";
 import { SilenceSpeechGate } from "../speech/speech-gate.js";
@@ -157,7 +158,9 @@ export class CaptureRuntime {
           }
           const adaptive = new AdaptiveSpeechBoundary(createUtilitySpeechEffects({ gpuAvailable: true,
             infer: this.effects.infer(context), progress: (value) => { this.emit({ kind: "progress", ...value }); } }));
-          return adaptive.transcribe(audio, selected, context, onStage);
+          return selected.mode === "meeting"
+            ? transcribeMeeting(adaptive, audio, selected, context, onStage)
+            : adaptive.transcribe(audio, selected, context, onStage);
         } },
       });
       await this.coordinator.restoreRecovery(request.request);

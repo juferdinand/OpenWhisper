@@ -2193,6 +2193,20 @@ dialog#settings-dialog {
   padding: 3px 7px;
   font-size: 11px;
 }
+.meeting-notice {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.meeting-notice strong { color: var(--text); }
+.meeting-transcript { white-space: pre-wrap; }
 .connection-cli-note {
   display: grid;
   gap: 3px;

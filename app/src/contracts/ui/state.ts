@@ -175,6 +175,7 @@ export const preferencesSchema = z.strictObject({
   model: modelId,
   language: speechLanguageSchema,
   microphone: utf8(1024),
+  recording_mode: z.enum(["dictation", "meeting"]).optional(),
   vocabulary: vocabularySchema,
   cleanup_enabled: z.boolean().default(true),
   snippets: z.array(snippetSchema).max(100),
