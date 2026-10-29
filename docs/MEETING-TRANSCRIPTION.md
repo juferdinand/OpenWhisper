@@ -32,6 +32,6 @@ Transcription is produced after Stop; this version does not show a live meeting 
 ## Development validation
 
 The implementation uses the existing Electron recording build path and is isolated on its feature
-branch. TypeScript and build checks are required before review; package/runtime validation remains
-outstanding. No real microphone, meeting recording or physical-device check is performed as part
-of unattended validation.
+branch. A Linux x64 directory-only Dev candidate was packaged with CPU and Vulkan speech bindings.
+It has not been launched. No real microphone, meeting recording or physical-device check has been
+performed, so runtime and speaker-label accuracy remain unvalidated. No macOS package was built.
