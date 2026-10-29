@@ -257,6 +257,35 @@ const localProcessingPreviewResultSchema = z.discriminatedUnion("ok", [
   z.strictObject({ ok: z.literal(false), code: localProcessingFailureSchema }),
 ]);
 
+const harnessText = utf8(256 * 1024);
+const harnessActivitySchema = z.strictObject({
+  id: utf8(128), speaker: z.enum(["you", "codex", "openwhisper"]),
+  kind: z.enum(["message", "activity"]), text: harnessText, streaming: z.boolean(),
+});
+const harnessApprovalSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("command"), id: utf8(128), title: utf8(512), details: utf8(4096),
+    command: utf8(16384).nullable(), working_directory: label.nullable() }),
+  z.strictObject({ kind: z.literal("file_change"), id: utf8(128), title: utf8(512), details: utf8(4096),
+    working_directory: label.nullable() }),
+  z.strictObject({ kind: z.literal("question"), id: utf8(128), title: utf8(512), details: utf8(8192),
+    options: z.array(z.strictObject({ label: utf8(1024), description: utf8(2048) })).max(12), secret: z.boolean() }),
+]);
+export const harnessSessionSchema = z.strictObject({
+  status: z.enum(["idle", "starting", "ready", "working", "waiting", "error"]),
+  workspace: label.nullable(), thread_id: utf8(256).nullable(),
+  activity: z.array(harnessActivitySchema).max(60), approval: harnessApprovalSchema.nullable(),
+  error: z.enum(["CODEX_NOT_FOUND", "CODEX_START_FAILED", "CODEX_SESSION_FAILED", "CODEX_PROTOCOL_FAILED"]).nullable(),
+});
+export type HarnessSession = z.infer<typeof harnessSessionSchema>;
+export const harnessTtsStateSchema = z.strictObject({
+  enabled: z.boolean(), configured: z.boolean(), voice_id: utf8(128),
+  storage: z.enum(["system_keyring", "session", "unavailable"]),
+  status: z.enum(["idle", "generating", "error"]),
+  error: z.enum(["TTS_SECRET_UNAVAILABLE", "TTS_KEY_MISSING", "TTS_AUTH_FAILED",
+    "TTS_RATE_LIMITED", "TTS_VOICE_INVALID", "TTS_NETWORK_FAILED", "TTS_RESPONSE_INVALID", "TTS_API_FAILED"]).nullable(),
+});
+export type HarnessTtsState = z.infer<typeof harnessTtsStateSchema>;
+
 /** Fixed renderer capabilities. Host-only bulk settings and arbitrary paths are not commands. */
 export const commandInputSchemas = {
   get_state: noArgs,
@@ -293,6 +322,17 @@ export const commandInputSchemas = {
   download_update: noArgs,
   install_update: noArgs,
   open_project_link: z.strictObject({ target: z.enum(["repository", "issues", "license", "release"]) }),
+  harness_get_session: noArgs,
+  harness_choose_workspace: noArgs,
+  harness_start_session: z.strictObject({ goal: harnessText.min(1) }),
+  harness_send_message: z.strictObject({ text: harnessText.min(1) }),
+  harness_respond_approval: z.strictObject({ approval_id: utf8(128), decision: z.enum(["accept", "decline", "cancel"]) }),
+  harness_answer_question: z.strictObject({ approval_id: utf8(128), answer: harnessText.min(1) }),
+  harness_stop_session: noArgs,
+  harness_tts_get: noArgs,
+  harness_tts_configure: z.strictObject({ api_key: utf8(512), voice_id: utf8(128).regex(/^[A-Za-z0-9_-]+$/u), enabled: z.boolean() }),
+  harness_tts_forget: noArgs,
+  harness_tts_stop: noArgs,
   window_action: z.strictObject({ action: z.enum(["minimize", "maximize", "close"]) }),
 };
 const commandNameSchema = z.strictObject(commandInputSchemas).keyof();
@@ -332,6 +372,17 @@ export const commandOutputSchemas = {
   download_update: actionResult,
   install_update: actionResult,
   open_project_link: actionResult,
+  harness_get_session: harnessSessionSchema,
+  harness_choose_workspace: z.strictObject({ canceled: z.boolean(), workspace: label.nullable() }),
+  harness_start_session: harnessSessionSchema,
+  harness_send_message: harnessSessionSchema,
+  harness_respond_approval: harnessSessionSchema,
+  harness_answer_question: harnessSessionSchema,
+  harness_stop_session: harnessSessionSchema,
+  harness_tts_get: harnessTtsStateSchema,
+  harness_tts_configure: harnessTtsStateSchema,
+  harness_tts_forget: harnessTtsStateSchema,
+  harness_tts_stop: actionResult,
   window_action: actionResult,
 } satisfies Record<CommandName, z.ZodType>;
 export type CommandInput<N extends CommandName> = z.infer<(typeof commandInputSchemas)[N]>;
@@ -350,7 +401,10 @@ export function validateCommandOutput(name: CommandName, value: unknown) {
   return commandOutputSchemas[name].parse(value);
 }
 
-const eventSchemas = { state: appStateSchema, recording_telemetry: recordingTelemetrySchema, navigate: tabSchema };
+const eventSchemas = { state: appStateSchema, recording_telemetry: recordingTelemetrySchema, navigate: tabSchema,
+  harness_session: harnessSessionSchema, harness_tts_state: harnessTtsStateSchema,
+  harness_tts_audio: z.strictObject({ audio_base64: utf8(12 * 1024 * 1024) }),
+  harness_tts_stop_audio: z.strictObject({}) };
 const eventNameSchema = z.strictObject(eventSchemas).keyof();
 export type EventName = z.infer<typeof eventNameSchema>;
 export type EventPayload<N extends EventName> = z.infer<(typeof eventSchemas)[N]>;

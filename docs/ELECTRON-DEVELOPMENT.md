@@ -233,6 +233,8 @@ cd app
 node --import tsx scripts/package-linux-preview.ts --output /absolute/fresh/output
 ```
 
+Use `--directory-only` on systems without `dpkg-deb`.
+
 This requires `readelf` and `dpkg-deb`; use `--directory-only` when only the directory
 is needed. The script preserves package/build metadata, checks captured native
 inputs, copies the locked production dependencies and retains notices. It uses
@@ -245,6 +247,46 @@ Wayland, a directory-only Dev package needs its matching
 environment for taskbar and window grouping to resolve the Dev identity. The `.deb`
 layout includes that entry and icon for package installation. A directory-only
 preview does not register them and may display a generic compositor icon.
+
+## Linux Voice Workspace Dev build
+
+The Voice Workspace is a development-only Electron surface backed by the installed Codex CLI
+[app-server](https://learn.chatgpt.com/docs/app-server). It uses Codex's local stdio JSONL protocol and the user's existing Codex CLI sign-in;
+OpenWhisper does not store a separate API key. Install Codex CLI, sign in, and make `codex`
+available in the environment used to launch the Dev app.
+
+Build the recording-enabled Linux x64 candidate and package it into a fresh output directory:
+
+```bash
+npm run build --prefix app -- --recording
+cd app
+node --import tsx scripts/package-linux-preview.ts --output /absolute/fresh/output
+```
+
+The recording build captures CPU and Vulkan speech bindings, so GPU selection is present in
+the Dev build. A Vulkan device must still be discovered for GPU inference to run; the speech
+service keeps its CPU fallback. The workspace chooses a project folder through the native
+folder picker, starts a Codex thread with `workspace-write` and `on-request` approval, and
+surfaces command, file-change and agent-question requests for explicit user response. The
+selected folder is the writable scope. Voice audio is processed by OpenWhisper locally; a
+recognized transcript is sent to Codex only after the user reviews it and chooses **Send to
+Codex**. Agent text and work status arrive from the real app-server session.
+
+The workspace shows the work flow and animates its live state: listening, transcribing, working,
+waiting for approval, preparing speech and speaking. Optional spoken Codex replies use the
+[ElevenLabs text-to-speech endpoint](https://elevenlabs.io/docs/api-reference/text-to-speech/convert)
+with the Flash v2.5 multilingual model. TTS is off until the user enters a key and enables it.
+The key is encrypted with Electron `safeStorage` when an OS credential store is available; otherwise
+it remains in memory only until the Dev app closes. The password field sends it through the typed
+IPC bridge to the main process; OpenWhisper never returns it in state or events and does not log it.
+The TTS switch is off again on each app launch. When enabled, completed Codex replies are sent to
+ElevenLabs over HTTPS and charged by generated characters. This provider sends those replies
+off-device; microphone audio and speech recognition remain local. See
+[ElevenLabs authentication](https://elevenlabs.io/docs/api-reference/authentication) for API-key behavior.
+
+The package is unsigned and uses the separate `io.github.whisperfree.dev` identity and Dev
+profile. It is a candidate, not an installation or release; keep the stable app and its data
+untouched.
 
 Native inputs must be built on the intended distribution baseline. A fresh private
 Ubuntu22 build of the existing production recording scripts now produces a Dev

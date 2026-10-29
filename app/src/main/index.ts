@@ -1,18 +1,20 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences, Tray } from "electron";
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, protocol, safeStorage, screen, session, shell, systemPreferences, Tray } from "electron";
 import { deliverClipboard } from "../services/recording/clipboard-output.js";
 import { WaylandClipboard } from "../services/platforms/linux/wayland-clipboard.js";
 import { portalPasteStateSchema } from "../platforms/linux/shared/portal-paste.js";
 import type { IpcMainInvokeEvent } from "electron";
-import { readFile, realpath } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { cpus, homedir, totalmem } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
   appStateSchema, hardwareDeviceNameSchema, preferencesSchema, validateEvent, isSteadyRecordingUpdate,
-  MAX_USER_TEXT_BYTES, MAX_UI_REQUEST_BYTES,
-  type AppState, type EventName, type EventPayload, type UpdateState,
+  harnessSessionSchema, harnessTtsStateSchema, MAX_USER_TEXT_BYTES, MAX_UI_REQUEST_BYTES,
+  type AppState, type EventName, type EventPayload, type HarnessTtsState, type UpdateState,
 } from "../contracts/ui/state.js";
+import { CodexAppServer } from "../services/harness/codex-app-server.js";
+import { DEFAULT_ELEVENLABS_VOICE_ID, ElevenLabsTtsError, splitSpeechText, synthesizeElevenLabsSpeech } from "../services/harness/elevenlabs-tts.js";
 import { PreferenceStore } from "../services/settings/preferences.js";
 import type { HostProfile } from "../services/settings/host-profile.js";
 import type { BuildIdentity } from "../contracts/application/build-identity.js";
@@ -39,6 +41,8 @@ import { DEVELOPMENT_RECORDING_BUILD } from "./development-recording-build.js";
 import { developmentRecordingDescriptorSchema, selectDevelopmentRecordingDescriptor, type DevelopmentRecordingDescriptor } from "./development-recording-descriptor.js";
 import { DevelopmentRecordingHost, developmentPulseServer, formatSourceDiscoveryFailure } from "./development-recording-host.js";
 import { saveTranscript } from "../services/development/development-transcripts.js";
+
+const elevenLabsSecretSchema = z.strictObject({ ciphertext: z.string().max(16_384), voice_id: z.string().min(1).max(128) });
 import { DevelopmentPlatformHost } from "./development-platform-host.js";
 import { createRecordingControlPort, recordingUnavailableReason } from "./recording-control.js";
 import { portalShortcutStateSchema } from "../platforms/linux/shared/portal-shortcuts.js";
@@ -189,6 +193,34 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       executable: await realpath(process.execPath), appPath: await realpath(app.getAppPath()),
       resourcesPath: await realpath(process.resourcesPath), argv: process.argv, profile }) : undefined;
   const preferences = await PreferenceStore.open(profile, { allowDevelopmentAutostart: devAutostart !== undefined });
+  const elevenLabsSecrets = identity.kind === "development"
+    ? await PrivateStateStore.open(join(profile.paths.settings, "elevenlabs-tts.json"), elevenLabsSecretSchema,
+      { ciphertext: "", voice_id: DEFAULT_ELEVENLABS_VOICE_ID }, 32 * 1024, { invalidContent: "preserve-and-default" })
+    : undefined;
+  let elevenLabsApiKey: string | undefined;
+  const storedTts = elevenLabsSecrets?.snapshot();
+  const storedVoiceId = storedTts?.voice_id && /^[A-Za-z0-9_-]{1,128}$/u.test(storedTts.voice_id)
+    ? storedTts.voice_id : DEFAULT_ELEVENLABS_VOICE_ID;
+  let harnessTtsState: HarnessTtsState = harnessTtsStateSchema.parse({ enabled: false, configured: false,
+    voice_id: storedVoiceId, storage: "unavailable", status: "idle", error: null });
+  if (storedTts?.ciphertext) {
+    try {
+      const secureBackend = await safeStorage.isAsyncEncryptionAvailable() &&
+        (process.platform !== "linux" || !["basic_text", "unknown"].includes(safeStorage.getSelectedStorageBackend()));
+      if (!secureBackend || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(storedTts.ciphertext)) {
+        throw new Error("Secure storage is unavailable.");
+      }
+      const decrypted = await safeStorage.decryptStringAsync(Buffer.from(storedTts.ciphertext, "base64"));
+      elevenLabsApiKey = decrypted.result;
+      harnessTtsState = harnessTtsStateSchema.parse({ ...harnessTtsState, configured: true, storage: "system_keyring" });
+      if (decrypted.shouldReEncrypt) {
+        const replacement = await safeStorage.encryptStringAsync(elevenLabsApiKey);
+        await elevenLabsSecrets?.update((current) => ({ ...current, ciphertext: replacement.toString("base64") }));
+      }
+    } catch {
+      harnessTtsState = harnessTtsStateSchema.parse({ ...harnessTtsState, error: "TTS_SECRET_UNAVAILABLE" });
+    }
+  }
   const processingProfile = await PrivateStateStore.open(
     join(profile.paths.settings, "local-processing.json"), localProcessingProfileSchema, defaultLocalProcessingProfile(),
     1024 * 1024, { invalidContent: "preserve-and-default" },
@@ -234,6 +266,9 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   let macMouse: MacosMouseTrigger | undefined;
   let recording = recordingSnapshotSchema.parse({ phase: "idle", generation: 0, elapsedMs: 0, level: 0,
     busy: false, recoveryAvailable: false, error: null, transcript: "" });
+  let harnessSession = harnessSessionSchema.parse({ status: "idle", workspace: null, thread_id: null, activity: [], approval: null, error: null });
+  let harnessWorkspacePath: string | undefined;
+  let codexHarness: CodexAppServer | undefined;
   let message = "", inferenceProgress = 0;
   let download: string | null = null, downloadProgress = 0;
   let downloading: Promise<void> | undefined, downloadAbort: AbortController | undefined;
@@ -569,6 +604,88 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
       }
     }
   };
+  const emitMain = <N extends EventName>(name: N, payload: EventPayload<N>): void => {
+    if (contents.isDestroyed() || contents.mainFrame.url !== MAIN_URL) return;
+    contents.send(`openwhisper:event:${name}`, validateEvent(name, payload));
+  };
+  let ttsSpeechQueue: string[] = [];
+  let ttsGeneration = 0;
+  let ttsAbort: AbortController | undefined;
+  let ttsDrain: Promise<void> | undefined;
+  const publishTtsState = (): void => emit("harness_tts_state", harnessTtsState);
+  const stopTtsQueue = (): void => {
+    ttsGeneration += 1;
+    ttsSpeechQueue = [];
+    ttsAbort?.abort();
+    ttsAbort = undefined;
+    emitMain("harness_tts_stop_audio", {});
+  };
+  const drainTtsSpeech = (): Promise<void> => {
+    if (ttsDrain) return ttsDrain;
+    const generation = ttsGeneration;
+    const work = (async (): Promise<void> => {
+      while (ttsSpeechQueue.length && generation === ttsGeneration && harnessTtsState.enabled && elevenLabsApiKey) {
+        const text = ttsSpeechQueue.shift();
+        if (!text) continue;
+        for (const chunk of splitSpeechText(text)) {
+          if (generation !== ttsGeneration || !harnessTtsState.enabled || !elevenLabsApiKey) return;
+          const controller = new AbortController();
+          ttsAbort = controller;
+          const timeout = setTimeout(() => controller.abort(), 60_000);
+          timeout.unref();
+          harnessTtsState = harnessTtsStateSchema.parse({ ...harnessTtsState, status: "generating", error: null });
+          publishTtsState();
+          try {
+            const audio = await synthesizeElevenLabsSpeech(chunk, harnessTtsState.voice_id, elevenLabsApiKey, controller.signal);
+            if (generation === ttsGeneration && harnessTtsState.enabled) emitMain("harness_tts_audio", { audio_base64: audio.toString("base64") });
+          } catch (error: unknown) {
+            if (generation !== ttsGeneration) return;
+            if (error instanceof ElevenLabsTtsError && error.code === "TTS_CANCELLED" && !controller.signal.aborted) return;
+            const code = error instanceof ElevenLabsTtsError && error.code !== "TTS_CANCELLED" ? error.code : "TTS_NETWORK_FAILED";
+            harnessTtsState = harnessTtsStateSchema.parse({ ...harnessTtsState, enabled: false, status: "error", error: code });
+            ttsSpeechQueue = [];
+            emitMain("harness_tts_stop_audio", {});
+            publishTtsState();
+            return;
+          } finally {
+            clearTimeout(timeout);
+            if (ttsAbort === controller) ttsAbort = undefined;
+          }
+        }
+      }
+      if (generation === ttsGeneration && harnessTtsState.status === "generating") {
+        harnessTtsState = harnessTtsStateSchema.parse({ ...harnessTtsState, status: "idle" });
+        publishTtsState();
+      }
+    })();
+    let tracked: Promise<void>;
+    tracked = work.finally(() => {
+      if (ttsDrain === tracked) ttsDrain = undefined;
+      if (ttsSpeechQueue.length && harnessTtsState.enabled && !shutdownInProgress) void drainTtsSpeech();
+    });
+    ttsDrain = tracked;
+    return tracked;
+  };
+  const enqueueTtsSpeech = (text: string): void => {
+    if (!harnessTtsState.enabled || !elevenLabsApiKey || shutdownInProgress) return;
+    ttsSpeechQueue.push(text);
+    void drainTtsSpeech();
+  };
+  const clearTtsSpeech = (): void => {
+    stopTtsQueue();
+    harnessTtsState = harnessTtsStateSchema.parse({ ...harnessTtsState, enabled: false, status: "idle", error: null });
+    publishTtsState();
+  };
+  if (identity.kind === "development") {
+    codexHarness = new CodexAppServer((snapshot) => {
+      const completedBefore = new Set(harnessSession.activity.filter((item) => item.speaker === "codex" && item.kind === "message" && !item.streaming).map((item) => item.id));
+      harnessSession = snapshot;
+      emit("harness_session", snapshot);
+      for (const item of snapshot.activity) {
+        if (item.speaker === "codex" && item.kind === "message" && !item.streaming && !completedBefore.has(item.id)) enqueueTtsSpeech(item.text);
+      }
+    });
+  }
   const showSettings = (): void => { if (window && !window.isDestroyed()) { window.show(); window.focus(); } };
   let updateTray = (_state: AppState): void => {};
   notify = () => {
@@ -787,6 +904,7 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
   function finishShutdown(retiring: boolean, macHandoff?: Readonly<PreparedMacosUpdateInstall>): Promise<void> {
     if (shutdownTask) return retiring || macHandoff ? Promise.reject(new Error("Shutdown already started.")) : shutdownTask;
     shutdownInProgress = true; cancelRequested = true; processing.close(); downloadAbort?.abort();
+    stopTtsQueue();
     if (!macHandoff) macUpdateAbort?.abort();
     updateCheckScheduler?.close(); updateCheckScheduler = undefined;
     powerMonitor.off("resume", resumeUpdateChecks);
@@ -794,8 +912,9 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
     let nativeCleanupStarted = false;
     const closeOwners = async (): Promise<void> => {
       await recordingOperation?.catch(() => {}); await downloading; await downloads.finalize();
+      await ttsDrain?.catch(() => {}); elevenLabsApiKey = undefined;
       nativeCleanupStarted = true;
-      await macShortcut?.close(); macMouse?.close(); macPaste?.close(); await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); await waylandOverlay?.close();
+      await codexHarness?.close(); await macShortcut?.close(); macMouse?.close(); macPaste?.close(); await platformHost?.close(); await host?.close(); await waylandClipboard?.close(); await waylandOverlay?.close();
       if (macRecording) { recordingRetired = true; host = undefined; configured = false; }
     };
     shutdownTask = (async () => {
@@ -971,6 +1090,97 @@ async function start({ identity, profile, version, build, descriptor }: Applicat
           isNewerUpdateVersion(updates.version, version)) url = `https://github.com/juferdinand/OpenWhisper/releases/tag/v${updates.version}`;
         else throw new Error("No update release is available.");
         await shell.openExternal(url);
+      },
+      harness_get_session: () => codexHarness?.snapshot() ?? harnessSession,
+      harness_choose_workspace: async () => {
+        if (!codexHarness || identity.kind !== "development" || shutdownInProgress || recording.busy || recording.phase === "recording") {
+          throw new Error("Harness workspace selection is unavailable.");
+        }
+        if (codexHarness.snapshot().thread_id) {
+          throw new Error("Stop the current Codex session before changing its workspace.");
+        }
+        if (!window || window.isDestroyed()) throw new Error("The main window is unavailable.");
+        const selected = await dialog.showOpenDialog(window, { properties: ["openDirectory"] });
+        if (selected.canceled || selected.filePaths.length !== 1 || !selected.filePaths[0]) return { canceled: true, workspace: null };
+        const workspacePath = await realpath(selected.filePaths[0]);
+        if (!(await stat(workspacePath)).isDirectory()) throw new Error("Choose a workspace folder.");
+        harnessWorkspacePath = workspacePath;
+        harnessSession = harnessSessionSchema.parse({ status: "idle", workspace: basename(workspacePath), thread_id: null,
+          activity: [], approval: null, error: null });
+        emit("harness_session", harnessSession);
+        return { canceled: false, workspace: harnessSession.workspace };
+      },
+      harness_start_session: async ({ goal }) => {
+        if (!codexHarness || !harnessWorkspacePath || identity.kind !== "development" || shutdownInProgress) {
+          throw new Error("Choose a workspace folder before starting a Codex session.");
+        }
+        if (recording.busy || recording.phase === "recording" || recording.recoveryAvailable) {
+          throw new Error("Finish or discard the current recording before starting a Codex session.");
+        }
+        return codexHarness.start(harnessWorkspacePath, basename(harnessWorkspacePath), goal);
+      },
+      harness_send_message: ({ text }) => {
+        if (!codexHarness || identity.kind !== "development" || shutdownInProgress) throw new Error("The Codex session is unavailable.");
+        return codexHarness.sendMessage(text);
+      },
+      harness_respond_approval: ({ approval_id, decision }) => {
+        if (!codexHarness || identity.kind !== "development" || shutdownInProgress) throw new Error("The Codex session is unavailable.");
+        return codexHarness.respondApproval(approval_id, decision);
+      },
+      harness_answer_question: ({ approval_id, answer }) => {
+        if (!codexHarness || identity.kind !== "development" || shutdownInProgress) throw new Error("The Codex session is unavailable.");
+        return codexHarness.answerQuestion(approval_id, answer);
+      },
+      harness_stop_session: () => codexHarness?.stop() ?? harnessSession,
+      harness_tts_get: () => harnessTtsState,
+      harness_tts_configure: async ({ api_key, voice_id, enabled }) => {
+        if (!elevenLabsSecrets || identity.kind !== "development" || shutdownInProgress) throw new Error("Spoken responses are unavailable.");
+        stopTtsQueue();
+        const submittedKey = api_key.trim();
+        let storage = harnessTtsState.storage;
+        if (submittedKey) {
+          elevenLabsApiKey = submittedKey;
+          try {
+            const secureBackend = await safeStorage.isAsyncEncryptionAvailable() &&
+              (process.platform !== "linux" || !["basic_text", "unknown"].includes(safeStorage.getSelectedStorageBackend()));
+            if (secureBackend) {
+              const encrypted = await safeStorage.encryptStringAsync(submittedKey);
+              await elevenLabsSecrets.update(() => ({ ciphertext: encrypted.toString("base64"), voice_id: voice_id }));
+              storage = "system_keyring";
+            } else storage = "session";
+          } catch { storage = "session"; }
+        } else {
+          try { await elevenLabsSecrets.update((current) => ({ ...current, voice_id })); }
+          catch { harnessTtsState = harnessTtsStateSchema.parse({ ...harnessTtsState, error: "TTS_SECRET_UNAVAILABLE" }); }
+        }
+        if (storage !== "system_keyring") {
+          try { await elevenLabsSecrets.update((current) => ({ ...current, voice_id })); }
+          catch { /* The key remains usable in memory for this session. */ }
+        }
+        const configured = !!elevenLabsApiKey;
+        harnessTtsState = harnessTtsStateSchema.parse({ ...harnessTtsState, voice_id, storage: configured ? storage : "unavailable",
+          configured, enabled: enabled && configured, status: "idle", error: enabled && !configured ? "TTS_KEY_MISSING" : null });
+        publishTtsState();
+        return harnessTtsState;
+      },
+      harness_tts_forget: async () => {
+        if (!elevenLabsSecrets || identity.kind !== "development" || shutdownInProgress) throw new Error("Spoken responses are unavailable.");
+        clearTtsSpeech();
+        elevenLabsApiKey = undefined;
+        try {
+          await elevenLabsSecrets.update((current) => ({ ciphertext: "", voice_id: current.voice_id }));
+          harnessTtsState = harnessTtsStateSchema.parse({ ...harnessTtsState, configured: false, storage: "unavailable", error: null });
+        } catch {
+          harnessTtsState = harnessTtsStateSchema.parse({ ...harnessTtsState, configured: false, storage: "unavailable", error: "TTS_SECRET_UNAVAILABLE" });
+        }
+        publishTtsState();
+        return harnessTtsState;
+      },
+      harness_tts_stop: () => {
+        stopTtsQueue();
+        harnessTtsState = harnessTtsStateSchema.parse({ ...harnessTtsState, status: "idle", error: null });
+        publishTtsState();
+        return { ok: true };
       },
       check_updates: () => requestUpdate("check"),
       download_update: () => requestUpdate("download"),

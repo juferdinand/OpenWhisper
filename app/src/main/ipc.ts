@@ -210,6 +210,17 @@ export function createUiDispatcher(options: {
     download_update: route("download_update", handlers.download_update),
     install_update: route("install_update", handlers.install_update),
     open_project_link: route("open_project_link", handlers.open_project_link),
+    harness_get_session: route("harness_get_session", handlers.harness_get_session),
+    harness_choose_workspace: route("harness_choose_workspace", handlers.harness_choose_workspace),
+    harness_start_session: route("harness_start_session", handlers.harness_start_session),
+    harness_send_message: route("harness_send_message", handlers.harness_send_message),
+    harness_respond_approval: route("harness_respond_approval", handlers.harness_respond_approval),
+    harness_answer_question: route("harness_answer_question", handlers.harness_answer_question),
+    harness_stop_session: route("harness_stop_session", handlers.harness_stop_session),
+    harness_tts_get: route("harness_tts_get", handlers.harness_tts_get),
+    harness_tts_configure: route("harness_tts_configure", handlers.harness_tts_configure),
+    harness_tts_forget: route("harness_tts_forget", handlers.harness_tts_forget),
+    harness_tts_stop: route("harness_tts_stop", handlers.harness_tts_stop),
     window_action: route("window_action", handlers.window_action),
   } satisfies Record<CommandName, Route>;
 

@@ -121,6 +121,12 @@ npm run setup --prefix app
 npm run dev --prefix app
 ```
 
+To build the Linux Dev Voice Workspace with native recording and Vulkan support, see
+[Electron development](docs/ELECTRON-DEVELOPMENT.md#linux-voice-workspace-dev-build). The
+workspace connects to the installed Codex CLI app-server, uses OpenWhisper's local recording
+and transcription, and requires an explicit send before a transcript reaches Codex. It runs in
+the separate Dev profile and does not replace the installed stable app.
+
 The renderer can be built and tested independently:
 
 ```bash

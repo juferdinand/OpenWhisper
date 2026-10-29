@@ -3,13 +3,17 @@ import { invoke, listen } from "./bridge";
 import { setLocale, t } from "./i18n";
 import { escapeHtml as esc } from "./escape-html";
 import { LiveWaveform } from "./live-waveform";
+import { renderVoiceWorkspace, type VoicePlaybackState } from "./voice-workspace";
 import "./style.css";
+import "./voice-workspace.css";
 import {
   preferencePatchSchema,
   isCurrentRecordingTelemetry,
   validateCommandName,
   validateCommandInput,
   type AppState as State,
+  type HarnessSession,
+  type HarnessTtsState,
   type Preferences,
   type PreferencePatch,
   type Tab,
@@ -18,6 +22,14 @@ import {
 } from "../../src/contracts/ui/state.js";
 
 let state: State;
+let harnessSession: HarnessSession = { status: "idle", workspace: null, thread_id: null, activity: [], approval: null, error: null };
+let harnessTtsState: HarnessTtsState = { enabled: false, configured: false, voice_id: "JBFqnCBsd6RMkjVDRZzb",
+  storage: "unavailable", status: "idle", error: null };
+let voicePlaybackState: VoicePlaybackState = "idle";
+let ttsAudioContext: AudioContext | undefined;
+let ttsPlaybackQueue: string[] = [];
+let activeTtsSource: AudioBufferSourceNode | undefined;
+let ttsPlaybackGeneration = 0;
 type View = Tab | "dictation" | "recording" | "text" | "permissions";
 let tab: View = "dictation";
 let dirty = false;
@@ -58,6 +70,70 @@ const expandedModelFamilies = new Set<string>();
 let preferenceQueue = Promise.resolve();
 let pendingPreferences = 0;
 let mouseTriggerCandidate: number | undefined;
+let voiceWorkspaceOpen = false;
+
+function armSpeechOutput(): void {
+  try {
+    ttsAudioContext ??= new AudioContext();
+    void ttsAudioContext.resume().catch(() => {});
+  } catch { /* The workspace reports playback failures through its status view. */ }
+}
+
+function stopSpeechPlayback(): void {
+  ttsPlaybackGeneration += 1;
+  ttsPlaybackQueue = [];
+  const source = activeTtsSource;
+  activeTtsSource = undefined;
+  try { source?.stop(); } catch { /* The source may already have ended. */ }
+  voicePlaybackState = "idle";
+  if (voiceWorkspaceOpen && state) render();
+}
+
+function playNextSpeechChunk(): void {
+  const context = ttsAudioContext;
+  const encoded = ttsPlaybackQueue.shift();
+  if (!context || !encoded || activeTtsSource) return;
+  const generation = ttsPlaybackGeneration;
+  let audioBuffer: ArrayBuffer;
+  try {
+    const binary = atob(encoded);
+    audioBuffer = new ArrayBuffer(binary.length);
+    const bytes = new Uint8Array(audioBuffer);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  } catch {
+    playNextSpeechChunk();
+    return;
+  }
+  void context.decodeAudioData(audioBuffer).then((audio) => {
+    if (generation !== ttsPlaybackGeneration) return;
+    const source = context.createBufferSource();
+    source.buffer = audio;
+    source.connect(context.destination);
+    activeTtsSource = source;
+    voicePlaybackState = "speaking";
+    if (voiceWorkspaceOpen) render();
+    source.onended = () => {
+      if (generation !== ttsPlaybackGeneration) return;
+      if (activeTtsSource === source) activeTtsSource = undefined;
+      voicePlaybackState = "idle";
+      if (voiceWorkspaceOpen) render();
+      playNextSpeechChunk();
+    };
+    source.start();
+  }).catch(() => {
+    if (generation !== ttsPlaybackGeneration) return;
+    voicePlaybackState = "idle";
+    notice(t("Could not play the spoken reply. Check your audio output."));
+    if (voiceWorkspaceOpen) render();
+    playNextSpeechChunk();
+  });
+}
+
+function queueSpeechAudio(encoded: string): void {
+  ttsPlaybackQueue.push(encoded);
+  playNextSpeechChunk();
+}
+
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const overlay =
   new URLSearchParams(location.search).has("overlay") ||
@@ -98,15 +174,28 @@ function windowTitlebar(): string {
     state.profile === "development"
       ? `<span class="window-dev-badge">Dev</span>`
       : "";
-  const setup = !state.preferences.setup_completed;
+  const voiceWorkspaceEnabled =
+    state.profile === "development" && voiceWorkspaceOpen;
+  const setup = !state.preferences.setup_completed && !voiceWorkspaceEnabled;
   const model = state.models.find(
     (candidate) => candidate.id === state.preferences.model,
   );
   const dotState = windowTabStatus();
   const tabChrome = setup
     ? `<span class="window-dictation-title">${esc(t("Setup"))}</span>`
+    : voiceWorkspaceEnabled
+      ? `<span class="window-dictation-title">${esc(t("Voice workspace"))}</span>`
     : `<div class="window-titlebar-tabs"><div class="window-active-tab" aria-current="page"><span class="window-tab-status ${dotState}" aria-hidden="true"></span><span class="window-tab-copy"><span class="window-tab-title">${esc(t("Dictation"))}</span><span class="window-tab-subtitle">${esc(model?.title ?? t("Choose a model"))}</span></span></div></div>`;
-  return `<header class="window-titlebar"><div class="window-titlebar-brand"><img src="./branding/icon-bordered.svg" width="24" height="24" alt="">${wordmark()}${dev}</div>${tabChrome}${setup ? "" : `<div class="window-titlebar-actions"><span class="local-recognition-badge">${esc(t("Local recognition"))}</span><button type="button" id="header-update" aria-live="polite" hidden></button><button type="button" id="open-settings">${symbol("M12 8a4 4 0 1 0 0 8 4 4 0 0 0-4-8M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2")}${esc(t("Settings"))}</button></div>`}<div class="window-actions"><button data-window-action="minimize" aria-label="${esc(t("Minimize window"))}" title="${esc(t("Minimize window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 11.5h10"/></svg></button><button data-window-action="maximize" aria-label="${esc(t("Maximize or restore window"))}" title="${esc(t("Maximize or restore window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/></svg></button><button class="window-close" data-window-action="close" aria-label="${esc(t("Close window"))}" title="${esc(t("Close window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div></header>`;
+  const workspaceAction =
+    state.profile === "development"
+      ? `<button type="button" id="open-harness-workspace">${esc(t(voiceWorkspaceOpen ? state.preferences.setup_completed ? "Back to dictation" : "Back to setup" : "Voice workspace"))}</button>`
+      : "";
+  const titlebarActions = setup
+    ? state.profile === "development"
+      ? `<div class="window-titlebar-actions">${workspaceAction}</div>`
+      : ""
+    : `<div class="window-titlebar-actions"><span class="local-recognition-badge">${esc(t("Local recognition"))}</span>${workspaceAction}<button type="button" id="header-update" aria-live="polite" hidden></button><button type="button" id="open-settings">${symbol("M12 8a4 4 0 1 0 0 8 4 4 0 0 0-4-8M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2")}${esc(t("Settings"))}</button></div>`;
+  return `<header class="window-titlebar"><div class="window-titlebar-brand"><img src="./branding/icon-bordered.svg" width="24" height="24" alt="">${wordmark()}${dev}</div>${tabChrome}${titlebarActions}<div class="window-actions"><button data-window-action="minimize" aria-label="${esc(t("Minimize window"))}" title="${esc(t("Minimize window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 11.5h10"/></svg></button><button data-window-action="maximize" aria-label="${esc(t("Maximize or restore window"))}" title="${esc(t("Maximize or restore window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/></svg></button><button class="window-close" data-window-action="close" aria-label="${esc(t("Close window"))}" title="${esc(t("Close window"))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div></header>`;
 }
 function windowTabStatus(): string {
   return state.status === "recording"
@@ -118,6 +207,19 @@ function windowTabStatus(): string {
         : "ready";
 }
 function syncWindowTitlebar() {
+  const workspaceButton = document.querySelector<HTMLButtonElement>(
+    "#open-harness-workspace",
+  );
+  if (workspaceButton) {
+    workspaceButton.textContent = t(
+      voiceWorkspaceOpen
+        ? state.preferences.setup_completed
+          ? "Back to dictation"
+          : "Back to setup"
+        : "Voice workspace",
+    );
+    workspaceButton.setAttribute("aria-pressed", String(voiceWorkspaceOpen));
+  }
   const dot = document.querySelector<HTMLElement>(".window-tab-status");
   const subtitle = document.querySelector<HTMLElement>(".window-tab-subtitle");
   if (dot && subtitle) {
@@ -1245,7 +1347,10 @@ function bindSettingsDialogShell() {
   bindDialogFocusTrap(dialog);
 }
 function renderShell() {
-  const key = `${state.preferences.ui_language}:${state.preferences.setup_completed}:${state.profile ?? "stable"}`;
+  const developmentWorkspaceSetup =
+    state.profile === "development" && !state.preferences.setup_completed;
+  const workspaceMode = developmentWorkspaceSetup ? voiceWorkspaceOpen : null;
+  const key = `${state.preferences.ui_language}:${state.preferences.setup_completed}:${state.profile ?? "stable"}:${workspaceMode}`;
   if (shellKey === key) return;
   if (document.querySelector<HTMLDialogElement>("#model-drawer")?.open) {
     modelFocusRestorePending = true;
@@ -1261,7 +1366,9 @@ function renderShell() {
   shellKey = key;
   contentKey = "";
   workspaceKey = "";
-  const setup = !state.preferences.setup_completed;
+  const setup =
+    !state.preferences.setup_completed &&
+    !(state.profile === "development" && voiceWorkspaceOpen);
   document.documentElement.classList.toggle("setup-mode", setup && !overlay);
   if (setup) {
     app.innerHTML = `${windowTitlebar()}<main class="setup-main"><div id="notice" role="alert" hidden></div><div id="content"></div></main><div id="record-control"></div>${emptyModelDialog()}`;
@@ -1279,7 +1386,7 @@ function renderShell() {
     ["permissions", "Permissions"],
     ["about", "About"],
   ];
-  app.innerHTML = `${windowTitlebar()}<div id="notice" role="alert" hidden></div><div id="dictation-workspace" class="dictation-workspace"><div class="workspace-frame${historyRailOpen ? "" : " history-collapsed"}"><main id="dictation-content" class="dictation-main"></main><aside id="dictation-history" class="dictation-history history-rail" aria-label="${esc(t("History"))}"></aside></div><div id="record-control"></div></div><dialog id="settings-dialog" aria-labelledby="page-title"><div class="settings-dialog-shell"><nav class="settings-dialog-nav" aria-label="${esc(t("Settings"))}">${settingsTabs.map(([id, title]) => `<button type="button" data-tab="${id}">${esc(t(title))}${id === "permissions" && missingPermissionCount() > 0 ? ` · ${missingPermissionCount()}` : ""}</button>`).join("")}<small class="settings-dialog-version">OpenWhisper ${esc(state.version)}</small></nav><div class="settings-dialog-panel"><header class="settings-dialog-heading"><h1 id="page-title"></h1><button type="button" id="close-settings">${esc(t("Done"))}</button></header><div id="settings-notice" role="alert" hidden></div><div class="settings-dialog-scroll"><div class="settings-content"><div id="content"></div></div></div></div></div></dialog>${emptyModelDialog()}${emptyUpdateDialog()}`;
+  app.innerHTML = `${windowTitlebar()}<div id="notice" role="alert" hidden></div><div id="dictation-workspace" class="dictation-workspace"><div class="workspace-frame${historyRailOpen ? "" : " history-collapsed"}"><main id="dictation-content" class="dictation-main"></main><aside id="dictation-history" class="dictation-history history-rail" aria-label="${esc(t("History"))}"></aside></div><div id="record-control"></div></div><main id="voice-workspace-root" class="voice-workspace-root" hidden></main><dialog id="settings-dialog" aria-labelledby="page-title"><div class="settings-dialog-shell"><nav class="settings-dialog-nav" aria-label="${esc(t("Settings"))}">${settingsTabs.map(([id, title]) => `<button type="button" data-tab="${id}">${esc(t(title))}${id === "permissions" && missingPermissionCount() > 0 ? ` · ${missingPermissionCount()}` : ""}</button>`).join("")}<small class="settings-dialog-version">OpenWhisper ${esc(state.version)}</small></nav><div class="settings-dialog-panel"><header class="settings-dialog-heading"><h1 id="page-title"></h1><button type="button" id="close-settings">${esc(t("Done"))}</button></header><div id="settings-notice" role="alert" hidden></div><div class="settings-dialog-scroll"><div class="settings-content"><div id="content"></div></div></div></div></div></dialog>${emptyModelDialog()}${emptyUpdateDialog()}`;
   bindModelDialogShell();
   bindUpdateDialogShell();
   bindSettingsDialogShell();
@@ -1290,9 +1397,21 @@ function renderShell() {
 
 app.addEventListener("click", (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
-    "[data-tab], [data-settings-view], [data-ui-language], [data-window-action], [data-open-model-drawer], #open-settings, #toggle-history",
+    "[data-tab], [data-settings-view], [data-ui-language], [data-window-action], [data-open-model-drawer], #open-settings, #toggle-history, #open-harness-workspace",
   );
   if (!button) return;
+  if (button.id === "open-harness-workspace") {
+    if (dirty) {
+      notice(
+        t("Save or discard your changes before switching tabs or language."),
+      );
+      return;
+    }
+    if (state.profile !== "development") return;
+    voiceWorkspaceOpen = !voiceWorkspaceOpen;
+    render();
+    return;
+  }
   if (button.id === "toggle-history") {
     historyRailOpen = !historyRailOpen;
     const frame = document.querySelector<HTMLElement>(".workspace-frame");
@@ -1821,13 +1940,74 @@ function render() {
       else expandedModelFamilies.delete(family);
     });
   setLocale(state.preferences.ui_language ?? "en");
-  if (!state.preferences.setup_completed) tab = "setup";
+  const voiceWorkspaceEnabled =
+    state.profile === "development" && voiceWorkspaceOpen;
+  const setup = !state.preferences.setup_completed && !voiceWorkspaceEnabled;
+  if (setup) tab = "setup";
   else if (tab === "setup") tab = "dictation";
   renderShell();
   syncWindowTitlebar();
   syncUpdateDialog();
   recordControl();
   if (overlay) return;
+  const workspaceRoot = document.querySelector<HTMLElement>(
+    "#voice-workspace-root",
+  );
+  const dictationRoot = document.querySelector<HTMLElement>(
+    "#dictation-workspace",
+  );
+  document.documentElement.classList.toggle(
+    "voice-workspace-active",
+    voiceWorkspaceEnabled,
+  );
+  if (workspaceRoot) workspaceRoot.hidden = !voiceWorkspaceEnabled;
+  if (dictationRoot) dictationRoot.hidden = voiceWorkspaceEnabled;
+  if (voiceWorkspaceEnabled && workspaceRoot) {
+    renderVoiceWorkspace(workspaceRoot, harnessSession, state, harnessTtsState, voicePlaybackState, {
+      chooseWorkspace: () => {
+        void invoke("harness_choose_workspace").then(async (result) => {
+          if (!result.canceled) harnessSession = await invoke("harness_get_session");
+          render();
+        }).catch((error: unknown) => notice(String(error)));
+      },
+      startSession: (goal) => {
+        void invoke("harness_start_session", { goal }).then((snapshot) => { harnessSession = snapshot; render(); })
+          .catch((error: unknown) => notice(String(error)));
+      },
+      sendMessage: (text) => {
+        void invoke("harness_send_message", { text }).then((snapshot) => { harnessSession = snapshot; render(); })
+          .catch((error: unknown) => notice(String(error)));
+      },
+      respondApproval: (id, decision) => {
+        void invoke("harness_respond_approval", { approval_id: id, decision }).then((snapshot) => { harnessSession = snapshot; render(); })
+          .catch((error: unknown) => notice(String(error)));
+      },
+      answerQuestion: (id, answer) => {
+        void invoke("harness_answer_question", { approval_id: id, answer }).then((snapshot) => { harnessSession = snapshot; render(); })
+          .catch((error: unknown) => notice(String(error)));
+      },
+      stopSession: () => {
+        void invoke("harness_stop_session").then((snapshot) => { harnessSession = snapshot; render(); })
+          .catch((error: unknown) => notice(String(error)));
+      },
+      toggleRecording: () => { void command("toggle_recording"); },
+      cancelRecording: () => { void command("cancel_recording"); },
+      configureTts: (apiKey, voiceId, enabled) => {
+        if (enabled) armSpeechOutput();
+        void invoke("harness_tts_configure", { api_key: apiKey, voice_id: voiceId, enabled })
+          .then((settings) => { harnessTtsState = settings; render(); })
+          .catch((error: unknown) => notice(String(error)));
+      },
+      forgetTts: () => {
+        void invoke("harness_tts_forget").then((settings) => { harnessTtsState = settings; render(); })
+          .catch((error: unknown) => notice(String(error)));
+      },
+      stopSpeech: () => {
+        stopSpeechPlayback();
+        void invoke("harness_tts_stop").catch((error: unknown) => notice(String(error)));
+      },
+    });
+  }
   syncModelDialog();
   const settingsDialog =
     document.querySelector<HTMLDialogElement>("#settings-dialog");
@@ -2820,8 +3000,22 @@ async function start() {
       overlayWaveform?.push(generation, event.payload.level, sampleAt);
       recordControl();
     });
+    await listen("harness_session", (event) => {
+      harnessSession = event.payload;
+      render();
+    });
+    await listen("harness_tts_state", (event) => {
+      harnessTtsState = event.payload;
+      render();
+    });
+    await listen("harness_tts_audio", (event) => queueSpeechAudio(event.payload.audio_base64));
+    await listen("harness_tts_stop_audio", () => stopSpeechPlayback());
     const initialState = await invoke("get_state");
     if (!receivedStateEvent) state = initialState;
+    if (state.profile === "development") {
+      harnessSession = await invoke("harness_get_session");
+      harnessTtsState = await invoke("harness_tts_get");
+    }
     if (!state.preferences.setup_completed) tab = "setup";
     else if (
       state.initial_tab &&
