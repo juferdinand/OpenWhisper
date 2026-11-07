@@ -11,7 +11,7 @@
     "format:check": "prettier --check src vite.config.ts playwright.config.ts tests"
   },
   "dependencies": {
-    "zod": "4.6.5"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
